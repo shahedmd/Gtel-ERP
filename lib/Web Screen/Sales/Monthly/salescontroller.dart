@@ -1,0 +1,211 @@
+import 'package:get/get.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+import 'model.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
+
+class MonthlySalesController extends GetxController {
+  final isLoading = true.obs;
+
+
+  final monthlyData = <String, MonthlySummary>{}.obs;
+
+  @override
+  void onInit() {
+    fetchSales();
+    super.onInit();
+  }
+
+  Future<void> fetchSales() async {
+    isLoading.value = true;
+    monthlyData.clear();
+
+    final snapshot =
+        await FirebaseFirestore.instance.collection('daily_sales').get();
+
+    for (var doc in snapshot.docs) {
+      final sale = SaleModel.fromDoc(doc);
+
+      final monthKey =
+          "${sale.timestamp.year}-${sale.timestamp.month.toString().padLeft(2, '0')}";
+      final dayKey =
+          "${sale.timestamp.year}-${sale.timestamp.month}-${sale.timestamp.day}";
+
+      monthlyData.putIfAbsent(
+        monthKey,
+        () => MonthlySummary(),
+      );
+
+      final month = monthlyData[monthKey]!;
+
+      month.total += sale.amount;
+      month.paid += sale.paid;
+
+      month.daily.putIfAbsent(dayKey, () => DailySummary());
+      month.daily[dayKey]!.total += sale.amount;
+      month.daily[dayKey]!.paid += sale.paid;
+    }
+
+    isLoading.value = false;
+  }
+}
+
+/// ---------------- SUMMARY MODELS ----------------
+
+class MonthlySummary {
+  double total = 0;
+  double paid = 0;
+  Map<String, DailySummary> daily = {};
+
+  double get pending => total - paid;
+}
+
+class DailySummary {
+  double total = 0;
+  double paid = 0;
+
+  double get pending => total - paid;
+}
+
+
+
+Future<void> generateMonthlyPdf(
+    String monthKey, MonthlySummary summary) async {
+  final pdf = pw.Document();
+
+  pdf.addPage(
+    pw.Page(
+      margin: const pw.EdgeInsets.all(24),
+      build: (context) {
+        return pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            /// HEADER
+            pw.Text(
+              "MONTHLY SALES REPORT",
+              style: pw.TextStyle(
+                fontSize: 20,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.SizedBox(height: 4),
+            pw.Text(
+              "Month: $monthKey",
+              style: const pw.TextStyle(fontSize: 12),
+            ),
+
+            pw.SizedBox(height: 12),
+            pw.Divider(),
+
+            /// SUMMARY SECTION
+            pw.Text(
+              "SUMMARY",
+              style: pw.TextStyle(
+                fontSize: 14,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.SizedBox(height: 6),
+
+            _pdfRow("Total Sales", summary.total),
+            _pdfRow("Paid Amount", summary.paid),
+            _pdfRow("Pending Amount", summary.pending),
+
+            pw.SizedBox(height: 12),
+            pw.Divider(),
+
+            /// DAILY BREAKDOWN HEADER
+            pw.Text(
+              "DAILY BREAKDOWN",
+              style: pw.TextStyle(
+                fontSize: 14,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.SizedBox(height: 8),
+
+            /// TABLE HEADER
+            pw.Row(
+              children: [
+                pw.Expanded(
+                  flex: 2,
+                  child: pw.Text(
+                    "Date",
+                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                  ),
+                ),
+                pw.Expanded(
+                  child: pw.Align(
+                    alignment: pw.Alignment.centerRight,
+                    child: pw.Text(
+                      "Total",
+                      style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            pw.Divider(),
+
+            /// DAILY ROWS
+            ...summary.daily.entries.map((e) {
+              final d = e.value;
+              return pw.Padding(
+                padding: const pw.EdgeInsets.symmetric(vertical: 4),
+                child: pw.Row(
+                  children: [
+                    pw.Expanded(
+                      flex: 2,
+                      child: pw.Text(e.key),
+                    ),
+                    pw.Expanded(
+                      child: pw.Align(
+                        alignment: pw.Alignment.centerRight,
+                        child: pw.Text(
+                          d.total.toStringAsFixed(0),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+
+            pw.SizedBox(height: 20),
+
+            /// FOOTER
+            pw.Divider(),
+            pw.Align(
+              alignment: pw.Alignment.center,
+              child: pw.Text(
+                "Generated by POS System",
+                style: const pw.TextStyle(fontSize: 10),
+              ),
+            ),
+          ],
+        );
+      },
+    ),
+  );
+
+  await Printing.layoutPdf(
+    onLayout: (format) async => pdf.save(),
+  );
+}
+
+/// 🔹 Reusable summary row
+pw.Widget _pdfRow(String label, double value) {
+  return pw.Padding(
+    padding: const pw.EdgeInsets.symmetric(vertical: 2),
+    child: pw.Row(
+      children: [
+        pw.Expanded(child: pw.Text(label)),
+        pw.Text(
+          value.toStringAsFixed(0),
+          style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+        ),
+      ],
+    ),
+  );
+}

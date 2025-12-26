@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "717493651190",
+    "project_id": "gtelerp",
+    "storage_bucket": "gtelerp.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:717493651190:android:77edc8b795a6d32b994ed7",
+        "android_client_info": {
+          "package_name": "com.example.gtel_erp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBj1I_bndL58_sYsfCqzg7hrC3-yWF9vqk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,215 @@
+// ignore_for_file: deprecated_member_use
+
+import 'package:flutter/material.dart';
+import 'package:get/get.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:intl/intl.dart';
+import 'controller.dart';
+import 'addstaff.dart'; // Assuming your addStaffDialog is here
+import 'details.dart';
+
+class StaffListPage extends StatelessWidget {
+  final StaffController controller = Get.put(StaffController());
+
+  // Colors from your Sidebar for consistency
+  static const Color darkSlate = Color(0xFF111827);
+  static const Color activeAccent = Color(0xFF3B82F6);
+  static const Color bgGrey = Color(0xFFF9FAFB);
+  static const Color textMuted = Color(0xFF6B7280);
+
+  StaffListPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: bgGrey,
+      body: Column(
+        children: [
+          _buildHeader(),
+          _buildTableHead(),
+          Expanded(
+            child: Obx(() {
+              if (controller.isLoading.value) {
+                return const Center(child: CircularProgressIndicator(color: activeAccent));
+              }
+
+              if (controller.filteredStaffList.isEmpty) {
+                return _buildEmptyState();
+              }
+
+              return ListView.builder(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                itemCount: controller.filteredStaffList.length,
+                itemBuilder: (context, index) {
+                  final staff = controller.filteredStaffList[index];
+                  return _buildStaffRow(staff);
+                },
+              );
+            }),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- HEADER SECTION (Search & Add) ---
+  Widget _buildHeader() {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      color: Colors.white,
+      child: Row(
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                "Staff Directory",
+                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: darkSlate),
+              ),
+              Text(
+                "Manage your employees and payroll",
+                style: TextStyle(fontSize: 14, color: textMuted),
+              ),
+            ],
+          ),
+          const Spacer(),
+          // Search Bar
+          Container(
+            width: 300,
+            decoration: BoxDecoration(
+              color: bgGrey,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.black12),
+            ),
+            child: TextField(
+              onChanged: (val) => controller.searchQuery.value = val,
+              decoration: const InputDecoration(
+                hintText: "Search staff name or phone...",
+                prefixIcon: Icon(Icons.search, size: 20),
+                border: InputBorder.none,
+                contentPadding: EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
+          ),
+          const SizedBox(width: 16),
+          // Add Staff Button
+          ElevatedButton.icon(
+            onPressed: () => addStaffDialog(controller),
+            icon: const Icon(Icons.add, color: Colors.white),
+            label: const Text("Add Member", style: TextStyle(color: Colors.white)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: activeAccent,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- TABLE HEADER ---
+  Widget _buildTableHead() {
+    return Container(
+      margin: const EdgeInsets.only(top: 16, left: 24, right: 24),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      decoration: const BoxDecoration(
+        color: darkSlate,
+        borderRadius: BorderRadius.only(topLeft: Radius.circular(8), topRight: Radius.circular(8)),
+      ),
+      child: Row(
+        children: const [
+          Expanded(flex: 3, child: Text("Employee", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+          Expanded(flex: 2, child: Text("Designation", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+          Expanded(flex: 2, child: Text("Phone", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+          Expanded(flex: 2, child: Text("Joining Date", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+          Expanded(flex: 1, child: Text("Salary", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+          SizedBox(width: 50), // For arrow
+        ],
+      ),
+    );
+  }
+
+  // --- STAFF DATA ROW ---
+  Widget _buildStaffRow(dynamic staff) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: Color(0xFFF3F4F6))),
+      ),
+      child: InkWell(
+        onTap: () => Get.to(() => StaffDetailsPage(staffId: staff.id, name: staff.name)),
+        child: Row(
+          children: [
+            // Employee Info with small Square Avatar
+            Expanded(
+              flex: 3,
+              child: Row(
+                children: [
+                  _buildAvatar(staff.name),
+                  const SizedBox(width: 12),
+                  Text(staff.name, style: const TextStyle(fontWeight: FontWeight.w600, color: darkSlate)),
+                ],
+              ),
+            ),
+            // Designation
+            Expanded(
+              flex: 2,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(color: activeAccent.withOpacity(0.1), borderRadius: BorderRadius.circular(4)),
+                child: Text(staff.des, style: const TextStyle(color: activeAccent, fontSize: 12, fontWeight: FontWeight.bold)),
+              ),
+            ),
+            // Phone
+            Expanded(flex: 2, child: Text(staff.phone, style: const TextStyle(color: textMuted))),
+            // Joining Date
+            Expanded(
+              flex: 2, 
+              child: Text(DateFormat("dd MMM yyyy").format(staff.joiningDate), style: const TextStyle(color: textMuted))
+            ),
+            // Salary
+            Expanded(
+              flex: 1, 
+              child: Text("\$${staff.salary}", style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green))
+            ),
+            // Action Icon
+            const Icon(Icons.arrow_forward_ios, size: 14, color: textMuted),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAvatar(String name) {
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: activeAccent.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Center(
+        child: Text(
+          name.isNotEmpty ? name[0].toUpperCase() : "?",
+          style: const TextStyle(color: activeAccent, fontWeight: FontWeight.bold),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          FaIcon(FontAwesomeIcons.usersSlash, size: 50, color: textMuted.withOpacity(0.5)),
+          const SizedBox(height: 16),
+          const Text("No staff members found", style: TextStyle(color: textMuted, fontSize: 16)),
+        ],
+      ),
+    );
+  }
+}

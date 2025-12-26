@@ -1,0 +1,5 @@
+package com.example.gtel_erp
+
+import io.flutter.embedding.android.FlutterActivity
+
+class MainActivity : FlutterActivity()
