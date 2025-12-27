@@ -50,7 +50,6 @@ class ProductController extends GetxController {
         },
       );
 
-      print('[API] GET: $uri');
 
       final res = await http.get(uri);
 
@@ -71,7 +70,6 @@ class ProductController extends GetxController {
         Get.snackbar('Error', 'Server returned ${res.statusCode}');
       }
     } catch (e) {
-      print('[ERROR] fetchProducts: $e');
       Get.snackbar('Error', 'Connection failed.');
     } finally {
       isLoading.value = false;

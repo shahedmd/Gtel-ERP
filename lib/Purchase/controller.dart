@@ -178,7 +178,6 @@ class PurchaseController extends GetxController {
       clearAll();
 
     } catch (e) {
-      print('[ERROR] Purchase processing failed: $e');
       Get.snackbar('System Error', 'Failed to complete purchase. Check server status.',
           backgroundColor: Colors.red, colorText: Colors.white);
     } finally {

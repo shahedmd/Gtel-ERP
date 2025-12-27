@@ -1,3 +1,5 @@
+// ignore_for_file: deprecated_member_use
+
 import 'dart:collection';
 import 'package:get/get.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';

@@ -7,7 +7,6 @@ import 'dart:typed_data';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:intl/intl.dart';
 import '../Sales/controller.dart';
-import 'adddebator.dart';
 import 'model.dart';
 
 class DebatorController extends GetxController {
@@ -339,10 +338,12 @@ class DebatorController extends GetxController {
       double debit = 0;
       for (var doc in snap.docs) {
         final d = doc.data() as Map<String, dynamic>;
-        if (d['type'] == 'credit')
+        if (d['type'] == 'credit') {
           credit += (d['amount'] as num?)?.toDouble() ?? 0;
-        if (d['type'] == 'debit')
+        }
+        if (d['type'] == 'debit') {
           debit += (d['amount'] as num?)?.toDouble() ?? 0;
+        }
       }
       return {'credit': credit, 'debit': debit, 'balance': credit - debit};
     });

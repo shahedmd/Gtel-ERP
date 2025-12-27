@@ -1,4 +1,4 @@
-// ignore_for_file: deprecated_member_use
+// ignore_for_file: deprecated_member_use, empty_catches
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:get/get.dart';
 import 'package:pdf/pdf.dart';
@@ -61,8 +61,6 @@ class DailySalesController extends GetxController {
         snap.docs.map((d) => SaleModel.fromFirestore(d)).toList(),
       );
       _computeTotals();
-    } catch (e) {
-      print("Error loading sales: $e");
     } finally {
       isLoading.value = false;
     }
@@ -255,7 +253,6 @@ class DailySalesController extends GetxController {
       await batch.commit();
       await loadDailySales(); // Refresh the UI
     } catch (e) {
-      print("[POS ERROR] applyDebtorPayment: $e");
       Get.snackbar("Payment Error", "Could not process daily payment.");
     }
   }
@@ -266,7 +263,6 @@ class DailySalesController extends GetxController {
       await _db.collection("daily_sales").doc(saleId).delete();
       await loadDailySales();
     } catch (e) {
-      print("Delete failed: $e");
     }
   }
 
