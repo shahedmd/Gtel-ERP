@@ -40,11 +40,14 @@ class Debatorpage extends StatelessWidget {
               }
 
               return ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 15),
                 itemCount: controller.filteredBodies.length,
                 itemBuilder: (context, index) {
                   final debtor = controller.filteredBodies[index];
-                  return _buildDebtorRow(debtor);
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 7),
+                    child: _buildDebtorRow(debtor),
+                  );
                 },
               );
             }),
