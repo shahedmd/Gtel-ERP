@@ -5,6 +5,7 @@ import 'package:get/get.dart';
 import 'package:gtel_erp/Web%20Elements/customwidget.dart';
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/debatorcontroller.dart';
 import 'package:gtel_erp/Web%20Screen/Expenses/dailycontroller.dart';
+import 'package:gtel_erp/Web%20Screen/Sales/controller.dart';
 import 'Web Screen/Expenses/monthlycontroller.dart';
 import 'Web Screen/homepage.dart';
 import 'firebase_options.dart';
@@ -14,6 +15,7 @@ Future<void> main() async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   Get.put(MonthlyExpensesController());
+  Get.put(DailySalesController());
   Get.put(DailyExpensesController());
   Get.put(NavigationController());
   Get.put(DebatorController());

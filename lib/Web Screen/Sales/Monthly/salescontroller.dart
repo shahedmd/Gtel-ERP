@@ -1,62 +1,73 @@
+import 'dart:collection';
 import 'package:get/get.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-
-import 'model.dart';
+import 'package:gtel_erp/Web%20Screen/Sales/model.dart';
+import 'package:intl/intl.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
 
 class MonthlySalesController extends GetxController {
-  final isLoading = true.obs;
+  final isLoading = false.obs;
 
-
-  final monthlyData = <String, MonthlySummary>{}.obs;
+  // SplayTreeMap keeps keys sorted automatically (e.g., 2025-01, 2025-02)
+  final monthlyData = SplayTreeMap<String, MonthlySummary>().obs;
 
   @override
   void onInit() {
-    fetchSales();
     super.onInit();
+    fetchSales();
   }
 
   Future<void> fetchSales() async {
-    isLoading.value = true;
-    monthlyData.clear();
+    try {
+      isLoading.value = true;
 
-    final snapshot =
-        await FirebaseFirestore.instance.collection('daily_sales').get();
+      final snapshot =
+          await FirebaseFirestore.instance
+              .collection('daily_sales')
+              .orderBy('timestamp', descending: true)
+              .get();
 
-    for (var doc in snapshot.docs) {
-      final sale = SaleModel.fromDoc(doc);
-
-      final monthKey =
-          "${sale.timestamp.year}-${sale.timestamp.month.toString().padLeft(2, '0')}";
-      final dayKey =
-          "${sale.timestamp.year}-${sale.timestamp.month}-${sale.timestamp.day}";
-
-      monthlyData.putIfAbsent(
-        monthKey,
-        () => MonthlySummary(),
+      // 1. Create your temporary sorted map
+      final tempMap = SplayTreeMap<String, MonthlySummary>(
+        (a, b) => b.compareTo(a),
       );
 
-      final month = monthlyData[monthKey]!;
+      for (var doc in snapshot.docs) {
+        final sale = SaleModel.fromFirestore(doc);
 
-      month.total += sale.amount;
-      month.paid += sale.paid;
+        final monthKey = DateFormat('yyyy-MM').format(sale.timestamp);
+        final dayKey = DateFormat('yyyy-MM-dd').format(sale.timestamp);
 
-      month.daily.putIfAbsent(dayKey, () => DailySummary());
-      month.daily[dayKey]!.total += sale.amount;
-      month.daily[dayKey]!.paid += sale.paid;
+        tempMap.putIfAbsent(monthKey, () => MonthlySummary());
+
+        final month = tempMap[monthKey]!;
+        month.total += sale.amount;
+        month.paid += sale.paid;
+
+        month.daily.putIfAbsent(dayKey, () => DailySummary());
+        month.daily[dayKey]!.total += sale.amount;
+        month.daily[dayKey]!.paid += sale.paid;
+      }
+
+      // 2. Assign the whole map to the observable .value
+      monthlyData.value = tempMap;
+    } catch (e) {
+      Get.snackbar("Error", "Failed to fetch sales: $e");
+    } finally {
+      isLoading.value = false;
     }
-
-    isLoading.value = false;
   }
 }
-
-/// ---------------- SUMMARY MODELS ----------------
 
 class MonthlySummary {
   double total = 0;
   double paid = 0;
-  Map<String, DailySummary> daily = {};
+  // Nested map for daily breakdown within the month
+  Map<String, DailySummary> daily = SplayTreeMap<String, DailySummary>(
+    (a, b) => b.compareTo(a),
+  );
 
   double get pending => total - paid;
 }
@@ -64,148 +75,132 @@ class MonthlySummary {
 class DailySummary {
   double total = 0;
   double paid = 0;
-
   double get pending => total - paid;
 }
 
-
-
-Future<void> generateMonthlyPdf(
-    String monthKey, MonthlySummary summary) async {
+Future<void> generateMonthlyPdf(String monthKey, MonthlySummary summary) async {
   final pdf = pw.Document();
+  final primaryColor = PdfColors.blue900;
+  final secondaryColor = PdfColors.blueGrey800;
 
   pdf.addPage(
-    pw.Page(
-      margin: const pw.EdgeInsets.all(24),
-      build: (context) {
-        return pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            /// HEADER
-            pw.Text(
-              "MONTHLY SALES REPORT",
-              style: pw.TextStyle(
-                fontSize: 20,
-                fontWeight: pw.FontWeight.bold,
-              ),
-            ),
-            pw.SizedBox(height: 4),
-            pw.Text(
-              "Month: $monthKey",
-              style: const pw.TextStyle(fontSize: 12),
-            ),
-
-            pw.SizedBox(height: 12),
-            pw.Divider(),
-
-            /// SUMMARY SECTION
-            pw.Text(
-              "SUMMARY",
-              style: pw.TextStyle(
-                fontSize: 14,
-                fontWeight: pw.FontWeight.bold,
-              ),
-            ),
-            pw.SizedBox(height: 6),
-
-            _pdfRow("Total Sales", summary.total),
-            _pdfRow("Paid Amount", summary.paid),
-            _pdfRow("Pending Amount", summary.pending),
-
-            pw.SizedBox(height: 12),
-            pw.Divider(),
-
-            /// DAILY BREAKDOWN HEADER
-            pw.Text(
-              "DAILY BREAKDOWN",
-              style: pw.TextStyle(
-                fontSize: 14,
-                fontWeight: pw.FontWeight.bold,
-              ),
-            ),
-            pw.SizedBox(height: 8),
-
-            /// TABLE HEADER
-            pw.Row(
-              children: [
-                pw.Expanded(
-                  flex: 2,
-                  child: pw.Text(
-                    "Date",
-                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-                  ),
-                ),
-                pw.Expanded(
-                  child: pw.Align(
-                    alignment: pw.Alignment.centerRight,
-                    child: pw.Text(
-                      "Total",
-                      style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+    pw.MultiPage(
+      // MultiPage is essential for long lists
+      pageFormat: PdfPageFormat.a4,
+      margin: const pw.EdgeInsets.all(32),
+      header:
+          (context) => pw.Column(
+            children: [
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(
+                    "G-TEL ERP: MONTHLY SALES",
+                    style: pw.TextStyle(
+                      fontSize: 18,
+                      fontWeight: pw.FontWeight.bold,
+                      color: primaryColor,
                     ),
                   ),
+                  pw.Text(
+                    "Month: $monthKey",
+                    style: const pw.TextStyle(fontSize: 12),
+                  ),
+                ],
+              ),
+              pw.SizedBox(height: 5),
+              pw.Divider(thickness: 1, color: primaryColor),
+            ],
+          ),
+      build: (context) {
+        return [
+          pw.SizedBox(height: 20),
+
+          // SUMMARY SECTION
+          pw.Container(
+            padding: const pw.EdgeInsets.all(15),
+            decoration: pw.BoxDecoration(
+              color: PdfColors.grey100,
+              borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
+            ),
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                _pdfStatItem("Total Revenue", summary.total, PdfColors.black),
+                _pdfStatItem(
+                  "Total Collected",
+                  summary.paid,
+                  PdfColors.green800,
+                ),
+                _pdfStatItem(
+                  "Total Pending",
+                  summary.pending,
+                  PdfColors.red800,
                 ),
               ],
             ),
-            pw.Divider(),
+          ),
 
-            /// DAILY ROWS
-            ...summary.daily.entries.map((e) {
-              final d = e.value;
-              return pw.Padding(
-                padding: const pw.EdgeInsets.symmetric(vertical: 4),
-                child: pw.Row(
-                  children: [
-                    pw.Expanded(
-                      flex: 2,
-                      child: pw.Text(e.key),
-                    ),
-                    pw.Expanded(
-                      child: pw.Align(
-                        alignment: pw.Alignment.centerRight,
-                        child: pw.Text(
-                          d.total.toStringAsFixed(0),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }),
+          pw.SizedBox(height: 30),
 
-            pw.SizedBox(height: 20),
-
-            /// FOOTER
-            pw.Divider(),
-            pw.Align(
-              alignment: pw.Alignment.center,
-              child: pw.Text(
-                "Generated by POS System",
-                style: const pw.TextStyle(fontSize: 10),
-              ),
+          // TABLE BREAKDOWN
+          pw.Table.fromTextArray(
+            headers: ["Transaction Date", "Daily Sales (BDT)", "Status"],
+            headerStyle: pw.TextStyle(
+              color: PdfColors.white,
+              fontWeight: pw.FontWeight.bold,
             ),
-          ],
-        );
+            headerDecoration: pw.BoxDecoration(color: secondaryColor),
+            cellHeight: 25,
+            cellAlignments: {
+              0: pw.Alignment.centerLeft,
+              1: pw.Alignment.centerRight,
+              2: pw.Alignment.center,
+            },
+            data:
+                summary.daily.entries.map((e) {
+                  final d = e.value;
+                  return [
+                    DateFormat(
+                      'dd MMM yyyy (EEEE)',
+                    ).format(DateTime.parse(e.key)),
+                    d.total.toStringAsFixed(2),
+                    d.pending <= 0 ? "CLEARED" : "DUE",
+                  ];
+                }).toList(),
+          ),
+
+          pw.SizedBox(height: 30),
+          pw.Divider(color: PdfColors.grey300),
+          pw.Center(
+            child: pw.Text(
+              "End of Monthly Statement",
+              style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey600),
+            ),
+          ),
+        ];
       },
     ),
   );
 
-  await Printing.layoutPdf(
-    onLayout: (format) async => pdf.save(),
-  );
+  await Printing.layoutPdf(onLayout: (format) async => pdf.save());
 }
 
-/// 🔹 Reusable summary row
-pw.Widget _pdfRow(String label, double value) {
-  return pw.Padding(
-    padding: const pw.EdgeInsets.symmetric(vertical: 2),
-    child: pw.Row(
-      children: [
-        pw.Expanded(child: pw.Text(label)),
-        pw.Text(
-          value.toStringAsFixed(0),
-          style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+pw.Widget _pdfStatItem(String label, double value, PdfColor color) {
+  return pw.Column(
+    children: [
+      pw.Text(
+        label,
+        style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
+      ),
+      pw.Text(
+        "Tk ${value.toStringAsFixed(2)}",
+        style: pw.TextStyle(
+          fontSize: 14,
+          fontWeight: pw.FontWeight.bold,
+          color: color,
         ),
-      ],
-    ),
+      ),
+    ],
   );
 }

@@ -1,501 +1,622 @@
 // ignore_for_file: deprecated_member_use, avoid_web_libraries_in_flutter
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
-import 'dart:html' as html;
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../Sales/controller.dart';
-
-
+import 'model.dart';
 
 class DailySalesPage extends StatelessWidget {
+  // Use Get.find since this should be initialized in your MainLayout or Bindings
   final DailySalesController ctrl = Get.put(DailySalesController());
 
-  final NumberFormat currencyFormat = NumberFormat.currency(
-    locale: 'en_US',
-    symbol: 'BDT ',
-  );
+  // Professional Theme Colors (Sync with your ERP Sidebar)
+  static const Color darkSlate = Color(0xFF111827);
+  static const Color activeAccent = Color(0xFF3B82F6);
+  static const Color bgGrey = Color(0xFFF9FAFB);
+  static const Color textMuted = Color(0xFF6B7280);
 
   DailySalesPage({super.key});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F7FB),
-      appBar: AppBar(
-        title: const Text("Daily Sales", style: TextStyle(color: Colors.white)),
-        centerTitle: true,
-        backgroundColor: const Color(0xFF0C2E69),
-        elevation: 2,
-        actions: [
-          IconButton(
-            icon: const FaIcon(FontAwesomeIcons.filePdf, color: Colors.white),
-            tooltip: "Download PDF",
-            onPressed: () async {
-              final pdfData = await ctrl.generatePDF();
-              final blob = html.Blob([pdfData], 'application/pdf');
-              final url = html.Url.createObjectUrlFromBlob(blob);
-              html.AnchorElement(href: url)
-                ..setAttribute(
-                    "download",
-                    "DailySales-${ctrl.selectedDate.value.toLocal().toString().split(' ')[0]}.pdf")
-                ..click();
-              html.Url.revokeObjectUrl(url);
-            },
-          ),
-          const SizedBox(width: 8),
-        ],
-      ),
+      backgroundColor: bgGrey,
       body: Obx(() {
-        if (ctrl.isLoading.value) {
-          return const Center(child: CircularProgressIndicator());
+        if (ctrl.isLoading.value && ctrl.salesList.isEmpty) {
+          return const Center(
+            child: CircularProgressIndicator(color: activeAccent),
+          );
         }
 
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              children: [
-                _buildFilterBar(context),
-                const SizedBox(height: 16),
-                _buildMetricsRow(),
-                const SizedBox(height: 16),
-                Expanded(child: _buildResponsiveContent(context)),
-              ],
-            ),
-          ),
+        return Column(
+          children: [
+            _buildHeader(context),
+            _buildMetricsRow(),
+            _buildTableHead(),
+            Expanded(child: _buildMainContent(context)),
+          ],
         );
       }),
     );
   }
 
-  // ---------------- Filter Bar ----------------
-  Widget _buildFilterBar(BuildContext context) {
-    return Row(
-      children: [
-        ElevatedButton.icon(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF0F3D85),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
-          onPressed: () async {
-            final pickedDate = await showDatePicker(
-              context: context,
-              initialDate: ctrl.selectedDate.value,
-              firstDate: DateTime(2020),
-              lastDate: DateTime.now(),
-            );
-            if (pickedDate != null) ctrl.changeDate(pickedDate);
-          },
-          icon: const Icon(Icons.date_range, color: Colors.white),
-          label: Obx(() => Text(
-                DateFormat('dd MMM yyyy').format(ctrl.selectedDate.value),
-                style: const TextStyle(color: Colors.white),
-              )),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Container(
-            height: 46,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(10),
-              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 6)],
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.search, color: Colors.blueGrey),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextField(
-                    onChanged: (v) => ctrl.filterQuery.value = v,
-                    decoration: const InputDecoration(
-                      hintText: "Search by customer, note, or type...",
-                      border: InputBorder.none,
-                      isCollapsed: true,
-                    ),
-                  ),
-                ),
-                Obx(() => ctrl.filterQuery.value.isNotEmpty
-                    ? InkWell(
-                        onTap: () => ctrl.filterQuery.value = "",
-                        child: const Icon(Icons.clear, color: Colors.blueGrey),
-                      )
-                    : const SizedBox.shrink()),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(width: 12),
-        ElevatedButton.icon(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF0F3D85),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
-          icon: const FaIcon(FontAwesomeIcons.fileCsv, color: Colors.white, size: 16),
-          label: const Text("Export", style: TextStyle(color: Colors.white)),
-          onPressed: () {
-            ctrl.generatePDF().then((pdfData) {
-              final blob = html.Blob([pdfData], 'application/pdf');
-              final url = html.Url.createObjectUrlFromBlob(blob);
-              html.AnchorElement(href: url)
-                ..setAttribute(
-                    "download",
-                    "DailySales-${ctrl.selectedDate.value.toLocal().toString().split(' ')[0]}.pdf")
-                ..click();
-              html.Url.revokeObjectUrl(url);
-            });
-          },
-        ),
-      ],
-    );
-  }
-
-  // ---------------- Metrics Row ----------------
-  Widget _buildMetricsRow() {
-    return Obx(() {
-      final total = ctrl.totalSales.value;
-      final paid = ctrl.paidAmount.value;
-      final debtor = ctrl.debtorPending.value;
-      final orders = ctrl.salesList.length;
-
-      return Row(
-        children: [
-          Expanded(child: _metricCard("Total Sales", currencyFormat.format(total), Icons.show_chart, Colors.blue.shade700)),
-          const SizedBox(width: 12),
-          Expanded(child: _metricCard("Paid", currencyFormat.format(paid), Icons.attach_money, Colors.green.shade700)),
-          const SizedBox(width: 12),
-          Expanded(child: _metricCard("Debtor Pending", currencyFormat.format(debtor), Icons.error_outline, Colors.red.shade700, valueColor: Colors.red)),
-          const SizedBox(width: 12),
-          Expanded(child: _metricCard("Orders", orders.toString(), Icons.receipt_long, Colors.indigo.shade700)),
-        ],
-      );
-    });
-  }
-
-  Widget _metricCard(String title, String value, IconData icon, Color bg, {Color? valueColor}) {
+  // --- 1. HEADER (Title, Date, Search) ---
+  Widget _buildHeader(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(colors: [bg.withOpacity(0.95), bg.withOpacity(0.8)]),
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 8)],
-      ),
+      padding: const EdgeInsets.all(24),
+      color: Colors.white,
       child: Row(
         children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                "Daily Sales Ledger",
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: darkSlate,
+                ),
+              ),
+              Obx(
+                () => Text(
+                  "Audit for ${DateFormat('EEEE, dd MMMM yyyy').format(ctrl.selectedDate.value)}",
+                  style: const TextStyle(fontSize: 14, color: textMuted),
+                ),
+              ),
+            ],
+          ),
+          const Spacer(),
+          // Search Bar
           Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(8)),
-            child: Icon(icon, color: Colors.white),
+            width: 300,
+            decoration: BoxDecoration(
+              color: bgGrey,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.black12),
+            ),
+            child: TextField(
+              onChanged: (v) => ctrl.filterQuery.value = v,
+              decoration: const InputDecoration(
+                hintText: "Search sales...",
+                prefixIcon: Icon(Icons.search, size: 20),
+                border: InputBorder.none,
+                contentPadding: EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
+          ),
+          const SizedBox(width: 16),
+          // Date Selector
+          OutlinedButton.icon(
+            onPressed: () async {
+              final p = await showDatePicker(
+                context: context,
+                initialDate: ctrl.selectedDate.value,
+                firstDate: DateTime(2020),
+                lastDate: DateTime.now(),
+              );
+              if (p != null) ctrl.changeDate(p);
+            },
+            icon: const Icon(Icons.calendar_month, size: 18),
+            label: const Text("Filter Date"),
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
           ),
           const SizedBox(width: 12),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(title, style: const TextStyle(color: Colors.white70, fontSize: 12)),
-              const SizedBox(height: 6),
-              Text(value, style: TextStyle(color: valueColor ?? Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-            ]),
+          // Export Button
+          ElevatedButton.icon(
+            onPressed: () => ctrl.generateProfessionalPDF(),
+            icon: const FaIcon(
+              FontAwesomeIcons.filePdf,
+              color: Colors.white,
+              size: 16,
+            ),
+            label: const Text(
+              "Export Statement",
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
           ),
         ],
       ),
     );
   }
 
-  // ---------------- Responsive Content ----------------
-  Widget _buildResponsiveContent(BuildContext context) {
-    return LayoutBuilder(builder: (context, constraints) {
-      if (constraints.maxWidth > 900) {
-        return _buildDataTableView();
-      } else {
-        return _buildCardListView();
-      }
-    });
+  Widget _buildMetricsRow() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+      child: Obx(
+        () => Row(
+          children: [
+            // 1. Gross Sales
+            Expanded(
+              child: _metricCard(
+                "Gross Sales",
+                ctrl.totalSales.value,
+                FontAwesomeIcons.chartLine,
+                activeAccent,
+              ),
+            ),
+            const SizedBox(width: 16),
+
+            // 2. Total Collected (Maps to paidAmount)
+            Expanded(
+              child: _metricCard(
+                "Total Collected",
+                ctrl.paidAmount.value, // Corrected variable name
+                FontAwesomeIcons.handHoldingDollar,
+                Colors.green,
+              ),
+            ),
+            const SizedBox(width: 16),
+
+            // 3. Outstanding Debt (Maps to debtorPending)
+            Expanded(
+              child: _metricCard(
+                "Outstanding Debt",
+                ctrl.debtorPending.value, // Corrected variable name
+                FontAwesomeIcons.circleExclamation,
+                Colors.redAccent,
+              ),
+            ),
+            const SizedBox(width: 16),
+
+            // 4. Order Count Card
+            Expanded(child: _orderCountCard()),
+          ],
+        ),
+      ),
+    );
   }
 
-  List<Map<String, dynamic>> _filteredSales() {
-    final query = ctrl.filterQuery.value.trim().toLowerCase();
-    if (query.isEmpty) return List<Map<String, dynamic>>.from(ctrl.salesList);
-
-    return ctrl.salesList.where((s) {
-      final name = (s['name'] ?? '').toString().toLowerCase();
-      final note = (s['note'] ?? '').toString().toLowerCase();
-      final type = (s['customerType'] ?? '').toString().toLowerCase();
-      return name.contains(query) || note.contains(query) || type.contains(query);
-    }).toList().cast<Map<String, dynamic>>();
-  }
-
-  String _getDateString(Map<String, dynamic> sale) {
-    final dynamic ts = sale['timestamp'] ?? sale['date'] ?? sale['time'] ?? sale['createdAt'];
-    if (ts == null) return "";
-
-    try {
-      if (ts is Timestamp) return DateFormat('dd MMM yyyy').format(ts.toDate());
-      if (ts is DateTime) return DateFormat('dd MMM yyyy').format(ts);
-      if (ts is String) {
-        try {
-          return DateFormat('dd MMM yyyy').format(DateTime.parse(ts));
-        } catch (_) {
-          return ts;
-        }
-      }
-      if ((ts as dynamic).toDate != null) {
-        final parsed = (ts as dynamic).toDate();
-        if (parsed is DateTime) return DateFormat('dd MMM yyyy').format(parsed);
-      }
-    } catch (_) {
-      return ts.toString();
-    }
-
-    return ts.toString();
-  }
-
-String _formatPaymentMethodSafe(dynamic pmField) {
-  if (pmField == null) return "";
-  try {
-    if (pmField is Map) {
-      final type = (pmField['type'] ?? '').toString().toLowerCase();
-
-      if (type == 'bkash' || type == 'nagad') {
-        final number = pmField['number'] ?? '';
-        return "${type[0].toUpperCase()}${type.substring(1)}: $number";
-      } else if (type == 'bank') {
-        final bankName = pmField['bankName'] ?? '';
-        final branch = pmField['branch'] ?? '';
-        final acc = pmField['accountNumber'] ?? '';
-        return "Bank: $bankName${branch.isNotEmpty ? ', $branch' : ''}${acc.isNotEmpty ? ', A/C: $acc' : ''}";
-      } else if (type == 'cash') {
-        return "Cash";
-      } else {
-        return pmField['type']?.toString() ?? pmField.toString();
-      }
-    } else if (pmField is String) {
-      return pmField;
-    } else {
-      return pmField.toString();
-    }
-  } catch (e) {
-    return pmField.toString();
-  }
+Widget _metricCard(String title, double value, IconData icon, Color color) {
+  return Container(
+    padding: const EdgeInsets.all(20),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: Colors.black.withOpacity(0.05)),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withOpacity(0.02),
+          blurRadius: 10,
+          offset: const Offset(0, 4),
+        ),
+      ],
+    ),
+    child: Row(
+      children: [
+        // Icon Circle
+        Container(
+          height: 40,
+          width: 40,
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Center(
+            child: FaIcon(icon, size: 16, color: color),
+          ),
+        ),
+        const SizedBox(width: 16),
+        // Text Content
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title.toUpperCase(),
+                style: const TextStyle(
+                  color: Color(0xFF6B7280), // textMuted
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.5,
+                ),
+              ),
+              const SizedBox(height: 4),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  "৳ ${value.toStringAsFixed(2)}",
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF111827), // darkSlate
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 
- Widget _buildDataTableView() {
-  final ScrollController hController = ScrollController();
+Widget _orderCountCard() {
+  return Container(
+    padding: const EdgeInsets.all(20),
+    decoration: BoxDecoration(
+      color: const Color(0xFF111827), // darkSlate
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Row(
+      children: [
+        const CircleAvatar(
+          radius: 20,
+          backgroundColor: Colors.white10,
+          child: FaIcon(FontAwesomeIcons.receipt, size: 14, color: Colors.white),
+        ),
+        const SizedBox(width: 16),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "TOTAL ORDERS",
+              style: TextStyle(
+                color: Colors.white60,
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 0.5,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              "${ctrl.salesList.length}",
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
+}
+  // --- 3. THE DATA TABLE ---
+  Widget _buildTableHead() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 24),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+      decoration: const BoxDecoration(
+        color: darkSlate,
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(8),
+          topRight: Radius.circular(8),
+        ),
+      ),
+      child: Row(
+        children: const [
+          Expanded(
+            flex: 3,
+            child: Text(
+              "Customer / Bill To",
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text(
+              "Status",
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text(
+              "Payment Method",
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text(
+              "Total Bill",
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+              textAlign: TextAlign.right,
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text(
+              "Balance Due",
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+              textAlign: TextAlign.right,
+            ),
+          ),
+          SizedBox(width: 60),
+        ],
+      ),
+    );
+  }
 
-  return Obx(() {
-    final rows = _filteredSales();
+  Widget _buildMainContent(BuildContext context) {
+    final filtered = _getFilteredList();
+    if (filtered.isEmpty) return _buildEmptyState();
 
-    return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      elevation: 1,
-      child: Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: SizedBox(
-          height: Get.height * 0.64,
-          child: Scrollbar(
-            controller: hController, // ✅ attach controller
-            thumbVisibility: true,
-            child: SingleChildScrollView(
-              controller: hController, // ✅ same controller
-              scrollDirection: Axis.horizontal,
-              child: DataTable(
-                headingRowColor: MaterialStateProperty.all(const Color(0xFF0C2E69)),
-                headingTextStyle: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                ),
-                dataRowHeight: 64,
-                columns: const [
-                  DataColumn(label: Text("Date")),
-                  DataColumn(label: Text("Customer")),
-                  DataColumn(label: Text("Type")),
-                  DataColumn(label: Text("Amount")),
-                  DataColumn(label: Text("Paid")),
-                  DataColumn(label: Text("Pending")),
-                  DataColumn(label: Text("Payment")),
-                  DataColumn(label: Text("Actions")),
-                ],
-                rows: rows.map((sale) {
-                  final amount = (sale['amount'] as num?)?.toDouble() ?? 0.0;
-                  final paid = (sale['paid'] as num?)?.toDouble() ?? 0.0;
-                  final pending = amount - paid;
-                  final pmStr = _formatPaymentMethodSafe(sale['paymentMethod']);
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      itemCount: filtered.length,
+      itemBuilder: (context, index) {
+        final sale = filtered[index];
+        return _buildSaleRow(context, sale);
+      },
+    );
+  }
 
-                  return DataRow(cells: [
-                    DataCell(Text(_getDateString(sale))),
-                    DataCell(Text("${sale['name'] ?? ''} (${sale['customerType'] ?? ''})")),
-                    DataCell(Text(sale['customerType'] == 'debtor' ? 'Debtor Sale' : 'Cash Sale')),
-                    DataCell(Text(currencyFormat.format(amount))),
-                    DataCell(Text(currencyFormat.format(paid))),
-                    DataCell(
-                      Text(
-                        currencyFormat.format(pending),
-                        style: TextStyle(color: pending > 0 ? Colors.red : Colors.green),
+  Widget _buildSaleRow(BuildContext context, SaleModel sale) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: Color(0xFFF3F4F6))),
+      ),
+      child: InkWell(
+        onTap: () {
+          if (sale.pending > 0) _showPaymentDialog(context, sale);
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          child: Row(
+            children: [
+              // Customer Name
+              Expanded(
+                flex: 3,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      sale.name,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: darkSlate,
                       ),
                     ),
-                    DataCell(SizedBox(width: 300, child: Text(pmStr, overflow: TextOverflow.ellipsis))),
-                    DataCell(Row(children: [
-                      IconButton(icon: const Icon(Icons.remove_red_eye), onPressed: () {}),
-                    ])),
-                  ]);
-                }).toList(),
+                    Text(
+                      DateFormat('hh:mm a').format(sale.timestamp),
+                      style: const TextStyle(fontSize: 11, color: textMuted),
+                    ),
+                  ],
+                ),
               ),
-            ),
+              // Status Badge
+              Expanded(flex: 2, child: _statusBadge(sale)),
+              // Payment Method
+              Expanded(
+                flex: 2,
+                child: Text(
+                  ctrl.formatPaymentMethod(sale.paymentMethod),
+                  style: const TextStyle(fontSize: 12, color: textMuted),
+                ),
+              ),
+              // Amount
+              Expanded(
+                flex: 2,
+                child: Text(
+                  "৳ ${sale.amount.toStringAsFixed(2)}",
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: darkSlate,
+                  ),
+                ),
+              ),
+              // Pending
+              Expanded(
+                flex: 2,
+                child: Text(
+                  sale.pending > 0
+                      ? "৳ ${sale.pending.toStringAsFixed(2)}"
+                      : "CLEARED",
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: sale.pending > 0 ? Colors.redAccent : Colors.green,
+                  ),
+                ),
+              ),
+              // Action
+              SizedBox(
+                width: 60,
+                child: IconButton(
+                  icon: const Icon(
+                    Icons.delete_outline,
+                    size: 18,
+                    color: Colors.black26,
+                  ),
+                  onPressed: () => _confirmDelete(sale),
+                ),
+              ),
+            ],
           ),
         ),
       ),
     );
-  });
-}
-
-
-  // ---------------- Card List View ----------------
-  Widget _buildCardListView() {
-    return Obx(() {
-      final rows = _filteredSales();
-
-      return Scrollbar(
-        thumbVisibility: true,
-        child: ListView.separated(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          itemCount: rows.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 8),
-          itemBuilder: (context, i) {
-            final sale = rows[i];
-            final amount = (sale['amount'] as num?)?.toDouble() ?? 0.0;
-            final paid = (sale['paid'] as num?)?.toDouble() ?? 0.0;
-            final pending = amount - paid;
-            final pmStr = _formatPaymentMethodSafe(sale['paymentMethod']);
-            final dateStr = _getDateString(sale);
-
-            return Container(
-              margin: const EdgeInsets.symmetric(horizontal: 4),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                gradient: sale['customerType'] == 'debtor'
-                    ? LinearGradient(colors: [Colors.orange.shade50, Colors.orange.shade100])
-                    : LinearGradient(colors: [Colors.blue.shade50, Colors.blue.shade100]),
-                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 6)],
-              ),
-              child: ListTile(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                title: Text("${sale['name'] ?? ''} • $dateStr", style: const TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  const SizedBox(height: 6),
-                  Text("Amount: ${currencyFormat.format(amount)}  •  Paid: ${currencyFormat.format(paid)}"),
-                  const SizedBox(height: 6),
-                  if (pmStr.isNotEmpty) Text("Payment: $pmStr", style: const TextStyle(color: Colors.blueGrey)),
-                ]),
-                trailing: pending > 0
-                    ? Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(color: Colors.red.shade100, borderRadius: BorderRadius.circular(8)),
-                        child: Text(currencyFormat.format(pending), style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
-                      )
-                    : null,
-                onTap: () {
-                  if (sale['customerType'] == 'debtor' && pending > 0) {
-                    _showDebtorPaymentDialog(context, sale['name'], pending, sale['paymentMethod']);
-                  }
-                },
-              ),
-            );
-          },
-        ),
-      );
-    });
   }
 
-  // ---------------- Debtor Payment Dialog ----------------
-  void _showDebtorPaymentDialog(BuildContext context, String debtorName, double remaining, Map<String, dynamic>? defaultPayment) {
-    final TextEditingController paymentCtrl = TextEditingController();
-    final TextEditingController detailsCtrl = TextEditingController();
+  // --- 4. DIALOGS & HELPERS ---
 
-    final selectedPayment = RxString(defaultPayment != null ? (defaultPayment['type'] ?? "bkash") : "bkash");
+  void _showPaymentDialog(BuildContext context, SaleModel sale) {
+    final amountC = TextEditingController(text: sale.pending.toString());
+    final RxString method = "cash".obs;
 
-    if (defaultPayment != null) {
-      if (defaultPayment['type'] == 'bank') {
-        detailsCtrl.text = "Bank: ${defaultPayment['bankName'] ?? ''}, Branch: ${defaultPayment['branch'] ?? ''}, A/C: ${defaultPayment['accountNumber'] ?? ''}";
-      } else if (defaultPayment['type'] == 'bkash') {
-        detailsCtrl.text = defaultPayment['number'] ?? defaultPayment['account'] ?? '';
-      } else {
-        detailsCtrl.text = defaultPayment['details'] ?? '';
-      }
-    }
+    Get.dialog(
+      Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Container(
+          width: 400,
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                "Collect Payment",
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                "Customer: ${sale.name}",
+                style: const TextStyle(color: textMuted),
+              ),
+              const SizedBox(height: 24),
+              TextField(
+                controller: amountC,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: "Amount to Pay",
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Obx(
+                () => DropdownButtonFormField<String>(
+                  value: method.value,
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                  ),
+                  items:
+                      ["cash", "bkash", "nagad", "bank"]
+                          .map(
+                            (e) => DropdownMenuItem(
+                              value: e,
+                              child: Text(e.toUpperCase()),
+                            ),
+                          )
+                          .toList(),
+                  onChanged: (v) => method.value = v!,
+                ),
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () => Get.back(),
+                      child: const Text("Cancel"),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () async {
+                        await ctrl.applyDebtorPayment(
+                          sale.name,
+                          double.parse(amountC.text),
+                          {"type": method.value},
+                          date: DateTime.now(),
+                        );
+                        Get.back();
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: activeAccent,
+                      ),
+                      child: const Text(
+                        "Record Payment",
+                        style: TextStyle(color: Colors.white),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
+  void _confirmDelete(SaleModel sale) {
     Get.defaultDialog(
-      title: "Debtor Payment",
-      content: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      title: "Delete Transaction?",
+      middleText: "Remove entry for ${sale.name} of ৳${sale.amount}?",
+      textConfirm: "Delete",
+      buttonColor: Colors.redAccent,
+      confirmTextColor: Colors.white,
+      onConfirm: () {
+        ctrl.deleteSale(sale.id);
+        Get.back();
+      },
+    );
+  }
+
+  Widget _statusBadge(SaleModel sale) {
+    bool isPaid = sale.pending <= 0;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color:
+            isPaid
+                ? Colors.green.withOpacity(0.1)
+                : Colors.orange.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        isPaid ? "PAID" : "PARTIAL / DUE",
+        style: TextStyle(
+          color: isPaid ? Colors.green : Colors.orange,
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+
+  List<SaleModel> _getFilteredList() {
+    final q = ctrl.filterQuery.value.toLowerCase();
+    if (q.isEmpty) return ctrl.salesList;
+    return ctrl.salesList
+        .where(
+          (s) =>
+              s.name.toLowerCase().contains(q) ||
+              s.customerType.toLowerCase().contains(q),
+        )
+        .toList();
+  }
+
+  Widget _buildEmptyState() {
+    return const Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Text("Remaining: ${currencyFormat.format(remaining)}"),
-          const SizedBox(height: 8),
-          TextField(
-            controller: paymentCtrl,
-            decoration: const InputDecoration(
-              labelText: "Payment Amount",
-              border: OutlineInputBorder(),
-            ),
-            keyboardType: TextInputType.number,
-          ),
-          const SizedBox(height: 8),
-          Obx(
-            () => DropdownButton<String>(
-              isExpanded: true,
-              value: selectedPayment.value,
-              items: ["bkash", "bank", "cash"]
-                  .map((p) => DropdownMenuItem(
-                        value: p,
-                        child: Text(p.toUpperCase()),
-                      ))
-                  .toList(),
-              onChanged: (v) {
-                if (v != null) selectedPayment.value = v;
-              },
-            ),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: detailsCtrl,
-            decoration: InputDecoration(labelText: "${selectedPayment.value.toUpperCase()} Details"),
+          Icon(FontAwesomeIcons.folderOpen, size: 50, color: Colors.black12),
+          SizedBox(height: 16),
+          Text(
+            "No sales records found for this date",
+            style: TextStyle(color: textMuted),
           ),
         ],
       ),
-      textConfirm: "Pay",
-      confirmTextColor: Colors.white,
-      onConfirm: () async {
-        final payment = double.tryParse(paymentCtrl.text) ?? 0.0;
-        if (payment <= 0) return;
-
-        final paymentMethod = <String, dynamic>{};
-        paymentMethod['type'] = selectedPayment.value;
-
-        switch (selectedPayment.value.toLowerCase()) {
-          case 'bank':
-            final parts = detailsCtrl.text.split(',');
-            if (parts.length >= 3) {
-              paymentMethod['bankName'] = parts[0].replaceAll("Bank:", "").trim();
-              paymentMethod['branch'] = parts[1].replaceAll("Branch:", "").trim();
-              paymentMethod['accountNumber'] = parts[2].replaceAll("A/C:", "").trim();
-            } else {
-              paymentMethod['details'] = detailsCtrl.text.trim();
-            }
-            break;
-          case 'bkash':
-            paymentMethod['number'] = detailsCtrl.text.trim();
-            break;
-          case 'cash':
-            paymentMethod['details'] = detailsCtrl.text.trim();
-            break;
-        }
-
-        await ctrl.applyDebtorPayment(debtorName, payment, paymentMethod, date: ctrl.selectedDate.value);
-        Get.back();
-      },
     );
   }
 }

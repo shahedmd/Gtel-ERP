@@ -114,7 +114,6 @@ class DebatorController extends GetxController {
     }
   }
 
-  /// 1. FIX: Updated Edit Profile with absolute closure
   Future<void> editDebtor({
     required String id,
     required String oldName,
@@ -152,14 +151,13 @@ class DebatorController extends GetxController {
       }
 
       await batch.commit();
-      await loadBodies(); // Refresh local list
+      await loadBodies();
 
-      // SUCCESS: Close ALL overlays (dialogs) and then show snackbar
       Get.back(closeOverlays: true);
       Get.snackbar(
         "Success",
         "Profile updated",
-        backgroundColor: Color(0xFF10B981),
+        backgroundColor: const Color(0xFF10B981),
         colorText: Colors.white,
       );
     } catch (e) {
@@ -187,9 +185,8 @@ class DebatorController extends GetxController {
   }) async {
     gbIsLoading.value = true;
     try {
-      // 1. Check if DailySalesController is actually there
       if (!Get.isRegistered<DailySalesController>()) {
-        Get.put(DailySalesController()); // Initialize it if missing
+        Get.put(DailySalesController());
       }
       final daily = Get.find<DailySalesController>();
 
@@ -202,6 +199,7 @@ class DebatorController extends GetxController {
       Map<String, dynamic>? paymentMethod = selectedPaymentMethod;
 
       if (typeLower == 'credit') {
+        // PURCHASE (SALE)
         final txRef = await db
             .collection('debatorbody')
             .doc(debtorId)
@@ -226,6 +224,7 @@ class DebatorController extends GetxController {
           transactionId: txRef.id,
         );
       } else {
+        // PAYMENT (COLLECTION)
         if (paymentMethod == null) {
           final payments = (debtorData['payments'] as List? ?? []);
           if (payments.isNotEmpty) {
@@ -246,6 +245,7 @@ class DebatorController extends GetxController {
               'createdAt': FieldValue.serverTimestamp(),
             });
 
+        // FIX: The daily controller now uses the 'date' provided to filter only THIS day
         await daily.applyDebtorPayment(
           debtorName,
           amount,
@@ -255,14 +255,10 @@ class DebatorController extends GetxController {
         );
       }
 
-      // --- KEY FIX START ---
-
-      // 1. Close the dialog FIRST
       if (Get.isDialogOpen ?? false) {
         Get.back();
       }
 
-      // 2. Then show the success message
       Get.snackbar(
         "Success",
         "Transaction recorded",
@@ -270,10 +266,7 @@ class DebatorController extends GetxController {
         backgroundColor: const Color(0xFF10B981),
         colorText: Colors.white,
       );
-
-      // --- KEY FIX END ---
     } catch (e) {
-      print("AddTransaction Error: $e");
       Get.snackbar(
         "Transaction Error",
         e.toString(),
@@ -346,19 +339,17 @@ class DebatorController extends GetxController {
       double debit = 0;
       for (var doc in snap.docs) {
         final d = doc.data() as Map<String, dynamic>;
-        if (d['type'] == 'credit') {
+        if (d['type'] == 'credit')
           credit += (d['amount'] as num?)?.toDouble() ?? 0;
-        }
-        if (d['type'] == 'debit') {
+        if (d['type'] == 'debit')
           debit += (d['amount'] as num?)?.toDouble() ?? 0;
-        }
       }
       return {'credit': credit, 'debit': debit, 'balance': credit - debit};
     });
   }
 
   // ------------------------------------------------------------------
-  // 6. DELETE TRANSACTION (ATOMIC REVERSAL)
+  // 6. DELETE TRANSACTION (FIXED: NO GLOBAL RE-CALCULATION)
   // ------------------------------------------------------------------
   Future<void> deleteTransaction(String debtorId, String transactionId) async {
     final daily = Get.find<DailySalesController>();
@@ -373,14 +364,12 @@ class DebatorController extends GetxController {
       final txSnap = await txRef.get();
       if (!txSnap.exists) return;
 
-      final txType = txSnap.data()?['type'];
       final debtorSnap = await db.collection('debatorbody').doc(debtorId).get();
       final debtorName = debtorSnap['name'];
 
       final salesSnap =
           await db
               .collection('daily_sales')
-              .where('customerType', isEqualTo: 'debtor')
               .where('name', isEqualTo: debtorName)
               .get();
 
@@ -388,23 +377,25 @@ class DebatorController extends GetxController {
 
       for (final doc in salesSnap.docs) {
         final data = doc.data();
-        final double paidAmount = (data['paid'] as num?)?.toDouble() ?? 0;
         final List applied = List.from(data['appliedDebits'] ?? []);
 
+        // Case A: This was the specific purchase entry
         if (data['transactionId'] == transactionId) {
           batch.delete(doc.reference);
-        } else if (applied.any((e) => e['id'] == transactionId)) {
+        }
+        // Case B: This was a payment that was applied to a sale
+        else if (applied.any((e) => e['id'] == transactionId)) {
           final entry = applied.firstWhere((e) => e['id'] == transactionId);
           final double usedAmt = (entry['amount'] as num?)?.toDouble() ?? 0;
+          final double currentPaid = (data['paid'] as num?)?.toDouble() ?? 0;
 
           applied.removeWhere((e) => e['id'] == transactionId);
 
           batch.update(doc.reference, {
-            'paid': (paidAmount - usedAmt).clamp(0, double.infinity),
+            'paid': (currentPaid - usedAmt).clamp(0, double.infinity),
             'appliedDebits': applied,
             'isPaid': false,
-            'paymentMethod':
-                null, // As requested: clear payment method on reversal
+            'paymentMethod': null,
           });
         }
       }
@@ -412,56 +403,14 @@ class DebatorController extends GetxController {
       await batch.commit();
       await txRef.delete();
 
-      if (txType == 'credit') {
-        await _normalizeDebits(debtorId, debtorName);
-      }
+      // REMOVED _normalizeDebits here to stop the "Messed up" re-calculation of other days
 
       await daily.loadDailySales();
-      Get.snackbar(
-        "Transaction Deleted",
-        "Daily sales and ledger have been adjusted",
-      );
+      Get.snackbar("Deleted", "Transaction removed from daily records");
     } catch (e) {
       Get.snackbar("Deletion Error", e.toString());
     } finally {
       gbIsLoading.value = false;
-    }
-  }
-
-  /// Internal logic to re-process payments if an old bill is deleted
-  Future<void> _normalizeDebits(String debtorId, String debtorName) async {
-    final daily = Get.find<DailySalesController>();
-    final debits =
-        await db
-            .collection('debatorbody')
-            .doc(debtorId)
-            .collection('transactions')
-            .where('type', isEqualTo: 'debit')
-            .get();
-
-    for (var doc in debits.docs) {
-      final d = doc.data();
-      final stale =
-          await db
-              .collection('daily_sales')
-              .where('transactionId', isEqualTo: doc.id)
-              .get();
-      final b = db.batch();
-      for (var s in stale.docs) {
-        b.delete(s.reference);
-      }
-      await b.commit();
-
-      await daily.addSale(
-        name: debtorName,
-        amount: (d['amount'] as num).toDouble(),
-        customerType: 'debtor',
-        isPaid: true,
-        date: (d['date'] as Timestamp).toDate(),
-        paymentMethod: d['paymentMethod'],
-        source: 'debit',
-        transactionId: doc.id,
-      );
     }
   }
 
@@ -480,7 +429,6 @@ class DebatorController extends GetxController {
     List<Map<String, dynamic>> transactions,
   ) async {
     final pdf = pw.Document();
-
     double credit = transactions
         .where((t) => t['type'] == 'credit')
         .fold(0.0, (s, t) => s + (t['amount'] as num).toDouble());
@@ -541,39 +489,20 @@ class DebatorController extends GetxController {
                   color: PdfColors.blueGrey900,
                 ),
                 cellHeight: 25,
-                cellAlignments: {
-                  0: pw.Alignment.centerLeft,
-                  1: pw.Alignment.center,
-                  2: pw.Alignment.centerLeft,
-                  3: pw.Alignment.centerRight,
-                },
                 data:
                     transactions.map((t) {
-                      // 1. Safely extract the date regardless of its current type
                       final dynamic dateValue = t['date'];
-                      DateTime tDate;
-
-                      if (dateValue is Timestamp) {
-                        tDate = dateValue.toDate();
-                      } else if (dateValue is DateTime) {
-                        tDate = dateValue;
-                      } else {
-                        // If it's already a String, try to parse it or just use now
-                        tDate =
-                            DateTime.tryParse(dateValue.toString()) ??
-                            DateTime.now();
-                      }
-
-                      // 2. Format the extracted DateTime
-                      final dateStr = DateFormat('dd/MM/yy').format(tDate);
-
-                      final amount = (t['amount'] as num?)?.toDouble() ?? 0.0;
-
+                      DateTime tDate =
+                          (dateValue is Timestamp)
+                              ? dateValue.toDate()
+                              : (dateValue is DateTime
+                                  ? dateValue
+                                  : DateTime.now());
                       return [
-                        dateStr,
+                        DateFormat('dd/MM/yy').format(tDate),
                         t['type'].toString().toUpperCase(),
                         t['note'] ?? "",
-                        amount.toStringAsFixed(2),
+                        (t['amount'] as num).toStringAsFixed(2),
                       ];
                     }).toList(),
               ),
@@ -602,6 +531,9 @@ class DebatorController extends GetxController {
     );
   }
 
+  // ------------------------------------------------------------------
+  // 8. EDIT TRANSACTION (SALES SYNC)
+  // ------------------------------------------------------------------
   Future<void> editTransaction({
     required String debtorId,
     required String transactionId,
@@ -620,10 +552,8 @@ class DebatorController extends GetxController {
           .doc(debtorId)
           .collection('transactions')
           .doc(transactionId);
-
       final WriteBatch batch = db.batch();
 
-      // Update the Ledger Entry
       batch.update(txRef, {
         'amount': newAmount,
         'type': newType,
@@ -632,8 +562,6 @@ class DebatorController extends GetxController {
         'paymentMethod': paymentMethod,
       });
 
-      // Update/Sync with Daily Sales
-      // We look for the sale created by THIS specific ledger transaction
       final salesSnap =
           await db
               .collection('daily_sales')
@@ -642,10 +570,8 @@ class DebatorController extends GetxController {
 
       for (var doc in salesSnap.docs) {
         if (newType == 'credit') {
-          // If it's a purchase, update the total bill amount
           batch.update(doc.reference, {'amount': newAmount});
         } else {
-          // If it's a payment, update the 'paid' field and payment method
           batch.update(doc.reference, {
             'amount': newAmount,
             'paid': newAmount,
@@ -655,12 +581,11 @@ class DebatorController extends GetxController {
       }
 
       await batch.commit();
-
       Get.back(closeOverlays: true);
       Get.snackbar(
         "Success",
         "Transaction updated",
-        backgroundColor: activeAccent,
+        backgroundColor: const Color(0xFF3B82F6),
         colorText: Colors.white,
       );
     } catch (e) {
