@@ -57,9 +57,12 @@ class DailySalesController extends GetxController {
               .orderBy("timestamp", descending: true)
               .get();
 
-      salesList.assignAll(
-        snap.docs.map((d) => SaleModel.fromFirestore(d)).toList(),
-      );
+      salesList.value =
+          snap.docs.map((doc) {
+            return SaleModel.fromFirestore(
+              doc,
+            ); // Use your fromFirestore or fromMap constructor
+          }).toList();
       _computeTotals();
     } finally {
       isLoading.value = false;
@@ -262,8 +265,7 @@ class DailySalesController extends GetxController {
     try {
       await _db.collection("daily_sales").doc(saleId).delete();
       await loadDailySales();
-    } catch (e) {
-    }
+    } catch (e) {}
   }
 
   // 8. FORMAT PAYMENT METHOD (Utility Method)

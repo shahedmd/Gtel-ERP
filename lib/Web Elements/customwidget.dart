@@ -6,8 +6,6 @@ import 'package:get/get.dart';
 
 import 'route.dart';
 
-
-
 // menu_item_model.dart
 
 class MenuItem {
@@ -28,12 +26,14 @@ class NavigationController extends GetxController {
   var activeId = Routes.DASHBOARD.obs;
 
   void changePage(String routeName) {
-    if (activeId.value == routeName) return; // Don't reload if already on the page
-    
+    if (activeId.value == routeName) {
+      return; // Don't reload if already on the page
+    }
+
     activeId.value = routeName;
-    
+
     // id: 1 refers to the Get.nestedKey(1) we set in MainLayout
-    Get.toNamed(routeName, id: 1); 
+    Get.toNamed(routeName, id: 1);
   }
 }
 
@@ -55,11 +55,7 @@ class _NavGroup extends StatelessWidget {
       data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
       child: ExpansionTile(
         tilePadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 2),
-        leading: FaIcon(
-          icon,
-          size: 16,
-          color: SidebarMenu.textSecondary,
-        ),
+        leading: FaIcon(icon, size: 16, color: SidebarMenu.textSecondary),
         title: Text(
           title,
           style: const TextStyle(
@@ -79,7 +75,6 @@ class _NavGroup extends StatelessWidget {
   }
 }
 
-
 class _NavTile extends StatelessWidget {
   final String id;
   final String title;
@@ -87,10 +82,10 @@ class _NavTile extends StatelessWidget {
   final bool isSubItem;
 
   const _NavTile({
-    required this.id, 
-    required this.title, 
-    this.icon, 
-    this.isSubItem = false
+    required this.id,
+    required this.title,
+    this.icon,
+    this.isSubItem = false,
   });
 
   @override
@@ -108,21 +103,27 @@ class _NavTile extends StatelessWidget {
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 200),
             padding: EdgeInsets.symmetric(
-              horizontal: 12, 
-              vertical: isSubItem ? 10 : 12
+              horizontal: 12,
+              vertical: isSubItem ? 10 : 12,
             ),
             decoration: BoxDecoration(
-              color: isActive 
-                  ? SidebarMenu.activeAccent.withOpacity(0.12) 
-                  : Colors.transparent,
+              color:
+                  isActive
+                      ? SidebarMenu.activeAccent.withOpacity(0.12)
+                      : Colors.transparent,
               borderRadius: BorderRadius.circular(8),
             ),
             child: Row(
               children: [
                 if (icon != null) ...[
-                  FaIcon(icon, 
-                    size: 16, 
-                    color: isActive ? SidebarMenu.activeAccent : SidebarMenu.textSecondary),
+                  FaIcon(
+                    icon,
+                    size: 16,
+                    color:
+                        isActive
+                            ? SidebarMenu.activeAccent
+                            : SidebarMenu.textSecondary,
+                  ),
                   const SizedBox(width: 15),
                 ] else if (isSubItem) ...[
                   // Dot indicator for nested items
@@ -131,7 +132,10 @@ class _NavTile extends StatelessWidget {
                     width: isActive ? 6 : 4,
                     height: isActive ? 6 : 4,
                     decoration: BoxDecoration(
-                      color: isActive ? SidebarMenu.activeAccent : SidebarMenu.textSecondary,
+                      color:
+                          isActive
+                              ? SidebarMenu.activeAccent
+                              : SidebarMenu.textSecondary,
                       shape: BoxShape.circle,
                     ),
                   ),
@@ -141,7 +145,8 @@ class _NavTile extends StatelessWidget {
                   child: Text(
                     title,
                     style: TextStyle(
-                      color: isActive ? Colors.white : SidebarMenu.textSecondary,
+                      color:
+                          isActive ? Colors.white : SidebarMenu.textSecondary,
                       fontSize: 14,
                       fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
                     ),
@@ -165,15 +170,13 @@ class _NavTile extends StatelessWidget {
   }
 }
 
-
-
 class SidebarMenu extends StatelessWidget {
   // Access the controller we initialized in MainLayout
   final NavigationController navCtrl = Get.find<NavigationController>();
 
   // Professional Theme Colors
-  static const Color sidebarBg = Color(0xFF111827);    // Modern Dark Slate
-  static const Color activeAccent = Color(0xFF3B82F6);  // Electric Blue
+  static const Color sidebarBg = Color(0xFF111827); // Modern Dark Slate
+  static const Color activeAccent = Color(0xFF3B82F6); // Electric Blue
   static const Color textPrimary = Colors.white;
   static const Color textSecondary = Color(0xFF9CA3AF); // Muted Gray
 
@@ -187,7 +190,7 @@ class SidebarMenu extends StatelessWidget {
       child: Column(
         children: [
           _buildHeader(),
-          
+
           Expanded(
             child: ListView(
               padding: const EdgeInsets.symmetric(vertical: 10),
@@ -199,7 +202,13 @@ class SidebarMenu extends StatelessWidget {
                   icon: FontAwesomeIcons.chartPie,
                   title: "Dashboard",
                 ),
+                _NavTile(
+                  id: Routes.LIVEORDER,
+                  title: "Live Order",
+                  icon: FontAwesomeIcons.moneyBill,
 
+                  isSubItem: false,
+                ),
                 // --- FINANCE ---
                 _NavGroup(
                   title: "Finance",
@@ -287,7 +296,7 @@ class SidebarMenu extends StatelessWidget {
               ],
             ),
           ),
-          
+
           _buildFooter(),
         ],
       ),
@@ -305,7 +314,11 @@ class SidebarMenu extends StatelessWidget {
               color: activeAccent.withOpacity(0.2),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Icon(FontAwesomeIcons.bolt, color: activeAccent, size: 20),
+            child: const Icon(
+              FontAwesomeIcons.bolt,
+              color: activeAccent,
+              size: 20,
+            ),
           ),
           const SizedBox(width: 15),
           const Text(
@@ -340,10 +353,18 @@ class SidebarMenu extends StatelessWidget {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: const [
-              Text("Admin Account", 
-                style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
-              Text("v1.0.24", 
-                style: TextStyle(color: textSecondary, fontSize: 11)),
+              Text(
+                "Admin Account",
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              Text(
+                "v1.0.24",
+                style: TextStyle(color: textSecondary, fontSize: 11),
+              ),
             ],
           ),
         ],
@@ -351,4 +372,3 @@ class SidebarMenu extends StatelessWidget {
     );
   }
 }
-

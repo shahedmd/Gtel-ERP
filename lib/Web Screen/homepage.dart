@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:get/get.dart';
-
-import '../Controller/menucontroller.dart';
+import '../Live order/liveorder.dart';
 import '../Purchase/page.dart';
 import '../Stock/stockpage.dart';
 import '../Web Elements/customwidget.dart';
@@ -15,62 +14,64 @@ import 'Sales/dailysales.dart';
 import 'Staff/Staffpage.dart';
 import 'overviewpage.dart';
 
-
 class AdminHomepage extends StatefulWidget {
   const AdminHomepage({super.key});
 
   @override
   State<AdminHomepage> createState() => _AdminHomepageState();
 }
- 
+
 class _AdminHomepageState extends State<AdminHomepage> {
   @override
   Widget build(BuildContext context) {
-    Get.put(Controller());
-
     return Scaffold(
       body: SizedBox(
         child: Row(
           children: [
             SidebarMenu(),
-        
+
             Expanded(
-            child: Navigator(
-              key: Get.nestedKey(1), 
-              initialRoute: Routes.DASHBOARD,
-              onGenerateRoute: (settings) {
-                // Map your IDs to your actual Pages here
-                if (settings.name == Routes.DASHBOARD) {
-                  return GetPageRoute(page: () => const DashboardPage());
-                }
-                if (settings.name == Routes.DEBTOR) {
-                  return GetPageRoute(page: () => Debatorpage());
-                }
-                if (settings.name == Routes.DAILY_EXPENSES) {
-                  return GetPageRoute(page: () => DailyExpensesPage());
-                }
-                if (settings.name == Routes.MONTHLY_EXPENSES) {
-                  return GetPageRoute(page: () => MonthlyExpensesPage());
-                }
-                if (settings.name == Routes.DAILY_SALES) {
-                  return GetPageRoute(page: () => DailySalesPage());
-                }
-                if (settings.name == Routes.MONTHLY_SALES) {
-                  return GetPageRoute(page: () => MonthlySalesPage());
-                }
-                if (settings.name == Routes.STOCK) {
-                  return GetPageRoute(page: () => ProductScreen());
-                }
-                if (settings.name == Routes.PURCHASE) {
-                  return GetPageRoute(page: () => PurchasePage());
-                }
-                if (settings.name == Routes.STAFF) {
-                  return GetPageRoute(page: () => StaffListPage());
-                }
-                return GetPageRoute(page: () => const Center(child: Text("Not Found")));
-              },
+              child: Navigator(
+                key: Get.nestedKey(1),
+                initialRoute: Routes.DASHBOARD,
+                onGenerateRoute: (settings) {
+                  // Map your IDs to your actual Pages here
+                  if (settings.name == Routes.DASHBOARD) {
+                    return GetPageRoute(page: () => const DashboardPage());
+                  }
+                  if (settings.name == Routes.DEBTOR) {
+                    return GetPageRoute(page: () => Debatorpage());
+                  }
+                  if (settings.name == Routes.DAILY_EXPENSES) {
+                    return GetPageRoute(page: () => DailyExpensesPage());
+                  }
+                  if (settings.name == Routes.MONTHLY_EXPENSES) {
+                    return GetPageRoute(page: () => MonthlyExpensesPage());
+                  }
+                  if (settings.name == Routes.DAILY_SALES) {
+                    return GetPageRoute(page: () => DailySalesPage());
+                  }
+                  if (settings.name == Routes.MONTHLY_SALES) {
+                    return GetPageRoute(page: () => MonthlySalesPage());
+                  }
+                  if (settings.name == Routes.STOCK) {
+                    return GetPageRoute(page: () => ProductScreen());
+                  }
+                  if (settings.name == Routes.PURCHASE) {
+                    return GetPageRoute(page: () => PurchasePage());
+                  }
+                  if (settings.name == Routes.STAFF) {
+                    return GetPageRoute(page: () => StaffListPage());
+                  }
+                  if (settings.name == Routes.LIVEORDER) {
+                    return GetPageRoute(page: () => LiveOrderSalesPage());
+                  }
+                  return GetPageRoute(
+                    page: () => const Center(child: Text("Not Found")),
+                  );
+                },
+              ),
             ),
-          ),
           ],
         ),
       ),

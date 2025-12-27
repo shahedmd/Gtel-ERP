@@ -2,6 +2,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:get/get.dart';
+import 'package:gtel_erp/Stock/controller.dart';
 import 'package:gtel_erp/Web%20Elements/customwidget.dart';
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/debatorcontroller.dart';
 import 'package:gtel_erp/Web%20Screen/Expenses/dailycontroller.dart';
@@ -19,6 +20,7 @@ Future<void> main() async {
   Get.put(DailyExpensesController());
   Get.put(NavigationController());
   Get.put(DebatorController());
+  Get.put(ProductController());
 
   runApp(const MyApp());
 }
