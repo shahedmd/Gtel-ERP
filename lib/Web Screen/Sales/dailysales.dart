@@ -183,113 +183,115 @@ class DailySalesPage extends StatelessWidget {
     );
   }
 
-Widget _metricCard(String title, double value, IconData icon, Color color) {
-  return Container(
-    padding: const EdgeInsets.all(20),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: Colors.black.withOpacity(0.05)),
-      boxShadow: [
-        BoxShadow(
-          color: Colors.black.withOpacity(0.02),
-          blurRadius: 10,
-          offset: const Offset(0, 4),
-        ),
-      ],
-    ),
-    child: Row(
-      children: [
-        // Icon Circle
-        Container(
-          height: 40,
-          width: 40,
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(8),
+  Widget _metricCard(String title, double value, IconData icon, Color color) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.black.withOpacity(0.05)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.02),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
           ),
-          child: Center(
-            child: FaIcon(icon, size: 16, color: color),
+        ],
+      ),
+      child: Row(
+        children: [
+          // Icon Circle
+          Container(
+            height: 40,
+            width: 40,
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Center(child: FaIcon(icon, size: 16, color: color)),
           ),
-        ),
-        const SizedBox(width: 16),
-        // Text Content
-        Expanded(
-          child: Column(
+          const SizedBox(width: 16),
+          // Text Content
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title.toUpperCase(),
+                  style: const TextStyle(
+                    color: Color(0xFF6B7280), // textMuted
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    "৳ ${value.toStringAsFixed(2)}",
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF111827), // darkSlate
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _orderCountCard() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111827), // darkSlate
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          const CircleAvatar(
+            radius: 20,
+            backgroundColor: Colors.white10,
+            child: FaIcon(
+              FontAwesomeIcons.receipt,
+              size: 14,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(width: 16),
+          Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                title.toUpperCase(),
-                style: const TextStyle(
-                  color: Color(0xFF6B7280), // textMuted
+              const Text(
+                "TOTAL ORDERS",
+                style: TextStyle(
+                  color: Colors.white60,
                   fontSize: 10,
                   fontWeight: FontWeight.bold,
                   letterSpacing: 0.5,
                 ),
               ),
               const SizedBox(height: 4),
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text(
-                  "৳ ${value.toStringAsFixed(2)}",
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF111827), // darkSlate
-                  ),
+              Text(
+                "${ctrl.salesList.length}",
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
                 ),
               ),
             ],
           ),
-        ),
-      ],
-    ),
-  );
-}
+        ],
+      ),
+    );
+  }
 
-
-Widget _orderCountCard() {
-  return Container(
-    padding: const EdgeInsets.all(20),
-    decoration: BoxDecoration(
-      color: const Color(0xFF111827), // darkSlate
-      borderRadius: BorderRadius.circular(12),
-    ),
-    child: Row(
-      children: [
-        const CircleAvatar(
-          radius: 20,
-          backgroundColor: Colors.white10,
-          child: FaIcon(FontAwesomeIcons.receipt, size: 14, color: Colors.white),
-        ),
-        const SizedBox(width: 16),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              "TOTAL ORDERS",
-              style: TextStyle(
-                color: Colors.white60,
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 0.5,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              "${ctrl.salesList.length}",
-              style: const TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
-          ],
-        ),
-      ],
-    ),
-  );
-}
   // --- 3. THE DATA TABLE ---
   Widget _buildTableHead() {
     return Container(
@@ -415,9 +417,27 @@ Widget _orderCountCard() {
               // Payment Method
               Expanded(
                 flex: 2,
-                child: Text(
-                  ctrl.formatPaymentMethod(sale.paymentMethod),
-                  style: const TextStyle(fontSize: 12, color: textMuted),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      ctrl.formatPaymentMethod(sale.paymentMethod),
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF374151),
+                      ),
+                    ),
+                    if (sale.paymentMethod?['type'] == 'bank')
+                      Text(
+                        "Bank Transfer",
+                        style: TextStyle(
+                          fontSize: 9,
+                          color: Colors.blueGrey.shade400,
+                        ),
+                      ),
+                  ],
                 ),
               ),
               // Amount

@@ -1,7 +1,7 @@
 // ignore_for_file: constant_identifier_names
 
 abstract class Routes {
-  static const String DASHBOARD = '/';
+  static const String DASHBOARD = '/dashboard';
   static const String DEBTOR = '/debtor';
   static const String DAILY_EXPENSES = '/expenses-daily';
   static const String MONTHLY_EXPENSES = '/expenses-monthly';

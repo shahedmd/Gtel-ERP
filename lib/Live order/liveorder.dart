@@ -11,7 +11,7 @@ import 'package:printing/printing.dart';
 // Your Project Imports
 import '../Stock/controller.dart';
 import '../Stock/model.dart';
-import '../Live order/salemodel.dart'; // Ensure this contains SalesCartItem class
+import '../Live order/salemodel.dart';
 import '../Web Screen/Debator Finance/debatorcontroller.dart';
 import '../Web Screen/Debator Finance/model.dart';
 import '../Web Screen/Sales/controller.dart';
@@ -51,9 +51,16 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
   final shopC = TextEditingController();
   final addressC = TextEditingController();
   final paymentInfoC = TextEditingController(); // For bKash/Nagad/Bank details
+  final bankNameC = TextEditingController();
 
-  double get totalAmount =>
-      cart.fold(0, (sumval, item) => sumval + item.subtotal);
+  // DISCOUNT CONTROLLERS
+  final discountC = TextEditingController();
+  final RxDouble discountVal = 0.0.obs;
+
+  // CALCULATED GETTERS
+  double get subtotalAmount =>
+      cart.fold(0, (sumvalue, item) => sumvalue + item.subtotal);
+  double get grandTotal => subtotalAmount - discountVal.value;
 
   // --- INVOICE ID GENERATOR ---
   String _generateInvoiceID() {
@@ -75,7 +82,6 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
       return;
     }
 
-    // Pricing Logic based on requirements
     double price =
         (customerType.value == "Debtor" || customerType.value == "Agent")
             ? p.agent
@@ -98,12 +104,12 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
       backgroundColor: posBg,
       body: Row(
         children: [
-          // LEFT PANE: PRODUCT TABLE
+          // LEFT SIDE: PRODUCT TABLE
           Expanded(flex: 7, child: _buildProductTableSection()),
 
-          // RIGHT PANE: CHECKOUT DETAILS
+          // RIGHT SIDE: CHECKOUT & CART
           Container(
-            width: 400,
+            width: 420,
             decoration: const BoxDecoration(
               color: Colors.white,
               border: Border(left: BorderSide(color: posBorder)),
@@ -115,9 +121,6 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // LEFT SIDE: PRODUCT TABLE
-  // ---------------------------------------------------------------------------
   Widget _buildProductTableSection() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
@@ -177,7 +180,6 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
             border: Border.all(color: posBorder),
           ),
           child: Center(
-            // Added Center wrapper for safety
             child: TextField(
               onChanged: (v) => productCtrl.search(v),
               textAlignVertical: TextAlignVertical.center,
@@ -187,7 +189,7 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
                 prefixIcon: Icon(Icons.search, size: 20, color: posPrimary),
                 border: InputBorder.none,
                 isDense: true,
-                contentPadding: EdgeInsets.zero, // Zeroing out internal padding
+                contentPadding: EdgeInsets.zero,
               ),
             ),
           ),
@@ -301,9 +303,6 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // RIGHT SIDE: CHECKOUT
-  // ---------------------------------------------------------------------------
   Widget _buildCheckoutSection() {
     return Column(
       children: [
@@ -402,23 +401,31 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
                 },
               ),
               if (selectedDebtor.value != null)
-                ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 5),
-                  leading: const Icon(
-                    Icons.verified_user,
-                    color: posSuccess,
-                    size: 22,
+                Container(
+                  margin: const EdgeInsets.only(top: 10),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: posBg,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: posSuccess.withOpacity(0.3)),
                   ),
-                  title: Text(
-                    selectedDebtor.value!.name,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const CircleAvatar(
+                      backgroundColor: posSuccess,
+                      child: Icon(Icons.check, color: Colors.white, size: 18),
                     ),
-                  ),
-                  subtitle: Text(
-                    selectedDebtor.value!.des,
-                    style: const TextStyle(fontSize: 12),
+                    title: Text(
+                      selectedDebtor.value!.name,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                    subtitle: Text(
+                      selectedDebtor.value!.des,
+                      style: const TextStyle(fontSize: 12),
+                    ),
                   ),
                 ),
             ] else ...[
@@ -442,12 +449,16 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
               _posTextField(shopC, "Shop/Company Name", Icons.store, null),
               const SizedBox(height: 10),
               _posTextField(addressC, "Address", Icons.location_on, null),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               DropdownButtonFormField<String>(
                 value: paymentMethod.value,
                 style: const TextStyle(fontSize: 13, color: posText),
                 decoration: InputDecoration(
                   labelText: "Payment Method",
+                  prefixIcon: const Icon(
+                    Icons.account_balance_wallet_outlined,
+                    size: 18,
+                  ),
                   labelStyle: const TextStyle(fontSize: 12),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
@@ -461,16 +472,25 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
                 onChanged: (v) {
                   paymentMethod.value = v!;
                   paymentInfoC.clear();
+                  bankNameC.clear();
                 },
               ),
-              if (paymentMethod.value != "Cash") ...[
+              if (paymentMethod.value == "Bank") ...[
+                const SizedBox(height: 10),
+                _posTextField(bankNameC, "Bank Name", Icons.business, null),
                 const SizedBox(height: 10),
                 _posTextField(
                   paymentInfoC,
-                  paymentMethod.value == "Bank"
-                      ? "Bank A/C Number"
-                      : "Mobile Wallet Number",
-                  Icons.payment,
+                  "Account Number",
+                  Icons.numbers,
+                  null,
+                ),
+              ] else if (paymentMethod.value != "Cash") ...[
+                const SizedBox(height: 10),
+                _posTextField(
+                  paymentInfoC,
+                  "${paymentMethod.value} Number",
+                  Icons.phone_android,
                   null,
                 ),
               ],
@@ -488,20 +508,19 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
     Function(String)? onCh,
   ) {
     return SizedBox(
-      height: 45,
+      height: 48,
       child: TextField(
         controller: c,
         onChanged: onCh,
+        textAlignVertical: TextAlignVertical.center,
         style: const TextStyle(fontSize: 13),
         decoration: InputDecoration(
           labelText: hint,
           labelStyle: const TextStyle(fontSize: 12),
-          prefixIcon: Icon(icon, size: 18, color: Colors.grey),
+          prefixIcon: Icon(icon, size: 18, color: Colors.grey.shade600),
+          isDense: true,
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-          contentPadding: const EdgeInsets.symmetric(
-            vertical: 0,
-            horizontal: 10,
-          ),
+          contentPadding: EdgeInsets.zero,
         ),
       ),
     );
@@ -613,16 +632,69 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
       ),
       child: Column(
         children: [
+          // SUB-TOTAL ROW
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                "Subtotal",
+                style: TextStyle(fontSize: 14, color: Colors.grey),
+              ),
+              Obx(
+                () => Text(
+                  "৳ ${subtotalAmount.toStringAsFixed(2)}",
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+
+          // DISCOUNT INPUT FIELD
+          Row(
+            children: [
+              const Text(
+                "Discount",
+                style: TextStyle(fontSize: 14, color: Colors.grey),
+              ),
+              const Spacer(),
+              SizedBox(
+                width: 120,
+                height: 40,
+                child: TextField(
+                  controller: discountC,
+                  keyboardType: TextInputType.number,
+                  textAlign: TextAlign.right,
+                  onChanged:
+                      (v) => discountVal.value = double.tryParse(v) ?? 0.0,
+                  decoration: InputDecoration(
+                    hintText: "0.00",
+                    prefixText: "৳ ",
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 10),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 15),
+
+          // GRAND TOTAL ROW
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text(
                 "Grand Total",
-                style: TextStyle(fontSize: 14, color: Colors.grey),
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               ),
               Obx(
                 () => Text(
-                  "৳ ${totalAmount.toStringAsFixed(2)}",
+                  "৳ ${grandTotal.toStringAsFixed(2)}",
                   style: const TextStyle(
                     fontSize: 28,
                     fontWeight: FontWeight.bold,
@@ -633,6 +705,7 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
             ],
           ),
           const SizedBox(height: 15),
+
           SizedBox(
             width: double.infinity,
             height: 55,
@@ -670,11 +743,12 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // FINAL TRANSACTION LOGIC
-  // ---------------------------------------------------------------------------
   Future<void> _finalizeSale() async {
     if (cart.isEmpty) return;
+    if (grandTotal < 0) {
+      Get.snackbar("Invalid Amount", "Total cannot be negative");
+      return;
+    }
 
     // Validations
     if (customerType.value != "Debtor") {
@@ -686,10 +760,20 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
         );
         return;
       }
-      if (paymentMethod.value != "Cash" && paymentInfoC.text.isEmpty) {
+      if (paymentMethod.value == "Bank" &&
+          (bankNameC.text.isEmpty || paymentInfoC.text.isEmpty)) {
         Get.snackbar(
-          "Payment Details",
-          "Please enter ${paymentMethod.value} info",
+          "Bank Info",
+          "Bank Name and A/C are mandatory",
+          backgroundColor: Colors.orange,
+        );
+        return;
+      }
+      if ((paymentMethod.value == "bKash" || paymentMethod.value == "Nagad") &&
+          paymentInfoC.text.isEmpty) {
+        Get.snackbar(
+          "Mobile Wallet",
+          "Number is mandatory",
           backgroundColor: Colors.orange,
         );
         return;
@@ -707,25 +791,15 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
     final String invNo = _generateInvoiceID();
 
     try {
-      // 1. PostgreSQL Stock Decrement
-      for (var item in cart) {
-        await productCtrl.updateProduct(item.product.id, {
-          'stock_qty': item.product.stockQty - item.quantity,
-          'name': item.product.name,
-          'category': item.product.category,
-          'brand': item.product.brand,
-          'model': item.product.model,
-          'weight': item.product.weight,
-          'yuan': item.product.yuan,
-          'air': item.product.air,
-          'sea': item.product.sea,
-          'agent': item.product.agent,
-          'wholesale': item.product.wholesale,
-          'shipmenttax': item.product.shipmentTax,
-          'shipmentno': item.product.shipmentNo,
-          'currency': item.product.currency,
-        });
-      }
+      // 1. Prepare Bulk Stock Data
+      List<Map<String, dynamic>> updates =
+          cart
+              .map((item) => {'id': item.product.id, 'qty': item.quantity})
+              .toList();
+
+      // 2. Call Bulk API
+      bool stockSuccess = await productCtrl.updateStockBulk(updates);
+      if (!stockSuccess) throw "Inventory update failed.";
 
       String fName = "";
       String fPhone = "";
@@ -733,39 +807,46 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
       if (customerType.value == "Debtor") {
         fName = selectedDebtor.value!.name;
         fPhone = selectedDebtor.value!.phone;
-        // Ledger Entry
         await debtorCtrl.addTransaction(
           debtorId: selectedDebtor.value!.id,
-          amount: totalAmount,
-          note: "Invoice: $invNo",
+          amount: grandTotal, // USING DISCOUNTED TOTAL
+          note: "Invoice: $invNo (Discount: ${discountVal.value})",
           type: "credit",
           date: DateTime.now(),
         );
       } else {
         fName = nameC.text;
         fPhone = phoneC.text;
-        // Customer History
+
+        Map<String, dynamic> finalPaymentMap = {
+          "type": paymentMethod.value.toLowerCase(),
+        };
+        if (paymentMethod.value == "Bank") {
+          finalPaymentMap["bankName"] = bankNameC.text;
+          finalPaymentMap["accountNumber"] = paymentInfoC.text;
+        } else if (paymentMethod.value == "Cash") {
+          finalPaymentMap["currency"] = "BDT";
+        } else {
+          finalPaymentMap["number"] = paymentInfoC.text;
+        }
+
         await _db.collection('customers').doc(fPhone).set({
           "name": fName,
           "phone": fPhone,
           "shop": shopC.text,
-          "address": addressC.text,
           "type": customerType.value,
+          "address": addressC.text,
           "lastInv": invNo,
           "lastOrder": DateTime.now(),
         }, SetOptions(merge: true));
 
-        // Daily Sales Audit
         await dailyCtrl.addSale(
           name: "$fName (${shopC.text})",
-          amount: totalAmount,
+          amount: grandTotal, // USING DISCOUNTED TOTAL
           customerType: customerType.value.toLowerCase(),
           isPaid: true,
           date: DateTime.now(),
-          paymentMethod: {
-            "type": paymentMethod.value,
-            "number": paymentInfoC.text,
-          },
+          paymentMethod: finalPaymentMap,
           transactionId: invNo,
         );
       }
@@ -794,13 +875,14 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
     shopC.clear();
     addressC.clear();
     paymentInfoC.clear();
+    bankNameC.clear();
+    discountC.clear();
+    discountVal.value = 0.0;
     debtorPhoneSearch.clear();
     selectedDebtor.value = null;
   }
 
-  // ---------------------------------------------------------------------------
-  // A3 PROFESSIONAL INVOICE GENERATOR
-  // ---------------------------------------------------------------------------
+  // --- 4. PROFESSIONAL A3 INVOICE GENERATOR ---
   Future<void> _generateA3Invoice(String id, String name, String phone) async {
     final pdf = pw.Document();
     final date = DateFormat('dd MMM yyyy, hh:mm a').format(DateTime.now());
@@ -813,7 +895,6 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
-              // Company Header
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
@@ -830,10 +911,6 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
                       ),
                       pw.Text(
                         "Dhaka, Bangladesh | Phone: +880 1700-000000",
-                        style: const pw.TextStyle(fontSize: 14),
-                      ),
-                      pw.Text(
-                        "Email: support@gtel.com.bd",
                         style: const pw.TextStyle(fontSize: 14),
                       ),
                     ],
@@ -866,8 +943,6 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
               ),
               pw.SizedBox(height: 30),
               pw.Divider(thickness: 2),
-
-              // Billing Info
               pw.Row(
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
@@ -898,10 +973,6 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
                           "Shop: ${shopC.text}",
                           style: const pw.TextStyle(fontSize: 14),
                         ),
-                        pw.Text(
-                          "Address: ${addressC.text}",
-                          style: const pw.TextStyle(fontSize: 14),
-                        ),
                       ],
                     ),
                   ),
@@ -921,9 +992,14 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
                           "Method: ${paymentMethod.value}",
                           style: const pw.TextStyle(fontSize: 14),
                         ),
+                        if (paymentMethod.value == "Bank")
+                          pw.Text(
+                            "Bank: ${bankNameC.text}",
+                            style: const pw.TextStyle(fontSize: 14),
+                          ),
                         if (paymentInfoC.text.isNotEmpty)
                           pw.Text(
-                            "Account/Ref: ${paymentInfoC.text}",
+                            "A/C or Number: ${paymentInfoC.text}",
                             style: const pw.TextStyle(fontSize: 14),
                           ),
                       ],
@@ -932,12 +1008,9 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
                 ],
               ),
               pw.SizedBox(height: 40),
-
-              // Item Table
               pw.Table.fromTextArray(
-                headerAlignment:
-                    pw.Alignment.center, // Centers the column headings
-                cellAlignment: pw.Alignment.center, // Centers the data cells
+                headerAlignment: pw.Alignment.center,
+                cellAlignment: pw.Alignment.center,
                 context: context,
                 border: pw.TableBorder.all(
                   color: PdfColors.grey300,
@@ -972,17 +1045,50 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
                   ),
                 ],
               ),
-
-              // Summary
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.end,
                 children: [
                   pw.Container(
-                    width: 300,
+                    width: 350,
                     padding: const pw.EdgeInsets.all(15),
                     child: pw.Column(
                       children: [
+                        // SUBTOTAL
+                        pw.Row(
+                          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                          children: [
+                            pw.Text(
+                              "SUBTOTAL:",
+                              style: const pw.TextStyle(fontSize: 16),
+                            ),
+                            pw.Text(
+                              "Tk ${subtotalAmount.toStringAsFixed(2)}",
+                              style: const pw.TextStyle(fontSize: 16),
+                            ),
+                          ],
+                        ),
+                        // DISCOUNT
+                        pw.Row(
+                          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                          children: [
+                            pw.Text(
+                              "DISCOUNT:",
+                              style: const pw.TextStyle(
+                                fontSize: 16,
+                                color: PdfColors.red900,
+                              ),
+                            ),
+                            pw.Text(
+                              "- Tk ${discountVal.value.toStringAsFixed(2)}",
+                              style: const pw.TextStyle(
+                                fontSize: 16,
+                                color: PdfColors.red900,
+                              ),
+                            ),
+                          ],
+                        ),
                         pw.Divider(),
+                        // GRAND TOTAL
                         pw.Row(
                           mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                           children: [
@@ -995,7 +1101,7 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
                               ),
                             ),
                             pw.Text(
-                              "Tk ${totalAmount.toStringAsFixed(2)}",
+                              "Tk ${grandTotal.toStringAsFixed(2)}",
                               style: pw.TextStyle(
                                 fontWeight: pw.FontWeight.bold,
                                 fontSize: 20,
@@ -1009,7 +1115,6 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
                   ),
                 ],
               ),
-
               pw.Spacer(),
               pw.Divider(),
               pw.Center(

@@ -37,7 +37,7 @@ class _AdminHomepageState extends State<AdminHomepage> {
                 onGenerateRoute: (settings) {
                   // Map your IDs to your actual Pages here
                   if (settings.name == Routes.DASHBOARD) {
-                    return GetPageRoute(page: () => const DashboardPage());
+                    return GetPageRoute(page: () =>  DailyOverviewPage());
                   }
                   if (settings.name == Routes.DEBTOR) {
                     return GetPageRoute(page: () => Debatorpage());

@@ -270,15 +270,29 @@ class DailySalesController extends GetxController {
 
   // 8. FORMAT PAYMENT METHOD (Utility Method)
   String formatPaymentMethod(dynamic pm) {
-    if (pm == null) return "CREDIT";
-    if (pm is String) return pm.toUpperCase();
-    if (pm is Map) {
-      String type = (pm["type"] ?? "").toString().toUpperCase();
-      if (type == "BANK") return "BANK: ${pm["bankName"] ?? ""}";
-      if (type == "BKASH") return "BKASH: ${pm["number"] ?? ""}";
-      return type;
+    if (pm == null || pm == "") return "CREDIT";
+    if (pm is! Map) return pm.toString().toUpperCase();
+
+    String type = (pm["type"] ?? "CASH").toString().toLowerCase();
+
+    switch (type) {
+      case "cash":
+        return "CASH";
+
+      case "bkash":
+      case "nagad":
+        String number = (pm["number"] ?? pm["details"] ?? "").toString();
+        return "${type.toUpperCase()}: $number";
+
+      case "bank":
+        String bName = (pm["bankName"] ?? "BANK").toString().toUpperCase();
+        String acc = (pm["accountNumber"] ?? "").toString();
+        // Returns format: DBBL (5746548546)
+        return "$bName ($acc)";
+
+      default:
+        return type.toUpperCase();
     }
-    return pm.toString();
   }
 
   // 9. PROFESSIONAL PDF GENERATOR

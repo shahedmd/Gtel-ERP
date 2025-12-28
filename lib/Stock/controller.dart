@@ -14,6 +14,7 @@ class ProductController extends GetxController {
   final RxString searchText = ''.obs;
   final RxBool isLoading = false.obs;
   final RxBool isEditingLoading = false.obs;
+  final RxBool isLoadingstock = false.obs;
   final RxDouble currentCurrency = 17.85.obs;
 
   // API Configuration
@@ -49,7 +50,6 @@ class ProductController extends GetxController {
           'brand': selectedBrand.value == 'All' ? '' : selectedBrand.value,
         },
       );
-
 
       final res = await http.get(uri);
 
@@ -195,6 +195,76 @@ class ProductController extends GetxController {
       Get.snackbar('Error', 'Network error');
     } finally {
       isLoading.value = false;
+    }
+  }
+
+  // ==========================================
+  // BULK UPDATE STOCK (POS CHECKOUT)
+  // ==========================================
+  Future<bool> updateStockBulk(List<Map<String, dynamic>> updates) async {
+    try {
+      isLoadingstock.value = true;
+
+      // The 'updates' list contains: [{'id': 1, 'qty': 5}, {'id': 2, 'qty': 1}]
+      final response = await http.put(
+        Uri.parse('$baseUrl/products/bulk-update-stock'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'updates': updates}),
+      );
+
+      if (response.statusCode == 200) {
+        
+        for (var update in updates) {
+          final productId = update['id'];
+          final quantitySold = update['qty'];
+
+          final index = allProducts.indexWhere((p) => p.id == productId);
+          if (index != -1) {
+            final currentProduct = allProducts[index];
+
+            // Create an updated product instance
+            allProducts[index] = Product(
+              id: currentProduct.id,
+              name: currentProduct.name,
+              category: currentProduct.category,
+              brand: currentProduct.brand,
+              model: currentProduct.model,
+              weight: currentProduct.weight,
+              yuan: currentProduct.yuan,
+              air: currentProduct.air,
+              sea: currentProduct.sea,
+              agent: currentProduct.agent,
+              wholesale: currentProduct.wholesale,
+              shipmentTax: currentProduct.shipmentTax,
+              shipmentNo: currentProduct.shipmentNo,
+              currency: currentProduct.currency,
+              // Subtract the sold quantity from local memory
+              stockQty: currentProduct.stockQty - (quantitySold as int),
+            );
+          }
+        }
+
+        allProducts.refresh(); // Trigger GetX UI update
+        return true;
+      } else {
+        Get.snackbar(
+          "Server Error",
+          "Failed to update stock: ${response.body}",
+          backgroundColor: Colors.red,
+          colorText: Colors.white,
+        );
+        return false;
+      }
+    } catch (e) {
+      Get.snackbar(
+        "Network Error",
+        "Check your internet connection",
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+      return false;
+    } finally {
+      isLoadingstock.value = false;
     }
   }
 
