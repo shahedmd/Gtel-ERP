@@ -4,11 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:intl/intl.dart';
-import 'dart:html' as html; // Keep for Web Download
-
 import 'addsalary.dart';
 import 'controller.dart';
 import 'model.dart';
+import 'dart:js_interop';
+import 'dart:typed_data';
+import 'package:web/web.dart' as web;
 
 class StaffDetailsPage extends StatelessWidget {
   final String staffId;
@@ -39,14 +40,25 @@ class StaffDetailsPage extends StatelessWidget {
         ),
         title: Text(
           "Employee Profile: $name",
-          style: const TextStyle(color: darkSlate, fontWeight: FontWeight.bold, fontSize: 20),
+          style: const TextStyle(
+            color: darkSlate,
+            fontWeight: FontWeight.bold,
+            fontSize: 20,
+          ),
         ),
         actions: [
           // Professional PDF Action
           TextButton.icon(
             onPressed: () => _handlePdfDownload(staff),
-            icon: const FaIcon(FontAwesomeIcons.filePdf, size: 16, color: Colors.redAccent),
-            label: const Text("Export Statement", style: TextStyle(color: Colors.redAccent)),
+            icon: const FaIcon(
+              FontAwesomeIcons.filePdf,
+              size: 16,
+              color: Colors.redAccent,
+            ),
+            label: const Text(
+              "Export Statement",
+              style: TextStyle(color: Colors.redAccent),
+            ),
           ),
           const SizedBox(width: 20),
         ],
@@ -66,7 +78,11 @@ class StaffDetailsPage extends StatelessWidget {
             const SizedBox(height: 32),
             const Text(
               "Salary Payment History",
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: darkSlate),
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: darkSlate,
+              ),
             ),
             const SizedBox(height: 16),
             _buildSalaryHistoryTable(),
@@ -83,16 +99,34 @@ class StaffDetailsPage extends StatelessWidget {
       builder: (context, snapshot) {
         double totalPaid = 0;
         if (snapshot.hasData) {
-          totalPaid = snapshot.data!.fold(0.0, (sum, item) => sum + item.amount);
+          totalPaid = snapshot.data!.fold(
+            0.0,
+            (sum, item) => sum + item.amount,
+          );
         }
 
         return Row(
           children: [
-            _statCard("Designation", staff.des, FontAwesomeIcons.userTag, activeAccent),
+            _statCard(
+              "Designation",
+              staff.des,
+              FontAwesomeIcons.userTag,
+              activeAccent,
+            ),
             const SizedBox(width: 16),
-            _statCard("Base Salary", "\$${staff.salary}", FontAwesomeIcons.moneyBillWave, Colors.green),
+            _statCard(
+              "Base Salary",
+              "\$${staff.salary}",
+              FontAwesomeIcons.moneyBillWave,
+              Colors.green,
+            ),
             const SizedBox(width: 16),
-            _statCard("Total Disbursed", "\$${totalPaid.toStringAsFixed(2)}", FontAwesomeIcons.wallet, Colors.orange),
+            _statCard(
+              "Total Disbursed",
+              "\$${totalPaid.toStringAsFixed(2)}",
+              FontAwesomeIcons.wallet,
+              Colors.orange,
+            ),
           ],
         );
       },
@@ -118,8 +152,18 @@ class StaffDetailsPage extends StatelessWidget {
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12)),
-                Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: darkSlate)),
+                Text(
+                  label,
+                  style: const TextStyle(color: Colors.grey, fontSize: 12),
+                ),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: darkSlate,
+                  ),
+                ),
               ],
             ),
           ],
@@ -143,14 +187,53 @@ class StaffDetailsPage extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 15),
             decoration: const BoxDecoration(
               color: darkSlate,
-              borderRadius: BorderRadius.only(topLeft: Radius.circular(11), topRight: Radius.circular(11)),
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(11),
+                topRight: Radius.circular(11),
+              ),
             ),
             child: Row(
               children: const [
-                Expanded(flex: 2, child: Text("Month", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
-                Expanded(flex: 2, child: Text("Payment Date", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
-                Expanded(flex: 3, child: Text("Note", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
-                Expanded(flex: 2, child: Text("Amount", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+                Expanded(
+                  flex: 2,
+                  child: Text(
+                    "Month",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  flex: 2,
+                  child: Text(
+                    "Payment Date",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  flex: 3,
+                  child: Text(
+                    "Note",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  flex: 2,
+                  child: Text(
+                    "Amount",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
                 SizedBox(width: 40),
               ],
             ),
@@ -160,10 +243,16 @@ class StaffDetailsPage extends StatelessWidget {
             stream: controller.streamSalaries(staffId),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator());
+                return const Padding(
+                  padding: EdgeInsets.all(20),
+                  child: CircularProgressIndicator(),
+                );
               }
               if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                return const Padding(padding: EdgeInsets.all(40), child: Text("No payment history found."));
+                return const Padding(
+                  padding: EdgeInsets.all(40),
+                  child: Text("No payment history found."),
+                );
               }
 
               return ListView.separated(
@@ -188,16 +277,47 @@ class StaffDetailsPage extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 15),
       child: Row(
         children: [
-          Expanded(flex: 2, child: Text(salary.month, style: const TextStyle(fontWeight: FontWeight.w600))),
-          Expanded(flex: 2, child: Text(DateFormat("dd MMM yyyy").format(salary.date), style: const TextStyle(color: Colors.grey))),
-          Expanded(flex: 3, child: Text(salary.note.isEmpty ? "No note" : salary.note, style: const TextStyle(color: Colors.grey))),
-          Expanded(flex: 2, child: Text("\$${salary.amount}", style: const TextStyle(fontWeight: FontWeight.bold, color: activeAccent))),
-          
+          Expanded(
+            flex: 2,
+            child: Text(
+              salary.month,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text(
+              DateFormat("dd MMM yyyy").format(salary.date),
+              style: const TextStyle(color: Colors.grey),
+            ),
+          ),
+          Expanded(
+            flex: 3,
+            child: Text(
+              salary.note.isEmpty ? "No note" : salary.note,
+              style: const TextStyle(color: Colors.grey),
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text(
+              "\$${salary.amount}",
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                color: activeAccent,
+              ),
+            ),
+          ),
+
           // Delete Action
           SizedBox(
             width: 40,
             child: IconButton(
-              icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
+              icon: const Icon(
+                Icons.delete_outline,
+                color: Colors.redAccent,
+                size: 20,
+              ),
               onPressed: () => _confirmDelete(salary),
             ),
           ),
@@ -206,25 +326,11 @@ class StaffDetailsPage extends StatelessWidget {
     );
   }
 
-  // --- ACTIONS ---
-  Future<void> _handlePdfDownload(dynamic staff) async {
-    // Get the current salaries from the stream's last value
-    final salaries = await controller.streamSalaries(staffId).first;
-    
-    final pdfData = await controller.generateProfessionalPDF(staff, salaries);
-
-    final blob = html.Blob([pdfData], 'application/pdf');
-    final url = html.Url.createObjectUrlFromBlob(blob);
-    html.AnchorElement(href: url)
-      ..setAttribute("download", "Statement_${staff.name}_${DateTime.now().millisecond}.pdf")
-      ..click();
-    html.Url.revokeObjectUrl(url);
-  }
-
   void _confirmDelete(SalaryModel salary) {
     Get.defaultDialog(
       title: "Confirm Deletion",
-      middleText: "Are you sure you want to remove the salary record for ${salary.month}?",
+      middleText:
+          "Are you sure you want to remove the salary record for ${salary.month}?",
       textConfirm: "Delete",
       textCancel: "Cancel",
       confirmTextColor: Colors.white,
@@ -237,8 +343,61 @@ class StaffDetailsPage extends StatelessWidget {
             .doc(salary.id)
             .delete();
         Get.back();
-        Get.snackbar("Deleted", "Record removed successfully", snackPosition: SnackPosition.BOTTOM);
+        Get.snackbar(
+          "Deleted",
+          "Record removed successfully",
+          snackPosition: SnackPosition.BOTTOM,
+        );
       },
     );
+  }
+
+  Future<void> _handlePdfDownload(dynamic staff) async {
+    // 1. Get the current salaries (Assuming staffId is staff.id or similar)
+    final salaries = await controller.streamSalaries(staff.id).first;
+
+    // 2. Generate the PDF bytes
+    final List<int> pdfData = await controller.generateProfessionalPDF(
+      staff,
+      salaries,
+    );
+
+    try {
+      // 3. Convert List<int> to Uint8List
+      final Uint8List uint8list = Uint8List.fromList(pdfData);
+
+      // 4. Convert to JS-compatible types for WASM
+      final JSUint8Array jsBytes = uint8list.toJS;
+
+      // 5. Create the JSArray and cast it to the required BlobPart view
+      final blobParts = [jsBytes].toJS as JSArray<web.BlobPart>;
+
+      // 6. Create the Blob using package:web
+      final blob = web.Blob(
+        blobParts,
+        web.BlobPropertyBag(type: 'application/pdf'),
+      );
+
+      // 7. Create the Object URL
+      final String url = web.URL.createObjectURL(blob);
+
+      // 8. Create Anchor Element and trigger download
+      final web.HTMLAnchorElement anchor =
+          web.document.createElement('a') as web.HTMLAnchorElement;
+      anchor.href = url;
+
+      // Professional naming with unique timestamp
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      anchor.download = "Statement_${staff.name}_$timestamp.pdf";
+
+      anchor.click();
+
+      // 9. Clean up memory
+      web.URL.revokeObjectURL(url);
+    } catch (e) {
+      debugPrint("Error generating or downloading PDF: $e");
+      // Optional: show a user-friendly snackbar
+      Get.snackbar("Download Error", "Could not generate the PDF statement.");
+    }
   }
 }

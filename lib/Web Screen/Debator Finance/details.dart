@@ -5,10 +5,12 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:intl/intl.dart';
-import 'dart:html' as html; // Web PDF Download
 import 'debatorcontroller.dart';
 import 'transaction.dart'; // addTransactionDialog
 import 'model.dart';
+import 'dart:js_interop'; // Required for .toJS conversion
+import 'dart:typed_data';
+import 'package:web/web.dart' as web;
 
 class Debatordetails extends StatelessWidget {
   final String id;
@@ -532,35 +534,6 @@ class Debatordetails extends StatelessWidget {
     );
   }
 
-  Future<void> downloadPDF(String id, String name) async {
-    final snap =
-        await controller.db
-            .collection("debatorbody")
-            .doc(id)
-            .collection("transactions")
-            .orderBy("date")
-            .get();
-    List<Map<String, dynamic>> data =
-        snap.docs.map((d) {
-          final docData = d.data();
-          return {
-            "date": (docData["date"] as Timestamp).toDate(),
-            "type": docData["type"] ?? "",
-            "amount": (docData["amount"] as num).toDouble(),
-            "note": docData["note"] ?? "",
-            "paymentMethod": docData["paymentMethod"],
-          };
-        }).toList();
-
-    final pdfData = await controller.generatePDF(name, data);
-    final blob = html.Blob([pdfData], 'application/pdf');
-    final url = html.Url.createObjectUrlFromBlob(blob);
-    html.AnchorElement(href: url)
-      ..setAttribute("download", "$name-ledger.pdf")
-      ..click();
-    html.Url.revokeObjectUrl(url);
-  }
-
   void editTransactionDialog(
     DebatorController controller,
     String debtorId,
@@ -704,6 +677,66 @@ class Debatordetails extends StatelessWidget {
       ),
       barrierDismissible: false,
     );
+  }
+
+  // ... inside your class
+
+  Future<void> downloadPDF(String id, String name) async {
+    // 1. Fetch data from Firebase
+    final snap =
+        await controller.db
+            .collection("debatorbody")
+            .doc(id)
+            .collection("transactions")
+            .orderBy("date")
+            .get();
+
+    List<Map<String, dynamic>> data =
+        snap.docs.map((d) {
+          final docData = d.data();
+          return {
+            "date": (docData["date"] as Timestamp).toDate(),
+            "type": docData["type"] ?? "",
+            "amount": (docData["amount"] as num).toDouble(),
+            "note": docData["note"] ?? "",
+            "paymentMethod": docData["paymentMethod"],
+          };
+        }).toList();
+
+    // 2. Generate PDF Bytes
+    final List<int> pdfData = await controller.generatePDF(name, data);
+
+    try {
+      // 3. Convert List<int> to Uint8List, then to JSUint8Array
+      // 1. Convert your bytes to a JS-compatible Uint8Array
+      final Uint8List uint8list = Uint8List.fromList(pdfData);
+      final JSUint8Array jsBytes = uint8list.toJS;
+
+      // 2. Create a JSArray and cast it to the specific view needed by Blob.
+      // We cast it 'as JSArray<web.BlobPart>' because JSArray is an extension type.
+      final blobParts = [jsBytes].toJS as JSArray<web.BlobPart>;
+
+      // 3. Now the constructor will accept it perfectly
+      final blob = web.Blob(
+        blobParts,
+        web.BlobPropertyBag(type: 'application/pdf'),
+      );
+
+      // 6. Create the Object URL
+      final String url = web.URL.createObjectURL(blob);
+
+      // 7. Create Anchor Element and trigger download
+      final web.HTMLAnchorElement anchor =
+          web.document.createElement('a') as web.HTMLAnchorElement;
+      anchor.href = url;
+      anchor.download = "$name-ledger.pdf";
+      anchor.click();
+
+      // 8. Clean up
+      web.URL.revokeObjectURL(url);
+    } catch (e) {
+      debugPrint("Error downloading PDF: $e");
+    }
   }
 
   Widget _typeDropdown(RxString selected) {
