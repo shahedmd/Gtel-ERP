@@ -1,3 +1,5 @@
+// ignore_for_file: deprecated_member_use
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
@@ -51,7 +53,6 @@ class OverviewController extends GetxController {
   }
 
   void _syncDateAndFetch() {
-    // Ensure both sub-controllers are looking at the same date as the Overview
     salesCtrl.changeDate(selectedDate.value);
     expenseCtrl.changeDate(selectedDate.value);
   }

@@ -9,12 +9,20 @@ import 'package:gtel_erp/Web%20Screen/Expenses/dailycontroller.dart';
 import 'package:gtel_erp/Web%20Screen/Sales/controller.dart';
 import 'Web Screen/Expenses/monthlycontroller.dart';
 import 'Web Screen/homepage.dart';
+import 'auth.dart';
 import 'firebase_options.dart';
+import 'login.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize Firebase with options (Crucial for Web)
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
+  // 1. Inject Auth Controller first to manage session
+  Get.put(AuthController());
+
+  // 2. Your existing controllers (DO NOT REMOVE)
   Get.put(MonthlyExpensesController());
   Get.put(DailySalesController());
   Get.put(DailyExpensesController());
@@ -32,9 +40,6 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        
-
-
         return ScreenUtilInit(
           designSize: const Size(1440, 900),
           minTextAdapt: true,
@@ -45,16 +50,21 @@ class MyApp extends StatelessWidget {
               title: 'G-Tel ERP',
               theme: ThemeData(
                 useMaterial3: true,
+                primarySwatch: Colors.blue,
                 brightness: Brightness.light,
                 iconTheme: const IconThemeData(color: Colors.white),
-                // Standardize your fonts for a clean POS look
                 textTheme: Typography.englishLike2021.apply(
                   fontSizeFactor: 1.sp,
+                  bodyColor:
+                      Colors.black, // Adjusted for light theme visibility
                 ),
               ),
-              // AdminHomepage (MainLayout) is our root "Shell"
-              home: AdminHomepage(),
-              // Set initial route for the inner navigator in AdminHomepage
+              // Use initialRoute for cleaner navigation management
+              initialRoute: '/',
+              getPages: [
+                GetPage(name: '/', page: () => const LoginPage()),
+                GetPage(name: '/home', page: () => AdminHomepage()),
+              ],
             );
           },
         );
