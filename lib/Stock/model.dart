@@ -14,6 +14,10 @@ class Product {
   final int shipmentNo;
   final double currency;
   final int stockQty;
+  // --- New Fields ---
+  final double avgPurchasePrice;
+  final int seaStockQty;
+  final int airStockQty;
 
   Product({
     required this.id,
@@ -31,6 +35,9 @@ class Product {
     required this.shipmentNo,
     required this.currency,
     required this.stockQty,
+    required this.avgPurchasePrice,
+    required this.seaStockQty,
+    required this.airStockQty,
   });
 
   factory Product.fromJson(Map<String, dynamic> json) {
@@ -62,10 +69,15 @@ class Product {
       sea: parseDouble(json['sea']),
       agent: parseDouble(json['agent']),
       wholesale: parseDouble(json['wholesale']),
-      shipmentTax: parseDouble(json['shipmenttax']),
-      shipmentNo: parseInt(json['shipmentno']),
+      // Note: Postgres often returns column names in lowercase
+      shipmentTax: parseDouble(json['shipmenttax'] ?? json['shipmentTax']),
+      shipmentNo: parseInt(json['shipmentno'] ?? json['shipmentNo']),
       currency: parseDouble(json['currency']),
       stockQty: parseInt(json['stock_qty']),
+      // --- Parsing New Fields ---
+      avgPurchasePrice: parseDouble(json['avg_purchase_price']),
+      seaStockQty: parseInt(json['sea_stock_qty']),
+      airStockQty: parseInt(json['air_stock_qty']),
     );
   }
 
@@ -82,10 +94,14 @@ class Product {
       'sea': sea,
       'agent': agent,
       'wholesale': wholesale,
-      'shipmenttax': shipmentTax,
-      'shipmentno': shipmentNo,
+      'shipmentTax': shipmentTax,
+      'shipmentNo': shipmentNo,
       'currency': currency,
       'stock_qty': stockQty,
+      // --- New Fields in JSON ---
+      'avg_purchase_price': avgPurchasePrice,
+      'sea_stock_qty': seaStockQty,
+      'air_stock_qty': airStockQty,
     };
   }
 }

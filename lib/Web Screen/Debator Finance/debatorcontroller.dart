@@ -277,48 +277,6 @@ class DebatorController extends GetxController {
     }
   }
 
-  // ------------------------------------------------------------------
-  // 4. ADD TRANSACTION (PURCHASE ONLY)
-  // ------------------------------------------------------------------
-  Future<void> addTransactionFORpurchase(
-    String debtorId,
-    double amount,
-    String note,
-    DateTime date, {
-    Map<String, dynamic>? selectedPaymentMethod,
-  }) async {
-    gbIsLoading.value = true;
-    try {
-      final debtorSnap = await db.collection('debatorbody').doc(debtorId).get();
-      if (!debtorSnap.exists) return;
-
-      Map<String, dynamic>? paymentMethod = selectedPaymentMethod;
-      if (paymentMethod == null) {
-        final payments = (debtorSnap.data()?['payments'] as List? ?? []);
-        if (payments.isNotEmpty) {
-          paymentMethod = Map<String, dynamic>.from(payments.first);
-        }
-      }
-
-      await db
-          .collection('debatorbody')
-          .doc(debtorId)
-          .collection('transactions')
-          .add({
-            'amount': amount,
-            'note': note,
-            'type': 'debit',
-            'date': Timestamp.fromDate(date),
-            'paymentMethod': paymentMethod ?? {},
-            'createdAt': FieldValue.serverTimestamp(),
-          });
-      Get.snackbar("Success", "Purchase transaction added to ledger");
-    } catch (e) {
-      Get.snackbar('Error', e.toString());
-    } finally {
-      gbIsLoading.value = false;
-    }
-  }
 
   // ------------------------------------------------------------------
   // 5. DATA STREAMS

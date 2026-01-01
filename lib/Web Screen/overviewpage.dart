@@ -21,7 +21,7 @@ class OverviewController extends GetxController {
   RxDouble grossSales = 0.0.obs;
   RxDouble totalCollected = 0.0.obs;
   RxDouble totalExpenses = 0.0.obs;
-  RxDouble netProfit = 0.0.obs;
+  RxDouble netProfiit = 0.0.obs;
   RxDouble outstandingDebt = 0.0.obs;
 
   RxMap<String, double> paymentMethods =
@@ -70,7 +70,7 @@ class OverviewController extends GetxController {
     totalExpenses.value = expenseCtrl.dailyTotal.value.toDouble();
 
     // 3. Net Profit = Total Gross Sales - Total Expenses
-    netProfit.value = grossSales.value - totalExpenses.value;
+    netProfiit.value = totalCollected.value - totalExpenses.value;
 
     // 4. Calculate Payment Method Breakdown dynamically from the list
     double cash = 0, bkash = 0, nagad = 0, bank = 0;
@@ -241,7 +241,7 @@ class DailyOverviewPage extends StatelessWidget {
         ),
         _statCard(
           "Net Profit",
-          ctrl.netProfit.value,
+          ctrl.netProfiit.value,
           FontAwesomeIcons.vault,
           Colors.indigo,
           isHighlight: true,
@@ -344,7 +344,7 @@ class DailyOverviewPage extends StatelessWidget {
           _profitBar(
             "Net Profit Margin",
             ctrl.grossSales.value,
-            ctrl.netProfit.value,
+            ctrl.netProfiit.value,
           ),
         ],
       ),

@@ -18,6 +18,7 @@ class ProductController extends GetxController {
   final RxDouble currentCurrency = 17.85.obs;
 
   // API Configuration
+  // Ensure this URL is correct. Note: Render sleeps, so first request might be slow.
   static const baseUrl = 'https://dart-server-1zun.onrender.com';
 
   // Pagination Observables
@@ -36,6 +37,7 @@ class ProductController extends GetxController {
 
   // ==========================================
   // FETCH PRODUCTS (GET)
+  // Handles all 18 fields via the Product.fromJson
   // ==========================================
   Future<void> fetchProducts({int? page}) async {
     isLoading.value = true;
@@ -65,12 +67,26 @@ class ProductController extends GetxController {
 
         // 3. Assign to your RxList
         allProducts.assignAll(loadedProducts);
-        totalProducts.value = data['total'] ?? 0;
+
+        // 4. Handle total count (Now expects a standard int from server ::int fix)
+        var totalRaw = data['total'];
+        if (totalRaw is String) {
+          totalProducts.value = int.tryParse(totalRaw) ?? 0;
+        } else {
+          totalProducts.value = totalRaw ?? 0;
+        }
       } else {
-        Get.snackbar('Error', 'Server returned ${res.statusCode}');
+        // If server returns 500, we catch it here
+        Get.snackbar(
+          'Server Error ${res.statusCode}',
+          'Check server logs. Database column mismatch or BigInt issue.',
+          backgroundColor: Colors.red,
+          colorText: Colors.white,
+        );
       }
     } catch (e) {
-      Get.snackbar('Error', 'Connection failed.');
+      print("Fetch Error: $e");
+      Get.snackbar('Error', 'Connection failed or JSON parsing error.');
     } finally {
       isLoading.value = false;
     }
@@ -103,6 +119,7 @@ class ProductController extends GetxController {
 
   // ==========================================
   // UPDATE CURRENCY & RECALCULATE (BULK)
+  // Re-values inventory for imports based on credit model
   // ==========================================
   Future<void> updateCurrencyAndRecalculate(double newCurrency) async {
     try {
@@ -115,11 +132,11 @@ class ProductController extends GetxController {
 
       if (res.statusCode == 200) {
         currentCurrency.value = newCurrency;
-        // Refresh the first page to see the new calculated prices
+        // Refresh the first page to see the new calculated prices and purchase rates
         await fetchProducts(page: 1);
         Get.snackbar(
           'Success',
-          'AIR & SEA prices updated for all items.',
+          'Currency updated. Stock values re-calculated based on today\'s rate.',
           backgroundColor: Colors.green,
           colorText: Colors.white,
         );
@@ -136,6 +153,8 @@ class ProductController extends GetxController {
   // ==========================================
   // CRUD OPERATIONS
   // ==========================================
+
+  // NOTE: 'data' must contain all 18 fields to avoid null errors on server
   Future<void> createProduct(Map<String, dynamic> data) async {
     try {
       isLoading.value = true;
@@ -149,7 +168,7 @@ class ProductController extends GetxController {
         await fetchProducts();
         Get.snackbar('Success', 'Product added successfully');
       } else {
-        Get.snackbar('Error', 'Failed to add product');
+        Get.snackbar('Error', 'Failed to add: ${res.body}');
       }
     } catch (e) {
       Get.snackbar('Error', 'Connection failed');
@@ -158,6 +177,7 @@ class ProductController extends GetxController {
     }
   }
 
+  // NOTE: 'data' must contain all 18 fields because server overwrites everything
   Future<void> updateProduct(int id, Map<String, dynamic> data) async {
     try {
       isEditingLoading.value = true;
@@ -169,9 +189,9 @@ class ProductController extends GetxController {
 
       if (res.statusCode == 200) {
         await fetchProducts();
-        Get.snackbar('Success', 'Product updated');
+        Get.snackbar('Success', 'Product updated fully');
       } else {
-        Get.snackbar('Error', 'Update failed');
+        Get.snackbar('Error', 'Update failed: ${res.body}');
       }
     } catch (e) {
       Get.snackbar('Error', 'Network error during update');
@@ -199,13 +219,57 @@ class ProductController extends GetxController {
   }
 
   // ==========================================
+  // NEW: ADD MIXED STOCK (Shipment Intake)
+  // Handles Sea, Air, and Local quantities + WAC calculation
+  // ==========================================
+  Future<void> addMixedStock({
+    required int productId,
+    int seaQty = 0,
+    int airQty = 0,
+    int localQty = 0,
+    double localPrice = 0.0,
+  }) async {
+    try {
+      isLoadingstock.value = true;
+      final res = await http.post(
+        Uri.parse('$baseUrl/products/add-stock'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'id': productId,
+          'sea_qty': seaQty,
+          'air_qty': airQty,
+          'local_qty': localQty,
+          'local_price': localPrice,
+        }),
+      );
+
+      if (res.statusCode == 200) {
+        await fetchProducts(); // Refresh to see updated WAC and stock levels
+        Get.snackbar(
+          'Success',
+          'Stock Added. Average Purchase Price recalculated.',
+          backgroundColor: Colors.blue,
+          colorText: Colors.white,
+        );
+      } else {
+        print(res.body);
+        Get.snackbar('Error', 'Failed to update stock: ${res.body}');
+      }
+    } catch (e) {
+      Get.snackbar('Error', 'Connection failed');
+    } finally {
+      isLoadingstock.value = false;
+    }
+  }
+
+  // ==========================================
   // BULK UPDATE STOCK (POS CHECKOUT)
+  // Uses server-side FIFO logic (Sea stock first)
   // ==========================================
   Future<bool> updateStockBulk(List<Map<String, dynamic>> updates) async {
     try {
       isLoadingstock.value = true;
 
-      // The 'updates' list contains: [{'id': 1, 'qty': 5}, {'id': 2, 'qty': 1}]
       final response = await http.put(
         Uri.parse('$baseUrl/products/bulk-update-stock'),
         headers: {'Content-Type': 'application/json'},
@@ -213,38 +277,9 @@ class ProductController extends GetxController {
       );
 
       if (response.statusCode == 200) {
-        
-        for (var update in updates) {
-          final productId = update['id'];
-          final quantitySold = update['qty'];
-
-          final index = allProducts.indexWhere((p) => p.id == productId);
-          if (index != -1) {
-            final currentProduct = allProducts[index];
-
-            // Create an updated product instance
-            allProducts[index] = Product(
-              id: currentProduct.id,
-              name: currentProduct.name,
-              category: currentProduct.category,
-              brand: currentProduct.brand,
-              model: currentProduct.model,
-              weight: currentProduct.weight,
-              yuan: currentProduct.yuan,
-              air: currentProduct.air,
-              sea: currentProduct.sea,
-              agent: currentProduct.agent,
-              wholesale: currentProduct.wholesale,
-              shipmentTax: currentProduct.shipmentTax,
-              shipmentNo: currentProduct.shipmentNo,
-              currency: currentProduct.currency,
-              // Subtract the sold quantity from local memory
-              stockQty: currentProduct.stockQty - (quantitySold as int),
-            );
-          }
-        }
-
-        allProducts.refresh(); // Trigger GetX UI update
+        // Since the server performs complex deduction logic between Sea/Air buckets,
+        // we refresh the list from the server to ensure Flutter matches the DB exactly.
+        await fetchProducts();
         return true;
       } else {
         Get.snackbar(

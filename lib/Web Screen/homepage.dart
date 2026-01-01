@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-
 import 'package:get/get.dart';
+import '../Cash/page.dart';
 import '../Live order/liveorder.dart';
-import '../Purchase/page.dart';
+import '../Profit&loss/page.dart';
 import '../Stock/stockpage.dart';
 import '../Web Elements/customwidget.dart';
 import '../Web Elements/route.dart';
@@ -37,7 +37,7 @@ class _AdminHomepageState extends State<AdminHomepage> {
                 onGenerateRoute: (settings) {
                   // Map your IDs to your actual Pages here
                   if (settings.name == Routes.DASHBOARD) {
-                    return GetPageRoute(page: () =>  DailyOverviewPage());
+                    return GetPageRoute(page: () => DailyOverviewPage());
                   }
                   if (settings.name == Routes.DEBTOR) {
                     return GetPageRoute(page: () => Debatorpage());
@@ -57,14 +57,17 @@ class _AdminHomepageState extends State<AdminHomepage> {
                   if (settings.name == Routes.STOCK) {
                     return GetPageRoute(page: () => ProductScreen());
                   }
-                  if (settings.name == Routes.PURCHASE) {
-                    return GetPageRoute(page: () => PurchasePage());
-                  }
                   if (settings.name == Routes.STAFF) {
                     return GetPageRoute(page: () => StaffListPage());
                   }
                   if (settings.name == Routes.LIVEORDER) {
                     return GetPageRoute(page: () => LiveOrderSalesPage());
+                  }
+                  if (settings.name == Routes.PROFITLOSS) {
+                    return GetPageRoute(page: () => ProfitLossReportPage());
+                  }
+                  if (settings.name == Routes.CASH) {
+                    return GetPageRoute(page: () => CashDrawerPage());
                   }
                   return GetPageRoute(
                     page: () => const Center(child: Text("Not Found")),

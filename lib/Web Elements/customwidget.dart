@@ -268,11 +268,6 @@ class SidebarMenu extends StatelessWidget {
                       title: "Stock Management",
                       isSubItem: true,
                     ),
-                    _NavTile(
-                      id: Routes.PURCHASE,
-                      title: "Add Product / Purchase",
-                      isSubItem: true,
-                    ),
                   ],
                 ),
 
@@ -289,10 +284,21 @@ class SidebarMenu extends StatelessWidget {
                 ),
 
                 _NavTile(
+                  id: '/profit', // Example of a standalone route
+                  icon: FontAwesomeIcons.gears,
+                  title: "Sale Overview",
+                ),
+
+                _NavTile(
                   id: '/settings', // Example of a standalone route
                   icon: FontAwesomeIcons.gears,
                   title: "System Settings",
                 ),
+                _NavTile(
+                  id: '/cash', // Example of a standalone route
+                  icon: FontAwesomeIcons.cashRegister,
+                  title: "Cash Drawer",
+                )
               ],
             ),
           ),

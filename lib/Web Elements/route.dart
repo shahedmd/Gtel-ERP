@@ -8,7 +8,8 @@ abstract class Routes {
   static const String DAILY_SALES = '/sales-daily';
   static const String MONTHLY_SALES = '/sales-monthly';
   static const String STOCK = '/stock';
-  static const String PURCHASE = '/purchase';
+  static const String PROFITLOSS = '/profit';
   static const String STAFF = '/staff';
   static const String LIVEORDER = '/liveorder';
+  static const String CASH = '/cash';
 }

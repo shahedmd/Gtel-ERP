@@ -1,3 +1,5 @@
+// ignore_for_file: deprecated_member_use
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'controller.dart';
@@ -6,7 +8,12 @@ import 'model.dart';
 /// ===============================
 /// MODERN POS INPUT STYLING
 /// ===============================
-Widget _buildField(TextEditingController c, String label, IconData icon, {TextInputType? type}) {
+Widget _buildField(
+  TextEditingController c,
+  String label,
+  IconData icon, {
+  TextInputType? type,
+}) {
   return Padding(
     padding: const EdgeInsets.symmetric(vertical: 6),
     child: TextFormField(
@@ -66,7 +73,9 @@ void _showPOSDialog({
     Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Container(
-        constraints: const BoxConstraints(maxWidth: 500), // Professional fixed width
+        constraints: const BoxConstraints(
+          maxWidth: 600,
+        ), // Slightly wider for 18 fields
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -75,18 +84,28 @@ void _showPOSDialog({
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: Colors.blue[800],
-                borderRadius: const BorderRadius.only(topLeft: Radius.circular(16), topRight: Radius.circular(16)),
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(16),
+                  topRight: Radius.circular(16),
+                ),
               ),
               child: Row(
                 children: [
                   const Icon(Icons.inventory, color: Colors.white, size: 20),
                   const SizedBox(width: 12),
-                  Text(title, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                   const Spacer(),
                   IconButton(
                     onPressed: () => Get.back(),
                     icon: const Icon(Icons.close, color: Colors.white70),
-                  )
+                  ),
                 ],
               ),
             ),
@@ -109,7 +128,10 @@ void _showPOSDialog({
                 children: [
                   TextButton(
                     onPressed: () => Get.back(),
-                    child: Text('Cancel', style: TextStyle(color: Colors.grey[600])),
+                    child: Text(
+                      'Cancel',
+                      style: TextStyle(color: Colors.grey[600]),
+                    ),
                   ),
                   const SizedBox(width: 12),
                   ElevatedButton(
@@ -117,10 +139,18 @@ void _showPOSDialog({
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.blue[800],
                       foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 12,
+                      ),
                     ),
-                    child: const Text('Save Changes', style: TextStyle(fontWeight: FontWeight.bold)),
+                    child: const Text(
+                      'Save Changes',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
                   ),
                 ],
               ),
@@ -133,7 +163,7 @@ void _showPOSDialog({
 }
 
 /// ===============================
-/// EDIT PRODUCT DIALOG
+/// EDIT PRODUCT DIALOG (Updated for 18 Fields)
 /// ===============================
 void showEditProductDialog(Product p, ProductController controller) {
   final nameC = TextEditingController(text: p.name);
@@ -151,6 +181,11 @@ void showEditProductDialog(Product p, ProductController controller) {
   final currencyC = TextEditingController(text: p.currency.toString());
   final stockC = TextEditingController(text: p.stockQty.toString());
 
+  // New Tracking Controllers
+  final avgPriceC = TextEditingController(text: p.avgPurchasePrice.toString());
+  final seaStockC = TextEditingController(text: p.seaStockQty.toString());
+  final airStockC = TextEditingController(text: p.airStockQty.toString());
+
   _showPOSDialog(
     title: 'Update Product',
     onSave: () {
@@ -165,10 +200,13 @@ void showEditProductDialog(Product p, ProductController controller) {
         'sea': double.tryParse(seaC.text),
         'agent': double.tryParse(agentC.text),
         'wholesale': double.tryParse(wholesaleC.text),
-        'shipmentTax': double.tryParse(shipmentTaxC.text),
-        'shipmentNo': int.tryParse(shipmentNoC.text),
+        'shipmenttax': double.tryParse(shipmentTaxC.text), // Lowercase key
+        'shipmentno': int.tryParse(shipmentNoC.text), // Lowercase key
         'currency': double.tryParse(currencyC.text),
         'stock_qty': int.tryParse(stockC.text),
+        'avg_purchase_price': double.tryParse(avgPriceC.text),
+        'sea_stock_qty': int.tryParse(seaStockC.text),
+        'air_stock_qty': int.tryParse(airStockC.text),
       });
       Get.back();
     },
@@ -178,141 +216,377 @@ void showEditProductDialog(Product p, ProductController controller) {
       _buildField(categoryC, 'Category', Icons.category),
       Row(
         children: [
-          Expanded(child: _buildField(brandC, 'Brand', Icons.branding_watermark)),
+          Expanded(
+            child: _buildField(brandC, 'Brand', Icons.branding_watermark),
+          ),
           const SizedBox(width: 10),
           Expanded(child: _buildField(modelC, 'Model', Icons.label)),
         ],
       ),
-      _sectionHeader('Pricing & Costs'),
+      _sectionHeader('Costs & Logic (Import)'),
       Row(
         children: [
-          Expanded(child: _buildField(yuanC, 'Yuan Price (¥)', Icons.money, type: TextInputType.number)),
+          Expanded(
+            child: _buildField(
+              yuanC,
+              'Yuan Price (¥)',
+              Icons.money,
+              type: TextInputType.number,
+            ),
+          ),
           const SizedBox(width: 10),
-          Expanded(child: _buildField(weightC, 'Weight (KG)', Icons.monitor_weight, type: TextInputType.number)),
+          Expanded(
+            child: _buildField(
+              weightC,
+              'Weight (KG)',
+              Icons.monitor_weight,
+              type: TextInputType.number,
+            ),
+          ),
         ],
       ),
       Row(
         children: [
-          Expanded(child: _buildField(agentC, 'Agent Price', Icons.person, type: TextInputType.number)),
+          Expanded(
+            child: _buildField(
+              shipmentTaxC,
+              'Shipment Tax',
+              Icons.receipt_long,
+              type: TextInputType.number,
+            ),
+          ),
           const SizedBox(width: 10),
-          Expanded(child: _buildField(wholesaleC, 'Wholesale', Icons.groups, type: TextInputType.number)),
+          Expanded(
+            child: _buildField(
+              currencyC,
+              'Exchange Rate',
+              Icons.currency_exchange,
+              type: TextInputType.number,
+            ),
+          ),
         ],
       ),
-      _sectionHeader('Inventory & Logistics'),
+      _sectionHeader('Pricing (Sales)'),
       Row(
         children: [
-          Expanded(child: _buildField(stockC, 'Current Stock', Icons.inventory_2, type: TextInputType.number)),
+          Expanded(
+            child: _buildField(
+              agentC,
+              'Agent Price',
+              Icons.person,
+              type: TextInputType.number,
+            ),
+          ),
           const SizedBox(width: 10),
-          Expanded(child: _buildField(shipmentNoC, 'Shipment No', Icons.local_shipping, type: TextInputType.number)),
+          Expanded(
+            child: _buildField(
+              wholesaleC,
+              'Wholesale',
+              Icons.groups,
+              type: TextInputType.number,
+            ),
+          ),
         ],
+      ),
+      _sectionHeader('Stock & Cost Tracking'),
+      _buildField(
+        avgPriceC,
+        'Average Purchase Rate (BDT)',
+        Icons.payments,
+        type: TextInputType.number,
       ),
       Row(
         children: [
-          Expanded(child: _buildField(airC, 'Air Price', Icons.airplanemode_active, type: TextInputType.number)),
+          Expanded(
+            child: _buildField(
+              stockC,
+              'Total Stock',
+              Icons.inventory_2,
+              type: TextInputType.number,
+            ),
+          ),
           const SizedBox(width: 10),
-          Expanded(child: _buildField(seaC, 'Sea Price', Icons.directions_boat, type: TextInputType.number)),
+          Expanded(
+            child: _buildField(
+              seaStockC,
+              'Sea Stock',
+              Icons.directions_boat,
+              type: TextInputType.number,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _buildField(
+              airStockC,
+              'Air Stock',
+              Icons.airplanemode_active,
+              type: TextInputType.number,
+            ),
+          ),
+        ],
+      ),
+      _sectionHeader('Reference Data (Do not edit usually)'),
+      Row(
+        children: [
+          Expanded(
+            child: _buildField(
+              airC,
+              'Calculated Air',
+              Icons.air,
+              type: TextInputType.number,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _buildField(
+              seaC,
+              'Calculated Sea',
+              Icons.waves,
+              type: TextInputType.number,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _buildField(
+              shipmentNoC,
+              'Shipment No',
+              Icons.numbers,
+              type: TextInputType.number,
+            ),
+          ),
         ],
       ),
     ],
   );
 }
 
+/// ===============================
+/// CREATE PRODUCT DIALOG (Updated for 18 Fields)
+/// ===============================
 void showCreateProductDialog(ProductController controller) {
-  // 1. Initialize all Controllers
+  // --- 1. Basic Information ---
   final nameC = TextEditingController();
-  final categoryC = TextEditingController();
+  final categoryC = TextEditingController(); // ADDED BACK
   final brandC = TextEditingController();
   final modelC = TextEditingController();
- 
-  final weightC = TextEditingController();
-  final yuanC = TextEditingController();
-  final airC = TextEditingController();
-  final seaC = TextEditingController();
- 
+
+  // --- 2. Calculation Inputs ---
+  final yuanC = TextEditingController(text: '0');
+  final weightC = TextEditingController(text: '0');
+  final currencyC = TextEditingController(
+    text: controller.currentCurrency.value.toString(),
+  );
+  final seaTaxC = TextEditingController(text: '0'); // Maps to shipmenttax
+  final airTaxC = TextEditingController(text: '700'); // UI only for calculation
+
+  // --- 3. Result Fields (Calculated) ---
+  final airResultC = TextEditingController(text: '0');
+  final seaResultC = TextEditingController(text: '0');
+
+  // --- 4. Pricing & Inventory ---
   final agentC = TextEditingController();
   final wholesaleC = TextEditingController();
- 
-  final shipmentTaxC = TextEditingController();
-  final shipmentNoC = TextEditingController();
-  final currencyC = TextEditingController(text: controller.currentCurrency.value.toString());
+  final shipmentNoC = TextEditingController(text: '0');
   final stockC = TextEditingController(text: '0');
+
+  // Logic to calculate both prices based on their specific taxes
+  void calculatePrices() {
+    double yuan = double.tryParse(yuanC.text) ?? 0.0;
+    double weight = double.tryParse(weightC.text) ?? 0.0;
+    double curr =
+        double.tryParse(currencyC.text) ?? controller.currentCurrency.value;
+    double seaTax = double.tryParse(seaTaxC.text) ?? 0.0;
+    double airTax = double.tryParse(airTaxC.text) ?? 0.0;
+
+    if (yuan > 0) {
+      double calculatedSea = (yuan * curr) + (weight * seaTax);
+      double calculatedAir = (yuan * curr) + (weight * airTax);
+
+      seaResultC.text = calculatedSea.toStringAsFixed(2);
+      airResultC.text = calculatedAir.toStringAsFixed(2);
+    } else {
+      seaResultC.text = '0';
+      airResultC.text = '0';
+    }
+  }
+
+  // Listeners
+  yuanC.addListener(calculatePrices);
+  weightC.addListener(calculatePrices);
+  currencyC.addListener(calculatePrices);
+  seaTaxC.addListener(calculatePrices);
+  airTaxC.addListener(calculatePrices);
 
   _showPOSDialog(
     title: 'New Product Registration',
     onSave: () {
-      // 2. Map all values to the controller
+      // PROPER MAPPING OF ALL 18 FIELDS (ID is 0 for new)
       controller.createProduct({
         'name': nameC.text,
-        'category': categoryC.text,
-        'brand': brandC.text,
-        'model': modelC.text,
-        'weight': double.tryParse(weightC.text) ?? 0.0,
-        'yuan': double.tryParse(yuanC.text) ?? 0.0,
-        'air': double.tryParse(airC.text) ?? 0.0,
-        'sea': double.tryParse(seaC.text) ?? 0.0,
-        'agent': double.tryParse(agentC.text) ?? 0.0,
-        'wholesale': double.tryParse(wholesaleC.text) ?? 0.0,
-        'shipmentTax': double.tryParse(shipmentTaxC.text) ?? 0.0,
-        'shipmentNo': int.tryParse(shipmentNoC.text) ?? 0,
-        'currency': double.tryParse(currencyC.text) ?? controller.currentCurrency.value,
-        'stock_qty': int.tryParse(stockC.text) ?? 0,
+        'category': categoryC.text, // 1
+        'brand': brandC.text, // 2
+        'model': modelC.text, // 3
+        'weight': double.tryParse(weightC.text) ?? 0.0, // 4
+        'yuan': double.tryParse(yuanC.text) ?? 0.0, // 5
+        'air': double.tryParse(airResultC.text) ?? 0.0, // 6 (Calculated)
+        'sea': double.tryParse(seaResultC.text) ?? 0.0, // 7 (Calculated)
+        'agent': double.tryParse(agentC.text) ?? 0.0, // 8
+        'wholesale': double.tryParse(wholesaleC.text) ?? 0.0, // 9
+        'shipmenttax': double.tryParse(seaTaxC.text) ?? 0.0, // 10
+        'shipmentno': int.tryParse(shipmentNoC.text) ?? 0, // 11
+        'currency':
+            double.tryParse(currencyC.text) ??
+            controller.currentCurrency.value, // 12
+        'stock_qty': int.tryParse(stockC.text) ?? 0, // 13
+        'avg_purchase_price': double.tryParse(seaResultC.text) ?? 0.0, // 14
+        'sea_stock_qty': int.tryParse(stockC.text) ?? 0, // 15
+        'air_stock_qty': 0, // 16 (Starts at 0 for new items)
+        // Fields 17 & 18 are "name" and "id" handled by nameC.text and DB auto-gen
       });
       Get.back();
     },
     children: [
-      // --- SECTION 1 ---
       _sectionHeader('Basic Information'),
       _buildField(nameC, 'Product Name', Icons.shopping_bag),
       _buildField(categoryC, 'Category', Icons.category),
       Row(
         children: [
-          Expanded(child: _buildField(brandC, 'Brand', Icons.branding_watermark)),
+          Expanded(
+            child: _buildField(brandC, 'Brand', Icons.branding_watermark),
+          ),
           const SizedBox(width: 10),
           Expanded(child: _buildField(modelC, 'Model', Icons.label)),
         ],
       ),
 
-      // --- SECTION 2 ---
-      _sectionHeader('Costs & Pricing'),
+      _sectionHeader('Calculation Inputs'),
       Row(
         children: [
-          Expanded(child: _buildField(yuanC, 'Yuan Price (¥)', Icons.money, type: TextInputType.number)),
+          Expanded(
+            child: _buildField(
+              yuanC,
+              'Yuan Price (¥)',
+              Icons.money,
+              type: TextInputType.number,
+            ),
+          ),
           const SizedBox(width: 10),
-          Expanded(child: _buildField(weightC, 'Weight (KG)', Icons.monitor_weight, type: TextInputType.number)),
-        ],
-      ),
-      Row(
-        children: [
-          Expanded(child: _buildField(agentC, 'Agent Price', Icons.person, type: TextInputType.number)),
+          Expanded(
+            child: _buildField(
+              weightC,
+              'Weight (KG)',
+              Icons.monitor_weight,
+              type: TextInputType.number,
+            ),
+          ),
           const SizedBox(width: 10),
-          Expanded(child: _buildField(wholesaleC, 'Wholesale Price', Icons.groups, type: TextInputType.number)),
+          Expanded(
+            child: _buildField(
+              currencyC,
+              'Rate',
+              Icons.currency_exchange,
+              type: TextInputType.number,
+            ),
+          ),
         ],
       ),
 
-      // --- SECTION 3 (The missing part) ---
-      _sectionHeader('Shipping & Logistics'),
       Row(
         children: [
-          Expanded(child: _buildField(airC, 'Air Price (Final)', Icons.airplanemode_active, type: TextInputType.number)),
+          Expanded(
+            child: _buildField(
+              seaTaxC,
+              'Sea Tax /KG',
+              Icons.waves,
+              type: TextInputType.number,
+            ),
+          ),
           const SizedBox(width: 10),
-          Expanded(child: _buildField(seaC, 'Sea Price (Final)', Icons.directions_boat, type: TextInputType.number)),
-        ],
-      ),
-      Row(
-        children: [
-          Expanded(child: _buildField(shipmentTaxC, 'Shipment Tax', Icons.receipt_long, type: TextInputType.number)),
-          const SizedBox(width: 10),
-          Expanded(child: _buildField(shipmentNoC, 'Shipment No', Icons.local_shipping, type: TextInputType.number)),
+          Expanded(
+            child: _buildField(
+              airTaxC,
+              'Air Tax /KG',
+              Icons.airplanemode_active,
+              type: TextInputType.number,
+            ),
+          ),
         ],
       ),
 
-      // --- SECTION 4 ---
-      _sectionHeader('System & Inventory'),
+      _sectionHeader('Auto-Calculated Costs (Landing)'),
       Row(
         children: [
-          Expanded(child: _buildField(currencyC, 'Exchange Rate', Icons.currency_exchange, type: TextInputType.number)),
+          Expanded(
+            child: TextField(
+              controller: seaResultC,
+              readOnly: true,
+              decoration: InputDecoration(
+                labelText: "Sea Price (BDT)",
+                prefixIcon: Icon(Icons.calculate, color: Colors.blue),
+                filled: true,
+                fillColor: Colors.blue.withOpacity(0.05),
+              ),
+            ),
+          ),
           const SizedBox(width: 10),
-          Expanded(child: _buildField(stockC, 'Initial Stock', Icons.inventory_2, type: TextInputType.number)),
+          Expanded(
+            child: TextField(
+              controller: airResultC,
+              readOnly: true,
+              decoration: InputDecoration(
+                labelText: "Air Price (BDT)",
+                prefixIcon: Icon(Icons.calculate, color: Colors.orange),
+                filled: true,
+                fillColor: Colors.orange.withOpacity(0.05),
+              ),
+            ),
+          ),
+        ],
+      ),
+
+      _sectionHeader('Sales Pricing'),
+      Row(
+        children: [
+          Expanded(
+            child: _buildField(
+              agentC,
+              'Agent Price',
+              Icons.person,
+              type: TextInputType.number,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _buildField(
+              wholesaleC,
+              'Wholesale Price',
+              Icons.groups,
+              type: TextInputType.number,
+            ),
+          ),
+        ],
+      ),
+
+      _sectionHeader('Initial Inventory'),
+      Row(
+        children: [
+          Expanded(
+            child: _buildField(
+              stockC,
+              'Initial Stock',
+              Icons.inventory_2,
+              type: TextInputType.number,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _buildField(
+              shipmentNoC,
+              'Shipment No',
+              Icons.numbers,
+              type: TextInputType.number,
+            ),
+          ),
         ],
       ),
     ],
@@ -333,7 +607,9 @@ void showDeleteConfirmDialog(int productId, ProductController controller) {
           Text('Confirm Delete'),
         ],
       ),
-      content: const Text('This action cannot be undone. Are you sure you want to delete this product?'),
+      content: const Text(
+        'This action cannot be undone. Are you sure you want to delete this product?',
+      ),
       actions: [
         TextButton(onPressed: () => Get.back(), child: const Text('Cancel')),
         ElevatedButton(
@@ -341,7 +617,10 @@ void showDeleteConfirmDialog(int productId, ProductController controller) {
             controller.deleteProduct(productId);
             Get.back();
           },
-          style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.red,
+            foregroundColor: Colors.white,
+          ),
           child: const Text('Delete Product'),
         ),
       ],

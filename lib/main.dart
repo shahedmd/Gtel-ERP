@@ -16,7 +16,6 @@ import 'login.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize Firebase with options (Crucial for Web)
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   // 1. Inject Auth Controller first to manage session
