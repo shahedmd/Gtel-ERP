@@ -3,8 +3,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-
 import 'controller.dart';
 
 class CashDrawerPage extends StatelessWidget {
@@ -47,8 +45,6 @@ class CashDrawerPage extends StatelessWidget {
                     _buildMainSummary(controller),
                     const SizedBox(height: 25),
                     _buildPaymentGrid(controller),
-                    const SizedBox(height: 30),
-                    _buildRecentTransactions(controller),
                   ],
                 ),
               );
@@ -220,97 +216,5 @@ class CashDrawerPage extends StatelessWidget {
     );
   }
 
-  // --- DETAILED LIST ---
-  Widget _buildRecentTransactions(CashDrawerController controller) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          "MONTHLY TRANSACTION LOG",
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-        ),
-        const SizedBox(height: 15),
-        ListView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: controller.filteredSales.length,
-          itemBuilder: (context, index) {
-            final sale = controller.filteredSales[index];
-            final method =
-                (sale['paymentMethod']?['type'] ?? 'Cash')
-                    .toString()
-                    .toUpperCase();
-            final timestamp = sale['timestamp'] as Timestamp?;
 
-            return Container(
-              margin: const EdgeInsets.only(bottom: 12),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: ListTile(
-                leading: _getIconForMethod(method),
-                title: Text(
-                  sale['name'] ?? 'Unknown Customer',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                  ),
-                ),
-                subtitle: Text(
-                  "${DateFormat('dd MMM | hh:mm a').format(timestamp?.toDate() ?? DateTime.now())} • ID: ${sale['transactionId']}",
-                ),
-                trailing: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      "৳${(sale['paid'] ?? 0.0).toStringAsFixed(2)}",
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w900,
-                        fontSize: 15,
-                        color: Colors.black87,
-                      ),
-                    ),
-                    Text(
-                      method,
-                      style: const TextStyle(
-                        fontSize: 9,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.blueGrey,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        ),
-      ],
-    );
-  }
-
-  Widget _getIconForMethod(String method) {
-    Color color = Colors.grey;
-    IconData icon = Icons.help_outline;
-
-    if (method.contains("CASH")) {
-      color = Colors.green;
-      icon = Icons.money;
-    } else if (method.contains("BKASH")) {
-      color = Colors.pink;
-      icon = Icons.phone_android;
-    } else if (method.contains("NAGAD")) {
-      color = Colors.orange;
-      icon = Icons.wallet;
-    } else if (method.contains("BANK")) {
-      color = Colors.blue;
-      icon = Icons.account_balance;
-    }
-
-    return CircleAvatar(
-      backgroundColor: color.withOpacity(0.1),
-      child: Icon(icon, color: color, size: 20),
-    );
-  }
 }
