@@ -1,120 +1,17 @@
 // ignore_for_file: deprecated_member_use
 
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
-import 'package:fl_chart/fl_chart.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import 'Expenses/dailycontroller.dart';
-import 'Sales/controller.dart';
-// Ensure these paths are exactly where your files are located
 
-class OverviewController extends GetxController {
-  // Use Get.find to get the already existing controllers
-  final DailySalesController salesCtrl = Get.find<DailySalesController>();
-  final DailyExpensesController expenseCtrl =
-      Get.find<DailyExpensesController>();
+import 'overviewcontroller.dart';
 
-  var selectedDate = DateTime.now().obs;
-
-  // Observables for the UI
-  RxDouble grossSales = 0.0.obs;
-  RxDouble totalCollected = 0.0.obs;
-  RxDouble totalExpenses = 0.0.obs;
-  RxDouble netProfiit = 0.0.obs;
-  RxDouble outstandingDebt = 0.0.obs;
-
-  RxMap<String, double> paymentMethods =
-      <String, double>{
-        "cash": 0.0,
-        "bkash": 0.0,
-        "nagad": 0.0,
-        "bank": 0.0,
-      }.obs;
-
-  @override
-  void onInit() {
-    super.onInit();
-
-    // 1. Sync the dates immediately on load
-    _syncDateAndFetch();
-
-    // 2. Setup Workers: Listen to the AGGREGATE values from your sub-controllers.
-    // This ensures that as soon as Firebase updates totalSales, the Overview updates.
-    ever(salesCtrl.salesList, (_) => _recalculate());
-    ever(expenseCtrl.dailyList, (_) => _recalculate());
-
-    // Also recalculate if the totals in sub-controllers change
-    ever(salesCtrl.totalSales, (_) => _recalculate());
-    ever(expenseCtrl.dailyTotal, (_) => _recalculate());
-
-    // 3. Initial Recalculate
-    _recalculate();
-  }
-
-  void _syncDateAndFetch() {
-    salesCtrl.changeDate(selectedDate.value);
-    expenseCtrl.changeDate(selectedDate.value);
-  }
-
-  void _recalculate() {
-    // We calculate based on the current lists in the controllers
-    // This makes it 100% dynamic as the Firebase stream updates the lists
-
-    // 1. Fetch Sales Totals
-    grossSales.value = salesCtrl.totalSales.value;
-    totalCollected.value = salesCtrl.paidAmount.value;
-    outstandingDebt.value = salesCtrl.debtorPending.value;
-
-    // 2. Fetch Expense Totals
-    totalExpenses.value = expenseCtrl.dailyTotal.value.toDouble();
-
-    // 3. Net Profit = Total Gross Sales - Total Expenses
-    netProfiit.value = totalCollected.value - totalExpenses.value;
-
-    // 4. Calculate Payment Method Breakdown dynamically from the list
-    double cash = 0, bkash = 0, nagad = 0, bank = 0;
-
-    for (var sale in salesCtrl.salesList) {
-      // paymentMethod?['type'] logic based on your SaleModel
-      final method =
-          sale.paymentMethod?['type']?.toString().toLowerCase().trim() ?? "";
-      final paid = sale.paid;
-
-      if (method == "cash") {
-        cash += paid;
-      }
-      if (method == "bkash") {
-        bkash += paid;
-      }
-      if (method == "nagad") {
-        nagad += paid;
-      }
-      if (method == "bank") {
-        bank += paid;
-      }
-    }
-
-    paymentMethods["cash"] = cash;
-    paymentMethods["bkash"] = bkash;
-    paymentMethods["nagad"] = nagad;
-    paymentMethods["bank"] = bank;
-
-    paymentMethods.refresh();
-  }
-
-  Future<void> selectDate(DateTime date) async {
-    selectedDate.value = date;
-    _syncDateAndFetch(); // This triggers the sub-controllers to hit Firebase for the new date
-    _recalculate();
-  }
-}
 
 class DailyOverviewPage extends StatelessWidget {
   DailyOverviewPage({super.key});
 
-  // Use Get.put if this is the first time the controller is used,
-  // but ensure Sales and Expense controllers are already in memory.
   final ctrl = Get.put(OverviewController());
 
   // Professional Color Palette
@@ -136,7 +33,6 @@ class DailyOverviewPage extends StatelessWidget {
       backgroundColor: scaffoldBg,
       appBar: _buildAppBar(context),
       body: Obx(() {
-        // If the sub-controllers are loading, show a progress bar
         if (ctrl.salesCtrl.isLoading.value ||
             ctrl.expenseCtrl.isLoading.value) {
           return const Center(
@@ -151,13 +47,27 @@ class DailyOverviewPage extends StatelessWidget {
             children: [
               _buildTopStatsGrid(),
               const SizedBox(height: 24),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(flex: 3, child: _buildMainPerformanceCard()),
-                  const SizedBox(width: 24),
-                  Expanded(flex: 2, child: _buildPaymentBreakdownCard()),
-                ],
+              // Responsive Layout check (Column on mobile, Row on desktop)
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  if (constraints.maxWidth < 900) {
+                    return Column(
+                      children: [
+                        _buildMainPerformanceCard(),
+                        const SizedBox(height: 24),
+                        _buildPaymentBreakdownCard(),
+                      ],
+                    );
+                  }
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(flex: 3, child: _buildMainPerformanceCard()),
+                      const SizedBox(width: 24),
+                      Expanded(flex: 2, child: _buildPaymentBreakdownCard()),
+                    ],
+                  );
+                },
               ),
             ],
           ),
@@ -219,6 +129,7 @@ class DailyOverviewPage extends StatelessWidget {
       physics: const NeverScrollableScrollPhysics(),
       crossAxisCount: 4,
       crossAxisSpacing: 20,
+      mainAxisSpacing: 10,
       childAspectRatio: 2.2,
       children: [
         _statCard(
@@ -336,7 +247,7 @@ class DailyOverviewPage extends StatelessWidget {
             FontAwesomeIcons.receipt,
           ),
           _performanceTile(
-            "Outstanding Debt",
+            "Outstanding Debt (Due)",
             "৳${ctrl.outstandingDebt.value.toStringAsFixed(0)}",
             FontAwesomeIcons.clockRotateLeft,
           ),
@@ -424,13 +335,26 @@ class DailyOverviewPage extends StatelessWidget {
           const SizedBox(height: 30),
           SizedBox(
             height: 200,
-            child: PieChart(
-              PieChartData(
-                sectionsSpace: 4,
-                centerSpaceRadius: 50,
-                sections: _getSections(),
-              ),
-            ),
+            child: Obx(() {
+              // Verify if we have data, otherwise show empty state
+              double total = ctrl.paymentMethods.values.reduce((a, b) => a + b);
+              if (total <= 0) {
+                return const Center(
+                  child: Text(
+                    "No Data",
+                    style: TextStyle(color: Colors.white54),
+                  ),
+                );
+              }
+              return PieChart(
+                PieChartData(
+                  sectionsSpace: 2,
+                  centerSpaceRadius: 40,
+                  sections: _getSections(),
+                  borderData: FlBorderData(show: false),
+                ),
+              );
+            }),
           ),
           const SizedBox(height: 30),
           _legendItem("Cash", ctrl.paymentMethods['cash']!, colorCash),
@@ -451,10 +375,20 @@ class DailyOverviewPage extends StatelessWidget {
     };
 
     return ctrl.paymentMethods.entries.map((entry) {
+      double val = entry.value;
+      // Chart crashes if value is 0, so we hide it or give minimal value
+      if (val <= 0) {
+        return PieChartSectionData(
+          value: 0,
+          radius: 0,
+          showTitle: false,
+          color: Colors.transparent,
+        );
+      }
       return PieChartSectionData(
-        value: entry.value > 0 ? entry.value : 0.001,
+        value: val,
         color: typeColors[entry.key] ?? Colors.grey,
-        radius: 18,
+        radius: 25,
         showTitle: false,
       );
     }).toList();

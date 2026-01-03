@@ -591,7 +591,6 @@ class ProductScreen extends StatelessWidget {
                 seaQty: int.tryParse(seaQtyC.text) ?? 0,
                 airQty: int.tryParse(airQtyC.text) ?? 0,
                 localQty: int.tryParse(localQtyC.text) ?? 0,
-                localPrice: double.tryParse(localPriceC.text) ?? 0.0,
               );
               Get.back();
             },

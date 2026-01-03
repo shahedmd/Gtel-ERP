@@ -13,9 +13,15 @@ class SaleModel {
   final String source;
 
   SaleModel({
-    required this.id, required this.name, required this.amount,
-    required this.paid, required this.customerType, required this.timestamp,
-    this.paymentMethod, required this.appliedDebits, this.transactionId,
+    required this.id,
+    required this.name,
+    required this.amount,
+    required this.paid,
+    required this.customerType,
+    required this.timestamp,
+    this.paymentMethod,
+    required this.appliedDebits,
+    this.transactionId,
     required this.source,
   });
 

@@ -5,7 +5,6 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
-
 import 'model.dart';
 
 class DailySalesController extends GetxController {
@@ -26,7 +25,6 @@ class DailySalesController extends GetxController {
   void onInit() {
     super.onInit();
     loadDailySales();
-    // Re-fetch automatically if date changes
     ever(selectedDate, (_) => loadDailySales());
   }
 
@@ -35,7 +33,7 @@ class DailySalesController extends GetxController {
     selectedDate.value = date;
   }
 
-  // 2. LOAD SALES (Upgraded with Model and Sorting)
+  // 2. LOAD SALES
   Future<void> loadDailySales() async {
     isLoading.value = true;
     try {
@@ -59,9 +57,7 @@ class DailySalesController extends GetxController {
 
       salesList.value =
           snap.docs.map((doc) {
-            return SaleModel.fromFirestore(
-              doc,
-            ); // Use your fromFirestore or fromMap constructor
+            return SaleModel.fromFirestore(doc);
           }).toList();
       _computeTotals();
     } finally {
@@ -69,7 +65,7 @@ class DailySalesController extends GetxController {
     }
   }
 
-  // 3. REVERSE DEBTOR PAYMENT (Atomic Batch - Safe for 2025)
+  // 3. REVERSE DEBTOR PAYMENT
   Future<void> reverseDebtorPayment(
     String debtorName,
     double amount,
@@ -79,12 +75,9 @@ class DailySalesController extends GetxController {
       final salesSnap =
           await _db
               .collection('daily_sales')
-              .where(
-                'name',
-                isEqualTo: debtorName,
-              ) // Matches model field 'name'
+              .where('name', isEqualTo: debtorName)
               .where('customerType', isEqualTo: 'debtor')
-              .orderBy('timestamp', descending: true) // Reverse newest first
+              .orderBy('timestamp', descending: true)
               .get();
 
       double remainingToReverse = amount;
@@ -115,7 +108,7 @@ class DailySalesController extends GetxController {
     }
   }
 
-  // 4. COMPUTE TOTALS (Logic Preserved & Corrected)
+  // 4. COMPUTE TOTALS
   void _computeTotals() {
     double total = 0.0;
     double paid = 0.0;
@@ -134,7 +127,7 @@ class DailySalesController extends GetxController {
     debtorPending.value = pending;
   }
 
-  // 5. ADD SALE (Includes all original parameters)
+  // 5. ADD SALE
   Future<void> addSale({
     required String name,
     required double amount,
@@ -169,7 +162,7 @@ class DailySalesController extends GetxController {
     }
   }
 
-  // 6. APPLY DEBTOR PAYMENT (Upgraded with FIFO logic and Batch)
+  // 6. APPLY DEBTOR PAYMENT
   Future<void> applyDebtorPayment(
     String debtorName,
     double paymentAmount,
@@ -179,32 +172,24 @@ class DailySalesController extends GetxController {
   }) async {
     try {
       double remaining = paymentAmount;
-
-      // 1. Calculate the 24-hour window for the specific date provided
       final DateTime startOfDay = DateTime(date.year, date.month, date.day);
       final DateTime endOfDay = startOfDay.add(const Duration(days: 1));
 
-      // 2. Query sales ONLY for this specific debtor AND this specific day
       final snap =
           await _db
               .collection("daily_sales")
               .where("customerType", isEqualTo: "debtor")
               .where("name", isEqualTo: debtorName)
-              // --- FIX: Strict Date Filtering ---
               .where(
                 "timestamp",
                 isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay),
               )
               .where("timestamp", isLessThan: Timestamp.fromDate(endOfDay))
-              .orderBy(
-                "timestamp",
-                descending: false,
-              ) // Pay earliest bill of THIS day first
+              .orderBy("timestamp", descending: false)
               .get();
 
       final batch = _db.batch();
 
-      // 3. Apply payment to the bills found within this specific day
       for (var doc in snap.docs) {
         if (remaining <= 0) break;
 
@@ -231,9 +216,6 @@ class DailySalesController extends GetxController {
         }
       }
 
-      // 4. Handle Extra Payment (Advance / Overpayment for today)
-      // If the user pays more than what they owe TODAY, we record it as a separate
-      // fully-paid entry for today. It will NOT touch previous days.
       if (remaining > 0) {
         await addSale(
           name: debtorName,
@@ -254,7 +236,7 @@ class DailySalesController extends GetxController {
       }
 
       await batch.commit();
-      await loadDailySales(); // Refresh the UI
+      await loadDailySales();
     } catch (e) {
       Get.snackbar("Payment Error", "Could not process daily payment.");
     }
@@ -268,13 +250,30 @@ class DailySalesController extends GetxController {
     } catch (e) {}
   }
 
-  // 8. FORMAT PAYMENT METHOD (Utility Method)
+  // 8. FORMAT PAYMENT METHOD (UPDATED FOR MULTI & BANK)
   String formatPaymentMethod(dynamic pm) {
-    if (pm == null || pm == "") return "CREDIT";
+    if (pm == null || pm == "") return "CREDIT/DUE";
     if (pm is! Map) return pm.toString().toUpperCase();
 
     String type = (pm["type"] ?? "CASH").toString().toLowerCase();
 
+    // CASE 1: MULTI PAYMENT (From your new JSON)
+    if (type == "multi") {
+      List<String> parts = [];
+      double cash = double.tryParse(pm['cash'].toString()) ?? 0;
+      double bkash = double.tryParse(pm['bkash'].toString()) ?? 0;
+      double nagad = double.tryParse(pm['nagad'].toString()) ?? 0;
+      double bank = double.tryParse(pm['bank'].toString()) ?? 0;
+
+      if (cash > 0) parts.add("Cash: ${cash.toStringAsFixed(0)}");
+      if (bkash > 0) parts.add("Bkash: ${bkash.toStringAsFixed(0)}");
+      if (nagad > 0) parts.add("Nagad: ${nagad.toStringAsFixed(0)}");
+      if (bank > 0) parts.add("Bank: ${bank.toStringAsFixed(0)}");
+
+      return parts.isEmpty ? "MULTI-PAY" : parts.join("\n");
+    }
+
+    // CASE 2: SINGLE METHODS (Old/Debtor Structure)
     switch (type) {
       case "cash":
         return "CASH";
@@ -282,13 +281,17 @@ class DailySalesController extends GetxController {
       case "bkash":
       case "nagad":
         String number = (pm["number"] ?? pm["details"] ?? "").toString();
-        return "${type.toUpperCase()}: $number";
+        // Return only type if number empty
+        return number.isEmpty
+            ? type.toUpperCase()
+            : "${type.toUpperCase()}: $number";
 
       case "bank":
-        String bName = (pm["bankName"] ?? "BANK").toString().toUpperCase();
+        String bName = (pm["bankName"] ?? "BANK").toString();
         String acc = (pm["accountNumber"] ?? "").toString();
-        // Returns format: DBBL (5746548546)
-        return "$bName ($acc)";
+        // Format: BRAC BANK (8373...)
+        if (acc.isNotEmpty) return "$bName\n($acc)";
+        return bName;
 
       default:
         return type.toUpperCase();
@@ -328,7 +331,6 @@ class DailySalesController extends GetxController {
             ),
         build:
             (context) => [
-              // SUMMARY BOX
               pw.Container(
                 padding: const pw.EdgeInsets.all(15),
                 decoration: pw.BoxDecoration(
@@ -355,12 +357,10 @@ class DailySalesController extends GetxController {
                 ),
               ),
               pw.SizedBox(height: 20),
-
-              // SALES TABLE
               pw.Table.fromTextArray(
                 headers: [
                   "Customer",
-                  "Type",
+                  "Inv ID",
                   "Method",
                   "Amount",
                   "Paid",
@@ -387,8 +387,10 @@ class DailySalesController extends GetxController {
                         .map(
                           (s) => [
                             s.name,
-                            s.customerType.toUpperCase(),
-                            formatPaymentMethod(s.paymentMethod),
+                            s.transactionId ?? "-",
+                            formatPaymentMethod(
+                              s.paymentMethod,
+                            ).replaceAll("\n", ", "), // Flatten for table
                             s.amount.toStringAsFixed(2),
                             s.paid.toStringAsFixed(2),
                             s.pending.toStringAsFixed(2),

@@ -7,10 +7,8 @@ import '../Sales/controller.dart';
 import 'model.dart';
 
 class DailySalesPage extends StatelessWidget {
-  // Use Get.find since this should be initialized in your MainLayout or Bindings
   final DailySalesController ctrl = Get.put(DailySalesController());
 
-  // Professional Theme Colors (Sync with your ERP Sidebar)
   static const Color darkSlate = Color(0xFF111827);
   static const Color activeAccent = Color(0xFF3B82F6);
   static const Color bgGrey = Color(0xFFF9FAFB);
@@ -79,7 +77,7 @@ class DailySalesPage extends StatelessWidget {
             child: TextField(
               onChanged: (v) => ctrl.filterQuery.value = v,
               decoration: const InputDecoration(
-                hintText: "Search sales...",
+                hintText: "Search Name / Invoice ID...",
                 prefixIcon: Icon(Icons.search, size: 20),
                 border: InputBorder.none,
                 contentPadding: EdgeInsets.symmetric(vertical: 12),
@@ -142,7 +140,6 @@ class DailySalesPage extends StatelessWidget {
       child: Obx(
         () => Row(
           children: [
-            // 1. Gross Sales
             Expanded(
               child: _metricCard(
                 "Gross Sales",
@@ -152,30 +149,24 @@ class DailySalesPage extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 16),
-
-            // 2. Total Collected (Maps to paidAmount)
             Expanded(
               child: _metricCard(
                 "Total Collected",
-                ctrl.paidAmount.value, // Corrected variable name
+                ctrl.paidAmount.value,
                 FontAwesomeIcons.handHoldingDollar,
                 Colors.green,
               ),
             ),
             const SizedBox(width: 16),
-
-            // 3. Outstanding Debt (Maps to debtorPending)
             Expanded(
               child: _metricCard(
                 "Outstanding Debt",
-                ctrl.debtorPending.value, // Corrected variable name
+                ctrl.debtorPending.value,
                 FontAwesomeIcons.circleExclamation,
                 Colors.redAccent,
               ),
             ),
             const SizedBox(width: 16),
-
-            // 4. Order Count Card
             Expanded(child: _orderCountCard()),
           ],
         ),
@@ -200,7 +191,6 @@ class DailySalesPage extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // Icon Circle
           Container(
             height: 40,
             width: 40,
@@ -211,7 +201,6 @@ class DailySalesPage extends StatelessWidget {
             child: Center(child: FaIcon(icon, size: 16, color: color)),
           ),
           const SizedBox(width: 16),
-          // Text Content
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -219,7 +208,7 @@ class DailySalesPage extends StatelessWidget {
                 Text(
                   title.toUpperCase(),
                   style: const TextStyle(
-                    color: Color(0xFF6B7280), // textMuted
+                    color: Color(0xFF6B7280),
                     fontSize: 10,
                     fontWeight: FontWeight.bold,
                     letterSpacing: 0.5,
@@ -233,7 +222,7 @@ class DailySalesPage extends StatelessWidget {
                     style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
-                      color: Color(0xFF111827), // darkSlate
+                      color: Color(0xFF111827),
                     ),
                   ),
                 ),
@@ -249,7 +238,7 @@ class DailySalesPage extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFF111827), // darkSlate
+        color: const Color(0xFF111827),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
@@ -327,7 +316,7 @@ class DailySalesPage extends StatelessWidget {
             ),
           ),
           Expanded(
-            flex: 2,
+            flex: 3,
             child: Text(
               "Payment Method",
               style: TextStyle(
@@ -335,7 +324,7 @@ class DailySalesPage extends StatelessWidget {
                 fontWeight: FontWeight.bold,
               ),
             ),
-          ),
+          ), // Increased flex
           Expanded(
             flex: 2,
             child: Text(
@@ -392,7 +381,7 @@ class DailySalesPage extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
           child: Row(
             children: [
-              // Customer Name
+              // Customer Name & Invoice ID
               Expanded(
                 flex: 3,
                 child: Column(
@@ -406,38 +395,34 @@ class DailySalesPage extends StatelessWidget {
                       ),
                     ),
                     Text(
+                      "Inv: ${sale.transactionId ?? 'N/A'}",
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: activeAccent,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text(
                       DateFormat('hh:mm a').format(sale.timestamp),
-                      style: const TextStyle(fontSize: 11, color: textMuted),
+                      style: const TextStyle(fontSize: 10, color: textMuted),
                     ),
                   ],
                 ),
               ),
               // Status Badge
               Expanded(flex: 2, child: _statusBadge(sale)),
-              // Payment Method
+              // Payment Method (Now shows Multi nicely)
               Expanded(
-                flex: 2,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      ctrl.formatPaymentMethod(sale.paymentMethod),
-                      style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF374151),
-                      ),
-                    ),
-                    if (sale.paymentMethod?['type'] == 'bank')
-                      Text(
-                        "Bank Transfer",
-                        style: TextStyle(
-                          fontSize: 9,
-                          color: Colors.blueGrey.shade400,
-                        ),
-                      ),
-                  ],
+                flex: 3,
+                child: Text(
+                  ctrl.formatPaymentMethod(sale.paymentMethod),
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF374151),
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
               // Amount
@@ -484,8 +469,6 @@ class DailySalesPage extends StatelessWidget {
       ),
     );
   }
-
-  // --- 4. DIALOGS & HELPERS ---
 
   void _showPaymentDialog(BuildContext context, SaleModel sale) {
     final amountC = TextEditingController(text: sale.pending.toString());
@@ -579,7 +562,7 @@ class DailySalesPage extends StatelessWidget {
   void _confirmDelete(SaleModel sale) {
     Get.defaultDialog(
       title: "Delete Transaction?",
-      middleText: "Remove entry for ${sale.name} of ৳${sale.amount}?",
+      middleText: "Remove entry for ${sale.name}?",
       textConfirm: "Delete",
       buttonColor: Colors.redAccent,
       confirmTextColor: Colors.white,
@@ -592,21 +575,24 @@ class DailySalesPage extends StatelessWidget {
 
   Widget _statusBadge(SaleModel sale) {
     bool isPaid = sale.pending <= 0;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color:
-            isPaid
-                ? Colors.green.withOpacity(0.1)
-                : Colors.orange.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        isPaid ? "PAID" : "PARTIAL / DUE",
-        style: TextStyle(
-          color: isPaid ? Colors.green : Colors.orange,
-          fontSize: 10,
-          fontWeight: FontWeight.bold,
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color:
+              isPaid
+                  ? Colors.green.withOpacity(0.1)
+                  : Colors.orange.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Text(
+          isPaid ? "PAID" : "PARTIAL / DUE",
+          style: TextStyle(
+            color: isPaid ? Colors.green : Colors.orange,
+            fontSize: 10,
+            fontWeight: FontWeight.bold,
+          ),
         ),
       ),
     );
@@ -619,6 +605,9 @@ class DailySalesPage extends StatelessWidget {
         .where(
           (s) =>
               s.name.toLowerCase().contains(q) ||
+              (s.transactionId ?? '').toLowerCase().contains(
+                q,
+              ) || // Added Invoice Search
               s.customerType.toLowerCase().contains(q),
         )
         .toList();
@@ -631,10 +620,7 @@ class DailySalesPage extends StatelessWidget {
         children: [
           Icon(FontAwesomeIcons.folderOpen, size: 50, color: Colors.black12),
           SizedBox(height: 16),
-          Text(
-            "No sales records found for this date",
-            style: TextStyle(color: textMuted),
-          ),
+          Text("No sales records found", style: TextStyle(color: textMuted)),
         ],
       ),
     );

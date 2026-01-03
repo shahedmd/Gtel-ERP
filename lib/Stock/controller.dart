@@ -1,32 +1,35 @@
 import 'dart:convert';
-import 'dart:async'; // Required for Timer (Debouncing)
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
-import 'model.dart';
+import 'model.dart'; // Ensure this path is correct
 
 class ProductController extends GetxController {
-  // Observables for data
+  // ==========================================
+  // STATE VARIABLES
+  // ==========================================
   final RxList<Product> allProducts = <Product>[].obs;
 
-  // Observables for state
+  // Filters
   final RxString selectedBrand = 'All'.obs;
   final RxString searchText = ''.obs;
+
+  // Loading States
   final RxBool isLoading = false.obs;
-  final RxBool isEditingLoading = false.obs;
-  final RxBool isLoadingstock = false.obs;
-  final RxDouble currentCurrency = 17.85.obs;
+  final RxBool isActionLoading =
+      false.obs; // Unified loading for Create/Update/Stock
 
-  // API Configuration
-  // Ensure this URL is correct. Note: Render sleeps, so first request might be slow.
-  static const baseUrl = 'https://dart-server-1zun.onrender.com';
+  // Global Settings
+  final RxDouble currentCurrency = 17.85.obs; // BDT to CNY Rate
 
-  // Pagination Observables
+  // Pagination
   final RxInt currentPage = 1.obs;
   final RxInt pageSize = 20.obs;
   final RxInt totalProducts = 0.obs;
 
-  // Timer for search debouncing (Crucial for fixing Postgres 42P05 error)
+  // Configuration
+  static const baseUrl = 'https://dart-server-1zun.onrender.com';
   Timer? _debounce;
 
   @override
@@ -35,95 +38,191 @@ class ProductController extends GetxController {
     fetchProducts();
   }
 
+  @override
+  void onClose() {
+    _debounce?.cancel();
+    super.onClose();
+  }
+
   // ==========================================
-  // FETCH PRODUCTS (GET)
-  // Handles all 18 fields via the Product.fromJson
+  // 1. FETCH PRODUCTS (READ)
   // ==========================================
   Future<void> fetchProducts({int? page}) async {
+    // Only show loading if it's a full refresh or search, not pagination if prefer lazy loading
     isLoading.value = true;
+
     try {
       final current = page ?? currentPage.value;
 
-      final uri = Uri.parse('$baseUrl/products').replace(
-        queryParameters: {
-          'page': current.toString(),
-          'limit': pageSize.value.toString(),
-          'search': searchText.value,
-          'brand': selectedBrand.value == 'All' ? '' : selectedBrand.value,
-        },
-      );
+      // Building Query Parameters cleanly
+      final queryParams = {
+        'page': current.toString(),
+        'limit': pageSize.value.toString(),
+        'search': searchText.value,
+        'brand': selectedBrand.value == 'All' ? '' : selectedBrand.value,
+      };
 
-      final res = await http.get(uri);
+      final uri = Uri.parse(
+        '$baseUrl/products',
+      ).replace(queryParameters: queryParams);
+
+      final res = await http.get(uri).timeout(const Duration(seconds: 20));
 
       if (res.statusCode == 200) {
         final Map<String, dynamic> data = jsonDecode(res.body);
 
-        // 1. Get the raw list
         final List<dynamic> productsJson = data['products'] ?? [];
 
-        // 2. Map JSON to Product objects with explicit typing
+        // Safety: Ensure JSON map is valid before parsing
         final List<Product> loadedProducts =
             productsJson.map<Product>((e) => Product.fromJson(e)).toList();
 
-        // 3. Assign to your RxList
         allProducts.assignAll(loadedProducts);
 
-        // 4. Handle total count (Now expects a standard int from server ::int fix)
+        // Safety: Handle dynamic types for total count
         var totalRaw = data['total'];
-        if (totalRaw is String) {
-          totalProducts.value = int.tryParse(totalRaw) ?? 0;
-        } else {
-          totalProducts.value = totalRaw ?? 0;
-        }
+        totalProducts.value = int.tryParse(totalRaw.toString()) ?? 0;
       } else {
-        // If server returns 500, we catch it here
-        Get.snackbar(
-          'Server Error ${res.statusCode}',
-          'Check server logs. Database column mismatch or BigInt issue.',
-          backgroundColor: Colors.red,
-          colorText: Colors.white,
-        );
+        _showError('Server Error: ${res.statusCode}');
       }
     } catch (e) {
-      print("Fetch Error: $e");
-      Get.snackbar('Error', 'Connection failed or JSON parsing error.');
+      _showError('Connection failed: $e');
     } finally {
       isLoading.value = false;
     }
   }
 
   // ==========================================
-  // SEARCH WITH DEBOUNCE
+  // 2. SEARCH & FILTER LOGIC
   // ==========================================
   void search(String text) {
+    if (searchText.value == text) return; // Prevent duplicate calls
     searchText.value = text;
-    currentPage.value = 1; // Always reset to page 1 when searching
+    currentPage.value = 1;
 
-    // Cancel existing timer if user is still typing
     if (_debounce?.isActive ?? false) _debounce!.cancel();
-
-    // Wait 500ms after last keystroke before hitting the server
-    _debounce = Timer(const Duration(milliseconds: 500), () {
+    _debounce = Timer(const Duration(milliseconds: 600), () {
       fetchProducts();
     });
   }
 
-  // ==========================================
-  // BRAND FILTER
-  // ==========================================
   void selectBrand(String brand) {
+    if (selectedBrand.value == brand) return;
     selectedBrand.value = brand;
-    currentPage.value = 1; // Reset to page 1
+    currentPage.value = 1;
     fetchProducts();
   }
 
   // ==========================================
-  // UPDATE CURRENCY & RECALCULATE (BULK)
-  // Re-values inventory for imports based on credit model
+  // 3. STOCK MANAGEMENT (CRITICAL LOGIC)
+  // ==========================================
+
+  /// Adds stock (Sea/Air/Local) and refreshes WAC from server.
+  ///
+  /// [productId]: The DB ID of the product
+  /// [seaQty]: Quantity arriving via Sea
+  /// [airQty]: Quantity arriving via Air
+  /// [localQty]: Quantity bought locally
+  /// [localUnitPrice]: The buying price (Unit Price) in BDT for local goods
+  Future<void> addMixedStock({
+    required int productId,
+    int seaQty = 0,
+    int airQty = 0,
+    int localQty = 0,
+    double localUnitPrice = 0.0,
+  }) async {
+    isActionLoading.value = true;
+    try {
+      // Validation: Prevent negative inventory corruption
+      if (seaQty < 0 || airQty < 0 || localQty < 0) {
+        _showError("Quantities cannot be negative");
+        return;
+      }
+
+      final body = {
+        'id': productId,
+        'sea_qty': seaQty,
+        'air_qty': airQty,
+        'local_qty': localQty,
+        // Send as double explicitly to prevent integer truncation on server
+        'local_price': localUnitPrice.toDouble(),
+      };
+
+      final res = await http.post(
+        Uri.parse('$baseUrl/products/add-stock'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(body),
+      );
+
+      if (res.statusCode == 200) {
+        // Success: Refresh list to get new calculated WAC from server
+        await fetchProducts();
+        Get.snackbar(
+          'Stock Updated',
+          'Inventory increased & Avg Price recalculated.',
+          backgroundColor: Colors.green,
+          colorText: Colors.white,
+          snackPosition: SnackPosition.BOTTOM,
+        );
+      } else {
+        _showError('Server Calculation Error: ${res.body}');
+      }
+    } catch (e) {
+      _showError('Network Error: $e');
+    } finally {
+      isActionLoading.value = false;
+    }
+  }
+
+  /// CLIENT-SIDE HELPER: Predict New WAC
+  /// Use this in your UI Dialog to show the user what the new price
+  /// WILL be before they save. This helps debugging.
+  double predictNewWAC(Product product, int newQty, double newUnitCost) {
+    double currentTotalValue = product.stockQty * product.avgPurchasePrice;
+    double newStockValue = newQty * newUnitCost;
+
+    double totalValue = currentTotalValue + newStockValue;
+    int totalQty = product.stockQty + newQty;
+
+    if (totalQty == 0) return 0.0;
+    return totalValue / totalQty;
+  }
+
+  // ==========================================
+  // 4. BULK OPERATIONS (Checkout)
+  // ==========================================
+  Future<bool> updateStockBulk(List<Map<String, dynamic>> updates) async {
+    isActionLoading.value = true;
+    try {
+      final res = await http.put(
+        Uri.parse('$baseUrl/products/bulk-update-stock'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'updates': updates}),
+      );
+
+      if (res.statusCode == 200) {
+        // We must fetch fresh data because the server determines
+        // which bucket (Sea/Air) the stock was deducted from.
+        await fetchProducts();
+        return true;
+      } else {
+        _showError("Bulk Update Failed: ${res.body}");
+        return false;
+      }
+    } catch (e) {
+      _showError("Connection Error");
+      return false;
+    } finally {
+      isActionLoading.value = false;
+    }
+  }
+
+  // ==========================================
+  // 5. SETTINGS (Currency)
   // ==========================================
   Future<void> updateCurrencyAndRecalculate(double newCurrency) async {
+    isActionLoading.value = true;
     try {
-      isLoading.value = true;
       final res = await http.put(
         Uri.parse('$baseUrl/products/recalculate-prices'),
         headers: {'Content-Type': 'application/json'},
@@ -132,210 +231,122 @@ class ProductController extends GetxController {
 
       if (res.statusCode == 200) {
         currentCurrency.value = newCurrency;
-        // Refresh the first page to see the new calculated prices and purchase rates
-        await fetchProducts(page: 1);
+        // Reset to page 1 to see changes immediately
+        currentPage.value = 1;
+        await fetchProducts();
+
         Get.snackbar(
           'Success',
-          'Currency updated. Stock values re-calculated based on today\'s rate.',
+          'Prices Recalculated based on Rate: $newCurrency',
           backgroundColor: Colors.green,
           colorText: Colors.white,
         );
       } else {
-        Get.snackbar('Error', 'Failed to recalculate: ${res.body}');
+        _showError('Recalculation Failed');
       }
     } catch (e) {
-      Get.snackbar('Error', 'Network error');
+      _showError('Network Error');
     } finally {
-      isLoading.value = false;
+      isActionLoading.value = false;
     }
   }
 
   // ==========================================
-  // CRUD OPERATIONS
+  // 6. CRUD (Create, Update, Delete)
   // ==========================================
-
-  // NOTE: 'data' must contain all 18 fields to avoid null errors on server
   Future<void> createProduct(Map<String, dynamic> data) async {
-    try {
-      isLoading.value = true;
-      final res = await http.post(
+    await _performRequest(
+      () => http.post(
         Uri.parse('$baseUrl/products/add'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(data),
-      );
-
-      if (res.statusCode == 200) {
-        await fetchProducts();
-        Get.snackbar('Success', 'Product added successfully');
-      } else {
-        Get.snackbar('Error', 'Failed to add: ${res.body}');
-      }
-    } catch (e) {
-      Get.snackbar('Error', 'Connection failed');
-    } finally {
-      isLoading.value = false;
-    }
+      ),
+      successMessage: 'Product Created',
+    );
   }
 
-  // NOTE: 'data' must contain all 18 fields because server overwrites everything
   Future<void> updateProduct(int id, Map<String, dynamic> data) async {
-    try {
-      isEditingLoading.value = true;
-      final res = await http.put(
+    await _performRequest(
+      () => http.put(
         Uri.parse('$baseUrl/products/$id'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(data),
-      );
-
-      if (res.statusCode == 200) {
-        await fetchProducts();
-        Get.snackbar('Success', 'Product updated fully');
-      } else {
-        Get.snackbar('Error', 'Update failed: ${res.body}');
-      }
-    } catch (e) {
-      Get.snackbar('Error', 'Network error during update');
-    } finally {
-      isEditingLoading.value = false;
-    }
+      ),
+      successMessage: 'Product Updated',
+    );
   }
 
   Future<void> deleteProduct(int id) async {
-    try {
-      isLoading.value = true;
-      final res = await http.delete(Uri.parse('$baseUrl/products/$id'));
-
-      if (res.statusCode == 200) {
-        await fetchProducts();
-        Get.snackbar('Deleted', 'Product removed successfully');
-      } else {
-        Get.snackbar('Error', 'Delete request failed');
-      }
-    } catch (e) {
-      Get.snackbar('Error', 'Network error');
-    } finally {
-      isLoading.value = false;
-    }
+    await _performRequest(
+      () => http.delete(Uri.parse('$baseUrl/products/$id')),
+      successMessage: 'Product Deleted',
+    );
   }
 
   // ==========================================
-  // NEW: ADD MIXED STOCK (Shipment Intake)
-  // Handles Sea, Air, and Local quantities + WAC calculation
+  // HELPERS
   // ==========================================
-  Future<void> addMixedStock({
-    required int productId,
-    int seaQty = 0,
-    int airQty = 0,
-    int localQty = 0,
-    double localPrice = 0.0,
-  }) async {
-    try {
-      isLoadingstock.value = true;
-      final res = await http.post(
-        Uri.parse('$baseUrl/products/add-stock'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'id': productId,
-          'sea_qty': seaQty,
-          'air_qty': airQty,
-          'local_qty': localQty,
-          'local_price': localPrice,
-        }),
-      );
 
+  // Generic Request Handler to reduce boilerplate
+  Future<void> _performRequest(
+    Future<http.Response> Function() request, {
+    required String successMessage,
+  }) async {
+    isActionLoading.value = true;
+    try {
+      final res = await request();
       if (res.statusCode == 200) {
-        await fetchProducts(); // Refresh to see updated WAC and stock levels
+        await fetchProducts();
         Get.snackbar(
           'Success',
-          'Stock Added. Average Purchase Price recalculated.',
-          backgroundColor: Colors.blue,
+          successMessage,
+          backgroundColor: Colors.green,
           colorText: Colors.white,
         );
       } else {
-        print(res.body);
-        Get.snackbar('Error', 'Failed to update stock: ${res.body}');
+        _showError('Operation Failed: ${res.body}');
       }
     } catch (e) {
-      Get.snackbar('Error', 'Connection failed');
+      _showError('Network Error');
     } finally {
-      isLoadingstock.value = false;
+      isActionLoading.value = false;
     }
   }
 
-  // ==========================================
-  // BULK UPDATE STOCK (POS CHECKOUT)
-  // Uses server-side FIFO logic (Sea stock first)
-  // ==========================================
-  Future<bool> updateStockBulk(List<Map<String, dynamic>> updates) async {
-    try {
-      isLoadingstock.value = true;
-
-      final response = await http.put(
-        Uri.parse('$baseUrl/products/bulk-update-stock'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'updates': updates}),
-      );
-
-      if (response.statusCode == 200) {
-        // Since the server performs complex deduction logic between Sea/Air buckets,
-        // we refresh the list from the server to ensure Flutter matches the DB exactly.
-        await fetchProducts();
-        return true;
-      } else {
-        Get.snackbar(
-          "Server Error",
-          "Failed to update stock: ${response.body}",
-          backgroundColor: Colors.red,
-          colorText: Colors.white,
-        );
-        return false;
-      }
-    } catch (e) {
-      Get.snackbar(
-        "Network Error",
-        "Check your internet connection",
-        backgroundColor: Colors.red,
-        colorText: Colors.white,
-      );
-      return false;
-    } finally {
-      isLoadingstock.value = false;
-    }
+  void _showError(String msg) {
+    Get.snackbar(
+      'Error',
+      msg,
+      backgroundColor: Colors.redAccent,
+      colorText: Colors.white,
+      snackPosition: SnackPosition.BOTTOM,
+    );
+    print("Error Log: $msg");
   }
 
-  // ==========================================
-  // PAGINATION HELPERS
-  // ==========================================
+  // Pagination Controls
   void goToPage(int page) {
     currentPage.value = page;
-    fetchProducts(page: page);
+    fetchProducts();
   }
 
   void nextPage() {
     if ((currentPage.value * pageSize.value) < totalProducts.value) {
-      currentPage.value += 1;
+      currentPage.value++;
       fetchProducts();
     }
   }
 
   void previousPage() {
     if (currentPage.value > 1) {
-      currentPage.value -= 1;
+      currentPage.value--;
       fetchProducts();
     }
   }
 
-  // Get list of unique brands currently visible for the dropdown
   List<String> get brands {
-    final uniqueBrands = allProducts.map((e) => e.brand).toSet().toList();
-    uniqueBrands.sort();
-    if (!uniqueBrands.contains('All')) return ['All', ...uniqueBrands];
-    return uniqueBrands;
-  }
-
-  @override
-  void onClose() {
-    _debounce?.cancel(); // Important: cancel timer when controller dies
-    super.onClose();
+    final unique = allProducts.map((e) => e.brand).toSet().toList();
+    unique.sort();
+    return ['All', ...unique];
   }
 }

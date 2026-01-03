@@ -13,6 +13,8 @@ class ProfitLossPdfService {
   ) async {
     final pdf = pw.Document();
     final dateLabel = DateFormat('MMMM yyyy').format(month);
+    final font = await PdfGoogleFonts.nunitoRegular();
+    final bold = await PdfGoogleFonts.nunitoBold();
 
     pdf.addPage(
       pw.MultiPage(
@@ -20,40 +22,90 @@ class ProfitLossPdfService {
         margin: const pw.EdgeInsets.all(32),
         build:
             (context) => [
+              // Header
               pw.Header(
                 level: 0,
                 child: pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
                     pw.Text(
-                      "Monthly Sales Report",
-                      style: pw.TextStyle(
-                        fontSize: 24,
-                        fontWeight: pw.FontWeight.bold,
-                      ),
+                      "Monthly Sales & Profit Report",
+                      style: pw.TextStyle(fontSize: 20, font: bold),
                     ),
-                    pw.Text(dateLabel),
+                    pw.Text(
+                      dateLabel,
+                      style: pw.TextStyle(font: font, fontSize: 14),
+                    ),
                   ],
                 ),
               ),
               pw.SizedBox(height: 10),
-              pw.Divider(),
-              pw.SizedBox(height: 10),
-              pw.Text(
-                "User/Agent Name: ${entity.name}",
-                style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+
+              // Customer Info Box
+              pw.Container(
+                padding: const pw.EdgeInsets.all(10),
+                decoration: pw.BoxDecoration(
+                  border: pw.Border.all(color: PdfColors.grey300),
+                  borderRadius: const pw.BorderRadius.all(
+                    pw.Radius.circular(4),
+                  ),
+                ),
+                child: pw.Row(
+                  children: [
+                    pw.Expanded(
+                      child: pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text(
+                            "Customer Name",
+                            style: pw.TextStyle(
+                              fontSize: 10,
+                              color: PdfColors.grey600,
+                            ),
+                          ),
+                          pw.Text(
+                            entity.name,
+                            style: pw.TextStyle(font: bold, fontSize: 14),
+                          ),
+                        ],
+                      ),
+                    ),
+                    pw.Expanded(
+                      child: pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.end,
+                        children: [
+                          pw.Text(
+                            "Phone Number",
+                            style: pw.TextStyle(
+                              fontSize: 10,
+                              color: PdfColors.grey600,
+                            ),
+                          ),
+                          pw.Text(
+                            entity.phone,
+                            style: pw.TextStyle(font: bold, fontSize: 14),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              pw.Text("Phone/ID: ${entity.id}"),
               pw.SizedBox(height: 20),
 
-              pw.Table.fromTextArray(
-                headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-                headers: ['Date', 'Invoice ID', 'Sale Amount', 'Profit'],
+              // Table
+              pw.TableHelper.fromTextArray(
+                headerStyle: pw.TextStyle(font: bold, color: PdfColors.white),
+                headerDecoration: const pw.BoxDecoration(
+                  color: PdfColors.blueGrey800,
+                ),
+                cellAlignment: pw.Alignment.centerLeft,
+                headers: ['Date', 'Invoice ID', 'Sale (BDT)', 'Profit (BDT)'],
                 data:
                     entity.invoices
                         .map(
                           (inv) => [
-                            DateFormat('dd-MM-yyyy').format(inv.date),
+                            DateFormat('dd-MMM-yyyy').format(inv.date),
                             inv.invoiceId,
                             inv.sale.toStringAsFixed(2),
                             inv.profit.toStringAsFixed(2),
@@ -63,23 +115,35 @@ class ProfitLossPdfService {
               ),
 
               pw.SizedBox(height: 30),
+
+              // Totals
               pw.Container(
                 alignment: pw.Alignment.centerRight,
                 child: pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.end,
                   children: [
                     pw.Text(
-                      "Total Sales: \$${entity.totalSale.toStringAsFixed(2)}",
+                      "Total Sales:  ${entity.totalSale.toStringAsFixed(2)} BDT",
+                      style: pw.TextStyle(font: font, fontSize: 14),
                     ),
-                    pw.Divider(height: 100),
+                    pw.Divider(),
                     pw.Text(
-                      "Total Profit: \$${entity.totalProfit.toStringAsFixed(2)}",
+                      "Total Profit:  ${entity.totalProfit.toStringAsFixed(2)} BDT",
                       style: pw.TextStyle(
+                        font: bold,
                         fontSize: 18,
-                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColors.green700,
                       ),
                     ),
                   ],
+                ),
+              ),
+
+              pw.Spacer(),
+              pw.Footer(
+                title: pw.Text(
+                  "Generated by G-TEL ERP System",
+                  style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey),
                 ),
               ),
             ],
