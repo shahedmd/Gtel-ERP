@@ -1,6 +1,9 @@
+// ignore_for_file: deprecated_member_use
+
 import 'dart:ui'; // Required for PointerDeviceKind
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'Service/servicepage.dart';
 import 'controller.dart';
 import 'edit.dart';
 import 'model.dart';
@@ -17,10 +20,12 @@ class MyCustomScrollBehavior extends MaterialScrollBehavior {
 class ProductScreen extends StatelessWidget {
   ProductScreen({super.key});
 
+  // Main Controller (Handles Products + Service + Damage)
   final ProductController controller = Get.put(ProductController());
+
   final TextEditingController currencyInput = TextEditingController();
 
-  // Explicit ScrollControllers to fix the "ScrollPosition" error
+  // Explicit ScrollControllers
   final ScrollController _verticalScrollController = ScrollController();
   final ScrollController _horizontalScrollController = ScrollController();
 
@@ -30,20 +35,32 @@ class ProductScreen extends StatelessWidget {
       backgroundColor: Colors.grey[100],
       appBar: AppBar(
         title: const Text(
-          'Inventory Management (Credit Mode)',
+          'Inventory & Service Manager',
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
         ),
         backgroundColor: Colors.white,
         foregroundColor: Colors.black,
         elevation: 1,
         actions: [
+          // New Service Page Button
+          TextButton.icon(
+            onPressed: () => Get.to(() => ServicePage()),
+            icon: const Icon(Icons.handyman, color: Colors.orange),
+            label: const Text(
+              "Service Center",
+              style: TextStyle(
+                color: Colors.orange,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: () => controller.fetchProducts(),
           ),
         ],
       ),
-      // APPLY THE CUSTOM SCROLL BEHAVIOR HERE
       body: ScrollConfiguration(
         behavior: MyCustomScrollBehavior(),
         child: Padding(
@@ -51,7 +68,7 @@ class ProductScreen extends StatelessWidget {
           child: Column(
             children: [
               // ==========================================
-              // CURRENCY MANAGEMENT CARD
+              // CURRENCY MANAGEMENT CARD (Existing)
               // ==========================================
               Card(
                 elevation: 0,
@@ -209,7 +226,7 @@ class ProductScreen extends StatelessWidget {
               const SizedBox(height: 16),
 
               // ==========================================
-              // DATA TABLE (FIXED SCROLL & SCREEN FIT)
+              // DATA TABLE (UPDATED COLUMNS)
               // ==========================================
               Expanded(
                 child: Card(
@@ -238,12 +255,9 @@ class ProductScreen extends StatelessWidget {
                             scrollDirection: Axis.vertical,
                             child: Scrollbar(
                               controller: _horizontalScrollController,
-                              thumbVisibility:
-                                  true, // Always show horizontal bar
+                              thumbVisibility: true,
                               trackVisibility: true,
-                              thickness: 12, // Thicker for easy dragging
-                              notificationPredicate:
-                                  (notif) => notif.depth == 1,
+                              thickness: 12,
                               child: SingleChildScrollView(
                                 controller: _horizontalScrollController,
                                 scrollDirection: Axis.horizontal,
@@ -252,11 +266,16 @@ class ProductScreen extends StatelessWidget {
                                     minWidth: constraints.maxWidth,
                                   ),
                                   child: DataTable(
-                                    columnSpacing:
-                                        50, // Massive gap for readability
-                                    horizontalMargin: 24,
+                                    columnSpacing: 24,
+                                    horizontalMargin: 20,
                                     headingRowColor: WidgetStateProperty.all(
                                       Colors.blueGrey[50],
+                                    ),
+                                    border: TableBorder(
+                                      verticalInside: BorderSide(
+                                        width: 1,
+                                        color: Colors.grey.shade200,
+                                      ),
                                     ),
                                     columns: const [
                                       DataColumn(
@@ -267,6 +286,32 @@ class ProductScreen extends StatelessWidget {
                                           ),
                                         ),
                                       ),
+                                      // --- NEW COLUMNS ---
+                                      DataColumn(
+                                        label: Text(
+                                          'Yuan (¥)',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                      DataColumn(
+                                        label: Text(
+                                          'Rate',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                      DataColumn(
+                                        label: Text(
+                                          'Weight',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                      // -------------------
                                       DataColumn(
                                         label: Text(
                                           'Avg Purchase',
@@ -277,7 +322,7 @@ class ProductScreen extends StatelessWidget {
                                       ),
                                       DataColumn(
                                         label: Text(
-                                          'Stock (Total)',
+                                          'Total Stock',
                                           style: TextStyle(
                                             fontWeight: FontWeight.bold,
                                           ),
@@ -285,7 +330,7 @@ class ProductScreen extends StatelessWidget {
                                       ),
                                       DataColumn(
                                         label: Text(
-                                          'Sea Stock',
+                                          'Sea Qty',
                                           style: TextStyle(
                                             fontWeight: FontWeight.bold,
                                           ),
@@ -293,12 +338,38 @@ class ProductScreen extends StatelessWidget {
                                       ),
                                       DataColumn(
                                         label: Text(
-                                          'Air Stock',
+                                          'Air Qty',
                                           style: TextStyle(
                                             fontWeight: FontWeight.bold,
                                           ),
                                         ),
                                       ),
+                                      DataColumn(
+                                        label: Text(
+                                          'Local Qty',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                      // --- ADDED PRICE COLUMNS ---
+                                      DataColumn(
+                                        label: Text(
+                                          'Sea Price',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                      DataColumn(
+                                        label: Text(
+                                          'Air Price',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                      // ---------------------------
                                       DataColumn(
                                         label: Text(
                                           'Agent',
@@ -310,22 +381,6 @@ class ProductScreen extends StatelessWidget {
                                       DataColumn(
                                         label: Text(
                                           'Wholesale',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                      DataColumn(
-                                        label: Text(
-                                          'Air Ref',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                      DataColumn(
-                                        label: Text(
-                                          'Sea Ref',
                                           style: TextStyle(
                                             fontWeight: FontWeight.bold,
                                           ),
@@ -352,7 +407,21 @@ class ProductScreen extends StatelessWidget {
                                                   ),
                                                 ),
                                               ),
-                                              // Avg Purchase Price with .00
+                                              // --- MAPPED NEW COLUMNS ---
+                                              DataCell(
+                                                Text(p.yuan.toStringAsFixed(2)),
+                                              ),
+                                              DataCell(
+                                                Text(
+                                                  p.currency.toStringAsFixed(2),
+                                                ),
+                                              ),
+                                              DataCell(
+                                                Text(
+                                                  p.weight.toStringAsFixed(2),
+                                                ),
+                                              ),
+                                              // -------------------------
                                               DataCell(
                                                 Container(
                                                   padding:
@@ -378,33 +447,31 @@ class ProductScreen extends StatelessWidget {
                                                   ),
                                                 ),
                                               ),
-                                              // All Quantities with .00
                                               DataCell(
                                                 Text(
-                                                  p.stockQty
-                                                      .toDouble()
-                                                      .toStringAsFixed(2),
+                                                  p.stockQty.toString(),
                                                   style: const TextStyle(
                                                     fontWeight: FontWeight.bold,
                                                   ),
                                                 ),
                                               ),
                                               DataCell(
-                                                Text(
-                                                  p.seaStockQty
-                                                      .toDouble()
-                                                      .toStringAsFixed(2),
-                                                ),
+                                                Text(p.seaStockQty.toString()),
                                               ),
                                               DataCell(
-                                                Text(
-                                                  p.airStockQty
-                                                      .toDouble()
-                                                      .toStringAsFixed(2),
-                                                ),
+                                                Text(p.airStockQty.toString()),
                                               ),
-
-                                              // All Prices with .00
+                                              DataCell(
+                                                Text(p.localQty.toString()),
+                                              ),
+                                              // --- ADDED PRICE CELLS ---
+                                              DataCell(
+                                                Text(p.sea.toStringAsFixed(2)),
+                                              ),
+                                              DataCell(
+                                                Text(p.air.toStringAsFixed(2)),
+                                              ),
+                                              // ------------------------
                                               DataCell(
                                                 Text(
                                                   p.agent.toStringAsFixed(2),
@@ -417,29 +484,14 @@ class ProductScreen extends StatelessWidget {
                                                   ),
                                                 ),
                                               ),
-                                              DataCell(
-                                                Text(
-                                                  p.air.toStringAsFixed(2),
-                                                  style: const TextStyle(
-                                                    color: Colors.red,
-                                                  ),
-                                                ),
-                                              ),
-                                              DataCell(
-                                                Text(
-                                                  p.sea.toStringAsFixed(2),
-                                                  style: const TextStyle(
-                                                    color: Colors.blue,
-                                                  ),
-                                                ),
-                                              ),
 
-                                              // Actions (Now reachable via drag)
+                                              // --- UPDATED ACTIONS ROW ---
                                               DataCell(
                                                 Row(
                                                   mainAxisSize:
                                                       MainAxisSize.min,
                                                   children: [
+                                                    // 1. ADD STOCK
                                                     IconButton(
                                                       tooltip: 'Receive Stock',
                                                       icon: const Icon(
@@ -453,6 +505,56 @@ class ProductScreen extends StatelessWidget {
                                                                 controller,
                                                               ),
                                                     ),
+                                                    // 2. SEND TO SERVICE (Using ProductController)
+                                                    IconButton(
+                                                      tooltip:
+                                                          'Send to Service',
+                                                      icon: const Icon(
+                                                        Icons.build,
+                                                        color: Colors.orange,
+                                                      ),
+                                                      onPressed:
+                                                          () => _showQuantityDialog(
+                                                            context,
+                                                            "Service",
+                                                            p,
+                                                            (qty) {
+                                                              controller.addToService(
+                                                                productId: p.id,
+                                                                model: p.model,
+                                                                qty: qty,
+                                                                type: 'service',
+                                                                currentAvgPrice:
+                                                                    p.avgPurchasePrice,
+                                                              );
+                                                            },
+                                                          ),
+                                                    ),
+                                                    // 3. DAMAGE (Using ProductController)
+                                                    IconButton(
+                                                      tooltip: 'Mark Damage',
+                                                      icon: const Icon(
+                                                        Icons.broken_image,
+                                                        color: Colors.redAccent,
+                                                      ),
+                                                      onPressed:
+                                                          () => _showQuantityDialog(
+                                                            context,
+                                                            "Damage",
+                                                            p,
+                                                            (qty) {
+                                                              controller.addToService(
+                                                                productId: p.id,
+                                                                model: p.model,
+                                                                qty: qty,
+                                                                type: 'damage',
+                                                                currentAvgPrice:
+                                                                    p.avgPurchasePrice,
+                                                              );
+                                                            },
+                                                          ),
+                                                    ),
+                                                    // 4. EDIT
                                                     IconButton(
                                                       tooltip: 'Edit Product',
                                                       icon: const Icon(
@@ -466,6 +568,7 @@ class ProductScreen extends StatelessWidget {
                                                                 controller,
                                                               ),
                                                     ),
+                                                    // 5. DELETE
                                                     IconButton(
                                                       tooltip: 'Delete Product',
                                                       icon: const Icon(
@@ -497,9 +600,6 @@ class ProductScreen extends StatelessWidget {
                 ),
               ),
 
-              // ==========================================
-              // PAGINATION CONTROLS
-              // ==========================================
               _buildPagination(),
             ],
           ),
@@ -518,6 +618,59 @@ class ProductScreen extends StatelessWidget {
   }
 
   // ==========================================
+  // HELPER: QUANTITY INPUT DIALOG (For Service/Damage)
+  // ==========================================
+  void _showQuantityDialog(
+    BuildContext context,
+    String actionType,
+    Product p,
+    Function(int) onConfirm,
+  ) {
+    final qtyController = TextEditingController();
+    Get.defaultDialog(
+      title: "$actionType: ${p.model}",
+      content: Column(
+        children: [
+          Text(
+            "Current Stock: ${p.stockQty}",
+            style: TextStyle(color: Colors.grey[600], fontSize: 12),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: qtyController,
+            keyboardType: TextInputType.number,
+            decoration: InputDecoration(
+              labelText: "Enter Quantity to Remove",
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              isDense: true,
+            ),
+          ),
+        ],
+      ),
+      textConfirm: "Confirm",
+      textCancel: "Cancel",
+      confirmTextColor: Colors.white,
+      buttonColor: actionType == "Damage" ? Colors.red : Colors.orange,
+      onConfirm: () {
+        int qty = int.tryParse(qtyController.text) ?? 0;
+        if (qty > 0 && qty <= p.stockQty) {
+          onConfirm(qty);
+          Get.back();
+        } else {
+          Get.snackbar(
+            "Invalid Quantity",
+            "Amount must be > 0 and <= Current Stock",
+            backgroundColor: Colors.red,
+            colorText: Colors.white,
+          );
+        }
+      },
+    );
+  }
+
+  // ==========================================
   // ADD MIXED STOCK DIALOG
   // ==========================================
   void _showAddStockDialog(Product p, ProductController controller) {
@@ -526,9 +679,34 @@ class ProductScreen extends StatelessWidget {
     final localQtyC = TextEditingController(text: '0');
     final localPriceC = TextEditingController(text: '0');
 
+    final RxDouble predictedAvg = p.avgPurchasePrice.obs;
+
+    void calculatePrediction() {
+      int s = int.tryParse(seaQtyC.text) ?? 0;
+      int a = int.tryParse(airQtyC.text) ?? 0;
+      int l = int.tryParse(localQtyC.text) ?? 0;
+      double lp = double.tryParse(localPriceC.text) ?? 0.0;
+      predictedAvg.value = controller.predictNewWAC(p, s, a, l, lp);
+    }
+
     Get.dialog(
       AlertDialog(
-        title: Text('Receive Inventory: ${p.model}'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Receive Inventory: ${p.model}',
+              style: const TextStyle(fontSize: 18),
+            ),
+            const SizedBox(height: 4),
+            Obx(
+              () => Text(
+                "New Avg Cost will be: ${predictedAvg.value.toStringAsFixed(2)}",
+                style: const TextStyle(fontSize: 12, color: Colors.blue),
+              ),
+            ),
+          ],
+        ),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -545,6 +723,7 @@ class ProductScreen extends StatelessWidget {
                   prefixIcon: Icon(Icons.waves),
                 ),
                 keyboardType: TextInputType.number,
+                onChanged: (_) => calculatePrediction(),
               ),
               TextField(
                 controller: airQtyC,
@@ -553,6 +732,7 @@ class ProductScreen extends StatelessWidget {
                   prefixIcon: Icon(Icons.airplanemode_active),
                 ),
                 keyboardType: TextInputType.number,
+                onChanged: (_) => calculatePrediction(),
               ),
               const SizedBox(height: 16),
               const Text(
@@ -566,14 +746,16 @@ class ProductScreen extends StatelessWidget {
                   prefixIcon: Icon(Icons.shopping_cart),
                 ),
                 keyboardType: TextInputType.number,
+                onChanged: (_) => calculatePrediction(),
               ),
               TextField(
                 controller: localPriceC,
                 decoration: const InputDecoration(
-                  labelText: 'Local Price (Unit BDT)',
+                  labelText: 'Local Unit Cost (BDT)',
                   prefixIcon: Icon(Icons.payments),
                 ),
                 keyboardType: TextInputType.number,
+                onChanged: (_) => calculatePrediction(),
               ),
             ],
           ),
@@ -591,6 +773,7 @@ class ProductScreen extends StatelessWidget {
                 seaQty: int.tryParse(seaQtyC.text) ?? 0,
                 airQty: int.tryParse(airQtyC.text) ?? 0,
                 localQty: int.tryParse(localQtyC.text) ?? 0,
+                localUnitPrice: double.tryParse(localPriceC.text) ?? 0.0,
               );
               Get.back();
             },

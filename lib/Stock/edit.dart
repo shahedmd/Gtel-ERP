@@ -13,19 +13,24 @@ Widget _buildField(
   String label,
   IconData icon, {
   TextInputType? type,
+  bool readOnly = false, // Defaults to false (Editable)
 }) {
   return Padding(
     padding: const EdgeInsets.symmetric(vertical: 6),
     child: TextFormField(
       controller: c,
       keyboardType: type ?? TextInputType.text,
-      style: const TextStyle(fontSize: 14),
+      readOnly: readOnly,
+      style: TextStyle(
+        fontSize: 14,
+        color: readOnly ? Colors.grey[600] : Colors.black,
+      ),
       decoration: InputDecoration(
         labelText: label,
         prefixIcon: Icon(icon, size: 18, color: Colors.blueGrey),
         isDense: true,
         filled: true,
-        fillColor: Colors.grey[50],
+        fillColor: readOnly ? Colors.grey[200] : Colors.grey[50],
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
           borderSide: BorderSide(color: Colors.grey[300]!),
@@ -73,9 +78,7 @@ void _showPOSDialog({
     Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Container(
-        constraints: const BoxConstraints(
-          maxWidth: 600,
-        ), // Slightly wider for 18 fields
+        constraints: const BoxConstraints(maxWidth: 600),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -163,7 +166,7 @@ void _showPOSDialog({
 }
 
 /// ===============================
-/// EDIT PRODUCT DIALOG (Updated for 18 Fields)
+/// EDIT PRODUCT DIALOG (FULLY UNLOCKED)
 /// ===============================
 void showEditProductDialog(Product p, ProductController controller) {
   final nameC = TextEditingController(text: p.name);
@@ -179,34 +182,39 @@ void showEditProductDialog(Product p, ProductController controller) {
   final shipmentTaxC = TextEditingController(text: p.shipmentTax.toString());
   final shipmentNoC = TextEditingController(text: p.shipmentNo.toString());
   final currencyC = TextEditingController(text: p.currency.toString());
-  final stockC = TextEditingController(text: p.stockQty.toString());
 
-  // New Tracking Controllers
+  // Stock Fields - NOW FULLY EDITABLE
+  final stockC = TextEditingController(text: p.stockQty.toString());
   final avgPriceC = TextEditingController(text: p.avgPurchasePrice.toString());
   final seaStockC = TextEditingController(text: p.seaStockQty.toString());
   final airStockC = TextEditingController(text: p.airStockQty.toString());
+  final localStockC = TextEditingController(text: p.localQty.toString());
 
   _showPOSDialog(
-    title: 'Update Product',
+    title: 'Update Product (Manual Mode)',
     onSave: () {
       controller.updateProduct(p.id, {
         'name': nameC.text,
         'category': categoryC.text,
         'brand': brandC.text,
         'model': modelC.text,
-        'weight': double.tryParse(weightC.text),
-        'yuan': double.tryParse(yuanC.text),
-        'air': double.tryParse(airC.text),
-        'sea': double.tryParse(seaC.text),
-        'agent': double.tryParse(agentC.text),
-        'wholesale': double.tryParse(wholesaleC.text),
-        'shipmenttax': double.tryParse(shipmentTaxC.text), // Lowercase key
-        'shipmentno': int.tryParse(shipmentNoC.text), // Lowercase key
-        'currency': double.tryParse(currencyC.text),
-        'stock_qty': int.tryParse(stockC.text),
-        'avg_purchase_price': double.tryParse(avgPriceC.text),
-        'sea_stock_qty': int.tryParse(seaStockC.text),
-        'air_stock_qty': int.tryParse(airStockC.text),
+        'weight': double.tryParse(weightC.text) ?? p.weight,
+        'yuan': double.tryParse(yuanC.text) ?? p.yuan,
+        'air': double.tryParse(airC.text) ?? p.air,
+        'sea': double.tryParse(seaC.text) ?? p.sea,
+        'agent': double.tryParse(agentC.text) ?? p.agent,
+        'wholesale': double.tryParse(wholesaleC.text) ?? p.wholesale,
+        'shipmenttax': double.tryParse(shipmentTaxC.text) ?? p.shipmentTax,
+        'shipmentno': int.tryParse(shipmentNoC.text) ?? p.shipmentNo,
+        'currency': double.tryParse(currencyC.text) ?? p.currency,
+
+        // MANUALLY OVERRIDING STOCK & COST
+        'stock_qty': int.tryParse(stockC.text) ?? p.stockQty,
+        'avg_purchase_price':
+            double.tryParse(avgPriceC.text) ?? p.avgPurchasePrice,
+        'sea_stock_qty': int.tryParse(seaStockC.text) ?? p.seaStockQty,
+        'air_stock_qty': int.tryParse(airStockC.text) ?? p.airStockQty,
+        'local_qty': int.tryParse(localStockC.text) ?? p.localQty,
       });
       Get.back();
     },
@@ -223,6 +231,7 @@ void showEditProductDialog(Product p, ProductController controller) {
           Expanded(child: _buildField(modelC, 'Model', Icons.label)),
         ],
       ),
+
       _sectionHeader('Costs & Logic (Import)'),
       Row(
         children: [
@@ -250,8 +259,8 @@ void showEditProductDialog(Product p, ProductController controller) {
           Expanded(
             child: _buildField(
               shipmentTaxC,
-              'Shipment Tax',
-              Icons.receipt_long,
+              'Sea Tax /KG (ShipmentTax)',
+              Icons.airplanemode_active,
               type: TextInputType.number,
             ),
           ),
@@ -266,6 +275,7 @@ void showEditProductDialog(Product p, ProductController controller) {
           ),
         ],
       ),
+
       _sectionHeader('Pricing (Sales)'),
       Row(
         children: [
@@ -288,13 +298,15 @@ void showEditProductDialog(Product p, ProductController controller) {
           ),
         ],
       ),
-      _sectionHeader('Stock & Cost Tracking'),
+
+      // Stock section is NOW EDITABLE (readOnly removed)
+      _sectionHeader('Stock & Cost (Manual Override)'),
       _buildField(
         avgPriceC,
         'Average Purchase Rate (BDT)',
         Icons.payments,
         type: TextInputType.number,
-      ),
+      ), // Editable
       Row(
         children: [
           Expanded(
@@ -304,7 +316,7 @@ void showEditProductDialog(Product p, ProductController controller) {
               Icons.inventory_2,
               type: TextInputType.number,
             ),
-          ),
+          ), // Editable
           const SizedBox(width: 10),
           Expanded(
             child: _buildField(
@@ -313,7 +325,7 @@ void showEditProductDialog(Product p, ProductController controller) {
               Icons.directions_boat,
               type: TextInputType.number,
             ),
-          ),
+          ), // Editable
           const SizedBox(width: 10),
           Expanded(
             child: _buildField(
@@ -322,29 +334,39 @@ void showEditProductDialog(Product p, ProductController controller) {
               Icons.airplanemode_active,
               type: TextInputType.number,
             ),
-          ),
+          ), // Editable
+          const SizedBox(width: 10),
+          Expanded(
+            child: _buildField(
+              localStockC,
+              'Local Stock',
+              Icons.store,
+              type: TextInputType.number,
+            ),
+          ), // Editable
         ],
       ),
-      _sectionHeader('Reference Data (Do not edit usually)'),
+
+      _sectionHeader('Reference Data (Manual Override)'),
       Row(
         children: [
           Expanded(
             child: _buildField(
               airC,
-              'Calculated Air',
+              'Calculated Air Price',
               Icons.air,
               type: TextInputType.number,
             ),
-          ),
+          ), // Editable
           const SizedBox(width: 10),
           Expanded(
             child: _buildField(
               seaC,
-              'Calculated Sea',
+              'Calculated Sea Price',
               Icons.waves,
               type: TextInputType.number,
             ),
-          ),
+          ), // Editable
           const SizedBox(width: 10),
           Expanded(
             child: _buildField(
@@ -361,12 +383,12 @@ void showEditProductDialog(Product p, ProductController controller) {
 }
 
 /// ===============================
-/// CREATE PRODUCT DIALOG (Updated for 18 Fields)
+/// CREATE PRODUCT DIALOG (FIXED)
 /// ===============================
 void showCreateProductDialog(ProductController controller) {
   // --- 1. Basic Information ---
   final nameC = TextEditingController();
-  final categoryC = TextEditingController(); // ADDED BACK
+  final categoryC = TextEditingController();
   final brandC = TextEditingController();
   final modelC = TextEditingController();
 
@@ -376,8 +398,8 @@ void showCreateProductDialog(ProductController controller) {
   final currencyC = TextEditingController(
     text: controller.currentCurrency.value.toString(),
   );
-  final seaTaxC = TextEditingController(text: '0'); // Maps to shipmenttax
-  final airTaxC = TextEditingController(text: '700'); // UI only for calculation
+  final seaTaxC = TextEditingController(text: '0');
+  final airTaxRate = 700.0; // Fixed rate for Air as requested
 
   // --- 3. Result Fields (Calculated) ---
   final airResultC = TextEditingController(text: '0');
@@ -389,18 +411,19 @@ void showCreateProductDialog(ProductController controller) {
   final shipmentNoC = TextEditingController(text: '0');
   final stockC = TextEditingController(text: '0');
 
-  // Logic to calculate both prices based on their specific taxes
+  // Logic to calculate costs based on your specific tax rules
   void calculatePrices() {
     double yuan = double.tryParse(yuanC.text) ?? 0.0;
     double weight = double.tryParse(weightC.text) ?? 0.0;
     double curr =
         double.tryParse(currencyC.text) ?? controller.currentCurrency.value;
     double seaTax = double.tryParse(seaTaxC.text) ?? 0.0;
-    double airTax = double.tryParse(airTaxC.text) ?? 0.0;
 
     if (yuan > 0) {
+      // Sea Cost = (Yuan * Curr) + (Weight * shipmenttax)
       double calculatedSea = (yuan * curr) + (weight * seaTax);
-      double calculatedAir = (yuan * curr) + (weight * airTax);
+      // Air Cost = (Yuan * Curr) + (Weight * 700)
+      double calculatedAir = (yuan * curr) + (weight * airTaxRate);
 
       seaResultC.text = calculatedSea.toStringAsFixed(2);
       airResultC.text = calculatedAir.toStringAsFixed(2);
@@ -415,33 +438,37 @@ void showCreateProductDialog(ProductController controller) {
   weightC.addListener(calculatePrices);
   currencyC.addListener(calculatePrices);
   seaTaxC.addListener(calculatePrices);
-  airTaxC.addListener(calculatePrices);
 
   _showPOSDialog(
     title: 'New Product Registration',
     onSave: () {
-      // PROPER MAPPING OF ALL 18 FIELDS (ID is 0 for new)
+      int initialStock = int.tryParse(stockC.text) ?? 0;
+      double initialAvgPrice = double.tryParse(seaResultC.text) ?? 0.0;
+
+      // When creating a product, we assume the first batch is SEA stock
+      // and the AVG price is the SEA landing cost.
       controller.createProduct({
         'name': nameC.text,
-        'category': categoryC.text, // 1
-        'brand': brandC.text, // 2
-        'model': modelC.text, // 3
-        'weight': double.tryParse(weightC.text) ?? 0.0, // 4
-        'yuan': double.tryParse(yuanC.text) ?? 0.0, // 5
-        'air': double.tryParse(airResultC.text) ?? 0.0, // 6 (Calculated)
-        'sea': double.tryParse(seaResultC.text) ?? 0.0, // 7 (Calculated)
-        'agent': double.tryParse(agentC.text) ?? 0.0, // 8
-        'wholesale': double.tryParse(wholesaleC.text) ?? 0.0, // 9
-        'shipmenttax': double.tryParse(seaTaxC.text) ?? 0.0, // 10
-        'shipmentno': int.tryParse(shipmentNoC.text) ?? 0, // 11
+        'category': categoryC.text,
+        'brand': brandC.text,
+        'model': modelC.text,
+        'weight': double.tryParse(weightC.text) ?? 0.0,
+        'yuan': double.tryParse(yuanC.text) ?? 0.0,
+        'air': double.tryParse(airResultC.text) ?? 0.0,
+        'sea': double.tryParse(seaResultC.text) ?? 0.0,
+        'agent': double.tryParse(agentC.text) ?? 0.0,
+        'wholesale': double.tryParse(wholesaleC.text) ?? 0.0,
+        'shipmenttax':
+            double.tryParse(seaTaxC.text) ??
+            0.0, // Air tax is 700, Sea tax from this field
+        'shipmentno': int.tryParse(shipmentNoC.text) ?? 0,
         'currency':
-            double.tryParse(currencyC.text) ??
-            controller.currentCurrency.value, // 12
-        'stock_qty': int.tryParse(stockC.text) ?? 0, // 13
-        'avg_purchase_price': double.tryParse(seaResultC.text) ?? 0.0, // 14
-        'sea_stock_qty': int.tryParse(stockC.text) ?? 0, // 15
-        'air_stock_qty': 0, // 16 (Starts at 0 for new items)
-        // Fields 17 & 18 are "name" and "id" handled by nameC.text and DB auto-gen
+            double.tryParse(currencyC.text) ?? controller.currentCurrency.value,
+        'stock_qty': initialStock,
+        'avg_purchase_price': initialAvgPrice,
+        'sea_stock_qty': initialStock,
+        'air_stock_qty': 0,
+        'local_qty': 0,
       });
       Get.back();
     },
@@ -490,27 +517,11 @@ void showCreateProductDialog(ProductController controller) {
           ),
         ],
       ),
-
-      Row(
-        children: [
-          Expanded(
-            child: _buildField(
-              seaTaxC,
-              'Sea Tax /KG',
-              Icons.waves,
-              type: TextInputType.number,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: _buildField(
-              airTaxC,
-              'Air Tax /KG',
-              Icons.airplanemode_active,
-              type: TextInputType.number,
-            ),
-          ),
-        ],
+      _buildField(
+        seaTaxC,
+        'Sea Tax /KG (ShipmentTax Column)',
+        Icons.airplanemode_active,
+        type: TextInputType.number,
       ),
 
       _sectionHeader('Auto-Calculated Costs (Landing)'),
@@ -521,7 +532,7 @@ void showCreateProductDialog(ProductController controller) {
               controller: seaResultC,
               readOnly: true,
               decoration: InputDecoration(
-                labelText: "Sea Price (BDT)",
+                labelText: "Air Price (BDT) ",
                 prefixIcon: Icon(Icons.calculate, color: Colors.blue),
                 filled: true,
                 fillColor: Colors.blue.withOpacity(0.05),
@@ -573,7 +584,7 @@ void showCreateProductDialog(ProductController controller) {
           Expanded(
             child: _buildField(
               stockC,
-              'Initial Stock',
+              'Initial Stock (Sea)',
               Icons.inventory_2,
               type: TextInputType.number,
             ),

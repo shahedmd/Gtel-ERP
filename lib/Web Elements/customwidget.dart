@@ -298,7 +298,13 @@ class SidebarMenu extends StatelessWidget {
                   id: '/cash', // Example of a standalone route
                   icon: FontAwesomeIcons.cashRegister,
                   title: "Cash Drawer",
-                )
+                ),
+
+                _NavTile(
+                  id: '/service', // Example of a standalone route
+                  icon: FontAwesomeIcons.productHunt,
+                  title: "Service Product",
+                ),
               ],
             ),
           ),

@@ -12,4 +12,5 @@ abstract class Routes {
   static const String STAFF = '/staff';
   static const String LIVEORDER = '/liveorder';
   static const String CASH = '/cash';
+  static const String SERVICE = '/service';
 }

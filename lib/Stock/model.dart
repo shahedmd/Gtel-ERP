@@ -10,14 +10,16 @@ class Product {
   final double sea;
   final double agent;
   final double wholesale;
-  final double shipmentTax;
+  final double shipmentTax; // Maps to 'shipmenttax' in DB
   final int shipmentNo;
   final double currency;
-  final int stockQty;
-  // --- New Fields ---
+  final int stockQty; // Total Stock
+
+  // --- Inventory Breakdown Fields ---
   final double avgPurchasePrice;
   final int seaStockQty;
   final int airStockQty;
+  final int localQty; // Added Local Qty
 
   Product({
     required this.id,
@@ -38,9 +40,11 @@ class Product {
     required this.avgPurchasePrice,
     required this.seaStockQty,
     required this.airStockQty,
+    required this.localQty,
   });
 
   factory Product.fromJson(Map<String, dynamic> json) {
+    // Helper for safe integer parsing
     int parseInt(dynamic value) {
       if (value == null) return 0;
       if (value is int) return value;
@@ -49,6 +53,7 @@ class Product {
       return 0;
     }
 
+    // Helper for safe double parsing
     double parseDouble(dynamic value) {
       if (value == null) return 0.0;
       if (value is double) return value;
@@ -59,25 +64,27 @@ class Product {
 
     return Product(
       id: parseInt(json['id']),
-      name: json['name'] ?? '',
-      category: json['category'] ?? '',
-      brand: json['brand'] ?? '',
-      model: json['model'] ?? '',
+      name: json['name']?.toString() ?? '',
+      category: json['category']?.toString() ?? '',
+      brand: json['brand']?.toString() ?? '',
+      model: json['model']?.toString() ?? '',
       weight: parseDouble(json['weight']),
       yuan: parseDouble(json['yuan']),
       air: parseDouble(json['air']),
       sea: parseDouble(json['sea']),
       agent: parseDouble(json['agent']),
       wholesale: parseDouble(json['wholesale']),
-      // Note: Postgres often returns column names in lowercase
+      // DB column is lowercase 'shipmenttax', handling both cases just in case
       shipmentTax: parseDouble(json['shipmenttax'] ?? json['shipmentTax']),
       shipmentNo: parseInt(json['shipmentno'] ?? json['shipmentNo']),
       currency: parseDouble(json['currency']),
       stockQty: parseInt(json['stock_qty']),
-      // --- Parsing New Fields ---
+
+      // --- New Inventory Fields ---
       avgPurchasePrice: parseDouble(json['avg_purchase_price']),
       seaStockQty: parseInt(json['sea_stock_qty']),
       airStockQty: parseInt(json['air_stock_qty']),
+      localQty: parseInt(json['local_qty']),
     );
   }
 
@@ -94,14 +101,14 @@ class Product {
       'sea': sea,
       'agent': agent,
       'wholesale': wholesale,
-      'shipmentTax': shipmentTax,
-      'shipmentNo': shipmentNo,
+      'shipmenttax': shipmentTax,
+      'shipmentno': shipmentNo,
       'currency': currency,
       'stock_qty': stockQty,
-      // --- New Fields in JSON ---
       'avg_purchase_price': avgPurchasePrice,
       'sea_stock_qty': seaStockQty,
       'air_stock_qty': airStockQty,
+      'local_qty': localQty,
     };
   }
 }

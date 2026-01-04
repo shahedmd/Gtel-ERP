@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:gtel_erp/Stock/Service/servicepage.dart';
 import '../Cash/page.dart';
 import '../Live order/liveorder.dart';
 import '../Profit&loss/page.dart';
@@ -68,6 +69,9 @@ class _AdminHomepageState extends State<AdminHomepage> {
                   }
                   if (settings.name == Routes.CASH) {
                     return GetPageRoute(page: () => CashDrawerPage());
+                  }
+                  if (settings.name == Routes.SERVICE) {
+                    return GetPageRoute(page: () => ServicePage());
                   }
                   return GetPageRoute(
                     page: () => const Center(child: Text("Not Found")),
