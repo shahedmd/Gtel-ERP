@@ -220,33 +220,37 @@ class LiveSalesController extends GetxController {
 
       // B. Logic Split: Debtor vs Retailer
       if (customerType.value == "Debtor") {
-        // --- DEBTOR LOGIC (UPDATED AS REQUESTED) ---
+        // --- DEBTOR LOGIC (UPDATED) ---
 
-        // 1. The Bill Entry (Unpaid/Due Amount) -> CREDIT ENTRY
-        // "if the bill is unpaid you should entry a credit entry"
-        // We record the FULL Invoice amount as Credit (Increasing their Due)
-        await debtorCtrl.addTransaction(
-          debtorId: selectedDebtor.value!.id,
-          amount: grandTotal,
-          note: "Invoice: $invNo",
-          type: "credit", // <--- CHANGED TO CREDIT (Bill/Due)
-          date: DateTime.now(),
-        );
-
-        // 2. The Payment Entry (If they paid anything) -> DEBIT ENTRY
-        // "if the bill is paid then you will entry a debit entry"
+        // 1. HANDLE PAYMENT -> Send to DAILY SALES
+        // "if the debtor make a payment it just create a dailysale"
         if (paidAmount > 0) {
+          await dailyCtrl.addSale(
+            name: "$fName (Debtor)", // Mark clearly
+            amount: paidAmount, // Only record what was PAID
+            customerType: "debtor",
+            isPaid: true, // This money is collected
+            date: DateTime.now(),
+            paymentMethod: paymentMap,
+            transactionId: invNo,
+            source: "debtor_instant_sale",
+          );
+        }
+
+        // 2. HANDLE DUE -> Send to DEBTOR LEDGER
+        // Only record the unpaid part as Debt (Credit)
+        if (dueAmount > 0) {
           await debtorCtrl.addTransaction(
             debtorId: selectedDebtor.value!.id,
-            amount: paidAmount,
-            note: "Payment for Inv: $invNo",
-            type: "debit", // <--- CHANGED TO DEBIT (Payment/Collection)
+            amount: dueAmount,
+            // Helpful note to explain why the amount is less than the total bill
+            note: "Due for Invoice: $invNo (Total Bill: $grandTotal)",
+            type: "credit", // Increases their debt
             date: DateTime.now(),
           );
         }
 
-
-        // 4. Profit Log
+        // 3. Profit Log (Keeps track of the full order details for analytics)
         await _db.collection('debtorProfitLoss').doc(invNo).set({
           "invoiceId": invNo,
           "debtorName": fName,
@@ -255,6 +259,10 @@ class LiveSalesController extends GetxController {
           "profit": invoiceProfit,
           "paidAmount": paidAmount,
           "dueAmount": dueAmount,
+          "items":
+              cart
+                  .map((e) => "${e.product.name} x${e.quantity}")
+                  .toList(), // Added items for reference
           "timestamp": FieldValue.serverTimestamp(),
         });
       } else {
