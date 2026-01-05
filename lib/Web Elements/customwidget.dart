@@ -288,12 +288,6 @@ class SidebarMenu extends StatelessWidget {
                   icon: FontAwesomeIcons.gears,
                   title: "Sale Overview",
                 ),
-
-                _NavTile(
-                  id: '/settings', // Example of a standalone route
-                  icon: FontAwesomeIcons.gears,
-                  title: "System Settings",
-                ),
                 _NavTile(
                   id: '/cash', // Example of a standalone route
                   icon: FontAwesomeIcons.cashRegister,

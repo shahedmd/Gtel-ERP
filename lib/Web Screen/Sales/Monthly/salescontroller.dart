@@ -56,6 +56,7 @@ class MonthlySalesController extends GetxController {
       // 2. Assign the whole map to the observable .value
       monthlyData.value = tempMap;
     } catch (e) {
+      print(e.toString());
       Get.snackbar("Error", "Failed to fetch sales: $e");
     } finally {
       isLoading.value = false;

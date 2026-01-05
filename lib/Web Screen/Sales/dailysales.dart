@@ -411,7 +411,7 @@ class DailySalesPage extends StatelessWidget {
               ),
               // Status Badge
               Expanded(flex: 2, child: _statusBadge(sale)),
-              // Payment Method (Now shows Multi nicely)
+              // Payment Method
               Expanded(
                 flex: 3,
                 child: Text(
@@ -451,16 +451,31 @@ class DailySalesPage extends StatelessWidget {
                   ),
                 ),
               ),
-              // Action
+              // Actions (Refund & Delete)
               SizedBox(
-                width: 60,
-                child: IconButton(
-                  icon: const Icon(
-                    Icons.delete_outline,
-                    size: 18,
-                    color: Colors.black26,
-                  ),
-                  onPressed: () => _confirmDelete(sale),
+                width: 100,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    if (sale.transactionId != null && sale.paid > 0)
+                      IconButton(
+                        tooltip: "Refund",
+                        icon: const Icon(
+                          Icons.replay_circle_filled,
+                          size: 20,
+                          color: Colors.orange,
+                        ),
+                        onPressed: () => _showRefundDialog(context, sale),
+                      ),
+                    IconButton(
+                      icon: const Icon(
+                        Icons.delete_outline,
+                        size: 20,
+                        color: Colors.black26,
+                      ),
+                      onPressed: () => _confirmDelete(sale),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -622,6 +637,90 @@ class DailySalesPage extends StatelessWidget {
           SizedBox(height: 16),
           Text("No sales records found", style: TextStyle(color: textMuted)),
         ],
+      ),
+    );
+  }
+
+  void _showRefundDialog(BuildContext context, SaleModel sale) {
+    final refundC = TextEditingController();
+
+    Get.dialog(
+      Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 130, vertical: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                "Process Refund",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                "Refund for: ${sale.name}",
+                style: const TextStyle(color: Colors.grey),
+              ),
+              const SizedBox(height: 5),
+              Text(
+                "Max Refundable: ৳${sale.paid}",
+                style: const TextStyle(
+                  color: Colors.green,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 20),
+              TextField(
+                controller: refundC,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: "Enter Refund Amount",
+                  border: OutlineInputBorder(),
+                  suffixText: "BDT",
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Get.back(),
+                    child: const Text("Cancel"),
+                  ),
+                  const SizedBox(width: 10),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orange,
+                    ),
+                    onPressed: () {
+                      final amount = double.tryParse(refundC.text) ?? 0.0;
+                      if (amount <= 0 || amount > sale.paid) {
+                        Get.snackbar(
+                          "Invalid Amount",
+                          "Please enter a valid amount up to ৳${sale.paid}",
+                        );
+                        return;
+                      }
+
+                      // CALL THE CONTROLLER
+                      ctrl.processRefund(
+                        saleId: sale.id,
+                        invoiceId: sale.transactionId!,
+                        customerName: sale.name,
+                        refundAmount: amount,
+                      );
+                    },
+                    child: const Text(
+                      "Confirm Refund",
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

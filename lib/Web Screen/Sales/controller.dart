@@ -1,5 +1,6 @@
 // ignore_for_file: deprecated_member_use, empty_catches
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -242,12 +243,92 @@ class DailySalesController extends GetxController {
     }
   }
 
-  // 7. DELETE SALE
+  // 7. DELETE SALE & DELETE ENTIRE ORDER DOCUMENT
   Future<void> deleteSale(String saleId) async {
+    isLoading.value = true;
     try {
-      await _db.collection("daily_sales").doc(saleId).delete();
+      // Step A: Get the Sale Document first to find the Invoice ID
+      DocumentSnapshot saleSnap =
+          await _db.collection("daily_sales").doc(saleId).get();
+
+      if (!saleSnap.exists) {
+        await loadDailySales(); // Refresh UI if it was already gone
+        return;
+      }
+
+      final saleData = saleSnap.data() as Map<String, dynamic>;
+      String? invoiceId = saleData['transactionId'] ?? saleData['invoiceId'];
+      String customerName = saleData['name'] ?? "";
+
+      DocumentReference? targetOrderRef;
+
+      // Step B: If there is an invoice ID, find the Order Document
+      if (invoiceId != null && invoiceId.isNotEmpty) {
+        // 1. Try finding by Customer Name first (Faster)
+        String cleanName =
+            customerName.contains('(')
+                ? customerName.split('(').first.trim()
+                : customerName;
+
+        QuerySnapshot customerQuery =
+            await _db
+                .collection('customers')
+                .where('name', isEqualTo: cleanName)
+                .get();
+
+        // Check inside found customers
+        for (var doc in customerQuery.docs) {
+          final ref = doc.reference.collection('orders').doc(invoiceId);
+          final snap = await ref.get();
+          if (snap.exists) {
+            targetOrderRef = ref;
+            break;
+          }
+        }
+
+        // 2. Fallback: Search ALL orders if name didn't match
+        if (targetOrderRef == null) {
+          final groupQuery =
+              await _db
+                  .collectionGroup('orders')
+                  .where('invoiceId', isEqualTo: invoiceId)
+                  .limit(1)
+                  .get();
+
+          if (groupQuery.docs.isNotEmpty) {
+            targetOrderRef = groupQuery.docs.first.reference;
+          }
+        }
+      }
+
+      // Step C: Run Transaction to Delete Both
+      await _db.runTransaction((transaction) async {
+        // 1. Delete the Order Document (if found)
+        if (targetOrderRef != null) {
+          transaction.delete(targetOrderRef);
+        }
+
+        // 2. Delete the Daily Sales Document
+        transaction.delete(_db.collection("daily_sales").doc(saleId));
+      });
+
       await loadDailySales();
-    } catch (e) {}
+      Get.snackbar(
+        "Deleted",
+        "Sale and Linked Order completely removed.",
+        backgroundColor: Colors.redAccent,
+        colorText: Colors.white,
+      );
+    } catch (e) {
+      Get.snackbar(
+        "Error",
+        "Could not delete: $e",
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+    } finally {
+      isLoading.value = false;
+    }
   }
 
   // 8. FORMAT PAYMENT METHOD (UPDATED FOR MULTI & BANK)
@@ -432,5 +513,167 @@ class DailySalesController extends GetxController {
         ),
       ],
     );
+  }
+
+  // ... existing imports
+  // Add this method inside DailySalesController class
+
+  // 10. PROCESS REFUND (NEW FEATURE)
+  // 10. PROCESS REFUND (FIXED & ROBUST)
+  // 10. PROCESS REFUND (SMART SEARCH FIXED)
+  Future<void> processRefund({
+    required String saleId,
+    required String invoiceId,
+    required String customerName,
+    required double refundAmount,
+  }) async {
+    isLoading.value = true;
+    try {
+      // --- STEP 1: FIND THE ORDER DOC (SMART LOOKUP) ---
+      DocumentReference? targetOrderRef;
+
+      // Strategy A: Clean the name (e.g. "Shahed (Demo)" -> "Shahed")
+      String cleanName = customerName;
+      if (customerName.contains('(')) {
+        cleanName = customerName.split('(').first.trim();
+      }
+
+      // Try finding customer by Clean Name
+      QuerySnapshot customerQuery =
+          await _db
+              .collection('customers')
+              .where('name', isEqualTo: cleanName)
+              .get();
+
+      // If failed, try Exact Name (just in case)
+      if (customerQuery.docs.isEmpty) {
+        customerQuery =
+            await _db
+                .collection('customers')
+                .where('name', isEqualTo: customerName)
+                .get();
+      }
+
+      // 1. Search inside found customers
+      if (customerQuery.docs.isNotEmpty) {
+        for (var doc in customerQuery.docs) {
+          final ref = doc.reference.collection('orders').doc(invoiceId);
+          final snap = await ref.get();
+          if (snap.exists) {
+            targetOrderRef = ref;
+            break;
+          }
+        }
+      }
+
+      // Strategy B: Collection Group Search (The "Golden Hammer")
+      // If we still haven't found it (maybe name is totally different),
+      // search ALL orders in the database by ID.
+      if (targetOrderRef == null) {
+        final groupQuery =
+            await _db
+                .collectionGroup('orders')
+                .where('invoiceId', isEqualTo: invoiceId)
+                .limit(1)
+                .get();
+
+        if (groupQuery.docs.isNotEmpty) {
+          targetOrderRef = groupQuery.docs.first.reference;
+        }
+      }
+
+      if (targetOrderRef == null) {
+        throw "Could not find Invoice #$invoiceId under customer '$cleanName' or any other record.";
+      }
+
+      final saleRef = _db.collection('daily_sales').doc(saleId);
+
+      // --- STEP 2: RUN TRANSACTION ---
+      await _db.runTransaction((transaction) async {
+        final saleSnap = await transaction.get(saleRef);
+        final orderSnap = await transaction.get(targetOrderRef!);
+
+        if (!saleSnap.exists) throw "Sales entry missing.";
+        if (!orderSnap.exists) throw "Order entry missing.";
+
+        // A. Parse Current Data
+        final saleData = saleSnap.data() as Map<String, dynamic>;
+        final orderData = orderSnap.data() as Map<String, dynamic>;
+
+        final double currentSalePaid =
+            (saleData['paid'] as num?)?.toDouble() ?? 0.0;
+        final double currentSaleAmount =
+            (saleData['amount'] as num?)?.toDouble() ?? 0.0;
+        final double currentProfit =
+            (orderData['profit'] as num?)?.toDouble() ?? 0.0;
+
+        // Deep copy payment details
+        final Map<String, dynamic> pmDetails = Map<String, dynamic>.from(
+          orderData['paymentDetails'] ?? {},
+        );
+        final double currentTotalPaid =
+            (pmDetails['totalPaid'] as num?)?.toDouble() ?? 0.0;
+        final double currentCash =
+            (pmDetails['cash'] as num?)?.toDouble() ?? 0.0;
+
+        // B. Validate
+        if (refundAmount > currentSalePaid) {
+          throw "Refund (৳$refundAmount) cannot exceed paid amount (৳$currentSalePaid).";
+        }
+        // C. Calculate New Values
+        // 1. Reduce from Daily Sales
+        transaction.update(saleRef, {
+          'amount': currentSaleAmount - refundAmount,
+          'paid': currentSalePaid - refundAmount,
+          'lastRefundAt': FieldValue.serverTimestamp(),
+          'paymentMethod': {
+            'cash': currentSaleAmount - refundAmount,
+            'totalPaid': currentSaleAmount - refundAmount,
+          },
+        });
+
+        // 2. Reduce from Customer Order (Profit & Paid)
+        pmDetails['totalPaid'] = currentTotalPaid - refundAmount;
+
+        // Adjust Cash specifically
+        double newCash = currentCash - refundAmount;
+        pmDetails['cash'] = newCash < 0 ? 0 : newCash;
+
+        transaction.update(targetOrderRef, {
+          'profit': currentProfit - refundAmount,
+          'paymentDetails': pmDetails,
+        });
+      });
+
+      // --- STEP 3: SUCCESS ---
+      await loadDailySales();
+      if (Get.isDialogOpen ?? false) Get.back();
+      Get.snackbar(
+        "Refund Successful",
+        "Refunded ৳$refundAmount for $cleanName",
+        backgroundColor: Colors.green,
+        colorText: Colors.white,
+        duration: const Duration(seconds: 4),
+      );
+    } catch (e) {
+      // If it's an index error, tell the user clearly
+      if (e.toString().contains("requires an index")) {
+        Get.snackbar(
+          "Database Index Required",
+          "Please create an index for 'orders' collection group in Firebase Console.",
+          backgroundColor: Colors.red,
+          colorText: Colors.white,
+        );
+      } else {
+        Get.snackbar(
+          "Refund Failed",
+          e.toString(),
+          backgroundColor: Colors.red,
+          colorText: Colors.white,
+        );
+      }
+    } finally {
+      isLoading.value = false;
+    }
   }
 }
