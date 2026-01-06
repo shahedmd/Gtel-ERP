@@ -207,7 +207,6 @@ class ProfitController extends GetxController {
         backgroundColor: Colors.redAccent,
         colorText: Colors.white,
       );
-      print("P&L Error: $e");
     } finally {
       isLoading.value = false;
     }

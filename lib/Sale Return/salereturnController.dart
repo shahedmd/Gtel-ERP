@@ -1,4 +1,4 @@
-// ignore_for_file: deprecated_member_use
+// ignore_for_file: deprecated_member_use, file_names, empty_catches
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -135,7 +135,6 @@ class SaleReturnController extends GetxController {
     String saleId = "";
 
     try {
-      print("--- STARTING RETURN: $invoiceId ---");
 
       // 2. GET DOCUMENT REFERENCES
       DocumentReference orderRef = _db
@@ -156,10 +155,8 @@ class SaleReturnController extends GetxController {
                 .get();
         if (dailyQuery.docs.isNotEmpty) {
           saleId = dailyQuery.docs.first.id;
-          print("Found Linked Daily Sale: $saleId");
         }
       } catch (e) {
-        print("Daily Lookup Error: $e");
       }
 
       // 4. PREPARE DATA
@@ -210,7 +207,6 @@ class SaleReturnController extends GetxController {
         });
       }
 
-      print("Calculated Refund: $refundAmt");
 
       // --- RECALCULATE FINANCIALS ---
       double oldGT = toDouble(currentOrder['grandTotal']);
@@ -289,7 +285,6 @@ class SaleReturnController extends GetxController {
         }
       }
 
-      print("DB Update Success. Syncing Stock...");
 
       // --- C. SUPABASE STOCK RESTORATION ---
       for (var pid in returnQuantities.keys) {
@@ -314,13 +309,11 @@ class SaleReturnController extends GetxController {
                 localUnitPrice: originalCost,
               );
             } catch (e) {
-              print("Stock API Error: $e");
             }
           }
         }
       }
 
-      print("Return Complete.");
 
       Get.back(); // Close Dialog
       Get.snackbar(
@@ -334,9 +327,7 @@ class SaleReturnController extends GetxController {
       orderData.value = null;
       searchController.clear();
       orderItems.clear();
-    } catch (e, stack) {
-      print("FATAL: $e");
-      print(stack);
+    } catch (e) {
       if (Get.isDialogOpen ?? false) Get.back();
       Get.snackbar(
         "Return Failed",

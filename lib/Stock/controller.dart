@@ -425,7 +425,6 @@ class ProductController extends GetxController {
       colorText: Colors.white,
       snackPosition: SnackPosition.BOTTOM,
     );
-    print("Error Log: $msg");
   }
 
   void goToPage(int page) {

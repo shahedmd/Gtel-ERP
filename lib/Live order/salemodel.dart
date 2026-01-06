@@ -379,7 +379,6 @@ class LiveSalesController extends GetxController {
         colorText: Colors.white,
       );
     } catch (e) {
-      print("Sale Error: $e");
       Get.snackbar(
         "Error",
         "Failed to finalize sale: $e",
