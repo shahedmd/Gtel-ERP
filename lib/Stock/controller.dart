@@ -3,15 +3,15 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
-import 'model.dart'; // Ensure this model supports local_qty, sea_stock_qty, air_stock_qty
+import 'model.dart'; // Ensure this model supports local_qty, sea_stock_qty, air_stock_qty, shipmentTaxAir
 
 class ProductController extends GetxController {
   // ==========================================
   // STATE VARIABLES
   // ==========================================
   final RxList<Product> allProducts = <Product>[].obs;
-  
-  // NEW: State for Service/Damage Logs
+
+  // State for Service/Damage Logs
   final RxList<Map<String, dynamic>> serviceLogs = <Map<String, dynamic>>[].obs;
 
   // Filters
@@ -20,7 +20,8 @@ class ProductController extends GetxController {
 
   // Loading States
   final RxBool isLoading = false.obs;
-  final RxBool isActionLoading = false.obs; // Unified loading for Create/Update/Stock/Service
+  final RxBool isActionLoading =
+      false.obs; // Unified loading for Create/Update/Stock/Service
 
   // Global Settings
   final RxDouble currentCurrency = 17.85.obs; // BDT to CNY Rate
@@ -31,15 +32,13 @@ class ProductController extends GetxController {
   final RxInt totalProducts = 0.obs;
 
   // Configuration
-  // Update this to your deployed URL or local IP
-  static const baseUrl = 'https://dart-server-1zun.onrender.com'; 
+  static const baseUrl = 'https://dart-server-1zun.onrender.com';
   Timer? _debounce;
 
   @override
   void onInit() {
     super.onInit();
     fetchProducts();
-    // Optional: Load service logs on init if needed, or call fetchServiceLogs() from the specific UI screen
   }
 
   @override
@@ -64,7 +63,9 @@ class ProductController extends GetxController {
         'brand': selectedBrand.value == 'All' ? '' : selectedBrand.value,
       };
 
-      final uri = Uri.parse('$baseUrl/products').replace(queryParameters: queryParams);
+      final uri = Uri.parse(
+        '$baseUrl/products',
+      ).replace(queryParameters: queryParams);
 
       final res = await http.get(uri).timeout(const Duration(seconds: 20));
 
@@ -72,7 +73,7 @@ class ProductController extends GetxController {
         final Map<String, dynamic> data = jsonDecode(res.body);
         final List<dynamic> productsJson = data['products'] ?? [];
 
-        // Parse using the Model
+        // Parse using the updated Model
         final List<Product> loadedProducts =
             productsJson.map<Product>((e) => Product.fromJson(e)).toList();
 
@@ -166,8 +167,8 @@ class ProductController extends GetxController {
 
   /// CLIENT-SIDE PREDICTION HELPER
   /// Matches Server Logic:
-  /// Sea = Tax from DB Column
-  /// Air = 700 Fixed
+  /// Sea = Tax from DB Column (shipmentTax)
+  /// Air = Tax Air from DB Column (shipmentTaxAir)
   double predictNewWAC(
     Product product,
     int addSea,
@@ -184,9 +185,10 @@ class ProductController extends GetxController {
         (product.yuan * product.currency) +
         (product.weight * product.shipmentTax);
 
-    // Air Cost: (Yuan * Curr) + (Weight * 700) <-- FIXED to 700 in Server
+    // [UPDATED] Air Cost: Now uses shipmentTaxAir from DB (dynamic)
     double airUnitCost =
-        (product.yuan * product.currency) + (product.weight * 700.0);
+        (product.yuan * product.currency) +
+        (product.weight * product.shipmentTaxAir);
 
     double newBatchValue =
         (addSea * seaUnitCost) +
@@ -293,7 +295,7 @@ class ProductController extends GetxController {
   }
 
   // ==========================================
-  // 7. SERVICE & DAMAGE MANAGEMENT (NEW)
+  // 7. SERVICE & DAMAGE MANAGEMENT
   // ==========================================
 
   /// Fetch Service Logs

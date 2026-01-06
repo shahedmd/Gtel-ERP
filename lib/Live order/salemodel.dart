@@ -1,5 +1,4 @@
 // ignore_for_file: deprecated_member_use
-
 import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -8,7 +7,6 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-
 // Import your existing models
 import '../Stock/controller.dart';
 import '../Stock/model.dart';
@@ -72,6 +70,13 @@ class LiveSalesController extends GetxController {
     bkashC.addListener(updatePaymentCalculations);
     nagadC.addListener(updatePaymentCalculations);
     bankC.addListener(updatePaymentCalculations);
+
+    // Listen to customer type changes to reset relevant fields
+    ever(customerType, (_) {
+      selectedDebtor.value = null;
+      debtorPhoneSearch.clear();
+      updatePaymentCalculations(); // Recalculate prices if logic depends on type
+    });
   }
 
   void updatePaymentCalculations() {
@@ -93,7 +98,12 @@ class LiveSalesController extends GetxController {
   // --- CALCULATIONS ---
   double get subtotalAmount =>
       cart.fold(0, (sumv, item) => sumv + item.subtotal);
-  double get grandTotal => subtotalAmount - discountVal.value;
+
+  // Safe calculation preventing negative total
+  double get grandTotal {
+    double total = subtotalAmount - discountVal.value;
+    return total < 0 ? 0 : total;
+  }
 
   // Cost & Profit Tracking
   double get totalInvoiceCost => cart.fold(
@@ -133,7 +143,7 @@ class LiveSalesController extends GetxController {
     } else {
       cart.add(SalesCartItem(product: p, initialQty: 1, priceAtSale: price));
     }
-    // Recalculate if discount exists
+    // Recalculate payments
     updatePaymentCalculations();
   }
 
@@ -147,20 +157,25 @@ class LiveSalesController extends GetxController {
     } else {
       cart[index].quantity.value = p.stockQty; // Max out
       cart.refresh();
+      Get.snackbar("Limit", "Cannot exceed stock quantity: ${p.stockQty}");
     }
     updatePaymentCalculations();
   }
 
+  // Generate a robust unique ID
   String _generateInvoiceID() {
     final now = DateTime.now();
-    final random = Random().nextInt(999).toString().padLeft(3, '0');
-    return "GTEL-${DateFormat('yyyyMMdd').format(now)}-$random";
+    final random = Random().nextInt(9999).toString().padLeft(4, '0');
+    return "GTEL-${DateFormat('yyMMdd').format(now)}-$random";
   }
 
-  // --- FINALIZE SALE (CORRECTED DEBTOR LOGIC) ---
+  // --- FINALIZE SALE (UPDATED LOGIC) ---
   Future<void> finalizeSale() async {
     // 1. Basic Validations
-    if (cart.isEmpty) return;
+    if (cart.isEmpty) {
+      Get.snackbar("Error", "Cart is empty");
+      return;
+    }
     if (grandTotal < 0) {
       Get.snackbar("Error", "Negative total not allowed");
       return;
@@ -169,6 +184,7 @@ class LiveSalesController extends GetxController {
     // 2. Customer Validation
     String fName = "";
     String fPhone = "";
+    String? debtorId;
 
     if (customerType.value == "Debtor") {
       if (selectedDebtor.value == null) {
@@ -177,6 +193,7 @@ class LiveSalesController extends GetxController {
       }
       fName = selectedDebtor.value!.name;
       fPhone = selectedDebtor.value!.phone;
+      debtorId = selectedDebtor.value!.id;
     } else {
       if (nameC.text.isEmpty || phoneC.text.isEmpty) {
         Get.snackbar("Required", "Customer Name & Phone are needed");
@@ -188,11 +205,19 @@ class LiveSalesController extends GetxController {
 
     isProcessing.value = true;
     final String invNo = _generateInvoiceID();
+    final DateTime saleDate = DateTime.now();
 
     // Calculate Financials
-    double paidAmount = totalPaidInput.value;
-    double dueAmount = grandTotal - paidAmount;
-    if (dueAmount < 0) dueAmount = 0;
+    // If user paid MORE than total, the actual money received is capped at Grand Total
+    // for accounting purposes (since the rest is change returned).
+    // However, we track the raw input for the payment breakdown.
+    double paidAmountInput = totalPaidInput.value;
+    double actualMoneyReceived =
+        paidAmountInput > grandTotal ? grandTotal : paidAmountInput;
+    double dueAmount = grandTotal - actualMoneyReceived;
+    if (dueAmount < 0) {
+      dueAmount = 0; // Should be handled by change logic, but safe guard.
+    }
 
     // Payment Breakdown Map
     Map<String, dynamic> paymentMap = {
@@ -201,89 +226,134 @@ class LiveSalesController extends GetxController {
       "bkash": double.tryParse(bkashC.text) ?? 0,
       "nagad": double.tryParse(nagadC.text) ?? 0,
       "bank": double.tryParse(bankC.text) ?? 0,
-      "totalPaid": paidAmount,
+      "totalPaidInput": paidAmountInput,
+      "actualReceived": actualMoneyReceived,
       "due": dueAmount,
       "changeReturned": changeReturn.value,
       "currency": "BDT",
     };
 
+    // Prepare Items List for Storage (Snapshot of current state)
+    List<Map<String, dynamic>> orderItems =
+        cart.map((item) {
+          return {
+            "productId": item.product.id,
+            "name": item.product.name,
+            "model": item.product.model,
+            "qty": item.quantity.value,
+            "saleRate": item.priceAtSale,
+            "costRate": item.product.avgPurchasePrice,
+            "subtotal": item.subtotal,
+          };
+        }).toList();
+
     try {
-      // A. Update Stock (Common)
-      List<Map<String, dynamic>> updates =
+      // A. Update Stock (Decrease)
+      List<Map<String, dynamic>> stockUpdates =
           cart
               .map(
                 (item) => {'id': item.product.id, 'qty': item.quantity.value},
               )
               .toList();
-      bool stockSuccess = await productCtrl.updateStockBulk(updates);
+      bool stockSuccess = await productCtrl.updateStockBulk(stockUpdates);
       if (!stockSuccess) throw "Stock update failed";
 
-      // B. Logic Split: Debtor vs Retailer
-      if (customerType.value == "Debtor") {
-        // --- DEBTOR LOGIC (UPDATED) ---
+      // B. Create Centralized Sales Order (CRITICAL FOR RETURNS/EDIT/PDF)
+      // This is the "Master Record" of the sale
+      await _db.collection('sales_orders').doc(invNo).set({
+        "invoiceId": invNo,
+        "timestamp": FieldValue.serverTimestamp(),
+        "date": DateFormat(
+          'yyyy-MM-dd HH:mm:ss',
+        ).format(saleDate), // Searchable string date
+        // Customer Info
+        "customerType": customerType.value,
+        "customerName": fName,
+        "customerPhone": fPhone,
+        "debtorId": debtorId, // Null if retailer
+        "shopName": shopC.text,
 
-        // 1. HANDLE PAYMENT -> Send to DAILY SALES
-        // "if the debtor make a payment it just create a dailysale"
-        if (paidAmount > 0) {
+        // Product Details
+        "items": orderItems,
+
+        // Financials
+        "subtotal": subtotalAmount,
+        "discount": discountVal.value,
+        "grandTotal": grandTotal,
+        "totalCost": totalInvoiceCost,
+        "profit": invoiceProfit,
+
+        // Payment
+        "paymentDetails": paymentMap,
+        "isFullyPaid": dueAmount <= 0,
+        "status": "completed", // Can be 'returned', 'cancelled' later
+      });
+
+      // C. Logic Split: Debtor vs Retailer Handlers
+      if (customerType.value == "Debtor") {
+        // 1. Record Money In (Daily Sales) - Only if money was actually paid
+        if (actualMoneyReceived > 0) {
           await dailyCtrl.addSale(
-            name: "$fName (Debtor)", // Mark clearly
-            amount: paidAmount, // Only record what was PAID
+            name: "$fName (Debtor)",
+            amount: actualMoneyReceived,
             customerType: "debtor",
-            isPaid: true, // This money is collected
-            date: DateTime.now(),
+            isPaid: true,
+            date: saleDate,
             paymentMethod: paymentMap,
             transactionId: invNo,
             source: "debtor_instant_sale",
           );
         }
 
-        // 2. HANDLE DUE -> Send to DEBTOR LEDGER
-        // Only record the unpaid part as Debt (Credit)
+        // 2. Record Debt (Ledger) - Only if there is due
         if (dueAmount > 0) {
           await debtorCtrl.addTransaction(
-            debtorId: selectedDebtor.value!.id,
+            debtorId: debtorId!,
             amount: dueAmount,
-            // Helpful note to explain why the amount is less than the total bill
-            note: "Due for Invoice: $invNo (Total Bill: $grandTotal)",
-            type: "credit", // Increases their debt
-            date: DateTime.now(),
+            note: "Due for Inv: $invNo (Items: ${cart.length})",
+            type: "credit", // Increases debt
+            date: saleDate,
           );
         }
 
-        // 3. Profit Log (Keeps track of the full order details for analytics)
+        // 3. Profit Log (Legacy/Analytics support)
         await _db.collection('debtorProfitLoss').doc(invNo).set({
           "invoiceId": invNo,
           "debtorName": fName,
           "saleAmount": grandTotal,
           "costAmount": totalInvoiceCost,
           "profit": invoiceProfit,
-          "paidAmount": paidAmount,
+          "paidAmount": actualMoneyReceived,
           "dueAmount": dueAmount,
-          "items":
-              cart
-                  .map((e) => "${e.product.name} x${e.quantity}")
-                  .toList(), // Added items for reference
+          "items": orderItems.map((e) => "${e['model']} x${e['qty']}").toList(),
           "timestamp": FieldValue.serverTimestamp(),
         });
       } else {
-        // --- RETAILER LOGIC (UNCHANGED) ---
+        // Retailer Logic
+
+        // 1. Record Money In (Daily Sales)
+        // Assuming Daily Sales tracks cash flow, we log what was received.
+        // If it tracks Revenue, log grandTotal. Using actualMoneyReceived for consistency with cash drawer.
         await dailyCtrl.addSale(
           name: "$fName (${shopC.text})",
-          amount: grandTotal,
+          amount: actualMoneyReceived,
           customerType: customerType.value.toLowerCase(),
           isPaid: true,
-          date: DateTime.now(),
+          date: saleDate,
           paymentMethod: paymentMap,
           transactionId: invNo,
         );
 
+        // 2. Update Customer Record (For CRM)
         await _db.collection('customers').doc(fPhone).set({
           "name": fName,
           "phone": fPhone,
           "shop": shopC.text,
           "lastInv": invNo,
+          "lastShopDate": FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
 
+        // 3. Add to Customer's Sub-collection (Optional, if you want redundant access)
         await _db
             .collection('customers')
             .doc(fPhone)
@@ -291,34 +361,30 @@ class LiveSalesController extends GetxController {
             .doc(invNo)
             .set({
               "invoiceId": invNo,
-              "items":
-                  cart
-                      .map(
-                        (e) => {
-                          "name": e.product.name,
-                          "qty": e.quantity.value,
-                          "rate": e.priceAtSale,
-                        },
-                      )
-                      .toList(),
-              "paymentDetails": paymentMap,
-              "profit": invoiceProfit,
+              "grandTotal": grandTotal,
               "timestamp": FieldValue.serverTimestamp(),
+              // We store minimal info here since full info is in 'sales_orders'
+              "link": "sales_orders/$invNo",
             });
       }
 
-      // C. Print PDF
-      await _generatePdf(invNo, fName, fPhone, paymentMap);
+      // D. Print PDF
+      await _generatePdf(invNo, fName, fPhone, paymentMap, orderItems);
 
       _resetAll();
       Get.snackbar(
         "Success",
-        "Sale Finalized",
+        "Sale Finalized & Recorded",
         backgroundColor: Colors.green,
         colorText: Colors.white,
       );
     } catch (e) {
-      Get.snackbar("Error", e.toString(), backgroundColor: Colors.red);
+      print("Sale Error: $e");
+      Get.snackbar(
+        "Error",
+        "Failed to finalize sale: $e",
+        backgroundColor: Colors.red,
+      );
     } finally {
       isProcessing.value = false;
     }
@@ -336,18 +402,23 @@ class LiveSalesController extends GetxController {
     bankC.clear();
     discountVal.value = 0.0;
     totalPaidInput.value = 0.0;
+    changeReturn.value = 0.0;
+    // Do not clear customer type, keep user preference
     selectedDebtor.value = null;
+    debtorPhoneSearch.clear();
   }
 
-  // --- PDF GENERATION ---
+  // --- PDF GENERATION (UPDATED WITH FULL DETAILS) ---
   Future<void> _generatePdf(
     String invId,
     String name,
     String phone,
     Map<String, dynamic> payMap,
+    List<Map<String, dynamic>> items,
   ) async {
     final pdf = pw.Document();
     final boldFont = await PdfGoogleFonts.nunitoBold();
+    final regularFont = await PdfGoogleFonts.nunitoRegular();
 
     pdf.addPage(
       pw.Page(
@@ -356,57 +427,75 @@ class LiveSalesController extends GetxController {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
+              // HEADER
               pw.Header(
                 level: 0,
-                child: pw.Text(
-                  "G-TEL INVOICE",
-                  style: pw.TextStyle(font: boldFont, fontSize: 24),
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text(
+                      "G-TEL MOBILE",
+                      style: pw.TextStyle(
+                        font: boldFont,
+                        fontSize: 24,
+                        color: PdfColors.blue900,
+                      ),
+                    ),
+                    pw.Text(
+                      "INVOICE",
+                      style: pw.TextStyle(font: boldFont, fontSize: 20),
+                    ),
+                  ],
                 ),
               ),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text("Invoice ID: $invId"),
-                  // Show status on PDF
-                  pw.Text(
-                    double.parse(payMap['due'].toString()) > 0
-                        ? "STATUS: UNPAID/DUE"
-                        : "STATUS: PAID",
-                    style: pw.TextStyle(
-                      fontWeight: pw.FontWeight.bold,
-                      color:
-                          double.parse(payMap['due'].toString()) > 0
-                              ? PdfColors.red
-                              : PdfColors.green,
-                    ),
-                  ),
-                ],
-              ),
-              pw.Text(
-                "Date: ${DateFormat('dd-MMM-yyyy hh:mm a').format(DateTime.now())}",
-              ),
-              pw.Divider(),
+
+              // INFO ROW
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
                   pw.Column(
                     crossAxisAlignment: pw.CrossAxisAlignment.start,
                     children: [
-                      pw.Text("Bill To:", style: pw.TextStyle(font: boldFont)),
-                      pw.Text(name),
-                      pw.Text(phone),
+                      pw.Text(
+                        "Invoice ID: $invId",
+                        style: pw.TextStyle(font: regularFont),
+                      ),
+                      pw.Text(
+                        "Date: ${DateFormat('dd-MMM-yyyy hh:mm a').format(DateTime.now())}",
+                        style: pw.TextStyle(font: regularFont),
+                      ),
+                      pw.Text(
+                        double.parse(payMap['due'].toString()) > 0
+                            ? "STATUS: UNPAID/DUE"
+                            : "STATUS: PAID",
+                        style: pw.TextStyle(
+                          font: boldFont,
+                          color:
+                              double.parse(payMap['due'].toString()) > 0
+                                  ? PdfColors.red
+                                  : PdfColors.green,
+                        ),
+                      ),
                     ],
                   ),
                   pw.Column(
                     crossAxisAlignment: pw.CrossAxisAlignment.end,
                     children: [
-                      pw.Text("Shop:", style: pw.TextStyle(font: boldFont)),
-                      pw.Text(shopC.text.isEmpty ? "N/A" : shopC.text),
+                      pw.Text("Bill To:", style: pw.TextStyle(font: boldFont)),
+                      pw.Text(name, style: pw.TextStyle(font: regularFont)),
+                      pw.Text(phone, style: pw.TextStyle(font: regularFont)),
+                      if (shopC.text.isNotEmpty)
+                        pw.Text(
+                          "Shop: ${shopC.text}",
+                          style: pw.TextStyle(font: regularFont),
+                        ),
                     ],
                   ),
                 ],
               ),
               pw.SizedBox(height: 20),
+
+              // ITEMS TABLE
               pw.TableHelper.fromTextArray(
                 border: pw.TableBorder.all(color: PdfColors.grey300),
                 headerStyle: pw.TextStyle(
@@ -416,51 +505,96 @@ class LiveSalesController extends GetxController {
                 headerDecoration: const pw.BoxDecoration(
                   color: PdfColors.blueGrey800,
                 ),
-                headers: ['Item', 'Rate', 'Qty', 'Total'],
+                cellStyle: pw.TextStyle(font: regularFont),
+                headers: ['Item / Model', 'Rate', 'Qty', 'Total'],
                 data:
-                    cart
+                    items
                         .map(
                           (e) => [
-                            e.product.name,
-                            e.priceAtSale.toStringAsFixed(2),
-                            e.quantity.value.toString(),
-                            e.subtotal.toStringAsFixed(2),
+                            e['model'] ?? e['name'],
+                            double.parse(
+                              e['saleRate'].toString(),
+                            ).toStringAsFixed(2),
+                            e['qty'].toString(),
+                            double.parse(
+                              e['subtotal'].toString(),
+                            ).toStringAsFixed(2),
                           ],
                         )
                         .toList(),
               ),
+
               pw.SizedBox(height: 10),
+
+              // TOTALS
               pw.Align(
                 alignment: pw.Alignment.centerRight,
-                child: pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.end,
-                  children: [
-                    pw.Text("Subtotal: ${subtotalAmount.toStringAsFixed(2)}"),
-                    if (discountVal.value > 0)
-                      pw.Text(
-                        "Discount: -${discountVal.value.toStringAsFixed(2)}",
-                        style: const pw.TextStyle(color: PdfColors.red),
+                child: pw.Container(
+                  width: 200,
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.end,
+                    children: [
+                      _buildSummaryRow(
+                        "Subtotal",
+                        subtotalAmount.toStringAsFixed(2),
+                        boldFont,
                       ),
-                    pw.Divider(),
-                    pw.Text(
-                      "Grand Total: ${grandTotal.toStringAsFixed(2)}",
-                      style: pw.TextStyle(font: boldFont, fontSize: 16),
-                    ),
-                    pw.SizedBox(height: 10),
-                    // Payment Details for PDF
-                    pw.Text(
-                      "Paid Amount: ${double.parse(payMap['totalPaid'].toString()).toStringAsFixed(2)}",
-                    ),
-                    if (double.parse(payMap['due'].toString()) > 0)
-                      pw.Text(
-                        "DUE AMOUNT: ${double.parse(payMap['due'].toString()).toStringAsFixed(2)}",
-                        style: pw.TextStyle(
-                          font: boldFont,
+                      if (discountVal.value > 0)
+                        _buildSummaryRow(
+                          "Discount",
+                          "-${discountVal.value.toStringAsFixed(2)}",
+                          boldFont,
                           color: PdfColors.red,
-                          fontSize: 14,
                         ),
+                      pw.Divider(),
+                      _buildSummaryRow(
+                        "Grand Total",
+                        grandTotal.toStringAsFixed(2),
+                        boldFont,
+                        fontSize: 16,
                       ),
-                  ],
+                      pw.SizedBox(height: 10),
+
+                      _buildSummaryRow(
+                        "Paid Amount",
+                        double.parse(
+                          payMap['actualReceived'].toString(),
+                        ).toStringAsFixed(2),
+                        regularFont,
+                      ),
+                      if (double.parse(payMap['changeReturned'].toString()) > 0)
+                        _buildSummaryRow(
+                          "Change Given",
+                          double.parse(
+                            payMap['changeReturned'].toString(),
+                          ).toStringAsFixed(2),
+                          regularFont,
+                        ),
+
+                      if (double.parse(payMap['due'].toString()) > 0)
+                        pw.Text(
+                          "DUE AMOUNT: ${double.parse(payMap['due'].toString()).toStringAsFixed(2)}",
+                          style: pw.TextStyle(
+                            font: boldFont,
+                            color: PdfColors.red,
+                            fontSize: 14,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // FOOTER
+              pw.Spacer(),
+              pw.Divider(),
+              pw.Center(
+                child: pw.Text(
+                  "Thank you for your business!",
+                  style: pw.TextStyle(
+                    font: regularFont,
+                    color: PdfColors.grey600,
+                  ),
                 ),
               ),
             ],
@@ -470,5 +604,27 @@ class LiveSalesController extends GetxController {
     );
 
     await Printing.layoutPdf(onLayout: (f) => pdf.save());
+  }
+
+  pw.Widget _buildSummaryRow(
+    String label,
+    String value,
+    pw.Font font, {
+    PdfColor color = PdfColors.black,
+    double fontSize = 12,
+  }) {
+    return pw.Row(
+      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+      children: [
+        pw.Text(
+          label,
+          style: pw.TextStyle(font: font, fontSize: fontSize, color: color),
+        ),
+        pw.Text(
+          value,
+          style: pw.TextStyle(font: font, fontSize: fontSize, color: color),
+        ),
+      ],
+    );
   }
 }

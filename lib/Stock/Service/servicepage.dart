@@ -1,8 +1,12 @@
 // ignore_for_file: deprecated_member_use
 
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 
 import '../controller.dart';
 
@@ -15,7 +19,6 @@ class ServicePage extends StatefulWidget {
 
 class _ServicePageState extends State<ServicePage> {
   // We use ProductController because it holds the 'serviceLogs' and API logic
-  // based on the previous update.
   final ProductController controller = Get.find<ProductController>();
 
   @override
@@ -37,6 +40,155 @@ class _ServicePageState extends State<ServicePage> {
     }
   }
 
+  /// ==================================================
+  /// PDF GENERATION LOGIC (NEW)
+  /// ==================================================
+  Future<void> _generateAndDownloadPdf(String reportType) async {
+    final pdf = pw.Document();
+
+    // Filter Data based on Type
+    final isDamage = reportType == 'damage';
+    final title = isDamage ? "Damage Report" : "Service Center Report";
+    final dataList =
+        controller.serviceLogs.where((e) => e['type'] == reportType).toList();
+
+    if (dataList.isEmpty) {
+      Get.snackbar("No Data", "There is no data to generate a report for.");
+      return;
+    }
+
+    // Calculate Totals for Footer
+    int totalQty = 0;
+    double totalValue = 0.0;
+
+    for (var item in dataList) {
+      int q = int.tryParse(item['qty'].toString()) ?? 0;
+      double c = double.tryParse(item['return_cost'].toString()) ?? 0.0;
+      totalQty += q;
+      if (isDamage) {
+        totalValue += (q * c);
+      }
+    }
+
+    // Load Font (Optional, uses standard font by default)
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(32),
+        build: (pw.Context context) {
+          return [
+            // Header
+            pw.Header(
+              level: 0,
+              child: pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(
+                    title,
+                    style: pw.TextStyle(
+                      fontSize: 24,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+                  pw.Text(
+                    DateFormat('dd MMM yyyy').format(DateTime.now()),
+                    style: const pw.TextStyle(
+                      fontSize: 14,
+                      color: PdfColors.grey,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            pw.SizedBox(height: 20),
+
+            // Table
+            pw.TableHelper.fromTextArray(
+              headers:
+                  isDamage
+                      ? ['Model', 'Date', 'Qty', 'Unit Cost', 'Total Loss']
+                      : ['Model', 'Date', 'Qty', 'Status'],
+              data:
+                  dataList.map((item) {
+                    final qty = int.tryParse(item['qty'].toString()) ?? 0;
+                    final cost =
+                        double.tryParse(item['return_cost'].toString()) ?? 0.0;
+                    final date = _formatDate(item['created_at']);
+
+                    if (isDamage) {
+                      final loss = qty * cost;
+                      return [
+                        item['model'] ?? 'Unknown',
+                        date,
+                        qty.toString(),
+                        cost.toStringAsFixed(2),
+                        loss.toStringAsFixed(2),
+                      ];
+                    } else {
+                      return [
+                        item['model'] ?? 'Unknown',
+                        date,
+                        qty.toString(),
+                        item['status'] == 'active' ? 'Pending' : 'Returned',
+                      ];
+                    }
+                  }).toList(),
+              border: null,
+              headerStyle: pw.TextStyle(
+                fontWeight: pw.FontWeight.bold,
+                color: PdfColors.white,
+              ),
+              headerDecoration: const pw.BoxDecoration(
+                color: PdfColors.blue800,
+              ),
+              rowDecoration: const pw.BoxDecoration(
+                border: pw.Border(
+                  bottom: pw.BorderSide(color: PdfColors.grey300),
+                ),
+              ),
+              cellAlignment: pw.Alignment.centerLeft,
+              cellPadding: const pw.EdgeInsets.all(8),
+            ),
+
+            pw.SizedBox(height: 20),
+            pw.Divider(),
+
+            // Footer Totals
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.end,
+              children: [
+                pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.end,
+                  children: [
+                    pw.Text(
+                      "Total Items: $totalQty",
+                      style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                    ),
+                    if (isDamage)
+                      pw.Text(
+                        "Total Loss Value: ${totalValue.toStringAsFixed(2)} BDT",
+                        style: pw.TextStyle(
+                          fontWeight: pw.FontWeight.bold,
+                          color: PdfColors.red,
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ];
+        },
+      ),
+    );
+
+    // This opens the native print dialog (which includes "Save as PDF")
+    await Printing.layoutPdf(
+      onLayout: (PdfPageFormat format) async => pdf.save(),
+      name: '${title}_${DateFormat('yyyyMMdd').format(DateTime.now())}.pdf',
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -50,6 +202,36 @@ class _ServicePageState extends State<ServicePage> {
         foregroundColor: Colors.black,
         elevation: 1,
         actions: [
+          // PDF DOWNLOAD BUTTON
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.print, color: Colors.blue),
+            tooltip: "Download Report",
+            onSelected: (value) => _generateAndDownloadPdf(value),
+            itemBuilder:
+                (context) => [
+                  const PopupMenuItem(
+                    value: 'service',
+                    child: Row(
+                      children: [
+                        Icon(Icons.build, size: 18, color: Colors.orange),
+                        SizedBox(width: 8),
+                        Text("Print Service Report"),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'damage',
+                    child: Row(
+                      children: [
+                        Icon(Icons.broken_image, size: 18, color: Colors.red),
+                        SizedBox(width: 8),
+                        Text("Print Damage Report"),
+                      ],
+                    ),
+                  ),
+                ],
+          ),
+          const SizedBox(width: 8),
           IconButton(
             onPressed: () => controller.fetchServiceLogs(),
             icon: const Icon(Icons.refresh),

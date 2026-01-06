@@ -3,6 +3,7 @@
 import 'dart:ui'; // Required for PointerDeviceKind
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:intl/intl.dart'; // Added for Date Formatting
 import 'Service/servicepage.dart';
 import 'controller.dart';
 import 'edit.dart';
@@ -226,7 +227,7 @@ class ProductScreen extends StatelessWidget {
               const SizedBox(height: 16),
 
               // ==========================================
-              // DATA TABLE (UPDATED COLUMNS)
+              // DATA TABLE (UPDATED WITH SHIPMENT DATE)
               // ==========================================
               Expanded(
                 child: Card(
@@ -308,6 +309,16 @@ class ProductScreen extends StatelessWidget {
                                           'Weight',
                                           style: TextStyle(
                                             fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                      // --- NEW: SHIPMENT DATE COLUMN ---
+                                      DataColumn(
+                                        label: Text(
+                                          'Shipment Date',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.indigo,
                                           ),
                                         ),
                                       ),
@@ -407,7 +418,7 @@ class ProductScreen extends StatelessWidget {
                                                   ),
                                                 ),
                                               ),
-                                              // --- MAPPED NEW COLUMNS ---
+                                              // --- MAPPED COLUMNS ---
                                               DataCell(
                                                 Text(p.yuan.toStringAsFixed(2)),
                                               ),
@@ -421,6 +432,29 @@ class ProductScreen extends StatelessWidget {
                                                   p.weight.toStringAsFixed(2),
                                                 ),
                                               ),
+
+                                              // --- NEW: SHIPMENT DATE CELL ---
+                                              DataCell(
+                                                Text(
+                                                  p.shipmentDate != null
+                                                      ? DateFormat(
+                                                        'yyyy-MM-dd',
+                                                      ).format(p.shipmentDate!)
+                                                      : '-',
+                                                  style: TextStyle(
+                                                    fontSize: 12,
+                                                    color:
+                                                        p.shipmentDate != null
+                                                            ? Colors.black87
+                                                            : Colors.grey[400],
+                                                    fontWeight:
+                                                        p.shipmentDate != null
+                                                            ? FontWeight.w500
+                                                            : FontWeight.normal,
+                                                  ),
+                                                ),
+                                              ),
+
                                               // -------------------------
                                               DataCell(
                                                 Container(
@@ -485,7 +519,7 @@ class ProductScreen extends StatelessWidget {
                                                 ),
                                               ),
 
-                                              // --- UPDATED ACTIONS ROW ---
+                                              // --- ACTIONS ROW ---
                                               DataCell(
                                                 Row(
                                                   mainAxisSize:
@@ -505,7 +539,7 @@ class ProductScreen extends StatelessWidget {
                                                                 controller,
                                                               ),
                                                     ),
-                                                    // 2. SEND TO SERVICE (Using ProductController)
+                                                    // 2. SEND TO SERVICE
                                                     IconButton(
                                                       tooltip:
                                                           'Send to Service',
@@ -530,7 +564,7 @@ class ProductScreen extends StatelessWidget {
                                                             },
                                                           ),
                                                     ),
-                                                    // 3. DAMAGE (Using ProductController)
+                                                    // 3. DAMAGE
                                                     IconButton(
                                                       tooltip: 'Mark Damage',
                                                       icon: const Icon(

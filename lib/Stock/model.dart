@@ -10,16 +10,20 @@ class Product {
   final double sea;
   final double agent;
   final double wholesale;
-  final double shipmentTax; // Maps to 'shipmenttax' in DB
+  final double shipmentTax; // 'shipmenttax'
   final int shipmentNo;
   final double currency;
   final int stockQty; // Total Stock
+
+  // --- New Fields (Updated) ---
+  final double shipmentTaxAir; // Maps to 'shipmenttaxair'
+  final DateTime? shipmentDate; // Maps to 'shipmentdate'
 
   // --- Inventory Breakdown Fields ---
   final double avgPurchasePrice;
   final int seaStockQty;
   final int airStockQty;
-  final int localQty; // Added Local Qty
+  final int localQty;
 
   Product({
     required this.id,
@@ -37,6 +41,11 @@ class Product {
     required this.shipmentNo,
     required this.currency,
     required this.stockQty,
+
+    // Updated Constructor
+    this.shipmentTaxAir = 0.0,
+    this.shipmentDate,
+
     required this.avgPurchasePrice,
     required this.seaStockQty,
     required this.airStockQty,
@@ -62,6 +71,16 @@ class Product {
       return 0.0;
     }
 
+    // Helper for safe Date parsing
+    DateTime? parseDate(dynamic value) {
+      if (value == null ||
+          value.toString() == '0' ||
+          value.toString() == 'null') {
+        return null;
+      }
+      return DateTime.tryParse(value.toString());
+    }
+
     return Product(
       id: parseInt(json['id']),
       name: json['name']?.toString() ?? '',
@@ -74,13 +93,18 @@ class Product {
       sea: parseDouble(json['sea']),
       agent: parseDouble(json['agent']),
       wholesale: parseDouble(json['wholesale']),
-      // DB column is lowercase 'shipmenttax', handling both cases just in case
       shipmentTax: parseDouble(json['shipmenttax'] ?? json['shipmentTax']),
       shipmentNo: parseInt(json['shipmentno'] ?? json['shipmentNo']),
       currency: parseDouble(json['currency']),
       stockQty: parseInt(json['stock_qty']),
 
-      // --- New Inventory Fields ---
+      // --- New Fields Mapped ---
+      shipmentTaxAir: parseDouble(
+        json['shipmenttaxair'] ?? json['shipmentTaxAir'],
+      ),
+      shipmentDate: parseDate(json['shipmentdate'] ?? json['shipmentDate']),
+
+      // --- Inventory Breakdown ---
       avgPurchasePrice: parseDouble(json['avg_purchase_price']),
       seaStockQty: parseInt(json['sea_stock_qty']),
       airStockQty: parseInt(json['air_stock_qty']),
@@ -105,6 +129,11 @@ class Product {
       'shipmentno': shipmentNo,
       'currency': currency,
       'stock_qty': stockQty,
+
+      // --- New Fields ---
+      'shipmenttaxair': shipmentTaxAir,
+      'shipmentdate': shipmentDate?.toIso8601String(), // Send as ISO String
+
       'avg_purchase_price': avgPurchasePrice,
       'sea_stock_qty': seaStockQty,
       'air_stock_qty': airStockQty,

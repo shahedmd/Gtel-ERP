@@ -79,7 +79,7 @@ class LiveOrderSalesPage extends StatelessWidget {
     );
   }
 
-  // --- 1. CUSTOMER INFO ---
+  // --- 1. CUSTOMER INFO (UPDATED) ---
   Widget _buildCustomerSection(LiveSalesController controller) {
     return Container(
       padding: const EdgeInsets.all(15),
@@ -112,7 +112,8 @@ class LiveOrderSalesPage extends StatelessWidget {
                       child: GestureDetector(
                         onTap: () {
                           controller.customerType.value = type;
-                          controller.cart.clear();
+                          controller.cart.clear(); // Clear cart to reset prices
+                          controller.updatePaymentCalculations();
                         },
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 200),
@@ -151,46 +152,93 @@ class LiveOrderSalesPage extends StatelessWidget {
                   TextField(
                     controller: controller.debtorPhoneSearch,
                     decoration: InputDecoration(
-                      labelText: "Search Debtor (Phone)",
+                      labelText: "Search Debtor (Name or Phone)",
                       prefixIcon: const Icon(Icons.search, size: 18),
+                      suffixIcon:
+                          controller.debtorPhoneSearch.text.isNotEmpty
+                              ? IconButton(
+                                icon: const Icon(Icons.clear, size: 16),
+                                onPressed: () {
+                                  controller.debtorPhoneSearch.clear();
+                                  controller.selectedDebtor.value = null;
+                                },
+                              )
+                              : null,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),
                       isDense: true,
                     ),
                     onChanged: (v) {
-                      if (v.length > 5) {
-                        // Simple logic to find
-                        controller.selectedDebtor.value = controller
-                            .debtorCtrl
-                            .bodies
-                            .firstWhereOrNull((e) => e.phone.contains(v));
+                      // Case-insensitive search for name OR phone
+                      if (v.isEmpty) {
+                        controller.selectedDebtor.value = null;
+                        return;
                       }
+                      final match = controller.debtorCtrl.bodies
+                          .firstWhereOrNull(
+                            (e) =>
+                                e.phone.contains(v) ||
+                                e.name.toLowerCase().contains(v.toLowerCase()),
+                          );
+                      controller.selectedDebtor.value = match;
                     },
                   ),
+                  const SizedBox(height: 8),
+
+                  // Debtor Result Display
                   if (controller.selectedDebtor.value != null)
                     Container(
-                      margin: const EdgeInsets.only(top: 10),
                       padding: const EdgeInsets.all(10),
-                      color: Colors.green.shade50,
+                      decoration: BoxDecoration(
+                        color: Colors.green.shade50,
+                        border: Border.all(color: Colors.green.shade200),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
                       child: Row(
                         children: [
                           const Icon(
                             Icons.check_circle,
                             color: Colors.green,
-                            size: 16,
+                            size: 20,
                           ),
-                          const SizedBox(width: 8),
-                          Text(
-                            controller.selectedDebtor.value!.name,
-                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          const SizedBox(width: 10),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                controller.selectedDebtor.value!.name,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              Text(
+                                controller.selectedDebtor.value!.phone,
+                                style: TextStyle(
+                                  color: Colors.grey[600],
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
                           ),
                         ],
+                      ),
+                    )
+                  else if (controller.debtorPhoneSearch.text.isNotEmpty)
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      width: double.infinity,
+                      color: Colors.red.shade50,
+                      child: const Text(
+                        "Debtor not found",
+                        style: TextStyle(color: Colors.red, fontSize: 12),
                       ),
                     ),
                 ],
               );
             }
+            // RETAILER FORM
             return Column(
               children: [
                 Row(

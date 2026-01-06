@@ -324,7 +324,7 @@ class DailySalesPage extends StatelessWidget {
                 fontWeight: FontWeight.bold,
               ),
             ),
-          ), // Increased flex
+          ),
           Expanded(
             flex: 2,
             child: Text(
@@ -347,7 +347,7 @@ class DailySalesPage extends StatelessWidget {
               textAlign: TextAlign.right,
             ),
           ),
-          SizedBox(width: 60),
+          SizedBox(width: 100), // Space for Actions
         ],
       ),
     );
@@ -375,6 +375,7 @@ class DailySalesPage extends StatelessWidget {
       ),
       child: InkWell(
         onTap: () {
+          // Allow manual payment if due exists
           if (sale.pending > 0) _showPaymentDialog(context, sale);
         },
         child: Padding(
@@ -453,13 +454,26 @@ class DailySalesPage extends StatelessWidget {
               ),
               // Actions (Refund & Delete)
               SizedBox(
-                width: 100,
+                width: 140,
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
+                    // Only show Refund if there is a transaction ID (meaning it's a real order)
+                    // AND they have paid something to refund.
+                    if (sale.transactionId != null)
+                      IconButton(
+                        tooltip: "Reprint Invoice",
+                        icon: const Icon(
+                          Icons.print,
+                          size: 20,
+                          color: Colors.blueGrey,
+                        ),
+                        onPressed:
+                            () => ctrl.reprintInvoice(sale.transactionId!),
+                      ),
                     if (sale.transactionId != null && sale.paid > 0)
                       IconButton(
-                        tooltip: "Refund",
+                        tooltip: "Refund Sale",
                         icon: const Icon(
                           Icons.replay_circle_filled,
                           size: 20,
@@ -468,6 +482,7 @@ class DailySalesPage extends StatelessWidget {
                         onPressed: () => _showRefundDialog(context, sale),
                       ),
                     IconButton(
+                      tooltip: "Delete Record",
                       icon: const Icon(
                         Icons.delete_outline,
                         size: 20,
@@ -622,7 +637,7 @@ class DailySalesPage extends StatelessWidget {
               s.name.toLowerCase().contains(q) ||
               (s.transactionId ?? '').toLowerCase().contains(
                 q,
-              ) || // Added Invoice Search
+              ) || // Invoice Search
               s.customerType.toLowerCase().contains(q),
         )
         .toList();
@@ -703,7 +718,16 @@ class DailySalesPage extends StatelessWidget {
                         return;
                       }
 
-                      // CALL THE CONTROLLER
+                      // Ensure Transaction ID exists
+                      if (sale.transactionId == null) {
+                        Get.snackbar(
+                          "Error",
+                          "Cannot refund. Invoice ID is missing.",
+                        );
+                        return;
+                      }
+
+                      // CALL THE CONTROLLER (Updated Arguments)
                       ctrl.processRefund(
                         saleId: sale.id,
                         invoiceId: sale.transactionId!,

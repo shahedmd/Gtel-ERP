@@ -9,7 +9,7 @@ class SaleModel {
   final DateTime timestamp;
   final Map<String, dynamic>? paymentMethod;
   final List<dynamic> appliedDebits;
-  final String? transactionId;
+  final String? transactionId; // Links to sales_orders
   final String source;
 
   SaleModel({
@@ -26,17 +26,28 @@ class SaleModel {
   });
 
   factory SaleModel.fromFirestore(DocumentSnapshot doc) {
-    Map d = doc.data() as Map;
+    // 1. Safe Data Map Casting
+    Map<String, dynamic> d = doc.data() as Map<String, dynamic>;
+
     return SaleModel(
       id: doc.id,
       name: d['name'] ?? '',
       amount: (d['amount'] as num?)?.toDouble() ?? 0.0,
       paid: (d['paid'] as num?)?.toDouble() ?? 0.0,
       customerType: d['customerType'] ?? 'regular',
-      timestamp: (d['timestamp'] as Timestamp).toDate(),
-      paymentMethod: d['paymentMethod'],
+
+      // 2. Timestamp Safety
+      timestamp: (d['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
+
+      // 3. Payment Method Casting
+      paymentMethod: d['paymentMethod'] as Map<String, dynamic>?,
+
       appliedDebits: d['appliedDebits'] ?? [],
-      transactionId: d['transactionId'],
+
+      // 4. CRITICAL: Fallback logic to find the Link ID
+      // If 'transactionId' is missing, check 'invoiceId'
+      transactionId: d['transactionId'] ?? d['invoiceId'],
+
       source: d['source'] ?? 'direct',
     );
   }

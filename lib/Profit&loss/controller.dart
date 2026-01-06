@@ -1,249 +1,383 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:intl/intl.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 
-class SaleInvoice {
-  final String invoiceId;
-  final double sale;
-  final double cost;
-  final double profit;
-  final DateTime date;
-
-  SaleInvoice({
-    required this.invoiceId,
-    required this.sale,
-    required this.cost,
-    required this.profit,
-    required this.date,
-  });
-}
-
-class GroupedEntity {
-  final String id; // Phone for Customers, Name/ID for Debtors
-  final String name;
-  final String phone;
-  final bool isDebtor;
-  List<SaleInvoice> invoices = [];
-
-  GroupedEntity({
-    required this.id,
-    required this.name,
-    required this.phone,
-    required this.isDebtor,
-  });
-
-  double get totalSale => invoices.fold(0, (sumv, item) => sumv + item.sale);
-  double get totalProfit => invoices.fold(0, (sumv, item) => sumv + item.profit);
-}
-
-class ProfitLossController extends GetxController {
+class ProfitController extends GetxController {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
+  // --- STATE VARIABLES ---
   var isLoading = false.obs;
-  var selectedDate = DateTime.now().obs;
 
-  // Master Lists (All Data)
-  var allCustomers = <GroupedEntity>[];
-  var allDebtors = <GroupedEntity>[];
+  // Date Filters
+  var startDate = DateTime.now().subtract(const Duration(days: 30)).obs;
+  var endDate = DateTime.now().obs;
 
-  // Filtered Lists (For Display)
-  var customerList = <GroupedEntity>[].obs;
-  var debtorList = <GroupedEntity>[].obs;
+  // Metrics
+  var totalRevenue = 0.0.obs;
+  var totalCostOfGoods = 0.0.obs;
+  var grossProfit = 0.0.obs;
+  var totalExpenses = 0.0.obs;
+  var netProfit = 0.0.obs;
+  var totalDiscounts = 0.0.obs;
 
-  var searchText = "".obs;
+  // Lists
+  var salesReportList = <Map<String, dynamic>>[].obs;
+
+  // NEW: Customer Performance List
+  var customerPerformanceList = <Map<String, dynamic>>[].obs;
 
   @override
   void onInit() {
     super.onInit();
-    fetchMonthlyData();
+    setDateRange('This Month');
+  }
 
-    // Listen to search changes with debounce
-    debounce(
-      searchText,
-      (_) => _applySearch(),
-      time: const Duration(milliseconds: 500),
+  // ==========================================
+  // 1. DATE RANGE PICKER
+  // ==========================================
+  void setDateRange(String type) {
+    final now = DateTime.now();
+    if (type == 'Today') {
+      startDate.value = DateTime(now.year, now.month, now.day);
+      endDate.value = DateTime(now.year, now.month, now.day, 23, 59, 59);
+    } else if (type == 'Yesterday') {
+      final yesterday = now.subtract(const Duration(days: 1));
+      startDate.value = DateTime(
+        yesterday.year,
+        yesterday.month,
+        yesterday.day,
+      );
+      endDate.value = DateTime(
+        yesterday.year,
+        yesterday.month,
+        yesterday.day,
+        23,
+        59,
+        59,
+      );
+    } else if (type == 'This Month') {
+      startDate.value = DateTime(now.year, now.month, 1);
+      endDate.value = DateTime(now.year, now.month + 1, 0, 23, 59, 59);
+    } else if (type == 'Last 30 Days') {
+      startDate.value = now.subtract(const Duration(days: 30));
+      endDate.value = now;
+    }
+    fetchProfitAndLoss();
+  }
+
+  Future<void> pickCustomDateRange(BuildContext context) async {
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2022),
+      lastDate: DateTime(2030),
+      initialDateRange: DateTimeRange(
+        start: startDate.value,
+        end: endDate.value,
+      ),
     );
+
+    if (picked != null) {
+      startDate.value = picked.start;
+      endDate.value = DateTime(
+        picked.end.year,
+        picked.end.month,
+        picked.end.day,
+        23,
+        59,
+        59,
+      );
+      fetchProfitAndLoss();
+    }
   }
 
-  void search(String query) {
-    searchText.value = query;
-  }
-
-  void changeMonth(int increment) {
-    selectedDate.value = DateTime(
-      selectedDate.value.year,
-      selectedDate.value.month + increment,
-      1,
-    );
-    fetchMonthlyData();
-  }
-
-  Future<void> fetchMonthlyData() async {
+  // ==========================================
+  // 2. FETCH DATA
+  // ==========================================
+  Future<void> fetchProfitAndLoss() async {
     isLoading.value = true;
-    allCustomers.clear();
-    allDebtors.clear();
-
-    DateTime start = DateTime(
-      selectedDate.value.year,
-      selectedDate.value.month,
-      1,
-    );
-    DateTime end = DateTime(
-      selectedDate.value.year,
-      selectedDate.value.month + 1,
-      0,
-      23,
-      59,
-      59,
-    );
+    _resetMetrics();
 
     try {
-      // ---------------------------------------------
-      // 1. FETCH CUSTOMER ORDERS (Collection Group)
-      // ---------------------------------------------
-      // Path: customers/{PHONE}/orders/{INVOICE_ID}
-      QuerySnapshot custSnap =
+      // A. Fetch SALES
+      QuerySnapshot salesQuery =
           await _db
-              .collectionGroup('orders')
+              .collection('sales_orders')
               .where(
                 'timestamp',
-                isGreaterThanOrEqualTo: Timestamp.fromDate(start),
+                isGreaterThanOrEqualTo: Timestamp.fromDate(startDate.value),
               )
-              .where('timestamp', isLessThanOrEqualTo: Timestamp.fromDate(end))
-              .get();
-
-      Map<String, GroupedEntity> cMap = {};
-
-      for (var doc in custSnap.docs) {
-        var data = doc.data() as Map<String, dynamic>;
-
-        // 1. EXTRACT PHONE FROM PATH
-        // doc.reference.parent.parent?.id gives the Customer Phone Number
-        String phoneId = doc.reference.parent.parent?.id ?? "Unknown";
-
-        // 2. CALCULATE SALE AMOUNT (Crucial Fix)
-        // Check 'paymentDetails' first, then fallback to 'totalAmount'
-        double saleAmount = 0.0;
-        if (data['paymentDetails'] != null && data['paymentDetails'] is Map) {
-          double paid =
-              double.tryParse(data['paymentDetails']['totalPaid'].toString()) ??
-              0.0;
-          double due =
-              double.tryParse(data['paymentDetails']['due'].toString()) ?? 0.0;
-          saleAmount = paid + due;
-        } else {
-          // Fallback if structure differs
-          saleAmount = double.tryParse(data['totalAmount'].toString()) ?? 0.0;
-        }
-
-        // 3. NAME RESOLUTION
-        // If name isn't in the order doc, use the Phone ID as a placeholder
-        String name = data['customerName'] ?? "Customer: $phoneId";
-
-        if (!cMap.containsKey(phoneId)) {
-          cMap[phoneId] = GroupedEntity(
-            id: phoneId,
-            name: name,
-            phone: phoneId,
-            isDebtor: false,
-          );
-        }
-
-        cMap[phoneId]!.invoices.add(
-          SaleInvoice(
-            invoiceId: data['invoiceId'] ?? doc.id,
-            sale: saleAmount,
-            cost: double.tryParse(data['costAmount'].toString()) ?? 0.0,
-            profit: double.tryParse(data['profit'].toString()) ?? 0.0,
-            date: (data['timestamp'] as Timestamp).toDate(),
-          ),
-        );
-      }
-      allCustomers = cMap.values.toList();
-
-      // ---------------------------------------------
-      // 2. FETCH DEBTOR ORDERS
-      // ---------------------------------------------
-      QuerySnapshot debtSnap =
-          await _db
-              .collection('debtorProfitLoss')
               .where(
                 'timestamp',
-                isGreaterThanOrEqualTo: Timestamp.fromDate(start),
+                isLessThanOrEqualTo: Timestamp.fromDate(endDate.value),
               )
-              .where('timestamp', isLessThanOrEqualTo: Timestamp.fromDate(end))
+              .orderBy('timestamp', descending: true)
               .get();
 
-      Map<String, GroupedEntity> dMap = {};
+      List<Map<String, dynamic>> tempSales = [];
+      Map<String, Map<String, dynamic>> customerMap =
+          {}; // Helper for aggregation
 
-      for (var doc in debtSnap.docs) {
-        var data = doc.data() as Map<String, dynamic>;
+      for (var doc in salesQuery.docs) {
+        Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
 
-        // Use debtorName as Key if ID is missing
-        String dName = data['debtorName'] ?? "Unknown Debtor";
-        String dId =
-            data['debtorId'] ?? dName; // Fallback to name if ID missing
-        String dPhone = data['debtorPhone'] ?? "N/A"; // Handle missing phone
+        double revenue = double.tryParse(data['grandTotal'].toString()) ?? 0.0;
+        double cost = double.tryParse(data['totalCost'].toString()) ?? 0.0;
+        double discount = double.tryParse(data['discount'].toString()) ?? 0.0;
+        double profit =
+            data.containsKey('profit')
+                ? (double.tryParse(data['profit'].toString()) ?? 0.0)
+                : (revenue - cost);
 
-        if (!dMap.containsKey(dId)) {
-          dMap[dId] = GroupedEntity(
-            id: dId,
-            name: dName,
-            phone: dPhone,
-            isDebtor: true,
-          );
+        // Global Totals
+        totalRevenue.value += revenue;
+        totalCostOfGoods.value += cost;
+        totalDiscounts.value += discount;
+        grossProfit.value += profit;
+
+        // Add to Sales List
+        tempSales.add({
+          'date': data['date'] ?? '',
+          'invoiceId': data['invoiceId'] ?? 'N/A',
+          'customer': data['customerName'] ?? 'Unknown',
+          'revenue': revenue,
+          'cost': cost,
+          'profit': profit,
+          'items': (data['items'] as List<dynamic>).length,
+        });
+
+        // --- NEW: AGGREGATE BY CUSTOMER ---
+        String custName = data['customerName'] ?? 'Unknown';
+        String custType = data['customerType'] ?? 'Retailer';
+
+        if (!customerMap.containsKey(custName)) {
+          customerMap[custName] = {
+            'name': custName,
+            'type': custType,
+            'revenue': 0.0,
+            'profit': 0.0,
+            'count': 0,
+          };
         }
-
-        dMap[dId]!.invoices.add(
-          SaleInvoice(
-            invoiceId: data['invoiceId'] ?? doc.id,
-            // For debtors, your structure HAS 'saleAmount' top-level
-            sale: double.tryParse(data['saleAmount'].toString()) ?? 0.0,
-            cost: double.tryParse(data['costAmount'].toString()) ?? 0.0,
-            profit: double.tryParse(data['profit'].toString()) ?? 0.0,
-            date: (data['timestamp'] as Timestamp).toDate(),
-          ),
-        );
+        customerMap[custName]!['revenue'] += revenue;
+        customerMap[custName]!['profit'] += profit;
+        customerMap[custName]!['count'] += 1;
       }
-      allDebtors = dMap.values.toList();
 
-      // Apply initial lists
-      _applySearch();
+      salesReportList.assignAll(tempSales);
+
+      // Convert Customer Map to List & Sort by Profit (High to Low)
+      List<Map<String, dynamic>> sortedCustomers = customerMap.values.toList();
+      sortedCustomers.sort((a, b) => b['profit'].compareTo(a['profit']));
+      customerPerformanceList.assignAll(sortedCustomers);
+
+      // B. Fetch EXPENSES
+      try {
+        QuerySnapshot expenseQuery =
+            await _db
+                .collection('expenses')
+                .where(
+                  'date',
+                  isGreaterThanOrEqualTo: Timestamp.fromDate(startDate.value),
+                )
+                .where(
+                  'date',
+                  isLessThanOrEqualTo: Timestamp.fromDate(endDate.value),
+                )
+                .get();
+
+        for (var doc in expenseQuery.docs) {
+          Map<String, dynamic> exp = doc.data() as Map<String, dynamic>;
+          double amount = double.tryParse(exp['amount'].toString()) ?? 0.0;
+          totalExpenses.value += amount;
+        }
+      } catch (e) {
+        // Ignore if collection missing
+      }
+
+      // C. Net Profit
+      netProfit.value = grossProfit.value - totalExpenses.value;
     } catch (e) {
-      Get.snackbar("Error", "Failed to fetch data: $e");
-      print(e);
+      Get.snackbar(
+        "Error",
+        "Failed to generate report: $e",
+        backgroundColor: Colors.redAccent,
+        colorText: Colors.white,
+      );
+      print("P&L Error: $e");
     } finally {
       isLoading.value = false;
     }
   }
 
-  void _applySearch() {
-    String q = searchText.value.toLowerCase();
+  void _resetMetrics() {
+    totalRevenue.value = 0.0;
+    totalCostOfGoods.value = 0.0;
+    grossProfit.value = 0.0;
+    totalExpenses.value = 0.0;
+    netProfit.value = 0.0;
+    totalDiscounts.value = 0.0;
+    salesReportList.clear();
+    customerPerformanceList.clear();
+  }
 
-    if (q.isEmpty) {
-      customerList.assignAll(allCustomers);
-      debtorList.assignAll(allDebtors);
-    } else {
-      customerList.assignAll(
-        allCustomers
-            .where(
-              (e) =>
-                  e.name.toLowerCase().contains(q) ||
-                  e.phone.contains(q) ||
-                  e.id.contains(q),
-            )
-            .toList(),
-      );
+  // ==========================================
+  // 3. GENERATE PDF REPORT
+  // ==========================================
+  Future<void> generatePdfReport() async {
+    final pdf = pw.Document();
+    final fontBold = await PdfGoogleFonts.nunitoBold();
+    final fontRegular = await PdfGoogleFonts.nunitoRegular();
 
-      debtorList.assignAll(
-        allDebtors
-            .where(
-              (e) =>
-                  e.name.toLowerCase().contains(q) ||
-                  e.phone.contains(q) ||
-                  e.id.toLowerCase().contains(q),
-            )
-            .toList(),
-      );
-    }
+    final String startStr = DateFormat('dd MMM yyyy').format(startDate.value);
+    final String endStr = DateFormat('dd MMM yyyy').format(endDate.value);
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        build:
+            (context) => [
+              // HEADER
+              pw.Header(
+                level: 0,
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text(
+                      "Profit & Loss Statement",
+                      style: pw.TextStyle(font: fontBold, fontSize: 22),
+                    ),
+                    pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.end,
+                      children: [
+                        pw.Text(
+                          "G-TEL MOBILE",
+                          style: pw.TextStyle(font: fontBold, fontSize: 14),
+                        ),
+                        pw.Text(
+                          "Period: $startStr - $endStr",
+                          style: pw.TextStyle(
+                            font: fontRegular,
+                            fontSize: 12,
+                            color: PdfColors.grey700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              pw.SizedBox(height: 20),
+
+              // FINANCIAL SUMMARY
+              pw.Text(
+                "Financial Summary",
+                style: pw.TextStyle(font: fontBold, fontSize: 16),
+              ),
+              pw.Divider(),
+              _buildPdfRow(
+                "Total Sales Revenue",
+                totalRevenue.value,
+                fontRegular,
+              ),
+              _buildPdfRow(
+                "(-) Cost of Goods Sold",
+                totalCostOfGoods.value,
+                fontRegular,
+                isNegative: true,
+              ),
+              pw.Divider(thickness: 0.5),
+              _buildPdfRow(
+                "GROSS PROFIT",
+                grossProfit.value,
+                fontBold,
+                fontSize: 14,
+              ),
+              pw.SizedBox(height: 10),
+              _buildPdfRow(
+                "(-) Operational Expenses",
+                totalExpenses.value,
+                fontRegular,
+                isNegative: true,
+              ),
+              pw.Divider(thickness: 0.5),
+              _buildPdfRow(
+                "NET PROFIT",
+                netProfit.value,
+                fontBold,
+                fontSize: 16,
+                color: netProfit.value >= 0 ? PdfColors.green : PdfColors.red,
+              ),
+
+              pw.SizedBox(height: 30),
+
+              // NEW: CUSTOMER PERFORMANCE TABLE IN PDF
+              pw.Text(
+                "Top Customer Performance",
+                style: pw.TextStyle(font: fontBold, fontSize: 14),
+              ),
+              pw.SizedBox(height: 10),
+              pw.TableHelper.fromTextArray(
+                headers: ['Customer', 'Type', 'Orders', 'Revenue', 'Profit'],
+                headerStyle: pw.TextStyle(
+                  font: fontBold,
+                  color: PdfColors.white,
+                  fontSize: 10,
+                ),
+                headerDecoration: const pw.BoxDecoration(
+                  color: PdfColors.blueGrey800,
+                ),
+                cellStyle: pw.TextStyle(font: fontRegular, fontSize: 9),
+                data:
+                    customerPerformanceList
+                        .take(20)
+                        .map(
+                          (e) => [
+                            e['name'],
+                            e['type'],
+                            e['count'].toString(),
+                            e['revenue'].toStringAsFixed(0),
+                            e['profit'].toStringAsFixed(0),
+                          ],
+                        )
+                        .toList(),
+              ),
+            ],
+      ),
+    );
+
+    await Printing.layoutPdf(
+      onLayout: (f) => pdf.save(),
+      name: "PnL_$endStr.pdf",
+    );
+  }
+
+  pw.Widget _buildPdfRow(
+    String label,
+    double value,
+    pw.Font font, {
+    bool isNegative = false,
+    PdfColor color = PdfColors.black,
+    double fontSize = 12,
+  }) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(vertical: 4),
+      child: pw.Row(
+        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        children: [
+          pw.Text(
+            label,
+            style: pw.TextStyle(font: font, fontSize: fontSize, color: color),
+          ),
+          pw.Text(
+            "${isNegative ? '-' : ''}${value.toStringAsFixed(2)}",
+            style: pw.TextStyle(font: font, fontSize: fontSize, color: color),
+          ),
+        ],
+      ),
+    );
   }
 }

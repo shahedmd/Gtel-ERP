@@ -58,7 +58,6 @@ class MyApp extends StatelessWidget {
                       Colors.black, // Adjusted for light theme visibility
                 ),
               ),
-              // Use initialRoute for cleaner navigation management
               initialRoute: '/',
               getPages: [
                 GetPage(name: '/', page: () => const LoginPage()),
