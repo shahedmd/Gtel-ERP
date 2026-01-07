@@ -1,12 +1,10 @@
-// ignore_for_file: deprecated_member_use
-
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:gtel_erp/Profit&loss/controller.dart';
 import 'package:intl/intl.dart';
 
-import 'controller.dart';
-
 class ProfitLossPage extends StatelessWidget {
+  // Use Get.put to initialize the controller if not already in memory
   final controller = Get.put(ProfitController());
 
   // Professional Colors
@@ -28,7 +26,7 @@ class ProfitLossPage extends StatelessWidget {
         elevation: 0,
         title: const Text(
           "FINANCIAL & PERFORMANCE REPORT",
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
         ),
         actions: [
           IconButton(
@@ -81,11 +79,8 @@ class ProfitLossPage extends StatelessWidget {
                       color: activeAccent,
                     ),
                     const SizedBox(height: 10),
-                    _buildFinancialRow(
-                      "(-) Operational Expenses",
-                      controller.totalExpenses.value,
-                      isNegative: true,
-                    ),
+
+                    // REMOVED EXPENSES ROW FROM HERE
                     _buildFinancialRow(
                       "(-) Discounts Given",
                       controller.totalDiscounts.value,
@@ -105,15 +100,17 @@ class ProfitLossPage extends StatelessWidget {
 
                     const SizedBox(height: 30),
 
-                    // 3. NEW: CUSTOMER PROFITABILITY SECTION
+                    // 3. CUSTOMER PROFITABILITY
                     _buildSectionHeader("Customer Profitability Analysis"),
                     _buildCustomerPerformanceTable(),
 
                     const SizedBox(height: 30),
 
-                    // 4. RECENT SALES TABLE
+                    // 4. RECENT SALES
                     _buildSectionHeader("Recent Sales Logs"),
                     _buildSalesTable(),
+
+                    const SizedBox(height: 50),
                   ],
                 ),
               );
@@ -136,34 +133,43 @@ class ProfitLossPage extends StatelessWidget {
         children: [
           const Icon(Icons.calendar_today, size: 18, color: textMuted),
           const SizedBox(width: 10),
-          DropdownButton<String>(
-            value: null,
-            hint: Obx(
-              () => Text(
-                "${DateFormat('dd MMM').format(controller.startDate.value)} - ${DateFormat('dd MMM').format(controller.endDate.value)}",
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: darkSlate,
+
+          // Dropdown for Quick Select
+          DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: null,
+              hint: Obx(
+                () => Text(
+                  "${DateFormat('dd MMM').format(controller.startDate.value)} - ${DateFormat('dd MMM').format(controller.endDate.value)}",
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: darkSlate,
+                  ),
                 ),
               ),
+              icon: const Icon(Icons.arrow_drop_down, color: activeAccent),
+              items:
+                  ['Today', 'Yesterday', 'This Month', 'Last 30 Days'].map((
+                    String val,
+                  ) {
+                    return DropdownMenuItem(value: val, child: Text(val));
+                  }).toList(),
+              onChanged: (val) {
+                if (val != null) controller.setDateRange(val);
+              },
             ),
-            underline: Container(),
-            icon: const Icon(Icons.arrow_drop_down),
-            items:
-                ['Today', 'Yesterday', 'This Month', 'Last 30 Days'].map((
-                  String val,
-                ) {
-                  return DropdownMenuItem(value: val, child: Text(val));
-                }).toList(),
-            onChanged: (val) {
-              if (val != null) controller.setDateRange(val);
-            },
           ),
+
           const Spacer(),
-          TextButton.icon(
+
+          OutlinedButton.icon(
             onPressed: () => controller.pickCustomDateRange(context),
             icon: const Icon(Icons.date_range, size: 16),
             label: const Text("Custom Range"),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: darkSlate,
+              side: const BorderSide(color: Colors.grey),
+            ),
           ),
         ],
       ),
@@ -172,10 +178,10 @@ class ProfitLossPage extends StatelessWidget {
 
   Widget _buildSummaryCards() {
     return GridView.count(
-      crossAxisCount: 2,
+      crossAxisCount: 3, // Changed from 2 to 3 since one card is removed
       crossAxisSpacing: 12,
       mainAxisSpacing: 12,
-      childAspectRatio: 2.2,
+      childAspectRatio: 1.8, // Adjusted ratio for 3 columns
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       children: [
@@ -191,12 +197,7 @@ class ProfitLossPage extends StatelessWidget {
           Colors.orange,
           Icons.trending_up,
         ),
-        _summaryCard(
-          "Expenses",
-          controller.totalExpenses.value,
-          Colors.redAccent,
-          Icons.money_off,
-        ),
+        // EXPENSES CARD REMOVED FROM HERE
         _summaryCard(
           "Net Profit",
           controller.netProfit.value,
@@ -222,40 +223,45 @@ class ProfitLossPage extends StatelessWidget {
           ),
         ],
       ),
-      child: Row(
+      child: Column(
+        // Changed to Column for better fit in 3-grid layout
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon, color: color, size: 20),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, color: color, size: 18),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
                   title,
-                  style: TextStyle(
+                  style: const TextStyle(
                     color: textMuted,
                     fontSize: 11,
                     fontWeight: FontWeight.bold,
                   ),
+                  overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  "৳${value.toStringAsFixed(0)}",
-                  style: TextStyle(
-                    color: color,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              "৳${value.toStringAsFixed(0)}",
+              style: TextStyle(
+                color: color,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
         ],
@@ -329,7 +335,7 @@ class ProfitLossPage extends StatelessWidget {
     );
   }
 
-  // --- NEW: CUSTOMER TABLE ---
+  // --- CUSTOMER TABLE ---
   Widget _buildCustomerPerformanceTable() {
     return Container(
       width: double.infinity,
@@ -371,13 +377,13 @@ class ProfitLossPage extends StatelessWidget {
               ),
               DataColumn(
                 label: Text(
-                  "Total Sales",
+                  "Revenue",
                   style: TextStyle(fontWeight: FontWeight.bold),
                 ),
               ),
               DataColumn(
                 label: Text(
-                  "Total Profit",
+                  "Profit",
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
                     color: successGreen,
@@ -456,7 +462,7 @@ class ProfitLossPage extends StatelessWidget {
     );
   }
 
-  // --- EXISTING SALES TABLE ---
+  // --- SALES TABLE ---
   Widget _buildSalesTable() {
     return Container(
       decoration: BoxDecoration(
@@ -474,7 +480,7 @@ class ProfitLossPage extends StatelessWidget {
         return SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: DataTable(
-            headingRowColor: MaterialStateProperty.all(bgGrey),
+            headingRowColor: MaterialStateProperty.all(const Color(0xFFF8FAFC)),
             columnSpacing: 20,
             columns: const [
               DataColumn(
@@ -510,13 +516,20 @@ class ProfitLossPage extends StatelessWidget {
             ],
             rows:
                 controller.salesReportList.take(50).map((sale) {
+                  // SAFE DATE PARSING
+                  String dateStr = sale['date'] ?? '';
+                  String formattedDate = dateStr;
+                  if (dateStr.length >= 10) {
+                    formattedDate = dateStr.substring(0, 10);
+                  }
+
                   return DataRow(
                     cells: [
-                      DataCell(Text(sale['date'].toString().substring(0, 10))),
-                      DataCell(Text(sale['invoiceId'])),
+                      DataCell(Text(formattedDate)),
+                      DataCell(Text(sale['invoiceId'] ?? '-')),
                       DataCell(
                         Text(
-                          sale['customer'],
+                          sale['customer'] ?? 'Unknown',
                           style: const TextStyle(fontWeight: FontWeight.w500),
                         ),
                       ),

@@ -433,7 +433,7 @@ class LiveSalesController extends GetxController {
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
                     pw.Text(
-                      "G-TEL MOBILE",
+                      "G-TEL",
                       style: pw.TextStyle(
                         font: boldFont,
                         fontSize: 24,

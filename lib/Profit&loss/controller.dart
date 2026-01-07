@@ -20,14 +20,12 @@ class ProfitController extends GetxController {
   var totalRevenue = 0.0.obs;
   var totalCostOfGoods = 0.0.obs;
   var grossProfit = 0.0.obs;
-  var totalExpenses = 0.0.obs;
+  // var totalExpenses = 0.0.obs; // REMOVED
   var netProfit = 0.0.obs;
   var totalDiscounts = 0.0.obs;
 
   // Lists
   var salesReportList = <Map<String, dynamic>>[].obs;
-
-  // NEW: Customer Performance List
   var customerPerformanceList = <Map<String, dynamic>>[].obs;
 
   @override
@@ -41,6 +39,7 @@ class ProfitController extends GetxController {
   // ==========================================
   void setDateRange(String type) {
     final now = DateTime.now();
+
     if (type == 'Today') {
       startDate.value = DateTime(now.year, now.month, now.day);
       endDate.value = DateTime(now.year, now.month, now.day, 23, 59, 59);
@@ -63,8 +62,12 @@ class ProfitController extends GetxController {
       startDate.value = DateTime(now.year, now.month, 1);
       endDate.value = DateTime(now.year, now.month + 1, 0, 23, 59, 59);
     } else if (type == 'Last 30 Days') {
-      startDate.value = now.subtract(const Duration(days: 30));
-      endDate.value = now;
+      startDate.value = DateTime(
+        now.year,
+        now.month,
+        now.day,
+      ).subtract(const Duration(days: 30));
+      endDate.value = DateTime(now.year, now.month, now.day, 23, 59, 59);
     }
     fetchProfitAndLoss();
   }
@@ -95,14 +98,16 @@ class ProfitController extends GetxController {
   }
 
   // ==========================================
-  // 2. FETCH DATA
+  // 2. FETCH DATA (EXPENSES REMOVED)
   // ==========================================
   Future<void> fetchProfitAndLoss() async {
     isLoading.value = true;
     _resetMetrics();
 
     try {
-      // A. Fetch SALES
+      // ----------------------------------------
+      // A. FETCH SALES
+      // ----------------------------------------
       QuerySnapshot salesQuery =
           await _db
               .collection('sales_orders')
@@ -118,8 +123,7 @@ class ProfitController extends GetxController {
               .get();
 
       List<Map<String, dynamic>> tempSales = [];
-      Map<String, Map<String, dynamic>> customerMap =
-          {}; // Helper for aggregation
+      Map<String, Map<String, dynamic>> customerMap = {};
 
       for (var doc in salesQuery.docs) {
         Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
@@ -132,13 +136,11 @@ class ProfitController extends GetxController {
                 ? (double.tryParse(data['profit'].toString()) ?? 0.0)
                 : (revenue - cost);
 
-        // Global Totals
         totalRevenue.value += revenue;
         totalCostOfGoods.value += cost;
         totalDiscounts.value += discount;
         grossProfit.value += profit;
 
-        // Add to Sales List
         tempSales.add({
           'date': data['date'] ?? '',
           'invoiceId': data['invoiceId'] ?? 'N/A',
@@ -149,7 +151,6 @@ class ProfitController extends GetxController {
           'items': (data['items'] as List<dynamic>).length,
         });
 
-        // --- NEW: AGGREGATE BY CUSTOMER ---
         String custName = data['customerName'] ?? 'Unknown';
         String custType = data['customerType'] ?? 'Retailer';
 
@@ -168,43 +169,22 @@ class ProfitController extends GetxController {
       }
 
       salesReportList.assignAll(tempSales);
-
-      // Convert Customer Map to List & Sort by Profit (High to Low)
       List<Map<String, dynamic>> sortedCustomers = customerMap.values.toList();
       sortedCustomers.sort((a, b) => b['profit'].compareTo(a['profit']));
       customerPerformanceList.assignAll(sortedCustomers);
 
-      // B. Fetch EXPENSES
-      try {
-        QuerySnapshot expenseQuery =
-            await _db
-                .collection('expenses')
-                .where(
-                  'date',
-                  isGreaterThanOrEqualTo: Timestamp.fromDate(startDate.value),
-                )
-                .where(
-                  'date',
-                  isLessThanOrEqualTo: Timestamp.fromDate(endDate.value),
-                )
-                .get();
-
-        for (var doc in expenseQuery.docs) {
-          Map<String, dynamic> exp = doc.data() as Map<String, dynamic>;
-          double amount = double.tryParse(exp['amount'].toString()) ?? 0.0;
-          totalExpenses.value += amount;
-        }
-      } catch (e) {
-        // Ignore if collection missing
-      }
-
-      // C. Net Profit
-      netProfit.value = grossProfit.value - totalExpenses.value;
+      // ----------------------------------------
+      // B. NET PROFIT CALCULATION (No Expenses)
+      // ----------------------------------------
+      // Net Profit is now just Gross Profit (minus discounts if needed,
+      // but usually Gross Profit already accounts for that depending on logic.
+      // Assuming 'profit' stored in DB is Gross Profit).
+      netProfit.value = grossProfit.value; // - 0 expenses
     } catch (e) {
       Get.snackbar(
         "Error",
-        "Failed to generate report: $e",
-        backgroundColor: Colors.redAccent,
+        "Report Failed: $e",
+        backgroundColor: Colors.red,
         colorText: Colors.white,
       );
     } finally {
@@ -216,7 +196,7 @@ class ProfitController extends GetxController {
     totalRevenue.value = 0.0;
     totalCostOfGoods.value = 0.0;
     grossProfit.value = 0.0;
-    totalExpenses.value = 0.0;
+    // totalExpenses.value = 0.0; // REMOVED
     netProfit.value = 0.0;
     totalDiscounts.value = 0.0;
     salesReportList.clear();
@@ -296,12 +276,8 @@ class ProfitController extends GetxController {
                 fontSize: 14,
               ),
               pw.SizedBox(height: 10),
-              _buildPdfRow(
-                "(-) Operational Expenses",
-                totalExpenses.value,
-                fontRegular,
-                isNegative: true,
-              ),
+
+              // REMOVED EXPENSES ROW
               pw.Divider(thickness: 0.5),
               _buildPdfRow(
                 "NET PROFIT",
@@ -313,7 +289,7 @@ class ProfitController extends GetxController {
 
               pw.SizedBox(height: 30),
 
-              // NEW: CUSTOMER PERFORMANCE TABLE IN PDF
+              // TOP CUSTOMERS TABLE
               pw.Text(
                 "Top Customer Performance",
                 style: pw.TextStyle(font: fontBold, fontSize: 14),

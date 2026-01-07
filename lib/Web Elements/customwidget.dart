@@ -283,6 +283,11 @@ class SidebarMenu extends StatelessWidget {
 
                 // --- STAFF ---
                 _NavTile(
+                  id: Routes.SHIPMENT,
+                  icon: FontAwesomeIcons.shippingFast,
+                  title: "Shipment Details",
+                ),
+                _NavTile(
                   id: Routes.STAFF,
                   icon: FontAwesomeIcons.userTie,
                   title: "Staff Members",

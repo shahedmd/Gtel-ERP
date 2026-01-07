@@ -5,6 +5,7 @@ import '../Cash/page.dart';
 import '../Live order/liveorder.dart';
 import '../Profit&loss/page.dart';
 import '../Sale Return/salereturnpage.dart';
+import '../Shipment/shipmentpage.dart';
 import '../Stock/stockpage.dart';
 import '../Web Elements/customwidget.dart';
 import '../Web Elements/route.dart';
@@ -76,6 +77,9 @@ class _AdminHomepageState extends State<AdminHomepage> {
                   }
                   if (settings.name == Routes.SALERETURN) {
                     return GetPageRoute(page: () => SaleReturnPage());
+                  }
+                  if (settings.name == Routes.SHIPMENT) {
+                    return GetPageRoute(page: () => ShipmentPage());
                   }
                   return GetPageRoute(
                     page: () => const Center(child: Text("Not Found")),
