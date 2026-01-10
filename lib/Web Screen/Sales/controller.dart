@@ -1,7 +1,8 @@
-// ignore_for_file: deprecated_member_use, empty_catches
+// ignore_for_file: deprecated_member_use, empty_catches, avoid_print
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:gtel_erp/Stock/controller.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:intl/intl.dart';
@@ -11,14 +12,12 @@ import 'model.dart';
 class DailySalesController extends GetxController {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  // Observables
   final Rx<DateTime> selectedDate = DateTime.now().obs;
   final RxList<SaleModel> salesList = <SaleModel>[].obs;
-  final RxList<SaleModel> filteredList = <SaleModel>[].obs; // For searching
+  final RxList<SaleModel> filteredList = <SaleModel>[].obs;
   final RxBool isLoading = false.obs;
   final RxString filterQuery = "".obs;
 
-  // Computed Totals
   final RxDouble totalSales = 0.0.obs;
   final RxDouble paidAmount = 0.0.obs;
   final RxDouble debtorPending = 0.0.obs;
@@ -28,21 +27,17 @@ class DailySalesController extends GetxController {
     super.onInit();
     loadDailySales();
     ever(selectedDate, (_) => loadDailySales());
-    // Auto-filter when query changes
     ever(filterQuery, (_) => _applyFilter());
   }
 
-  // --- HELPER: Fix Floating Point Math ---
   double _round(double val) {
     return double.parse(val.toStringAsFixed(2));
   }
 
-  // 1. CHANGE DATE
   void changeDate(DateTime date) {
     selectedDate.value = date;
   }
 
-  // 2. LOAD SALES
   Future<void> loadDailySales() async {
     isLoading.value = true;
     try {
@@ -66,13 +61,8 @@ class DailySalesController extends GetxController {
 
       salesList.value =
           snap.docs.map((doc) => SaleModel.fromFirestore(doc)).toList();
-      _applyFilter(); // Apply search if any
+      _applyFilter();
       _computeTotals();
-    } on FirebaseException catch (e) {
-      if (e.code == 'failed-precondition') {
-        print("🔥 INDEX MISSING: ${e.message}");
-      }
-      Get.snackbar("Database Error", "Index missing or permission denied.");
     } catch (e) {
       Get.snackbar("Error", e.toString());
     } finally {
@@ -80,7 +70,6 @@ class DailySalesController extends GetxController {
     }
   }
 
-  // 2.1 APPLY SEARCH FILTER
   void _applyFilter() {
     if (filterQuery.value.isEmpty) {
       filteredList.assignAll(salesList);
@@ -98,7 +87,6 @@ class DailySalesController extends GetxController {
     }
   }
 
-  // 3. REVERSE DEBTOR PAYMENT
   Future<void> reverseDebtorPayment(
     String debtorName,
     double amount,
@@ -118,7 +106,6 @@ class DailySalesController extends GetxController {
 
       for (var doc in salesSnap.docs) {
         if (remainingToReverse <= 0) break;
-
         final data = doc.data();
         double currentPaid = _round((data['paid'] as num).toDouble());
 
@@ -150,15 +137,11 @@ class DailySalesController extends GetxController {
     }
   }
 
-  // 4. COMPUTE TOTALS (Using Filtered List)
   void _computeTotals() {
     double total = 0.0;
     double paid = 0.0;
     double pending = 0.0;
 
-    // We calculate totals based on the original list (actual daily totals),
-    // not the filtered list, unless you want totals to reflect search results.
-    // Usually, daily totals should remain constant.
     for (var s in salesList) {
       total += s.amount;
       paid += s.paid;
@@ -172,7 +155,6 @@ class DailySalesController extends GetxController {
     debtorPending.value = _round(pending);
   }
 
-  // 5. ADD SALE
   Future<void> addSale({
     required String name,
     required double amount,
@@ -186,7 +168,6 @@ class DailySalesController extends GetxController {
   }) async {
     try {
       final paidPart = (customerType == "debtor" && !isPaid) ? 0.0 : amount;
-
       List<Map<String, dynamic>> initialHistory = [];
       if (paidPart > 0 && paymentMethod != null) {
         initialHistory.add({
@@ -217,7 +198,6 @@ class DailySalesController extends GetxController {
     }
   }
 
-  // 6. APPLY DEBTOR PAYMENT
   Future<void> applyDebtorPayment(
     String debtorName,
     double paymentAmount,
@@ -227,8 +207,6 @@ class DailySalesController extends GetxController {
   }) async {
     try {
       double remaining = _round(paymentAmount);
-
-      // Query Setup
       final DateTime startOfDay = DateTime(date.year, date.month, date.day);
       final DateTime endOfDay = startOfDay.add(const Duration(days: 1));
 
@@ -242,14 +220,13 @@ class DailySalesController extends GetxController {
                 isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay),
               )
               .where("timestamp", isLessThan: Timestamp.fromDate(endOfDay))
-              .orderBy("timestamp", descending: false) // FIFO: Pay oldest first
+              .orderBy("timestamp", descending: false)
               .get();
 
       final batch = _db.batch();
 
       for (var doc in snap.docs) {
         if (remaining <= 0) break;
-
         final data = doc.data();
         final double amt = (data['amount'] as num).toDouble();
         final double alreadyPaid = (data['paid'] as num).toDouble();
@@ -258,10 +235,8 @@ class DailySalesController extends GetxController {
         if (due > 0) {
           final double toApply = remaining >= due ? due : remaining;
           List applied = List.from(data['appliedDebits'] ?? []);
-
-          if (transactionId != null) {
+          if (transactionId != null)
             applied.add({"id": transactionId, "amount": toApply});
-          }
 
           final newHistoryEntry = {
             ...paymentMethod,
@@ -281,7 +256,6 @@ class DailySalesController extends GetxController {
         }
       }
 
-      // Advance Payment (Excess)
       if (remaining > 0) {
         await addSale(
           name: debtorName,
@@ -308,100 +282,104 @@ class DailySalesController extends GetxController {
     }
   }
 
-  // 7. DELETE SALE (UPDATED: INCLUDES STOCK REVERSAL)
+  // ==================================================================
+  // 🗑️ DELETE SALE (UPDATED WITH HTTP RESTOCK)
+  // ==================================================================
   Future<void> deleteSale(String saleId) async {
     isLoading.value = true;
     try {
-      await _db.runTransaction((transaction) async {
-        // 1. Read the Daily Sale Entry
-        DocumentReference dailyRef = _db.collection("daily_sales").doc(saleId);
-        DocumentSnapshot dailySnap = await transaction.get(dailyRef);
+      DocumentSnapshot dailySnap =
+          await _db.collection('daily_sales').doc(saleId).get();
+      if (!dailySnap.exists) throw "Daily entry does not exist!";
 
-        if (!dailySnap.exists) throw "Daily entry does not exist!";
+      final saleData = dailySnap.data() as Map<String, dynamic>;
+      String customerType =
+          (saleData['customerType'] ?? '').toString().toLowerCase();
 
-        final saleData = dailySnap.data() as Map<String, dynamic>;
-        String? invoiceId = saleData['transactionId'] ?? saleData['invoiceId'];
+      // REQ: Block Debtor Deletion
+      if (customerType.contains('debtor')) {
+        Get.snackbar(
+          "Access Denied",
+          "Debtor sales must be managed in the Debtor Ledger.",
+          backgroundColor: Colors.orange,
+          colorText: Colors.white,
+        );
+        isLoading.value = false;
+        return;
+      }
 
-        // 2. Logic for Invoice & Stock Reversal
-        if (invoiceId != null && invoiceId.isNotEmpty) {
-          DocumentReference invRef = _db
-              .collection("sales_orders")
-              .doc(invoiceId);
-          DocumentSnapshot invSnap = await transaction.get(invRef);
+      // REQ: Delete Normal Sale
+      String? invoiceId = saleData['transactionId'] ?? saleData['invoiceId'];
 
-          if (invSnap.exists) {
-            final invData = invSnap.data() as Map<String, dynamic>;
-            final String customerType =
-                (invData['customerType'] ?? 'general').toLowerCase();
-            final String? customerPhone = invData['customerPhone'];
-            final List<dynamic> items = invData['items'] ?? [];
+      if (invoiceId != null && invoiceId.isNotEmpty) {
+        DocumentSnapshot invSnap =
+            await _db.collection("sales_orders").doc(invoiceId).get();
 
-            // --- A. STOCK REVERSAL (CRITICAL UPDATE) ---
-            // Only reverse stock if the invoice is NOT already returned/deleted
-            if (invData['status'] != 'deleted') {
-              for (var item in items) {
-                // Assuming you have 'productId' or 'id' in your item map
-                // and a 'products' collection.
-                String? pId = item['productId'] ?? item['id'];
-                if (pId != null) {
-                  DocumentReference prodRef = _db
-                      .collection('products')
-                      .doc(pId);
-                  // We use FieldValue.increment to safely add back stock
-                  // Note: In a transaction, you ideally read first, but increment is safe for blindly adding back
-                  transaction.update(prodRef, {
-                    'stock': FieldValue.increment(item['qty'] ?? 0),
-                  });
-                }
+        if (invSnap.exists) {
+          final invData = invSnap.data() as Map<String, dynamic>;
+          final List<dynamic> items = invData['items'] ?? [];
+
+          // 1. RESTORE STOCK VIA HTTP (Negative qty to add)
+          if (invData['status'] != 'deleted') {
+            List<Map<String, dynamic>> restockUpdates = [];
+            for (var item in items) {
+              String? pId = item['productId'] ?? item['id'];
+              int qty = item['qty'] ?? 0;
+              if (pId != null && qty > 0) {
+                // Sending NEGATIVE quantity to simulate adding back (since the API usually subtracts)
+                restockUpdates.add({'id': pId, 'qty': -qty});
               }
             }
-
-            // --- B. DELETE/UPDATE INVOICE ---
-            if (customerType.contains('debtor')) {
-              // Soft Delete for Debtor to keep ID in Ledger, but mark deleted
-              transaction.update(invRef, {
-                'daily_entry_status': 'deleted',
-                'status': 'deleted_entry',
-                'last_updated': FieldValue.serverTimestamp(),
-                'note': 'Daily sales entry manually removed',
-              });
-            } else {
-              // Hard Delete for General Customers
-              transaction.delete(invRef);
-
-              // C. Customer History Cleanup
-              if (customerPhone != null) {
-                DocumentReference custOrderRef = _db
-                    .collection('customers')
-                    .doc(customerPhone)
-                    .collection('orders')
-                    .doc(invoiceId);
-                transaction.delete(custOrderRef);
-              }
+            // Use the injected product controller
+            bool restockSuccess = await Get.find<ProductController>()
+                .updateStockBulk(restockUpdates);
+            if (!restockSuccess) {
+              Get.snackbar(
+                "Error",
+                "Failed to restore stock. Sale not deleted.",
+              );
+              return;
             }
           }
-        }
 
-        // 3. Delete the Daily Sales Entry
-        transaction.delete(dailyRef);
-      });
+          // 2. DELETE DOCUMENTS (Transaction)
+          await _db.runTransaction((transaction) async {
+            DocumentReference invRef = _db
+                .collection("sales_orders")
+                .doc(invoiceId);
+            transaction.delete(invRef);
+
+            String? custPhone = invData['customerPhone'];
+            if (custPhone != null && custPhone.isNotEmpty) {
+              DocumentReference custHistRef = _db
+                  .collection('customers')
+                  .doc(custPhone)
+                  .collection('orders')
+                  .doc(invoiceId);
+              transaction.delete(custHistRef);
+            }
+            transaction.delete(dailySnap.reference);
+          });
+        }
+      } else {
+        // If no invoice ID attached, just delete the daily entry
+        await dailySnap.reference.delete();
+      }
 
       await loadDailySales();
       Get.snackbar(
         "Deleted",
-        "Sale deleted & Stock returned to inventory.",
+        "Sale deleted & Stock restored.",
         backgroundColor: Colors.redAccent,
         colorText: Colors.white,
       );
     } catch (e) {
-      print("Delete Error: $e");
       Get.snackbar("Error", "Could not delete: $e");
     } finally {
       isLoading.value = false;
     }
   }
 
-  // 8. FORMAT PAYMENT METHOD
   String formatPaymentMethod(dynamic pm) {
     if (pm == null || pm == "") return "CREDIT/DUE";
     if (pm is! Map) return pm.toString().toUpperCase();
@@ -441,13 +419,10 @@ class DailySalesController extends GetxController {
     }
   }
 
-  // 9. PROFESSIONAL PDF GENERATOR
   Future<void> generateProfessionalPDF() async {
     final pdf = pw.Document();
     final dateStr = DateFormat("dd MMMM yyyy").format(selectedDate.value);
     final primaryColor = PdfColors.blue900;
-
-    // Use filtered list for PDF if a filter is active, otherwise all sales
     final listToPrint =
         filteredList.isEmpty && filterQuery.value.isEmpty
             ? salesList
@@ -480,7 +455,6 @@ class DailySalesController extends GetxController {
             ),
         build:
             (context) => [
-              // Summary Box
               pw.Container(
                 padding: const pw.EdgeInsets.all(15),
                 decoration: pw.BoxDecoration(
@@ -507,7 +481,6 @@ class DailySalesController extends GetxController {
                 ),
               ),
               pw.SizedBox(height: 20),
-              // Table
               pw.Table.fromTextArray(
                 headers: [
                   "Customer",
@@ -552,7 +525,6 @@ class DailySalesController extends GetxController {
             ],
       ),
     );
-
     await Printing.layoutPdf(onLayout: (format) async => pdf.save());
   }
 
@@ -575,25 +547,19 @@ class DailySalesController extends GetxController {
     );
   }
 
-  // 10. REPRINT INVOICE (With Safe Parsing)
   Future<void> reprintInvoice(String invoiceId) async {
     isLoading.value = true;
     try {
       DocumentSnapshot doc =
           await _db.collection('sales_orders').doc(invoiceId).get();
-
       if (!doc.exists) {
         Get.snackbar("Error", "Invoice not found in master records.");
         return;
       }
-
       Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
       List<dynamic> items = data['items'] ?? [];
       Map<String, dynamic> payMap = data['paymentDetails'] ?? {};
-
-      // SAFE PARSING HELPERS
       double getDouble(dynamic val) => double.tryParse(val.toString()) ?? 0.0;
-
       final pdf = pw.Document();
       final boldFont = await PdfGoogleFonts.nunitoBold();
       final regularFont = await PdfGoogleFonts.nunitoRegular();

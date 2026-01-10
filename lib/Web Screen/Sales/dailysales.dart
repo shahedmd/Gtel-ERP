@@ -1,39 +1,42 @@
-// ignore_for_file: deprecated_member_use, avoid_web_libraries_in_flutter
+// ignore_for_file: deprecated_member_use
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import 'controller.dart'; // Ensure this points to your file
-import 'model.dart'; // Ensure this points to your file
+import 'controller.dart';
+import 'model.dart';
 
 class DailySalesPage extends StatelessWidget {
   // Dependency Injection
   final DailySalesController ctrl = Get.put(DailySalesController());
 
-  // Theme Constants
-  static const Color darkSlate = Color(0xFF111827);
-  static const Color activeAccent = Color(0xFF3B82F6);
-  static const Color bgGrey = Color(0xFFF9FAFB);
-  static const Color textMuted = Color(0xFF6B7280);
+  // Modern Color Palette (Material 3 / Slate Style)
+  static const Color bgSlate = Color(0xFFF1F5F9);
+  static const Color darkText = Color(0xFF0F172A);
+  static const Color primaryBlue = Color(0xFF2563EB);
+  static const Color successGreen = Color(0xFF16A34A);
+  static const Color alertRed = Color(0xFFDC2626);
+  static const Color warningOrange = Color(0xFFEA580C);
 
   DailySalesPage({super.key});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: bgGrey,
+      backgroundColor: bgSlate,
       body: Obx(() {
-        // Loading State (Only if list is empty to prevent flicker)
+        // Loading State
         if (ctrl.isLoading.value && ctrl.salesList.isEmpty) {
           return const Center(
-            child: CircularProgressIndicator(color: activeAccent),
+            child: CircularProgressIndicator(color: primaryBlue),
           );
         }
 
         return Column(
           children: [
             _buildHeader(context),
-            _buildMetricsRow(),
+            _buildMetricsGrid(),
             _buildTableHead(),
             Expanded(child: _buildMainContent(context)),
           ],
@@ -47,53 +50,87 @@ class DailySalesPage extends StatelessWidget {
   // ==========================================================
   Widget _buildHeader(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
       decoration: BoxDecoration(
         color: Colors.white,
         border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Row(
         children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: primaryBlue.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const FaIcon(
+              FontAwesomeIcons.cashRegister,
+              color: primaryBlue,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 16),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
                 "Daily Sales Ledger",
                 style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: darkSlate,
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  color: darkText,
+                  letterSpacing: -0.5,
                 ),
               ),
               const SizedBox(height: 4),
               Obx(
                 () => Text(
-                  "Audit for ${DateFormat('EEEE, dd MMMM yyyy').format(ctrl.selectedDate.value)}",
-                  style: const TextStyle(fontSize: 14, color: textMuted),
+                  "Viewing Data for: ${DateFormat('EEEE, dd MMMM yyyy').format(ctrl.selectedDate.value)}",
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.grey.shade600,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               ),
             ],
           ),
           const Spacer(),
+
           // --- Search Bar ---
           Container(
-            width: 300,
+            width: 280,
+            height: 45,
             decoration: BoxDecoration(
-              color: bgGrey,
+              color: bgSlate,
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.black12),
+              border: Border.all(color: Colors.grey.shade300),
             ),
             child: TextField(
               onChanged: (v) => ctrl.filterQuery.value = v,
-              decoration: const InputDecoration(
-                hintText: "Search Name / Invoice ID...",
-                prefixIcon: Icon(Icons.search, size: 20, color: textMuted),
+              textAlignVertical: TextAlignVertical.center,
+              decoration: InputDecoration(
+                hintText: "Search Invoice or Name...",
+                hintStyle: TextStyle(fontSize: 13, color: Colors.grey.shade500),
+                prefixIcon: Icon(
+                  Icons.search,
+                  size: 18,
+                  color: Colors.grey.shade600,
+                ),
                 border: InputBorder.none,
-                contentPadding: EdgeInsets.symmetric(vertical: 12),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 10),
               ),
             ),
           ),
-          const SizedBox(width: 16),
+          const SizedBox(width: 12),
+
           // --- Date Filter ---
           OutlinedButton.icon(
             onPressed: () async {
@@ -102,12 +139,24 @@ class DailySalesPage extends StatelessWidget {
                 initialDate: ctrl.selectedDate.value,
                 firstDate: DateTime(2020),
                 lastDate: DateTime.now(),
+                builder: (context, child) {
+                  return Theme(
+                    data: ThemeData.light().copyWith(
+                      colorScheme: const ColorScheme.light(
+                        primary: primaryBlue,
+                      ),
+                    ),
+                    child: child!,
+                  );
+                },
               );
               if (p != null) ctrl.changeDate(p);
             },
             icon: const Icon(Icons.calendar_today, size: 16),
-            label: const Text("Filter Date"),
+            label: const Text("Select Date"),
             style: OutlinedButton.styleFrom(
+              foregroundColor: darkText,
+              side: BorderSide(color: Colors.grey.shade300),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8),
@@ -115,24 +164,17 @@ class DailySalesPage extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 12),
+
           // --- Export PDF ---
           ElevatedButton.icon(
             onPressed: () => ctrl.generateProfessionalPDF(),
-            icon: const FaIcon(
-              FontAwesomeIcons.filePdf,
-              color: Colors.white,
-              size: 16,
-            ),
-            label: const Text(
-              "Export Report",
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
+            icon: const Icon(Icons.picture_as_pdf, size: 18),
+            label: const Text("Export Report"),
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.redAccent.shade700,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+              backgroundColor: alertRed,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+              elevation: 2,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8),
               ),
@@ -146,42 +188,96 @@ class DailySalesPage extends StatelessWidget {
   // ==========================================================
   // 2. METRICS ROW
   // ==========================================================
-  Widget _buildMetricsRow() {
+  Widget _buildMetricsGrid() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-      child: Obx(
-        () => Row(
-          children: [
-            Expanded(
-              child: _metricCard(
-                "Gross Sales",
-                ctrl.totalSales.value,
-                FontAwesomeIcons.chartLine,
-                activeAccent,
+      padding: const EdgeInsets.all(24),
+      child: Row(
+        children: [
+          Expanded(
+            child: _metricCard(
+              "Total Sales",
+              ctrl.totalSales.value,
+              FontAwesomeIcons.chartLine,
+              primaryBlue,
+            ),
+          ),
+          const SizedBox(width: 20),
+          Expanded(
+            child: _metricCard(
+              "Cash Collected",
+              ctrl.paidAmount.value,
+              FontAwesomeIcons.handHoldingDollar,
+              successGreen,
+            ),
+          ),
+          const SizedBox(width: 20),
+          Expanded(
+            child: _metricCard(
+              "Debtor Pending",
+              ctrl.debtorPending.value,
+              FontAwesomeIcons.fileInvoiceDollar,
+              warningOrange,
+            ),
+          ),
+          const SizedBox(width: 20),
+          // Transaction Count Card
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: darkText,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: darkText.withOpacity(0.3),
+                    blurRadius: 12,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const FaIcon(
+                      FontAwesomeIcons.list,
+                      color: Colors.white,
+                      size: 18,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        "TRANSACTIONS",
+                        style: TextStyle(
+                          color: Colors.white54,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        "${ctrl.salesList.length}",
+                        style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: _metricCard(
-                "Cash Collected",
-                ctrl.paidAmount.value,
-                FontAwesomeIcons.handHoldingDollar,
-                Colors.green.shade600,
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: _metricCard(
-                "Outstanding Due",
-                ctrl.debtorPending.value,
-                FontAwesomeIcons.fileInvoiceDollar,
-                Colors.orange.shade800,
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(child: _orderCountCard()),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -191,11 +287,11 @@ class DailySalesPage extends StatelessWidget {
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withOpacity(0.05)),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.02),
+            color: Colors.grey.shade100,
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -204,94 +300,33 @@ class DailySalesPage extends StatelessWidget {
       child: Row(
         children: [
           Container(
-            height: 48,
-            width: 48,
+            padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: color.withOpacity(0.1),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: Center(child: FaIcon(icon, size: 20, color: color)),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title.toUpperCase(),
-                  style: const TextStyle(
-                    color: Color(0xFF6B7280),
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    "৳ ${value.toStringAsFixed(2)}",
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      color: darkSlate,
-                      fontFamily: 'RobotoMono', // Optional monospace look
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _orderCountCard() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: darkSlate,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: darkSlate.withOpacity(0.3),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          const CircleAvatar(
-            radius: 24,
-            backgroundColor: Colors.white10,
-            child: FaIcon(
-              FontAwesomeIcons.receipt,
-              size: 18,
-              color: Colors.white,
-            ),
+            child: FaIcon(icon, size: 20, color: color),
           ),
           const SizedBox(width: 16),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                "TOTAL TRANSACTIONS",
-                style: TextStyle(
-                  color: Colors.white60,
+              Text(
+                title.toUpperCase(),
+                style: const TextStyle(
+                  color: Colors.grey,
                   fontSize: 10,
-                  fontWeight: FontWeight.bold,
+                  fontWeight: FontWeight.w700,
                   letterSpacing: 0.5,
                 ),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 6),
               Text(
-                "${ctrl.salesList.length}",
-                style: const TextStyle(
-                  fontSize: 22,
+                "৳ ${value.toStringAsFixed(0)}",
+                style: TextStyle(
+                  fontSize: 24,
                   fontWeight: FontWeight.bold,
-                  color: Colors.white,
+                  color: darkText,
                 ),
               ),
             ],
@@ -302,27 +337,25 @@ class DailySalesPage extends StatelessWidget {
   }
 
   // ==========================================================
-  // 3. TABLE STRUCTURE
+  // 3. TABLE HEADER
   // ==========================================================
   Widget _buildTableHead() {
     return Container(
-      margin: const EdgeInsets.fromLTRB(24, 8, 24, 0),
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+      margin: const EdgeInsets.fromLTRB(24, 0, 24, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
       decoration: const BoxDecoration(
-        color: darkSlate,
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(8),
-          topRight: Radius.circular(8),
-        ),
+        color: darkText,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
       ),
       child: Row(
         children: const [
           Expanded(
             flex: 3,
             child: Text(
-              "Customer / Bill To",
+              "CUSTOMER / INVOICE",
               style: TextStyle(
                 color: Colors.white,
+                fontSize: 11,
                 fontWeight: FontWeight.bold,
               ),
             ),
@@ -330,19 +363,10 @@ class DailySalesPage extends StatelessWidget {
           Expanded(
             flex: 2,
             child: Text(
-              "Status",
+              "TYPE & STATUS",
               style: TextStyle(
                 color: Colors.white,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-          Expanded(
-            flex: 3,
-            child: Text(
-              "Payment Info",
-              style: TextStyle(
-                color: Colors.white,
+                fontSize: 11,
                 fontWeight: FontWeight.bold,
               ),
             ),
@@ -350,215 +374,300 @@ class DailySalesPage extends StatelessWidget {
           Expanded(
             flex: 2,
             child: Text(
-              "Total Bill",
+              "PAYMENT METHOD",
               style: TextStyle(
                 color: Colors.white,
+                fontSize: 11,
                 fontWeight: FontWeight.bold,
               ),
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text(
+              "TOTAL AMOUNT",
               textAlign: TextAlign.right,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
           Expanded(
             flex: 2,
             child: Text(
-              "Balance Due",
+              "BALANCE DUE",
+              textAlign: TextAlign.right,
               style: TextStyle(
                 color: Colors.white,
+                fontSize: 11,
                 fontWeight: FontWeight.bold,
               ),
-              textAlign: TextAlign.right,
             ),
           ),
-          SizedBox(width: 100), // Actions Space
+          SizedBox(width: 100), // Action button space
         ],
       ),
     );
   }
 
   // ==========================================================
-  // 4. MAIN CONTENT & LIST
+  // 4. MAIN SALES LIST
   // ==========================================================
   Widget _buildMainContent(BuildContext context) {
-    final filtered = _getFilteredList();
-    if (filtered.isEmpty) return _buildEmptyState();
+    final filtered =
+        _getFilteredList(); // Using logic from controller via local method
 
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-      itemCount: filtered.length,
-      itemBuilder: (context, index) {
-        final sale = filtered[index];
-        return _buildSaleRow(context, sale);
-      },
+    if (filtered.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.receipt_long_outlined,
+              size: 64,
+              color: Colors.grey.shade300,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              "No transactions found for this date",
+              style: TextStyle(color: Colors.grey.shade500, fontSize: 16),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: Colors.grey.shade200),
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
+      ),
+      child: ListView.separated(
+        itemCount: filtered.length,
+        separatorBuilder: (_, __) => const Divider(height: 1, thickness: 0.5),
+        itemBuilder: (context, index) {
+          final sale = filtered[index];
+          return _buildSaleRow(context, sale);
+        },
+      ),
     );
   }
 
   Widget _buildSaleRow(BuildContext context, SaleModel sale) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(
-          bottom: BorderSide(color: Colors.grey.shade200),
-          left: BorderSide(color: Colors.grey.shade200),
-          right: BorderSide(color: Colors.grey.shade200),
-        ),
-      ),
-      child: InkWell(
-        onTap: () {
-          // Quick Action: If pending > 0, open payment dialog
-          if (sale.pending > 0) _showPaymentDialog(context, sale);
-        },
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-          child: Row(
-            children: [
-              // Customer & Invoice
-              Expanded(
-                flex: 3,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      sale.name,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: darkSlate,
-                        fontSize: 14,
-                      ),
+    bool isDebtor = sale.customerType.toLowerCase().contains("debtor");
+
+    return InkWell(
+      onTap: () {
+        // Only allow extra payment on Debtors who have Pending amount
+        if (sale.pending > 0 && isDebtor) _showPaymentDialog(context, sale);
+      },
+      hoverColor: Colors.blue.withOpacity(0.02),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+        child: Row(
+          children: [
+            // 1. Customer Info
+            Expanded(
+              flex: 3,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    sale.name,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                      color: darkText,
                     ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 4,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.grey.shade100,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            sale.transactionId ?? 'N/A',
-                            style: const TextStyle(
-                              fontSize: 10,
-                              color: textMuted,
-                              fontFamily: 'monospace',
-                            ),
-                          ),
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
                         ),
-                        const SizedBox(width: 8),
-                        Text(
-                          DateFormat('hh:mm a').format(sale.timestamp),
+                        decoration: BoxDecoration(
+                          color: bgSlate,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          sale.transactionId ?? 'N/A',
                           style: const TextStyle(
                             fontSize: 10,
-                            color: textMuted,
+                            fontFamily: 'monospace',
+                            color: Colors.blueGrey,
                           ),
                         ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-
-              // Status Badge
-              Expanded(flex: 2, child: _statusBadge(sale)),
-
-              // Payment Method
-              Expanded(
-                flex: 3,
-                child: Text(
-                  ctrl.formatPaymentMethod(sale.paymentMethod),
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF374151),
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-
-              // Total Amount
-              Expanded(
-                flex: 2,
-                child: Text(
-                  "৳ ${sale.amount.toStringAsFixed(2)}",
-                  textAlign: TextAlign.right,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: darkSlate,
-                  ),
-                ),
-              ),
-
-              // Pending / Due
-              Expanded(
-                flex: 2,
-                child: Text(
-                  sale.pending > 0
-                      ? "৳ ${sale.pending.toStringAsFixed(2)}"
-                      : "CLEARED",
-                  textAlign: TextAlign.right,
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: sale.pending > 0 ? Colors.redAccent : Colors.green,
-                  ),
-                ),
-              ),
-
-              // Actions
-              SizedBox(
-                width: 100,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    // PRINT
-                    if (sale.transactionId != null)
-                      IconButton(
-                        tooltip: "Reprint Invoice",
-                        icon: const Icon(
-                          Icons.print_outlined,
-                          size: 20,
-                          color: Colors.blueGrey,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        DateFormat('hh:mm a').format(sale.timestamp),
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey.shade500,
                         ),
-                        onPressed:
-                            () => ctrl.reprintInvoice(sale.transactionId!),
                       ),
-                    // DELETE
-                    IconButton(
-                      tooltip: "Delete Daily Entry",
-                      icon: const Icon(
-                        Icons.delete_outline,
-                        size: 20,
-                        color: Colors.redAccent,
-                      ),
-                      onPressed: () => _confirmDelete(sale),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+
+            // 2. Type & Status
+            Expanded(
+              flex: 2,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Type Badge
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
                     ),
-                  ],
+                    decoration: BoxDecoration(
+                      color:
+                          isDebtor
+                              ? Colors.purple.shade50
+                              : Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(
+                        color:
+                            isDebtor
+                                ? Colors.purple.shade100
+                                : Colors.blue.shade100,
+                      ),
+                    ),
+                    child: Text(
+                      isDebtor ? "DEBTOR" : "RETAILER",
+                      style: TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.bold,
+                        color: isDebtor ? Colors.purple : Colors.blue,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  // Payment Status
+                  Text(
+                    sale.pending > 0 ? "PARTIAL / DUE" : "FULLY PAID",
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: sale.pending > 0 ? warningOrange : successGreen,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // 3. Payment Method
+            Expanded(
+              flex: 2,
+              child: Text(
+                ctrl.formatPaymentMethod(sale.paymentMethod),
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF475569),
                 ),
               ),
-            ],
-          ),
+            ),
+
+            // 4. Amount
+            Expanded(
+              flex: 2,
+              child: Text(
+                "৳ ${sale.amount.toStringAsFixed(2)}",
+                textAlign: TextAlign.right,
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: darkText,
+                ),
+              ),
+            ),
+
+            // 5. Balance Due
+            Expanded(
+              flex: 2,
+              child: Text(
+                sale.pending > 0 ? "৳ ${sale.pending.toStringAsFixed(2)}" : "-",
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: sale.pending > 0 ? alertRed : Colors.grey.shade300,
+                ),
+              ),
+            ),
+
+            // 6. Actions
+            SizedBox(
+              width: 100,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  IconButton(
+                    icon: const Icon(
+                      Icons.print_outlined,
+                      size: 20,
+                      color: Colors.blueGrey,
+                    ),
+                    tooltip: "Reprint Invoice",
+                    onPressed:
+                        () => ctrl.reprintInvoice(sale.transactionId ?? ""),
+                  ),
+                  IconButton(
+                    icon: Icon(
+                      Icons.delete_outline,
+                      size: 20,
+                      color: isDebtor ? Colors.grey.shade300 : alertRed,
+                    ),
+                    tooltip:
+                        isDebtor
+                            ? "Manage in Ledger"
+                            : "Delete & Restore Stock",
+                    onPressed: () {
+                      if (isDebtor) {
+                        Get.snackbar(
+                          "Restricted",
+                          "Debtor sales must be managed in the Debtor Ledger.",
+                          backgroundColor: Colors.orange,
+                          colorText: Colors.white,
+                        );
+                      } else {
+                        _confirmDelete(sale);
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 
   // ==========================================================
-  // 5. DIALOGS & HELPERS
+  // 5. DIALOGS & UTILS
   // ==========================================================
 
-  // Updated: Includes Reference/Trx ID field to match future-proof controller
   void _showPaymentDialog(BuildContext context, SaleModel sale) {
     final amountC = TextEditingController(text: sale.pending.toString());
-    final refC = TextEditingController(); // New Reference Field
+    final refC = TextEditingController();
     final RxString method = "cash".obs;
 
     Get.dialog(
       Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: Container(
-          width: 420,
+          width: 400,
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -566,34 +675,56 @@ class DailySalesPage extends StatelessWidget {
             children: [
               const Text(
                 "Collect Due Payment",
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
-              Text(
-                "Customer: ${sale.name}",
-                style: const TextStyle(color: textMuted),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: bgSlate,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      "Customer: ${sale.name}",
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                    Text(
+                      "Due: ৳${sale.pending}",
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: alertRed,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 20),
 
-              // Amount Field
+              // Inputs
               TextField(
                 controller: amountC,
                 keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: "Amount Received",
-                  border: OutlineInputBorder(),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                   prefixText: "৳ ",
                 ),
               ),
               const SizedBox(height: 16),
-
-              // Method Dropdown
               Obx(
                 () => DropdownButtonFormField<String>(
                   value: method.value,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: "Payment Method",
-                    border: OutlineInputBorder(),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                   ),
                   items:
                       ["cash", "bkash", "nagad", "bank"]
@@ -608,19 +739,18 @@ class DailySalesPage extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 16),
-
-              // Reference / Trx ID (Future Proofing)
               TextField(
                 controller: refC,
-                decoration: const InputDecoration(
-                  labelText: "Transaction Ref / Note (Optional)",
-                  hintText: "e.g. Bkash Trx ID...",
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: "Transaction Ref (Optional)",
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
               ),
               const SizedBox(height: 24),
 
-              // Actions
+              // Buttons
               Row(
                 children: [
                   Expanded(
@@ -638,20 +768,18 @@ class DailySalesPage extends StatelessWidget {
                       onPressed: () async {
                         final double amt = double.tryParse(amountC.text) ?? 0.0;
                         if (amt <= 0) return;
-
-                        // Call controller with transactionId (ref)
                         await ctrl.applyDebtorPayment(
                           sale.name,
                           amt,
-                          {"type": method.value}, // Basic type
+                          {"type": method.value},
                           date: DateTime.now(),
                           transactionId:
-                              refC.text.isEmpty ? null : refC.text, // Pass Ref
+                              refC.text.isNotEmpty ? refC.text : null,
                         );
                         Get.back();
                       },
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: activeAccent,
+                        backgroundColor: primaryBlue,
                         padding: const EdgeInsets.symmetric(vertical: 16),
                       ),
                       child: const Text(
@@ -669,79 +797,49 @@ class DailySalesPage extends StatelessWidget {
     );
   }
 
-  // Updated Text to reflect safe delete
   void _confirmDelete(SaleModel sale) {
     Get.defaultDialog(
-      title: "Delete Daily Entry?",
-      titleStyle: const TextStyle(fontWeight: FontWeight.bold),
-      middleText:
-          "This will remove the transaction from the Daily Ledger only.\n\nThe Master Invoice will remain but be marked as 'Entry Removed'.",
-      textConfirm: "Delete Entry",
+      title: "Delete Sale?",
+      titleStyle: const TextStyle(fontWeight: FontWeight.bold, color: alertRed),
+      content: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Column(
+          children: const [
+            Text(
+              "This action is irreversible.",
+              textAlign: TextAlign.center,
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 10),
+            Text(
+              "1. Daily Sales entry will be removed.\n2. Sales Invoice will be deleted.\n3. Customer History will be updated.\n4. STOCK WILL BE RESTORED.",
+              style: TextStyle(fontSize: 12, color: Color(0xFF475569)),
+            ),
+          ],
+        ),
+      ),
+      textConfirm: "Confirm Delete",
       textCancel: "Cancel",
       confirmTextColor: Colors.white,
-      buttonColor: Colors.redAccent,
+      buttonColor: alertRed,
+      cancelTextColor: Colors.black87,
       onConfirm: () {
-        ctrl.deleteSale(sale.id);
+        ctrl.deleteSale(
+          sale.id,
+        ); // The controller now handles the stock restoration logic
         Get.back();
       },
     );
   }
 
-  Widget _statusBadge(SaleModel sale) {
-    bool isPaid = sale.pending <= 0;
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: BoxDecoration(
-          color:
-              isPaid
-                  ? Colors.green.withOpacity(0.1)
-                  : Colors.orange.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(4),
-          border: Border.all(
-            color:
-                isPaid
-                    ? Colors.green.withOpacity(0.2)
-                    : Colors.orange.withOpacity(0.2),
-          ),
-        ),
-        child: Text(
-          isPaid ? "PAID" : "DUE",
-          style: TextStyle(
-            color: isPaid ? Colors.green.shade700 : Colors.orange.shade800,
-            fontSize: 10,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ),
-    );
-  }
-
+  // Helper to filter list based on search query
   List<SaleModel> _getFilteredList() {
     final q = ctrl.filterQuery.value.toLowerCase();
     if (q.isEmpty) return ctrl.salesList;
     return ctrl.salesList.where((s) {
-      final name = s.name.toLowerCase();
-      final id = (s.transactionId ?? '').toLowerCase();
-      final type = s.customerType.toLowerCase();
-      return name.contains(q) || id.contains(q) || type.contains(q);
+      return s.name.toLowerCase().contains(q) ||
+          (s.transactionId ?? '').toLowerCase().contains(q) ||
+          s.customerType.toLowerCase().contains(q);
     }).toList();
-  }
-
-  Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: const [
-          Icon(FontAwesomeIcons.folderOpen, size: 48, color: Colors.black12),
-          SizedBox(height: 16),
-          Text(
-            "No sales records found",
-            style: TextStyle(color: textMuted, fontSize: 16),
-          ),
-        ],
-      ),
-    );
   }
 }

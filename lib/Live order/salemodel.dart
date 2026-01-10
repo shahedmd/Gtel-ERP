@@ -1,4 +1,4 @@
-// ignore_for_file: deprecated_member_use
+// ignore_for_file: deprecated_member_use, avoid_print, empty_catches
 import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -78,8 +78,6 @@ class LiveSalesController extends GetxController {
 
   final RxDouble totalPaidInput = 0.0.obs;
   final RxDouble changeReturn = 0.0.obs;
-
-  // Reporting State
   final RxDouble calculatedCourierDue = 0.0.obs;
 
   @override
@@ -92,6 +90,11 @@ class LiveSalesController extends GetxController {
 
     ever(customerType, (_) => _handleTypeChange());
     ever(isConditionSale, (_) => updatePaymentCalculations());
+
+    // Auto-fetch courier dues
+    ever(selectedCourier, (val) {
+      if (val != null) fetchCourierTotalDue(val);
+    });
   }
 
   double _round(double val) => double.parse(val.toStringAsFixed(2));
@@ -100,7 +103,6 @@ class LiveSalesController extends GetxController {
     selectedDebtor.value = null;
     debtorPhoneSearch.clear();
 
-    // Re-price items
     for (var item in cart) {
       double newPrice =
           (customerType.value == "Debtor" || customerType.value == "Agent")
@@ -131,7 +133,6 @@ class LiveSalesController extends GetxController {
     }
   }
 
-  // --- CALCULATIONS ---
   double get subtotalAmount =>
       _round(cart.fold(0, (sumv, item) => sumv + item.subtotal));
 
@@ -150,7 +151,6 @@ class LiveSalesController extends GetxController {
 
   double get invoiceProfit => _round(grandTotal - totalInvoiceCost);
 
-  // --- ACTIONS ---
   void addToCart(Product p) {
     if (p.stockQty <= 0) {
       Get.snackbar(
@@ -161,7 +161,6 @@ class LiveSalesController extends GetxController {
       );
       return;
     }
-
     double price =
         (customerType.value == "Debtor" || customerType.value == "Agent")
             ? p.agent
@@ -202,39 +201,26 @@ class LiveSalesController extends GetxController {
     return "GTEL-${DateFormat('yyMMdd').format(now)}-$random";
   }
 
-  Future<void> calculateCourierDueFor(String courierName) async {
+  Future<void> fetchCourierTotalDue(String courierName) async {
     try {
-      final snap =
-          await _db
-              .collection('sales_orders')
-              .where('isCondition', isEqualTo: true)
-              .where('courierName', isEqualTo: courierName)
-              .where('status', whereIn: ['on_delivery', 'pending_courier'])
-              .get();
-
-      double totalPending = 0.0;
-      for (var doc in snap.docs) {
-        double due =
-            double.tryParse(doc.data()['courierDue'].toString()) ?? 0.0;
-        totalPending += due;
+      DocumentSnapshot doc =
+          await _db.collection('courier_ledgers').doc(courierName).get();
+      if (doc.exists && doc.data() != null) {
+        calculatedCourierDue.value = _round(
+          double.tryParse(doc.get('totalDue').toString()) ?? 0.0,
+        );
+      } else {
+        calculatedCourierDue.value = 0.0;
       }
-      calculatedCourierDue.value = _round(totalPending);
-      Get.snackbar(
-        "Courier Status",
-        "Pending in $courierName: Tk $_round(totalPending)",
-        backgroundColor: Colors.blueAccent,
-        colorText: Colors.white,
-      );
     } catch (e) {
-      Get.snackbar("Error", "Check console for Index link: $e");
+      print("Courier Fetch Error: $e");
     }
   }
 
   // ==================================================================
-  // 🔥 FINALIZATION LOGIC (Updated for Debtor Requirements)
+  // 🔥 FINALIZATION LOGIC
   // ==================================================================
   Future<void> finalizeSale() async {
-    // 1. Validations
     if (cart.isEmpty) {
       Get.snackbar("Error", "Cart is empty");
       return;
@@ -284,7 +270,6 @@ class LiveSalesController extends GetxController {
     final String invNo = _generateInvoiceID();
     final DateTime saleDate = DateTime.now();
 
-    // 2. Financial Calculations
     double paidAmountInput = totalPaidInput.value;
     double actualReceived = 0.0;
     double dueOrConditionAmount = 0.0;
@@ -293,7 +278,6 @@ class LiveSalesController extends GetxController {
       actualReceived = paidAmountInput;
       dueOrConditionAmount = _round(grandTotal - actualReceived);
     } else {
-      // Direct Sale
       actualReceived =
           paidAmountInput > grandTotal ? grandTotal : paidAmountInput;
       dueOrConditionAmount = _round(grandTotal - actualReceived);
@@ -327,19 +311,20 @@ class LiveSalesController extends GetxController {
         }).toList();
 
     try {
-      WriteBatch batch = _db.batch();
-
-      // A. Stock Deduction
+      // 1. UPDATE STOCK (HTTP CALL)
       List<Map<String, dynamic>> stockUpdates =
           cart
               .map(
                 (item) => {'id': item.product.id, 'qty': item.quantity.value},
               )
               .toList();
-      bool stockSuccess = await productCtrl.updateStockBulk(stockUpdates);
-      if (!stockSuccess) throw "Stock update failed";
 
-      // B. Create Master Invoice
+      bool stockSuccess = await productCtrl.updateStockBulk(stockUpdates);
+      if (!stockSuccess) throw "Stock update failed (Server)";
+
+      WriteBatch batch = _db.batch();
+
+      // 2. MASTER INVOICE
       int cartonsInt = int.tryParse(cartonsC.text) ?? 0;
       DocumentReference orderRef = _db.collection('sales_orders').doc(invNo);
 
@@ -369,33 +354,9 @@ class LiveSalesController extends GetxController {
         "status": isConditionSale.value ? "on_delivery" : "completed",
       });
 
-      // C. DAILY SALES ENTRY
-      // LOGIC FIXED: We create this for EVERY sale.
-      // If Debtor unpaid: paid=0, pending=total (Status: Due)
-      // If Paid: paid=total, pending=0 (Status: Normal)
-      DocumentReference dailyRef = _db.collection('daily_sales').doc();
-      batch.set(dailyRef, {
-        "name": isConditionSale.value ? "$fName (Cond)" : fName,
-        "amount": grandTotal, // Total Sale Value
-        "paid": actualReceived, // What we got
-        "pending": dueOrConditionAmount, // What is left
-        "customerType":
-            isConditionSale.value
-                ? "condition_advance"
-                : customerType.value.toLowerCase(),
-        "timestamp": Timestamp.fromDate(saleDate),
-        "paymentMethod": paymentMap,
-        "createdAt": FieldValue.serverTimestamp(),
-        "source": "pos_sale",
-        "transactionId": invNo,
-        "invoiceId": invNo,
-        "courierName": isConditionSale.value ? selectedCourier.value : null,
-        "cartons": isConditionSale.value ? cartonsInt : 0,
-      });
-
-      // D. BRANCHING LOGIC
+      // 3. LOGIC BRANCHING
       if (isConditionSale.value) {
-        // --- CONDITION CUSTOMER ---
+        // --- CONDITION SALE ---
         DocumentReference condCustRef = _db
             .collection('condition_customers')
             .doc(fPhone);
@@ -425,18 +386,42 @@ class LiveSalesController extends GetxController {
           "date": Timestamp.fromDate(saleDate),
           "status": "pending_courier",
         });
-      } else if (customerType.value == "Debtor" && debtorId != null) {
-        // --- DEBTOR LOGIC ---
 
-        // 1. Transaction Entry (ONLY IF DUE EXISTS)
-        // If they pay full, we skip this, so it acts like a normal sale.
+        // Store Courier Due (Fetchable)
+        if (selectedCourier.value != null && dueOrConditionAmount > 0) {
+          DocumentReference courierRef = _db
+              .collection('courier_ledgers')
+              .doc(selectedCourier.value);
+          batch.set(courierRef, {
+            "name": selectedCourier.value,
+            "totalDue": FieldValue.increment(dueOrConditionAmount),
+            "lastUpdated": FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+        }
+      } else if (customerType.value == "Debtor" && debtorId != null) {
+        // --- DEBTOR SALE ---
+        DocumentReference analyticsRef = _db
+            .collection('debtor_transaction_history')
+            .doc(invNo);
+        batch.set(analyticsRef, {
+          "invoiceId": invNo,
+          "debtorId": debtorId,
+          "debtorName": fName,
+          "date": FieldValue.serverTimestamp(),
+          "saleAmount": grandTotal,
+          "costAmount": totalInvoiceCost,
+          "profit": invoiceProfit,
+          "itemsSummary":
+              orderItems.map((e) => "${e['model']} x${e['qty']}").toList(),
+        });
+
         if (dueOrConditionAmount > 0) {
+          // Unpaid
           DocumentReference debTxRef = _db
               .collection('debatorbody')
               .doc(debtorId)
               .collection('transactions')
               .doc(invNo);
-
           batch.set(debTxRef, {
             "amount": dueOrConditionAmount,
             "transactionId": invNo,
@@ -445,25 +430,42 @@ class LiveSalesController extends GetxController {
             "createdAt": FieldValue.serverTimestamp(),
             "note": "Invoice $invNo",
           });
-        }
 
-        // 2. Profit/Loss Tracking (Always keep record of what they bought)
-        DocumentReference pnlRef = _db
-            .collection('debtorProfitLoss')
-            .doc(invNo);
-        batch.set(pnlRef, {
-          "invoiceId": invNo,
-          "debtorName": fName,
-          "saleAmount": grandTotal,
-          "costAmount": totalInvoiceCost,
-          "profit": invoiceProfit,
-          "paidAmount": actualReceived,
-          "dueAmount": dueOrConditionAmount,
-          "items": orderItems.map((e) => "${e['model']} x${e['qty']}").toList(),
-          "timestamp": FieldValue.serverTimestamp(),
-        });
+          DocumentReference dailyRef = _db.collection('daily_sales').doc();
+          batch.set(dailyRef, {
+            "name": fName,
+            "amount": grandTotal,
+            "paid": actualReceived,
+            "pending": dueOrConditionAmount,
+            "customerType": "debtor",
+            "timestamp": Timestamp.fromDate(saleDate),
+            "paymentMethod": paymentMap,
+            "createdAt": FieldValue.serverTimestamp(),
+            "source": "pos_sale",
+            "transactionId": invNo,
+            "invoiceId": invNo,
+            "status": "due",
+          });
+        } else {
+          // Paid
+          DocumentReference dailyRef = _db.collection('daily_sales').doc();
+          batch.set(dailyRef, {
+            "name": fName,
+            "amount": grandTotal,
+            "paid": grandTotal,
+            "pending": 0.0,
+            "customerType": "debtor",
+            "timestamp": Timestamp.fromDate(saleDate),
+            "paymentMethod": paymentMap,
+            "createdAt": FieldValue.serverTimestamp(),
+            "source": "pos_sale",
+            "transactionId": invNo,
+            "invoiceId": invNo,
+            "status": "paid",
+          });
+        }
       } else {
-        // --- RETAILER / AGENT LOGIC ---
+        // --- RETAILER SALE ---
         DocumentReference custRef = _db.collection('customers').doc(fPhone);
         batch.set(custRef, {
           "name": fName,
@@ -480,11 +482,25 @@ class LiveSalesController extends GetxController {
           "timestamp": FieldValue.serverTimestamp(),
           "link": "sales_orders/$invNo",
         });
+
+        DocumentReference dailyRef = _db.collection('daily_sales').doc();
+        batch.set(dailyRef, {
+          "name": fName,
+          "amount": grandTotal,
+          "paid": actualReceived,
+          "pending": 0.0,
+          "customerType": "retailer",
+          "timestamp": Timestamp.fromDate(saleDate),
+          "paymentMethod": paymentMap,
+          "createdAt": FieldValue.serverTimestamp(),
+          "source": "pos_sale",
+          "transactionId": invNo,
+          "invoiceId": invNo,
+        });
       }
 
       await batch.commit();
 
-      // 5. PDF
       await _generatePdf(
         invNo,
         fName,
@@ -501,7 +517,7 @@ class LiveSalesController extends GetxController {
       _resetAll();
       Get.snackbar(
         "Success",
-        "Sale Finalized & Recorded",
+        "Sale Finalized Successfully",
         backgroundColor: Colors.green,
         colorText: Colors.white,
       );
@@ -539,9 +555,6 @@ class LiveSalesController extends GetxController {
     calculatedCourierDue.value = 0.0;
   }
 
-  // ==================================================================
-  // 🖨️ PDF GENERATION
-  // ==================================================================
   Future<void> _generatePdf(
     String invId,
     String name,
@@ -603,7 +616,6 @@ class LiveSalesController extends GetxController {
         ),
       );
     }
-
     await Printing.layoutPdf(onLayout: (f) => pdf.save());
   }
 

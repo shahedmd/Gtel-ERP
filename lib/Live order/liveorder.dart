@@ -2,8 +2,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:gtel_erp/Live%20order/salemodel.dart';
 import '../Stock/model.dart';
-import 'salemodel.dart';
 
 class LiveOrderSalesPage extends StatelessWidget {
   const LiveOrderSalesPage({super.key});
@@ -14,22 +14,22 @@ class LiveOrderSalesPage extends StatelessWidget {
     final controller = Get.put(LiveSalesController());
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF1F5F9), // Slate-100
+      backgroundColor: const Color(0xFFF1F5F9), // Slate-100 background
       body: Row(
         children: [
-          // LEFT: Products Section
+          // LEFT: Products Section (Flex 6)
           Expanded(flex: 6, child: _ProductTableSection(controller)),
 
-          // RIGHT: Checkout Panel
+          // RIGHT: Checkout Panel (Fixed Width)
           Container(
             width: 500,
             decoration: BoxDecoration(
               color: Colors.white,
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
-                  blurRadius: 20,
-                  offset: const Offset(-5, 0),
+                  color: Colors.black.withOpacity(0.08),
+                  blurRadius: 24,
+                  offset: const Offset(-8, 0),
                 ),
               ],
             ),
@@ -38,17 +38,21 @@ class LiveOrderSalesPage extends StatelessWidget {
                 _buildHeader(controller),
                 Expanded(
                   child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(20),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 24,
+                      vertical: 20,
+                    ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         _buildModeToggle(controller),
-                        const SizedBox(height: 15),
+                        const SizedBox(height: 20),
                         _buildCustomerSection(controller),
                         const SizedBox(height: 20),
                         _buildCartSection(controller),
                         const SizedBox(height: 20),
                         _buildPaymentSection(controller),
+                        const SizedBox(height: 20), // Bottom padding for scroll
                       ],
                     ),
                   ),
@@ -65,24 +69,39 @@ class LiveOrderSalesPage extends StatelessWidget {
   // --- HEADER ---
   Widget _buildHeader(LiveSalesController controller) {
     return Obx(
-      () => Container(
-        padding: const EdgeInsets.symmetric(vertical: 15),
+      () => AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        padding: const EdgeInsets.symmetric(vertical: 18),
         decoration: BoxDecoration(
           color:
               controller.isConditionSale.value
-                  ? const Color(0xFFC2410C) // Orange-700
-                  : const Color(0xFF1E293B), // Slate-800
+                  ? const Color(0xFFC2410C) // Orange-700 (Condition)
+                  : const Color(0xFF1E293B), // Slate-800 (Normal)
         ),
         child: Center(
-          child: Text(
-            controller.isConditionSale.value
-                ? "CONDITION SALE & CHALLAN"
-                : "CHECKOUT & BILLING",
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 1.5,
-            ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                controller.isConditionSale.value
+                    ? Icons.local_shipping_outlined
+                    : Icons.point_of_sale,
+                color: Colors.white,
+                size: 22,
+              ),
+              const SizedBox(width: 10),
+              Text(
+                controller.isConditionSale.value
+                    ? "CONDITION SALE & CHALLAN"
+                    : "CHECKOUT & BILLING",
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  letterSpacing: 1.2,
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -93,45 +112,50 @@ class LiveOrderSalesPage extends StatelessWidget {
   Widget _buildModeToggle(LiveSalesController controller) {
     return Obx(
       () => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
           color:
               controller.isConditionSale.value
                   ? Colors.orange.shade50
                   : Colors.blue.shade50,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color:
                 controller.isConditionSale.value
                     ? Colors.orange.shade200
                     : Colors.blue.shade200,
+            width: 1.5,
           ),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Row(
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(
-                  controller.isConditionSale.value
-                      ? Icons.local_shipping
-                      : Icons.store,
-                  color:
-                      controller.isConditionSale.value
-                          ? Colors.orange.shade800
-                          : Colors.blue.shade800,
-                ),
-                const SizedBox(width: 10),
                 Text(
                   controller.isConditionSale.value
                       ? "Condition / Courier Mode"
                       : "Direct Sales Mode",
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
+                    fontSize: 14,
                     color:
                         controller.isConditionSale.value
                             ? Colors.orange.shade900
                             : Colors.blue.shade900,
+                  ),
+                ),
+                Text(
+                  controller.isConditionSale.value
+                      ? "Generates Challan & Ledger"
+                      : "Generates Invoice & Payment",
+                  style: TextStyle(
+                    fontSize: 11,
+                    color:
+                        controller.isConditionSale.value
+                            ? Colors.orange.shade700
+                            : Colors.blue.shade700,
                   ),
                 ),
               ],
@@ -139,6 +163,9 @@ class LiveOrderSalesPage extends StatelessWidget {
             Switch(
               value: controller.isConditionSale.value,
               activeColor: Colors.deepOrange,
+              activeTrackColor: Colors.orange.shade200,
+              inactiveThumbColor: Colors.blue.shade700,
+              inactiveTrackColor: Colors.blue.shade200,
               onChanged: (val) {
                 controller.isConditionSale.value = val;
               },
@@ -149,36 +176,48 @@ class LiveOrderSalesPage extends StatelessWidget {
     );
   }
 
-  // --- 1. CUSTOMER & LOGISTICS INFO (UPDATED) ---
+  // --- 1. CUSTOMER & LOGISTICS INFO ---
   Widget _buildCustomerSection(LiveSalesController controller) {
     return Container(
-      padding: const EdgeInsets.all(15),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.grey.shade200),
-        boxShadow: [BoxShadow(color: Colors.grey.shade100, blurRadius: 5)],
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.shade100,
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            "Customer Details",
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-              color: Colors.blueGrey,
-            ),
+          Row(
+            children: [
+              Icon(Icons.person_outline, size: 18, color: Colors.blueGrey),
+              SizedBox(width: 8),
+              Text(
+                "Customer & Logistics",
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.blueGrey,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
 
-          // Customer Type Tabs (Hidden/Limited in Condition Mode)
+          // Customer Type Tabs
           Obx(() {
             return Row(
               children:
                   ["Retailer", "Agent", "Debtor"].map((type) {
                     bool isSelected = controller.customerType.value == type;
-                    // Disable Debtor in Condition mode
+                    // Disable Debtor in Condition mode (Logic: Condition is Courier-based, distinct from Ledger Debtor)
                     bool isDisabled =
                         controller.isConditionSale.value && type == "Debtor";
 
@@ -189,14 +228,20 @@ class LiveOrderSalesPage extends StatelessWidget {
                         onTap: () => controller.customerType.value = type,
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 200),
-                          margin: const EdgeInsets.only(right: 5),
-                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          margin: const EdgeInsets.only(right: 8),
+                          padding: const EdgeInsets.symmetric(vertical: 10),
                           decoration: BoxDecoration(
                             color:
                                 isSelected
                                     ? const Color(0xFF2563EB)
                                     : Colors.grey.shade100,
-                            borderRadius: BorderRadius.circular(6),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color:
+                                  isSelected
+                                      ? Colors.transparent
+                                      : Colors.grey.shade300,
+                            ),
                           ),
                           child: Center(
                             child: Text(
@@ -205,7 +250,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                                 color:
                                     isSelected ? Colors.white : Colors.black54,
                                 fontWeight: FontWeight.bold,
-                                fontSize: 11,
+                                fontSize: 12,
                               ),
                             ),
                           ),
@@ -215,10 +260,10 @@ class LiveOrderSalesPage extends StatelessWidget {
                   }).toList(),
             );
           }),
-          const SizedBox(height: 15),
+          const SizedBox(height: 16),
 
           Obx(() {
-            // DEBTOR SEARCH (Only for Direct Debtor Sales)
+            // DEBTOR SEARCH (Direct Sale Only)
             if (controller.customerType.value == "Debtor" &&
                 !controller.isConditionSale.value) {
               return Column(
@@ -226,12 +271,12 @@ class LiveOrderSalesPage extends StatelessWidget {
                   TextField(
                     controller: controller.debtorPhoneSearch,
                     decoration: InputDecoration(
-                      labelText: "Search Debtor",
-                      prefixIcon: const Icon(Icons.search, size: 18),
+                      labelText: "Search Debtor Database",
+                      prefixIcon: const Icon(Icons.search, size: 20),
                       suffixIcon:
                           controller.debtorPhoneSearch.text.isNotEmpty
                               ? IconButton(
-                                icon: const Icon(Icons.clear, size: 16),
+                                icon: const Icon(Icons.clear, size: 18),
                                 onPressed: () {
                                   controller.debtorPhoneSearch.clear();
                                   controller.selectedDebtor.value = null;
@@ -248,6 +293,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                         controller.selectedDebtor.value = null;
                         return;
                       }
+                      // Use your existing debtor controller list
                       final match = controller.debtorCtrl.bodies
                           .firstWhereOrNull(
                             (e) =>
@@ -257,24 +303,36 @@ class LiveOrderSalesPage extends StatelessWidget {
                       controller.selectedDebtor.value = match;
                     },
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 10),
                   if (controller.selectedDebtor.value != null)
                     _buildSelectedDebtorCard(controller)
                   else if (controller.debtorPhoneSearch.text.isNotEmpty)
                     Container(
-                      padding: const EdgeInsets.all(10),
-                      width: double.infinity,
-                      color: Colors.red.shade50,
-                      child: const Text(
-                        "Debtor not found",
-                        style: TextStyle(color: Colors.red, fontSize: 12),
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(
+                        children: const [
+                          Icon(
+                            Icons.error_outline,
+                            color: Colors.red,
+                            size: 16,
+                          ),
+                          SizedBox(width: 8),
+                          Text(
+                            "Debtor not found",
+                            style: TextStyle(color: Colors.red, fontSize: 12),
+                          ),
+                        ],
                       ),
                     ),
                 ],
               );
             }
 
-            // MANUAL ENTRY & LOGISTICS (Condition Fields Updated Here)
+            // MANUAL ENTRY & LOGISTICS
             return Column(
               children: [
                 Row(
@@ -282,35 +340,37 @@ class LiveOrderSalesPage extends StatelessWidget {
                     Expanded(
                       child: _miniTextField(
                         controller.nameC,
-                        "Name",
+                        "Customer Name",
                         Icons.person,
                       ),
                     ),
-                    const SizedBox(width: 10),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: _miniTextField(
                         controller.phoneC,
-                        "Phone",
+                        "Phone Number",
                         Icons.phone,
+                        isNumber: true,
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 12),
                 _miniTextField(
                   controller.shopC,
-                  "Shop Name (Optional)",
+                  "Shop Name / Reference (Optional)",
                   Icons.store,
                 ),
 
-                // --- NEW: LOGISTICS FIELDS FOR CONDITION SALE ---
+                // --- CONDITION SALE FIELDS ---
                 if (controller.isConditionSale.value) ...[
-                  const SizedBox(height: 15),
-                  const Divider(thickness: 1),
+                  const SizedBox(height: 20),
+                  const Divider(thickness: 1, height: 1),
+                  const SizedBox(height: 10),
                   const Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      "Logistics & Courier Info",
+                      "Logistics & Courier Details",
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
@@ -340,57 +400,74 @@ class LiveOrderSalesPage extends StatelessWidget {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 12),
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // 1. COURIER DROPDOWN
+                      // Courier Dropdown with Due Display
                       Expanded(
                         flex: 2,
-                        child: Container(
-                          height: 40,
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
-                          decoration: BoxDecoration(
-                            border: Border.all(color: Colors.grey.shade400),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<String>(
-                              value: controller.selectedCourier.value,
-                              hint: const Text(
-                                "Select Courier",
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: Colors.black54,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              height: 45,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                              ),
+                              decoration: BoxDecoration(
+                                border: Border.all(color: Colors.grey.shade400),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: DropdownButtonHideUnderline(
+                                child: DropdownButton<String>(
+                                  value: controller.selectedCourier.value,
+                                  hint: const Text(
+                                    "Select Courier Service",
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: Colors.black54,
+                                    ),
+                                  ),
+                                  isExpanded: true,
+                                  items:
+                                      controller.courierList
+                                          .map(
+                                            (c) => DropdownMenuItem(
+                                              value: c,
+                                              child: Text(
+                                                c,
+                                                style: const TextStyle(
+                                                  fontSize: 13,
+                                                ),
+                                              ),
+                                            ),
+                                          )
+                                          .toList(),
+                                  onChanged: (v) {
+                                    controller.selectedCourier.value = v;
+                                    // The controller listens to this change and fetches due automatically
+                                  },
                                 ),
                               ),
-                              isExpanded: true,
-                              items:
-                                  controller.courierList
-                                      .map(
-                                        (c) => DropdownMenuItem(
-                                          value: c,
-                                          child: Text(
-                                            c,
-                                            style: const TextStyle(
-                                              fontSize: 13,
-                                            ),
-                                          ),
-                                        ),
-                                      )
-                                      .toList(),
-                              onChanged: (v) {
-                                controller.selectedCourier.value = v;
-                                // Optional: Trigger due calculation when selected
-                                if (v != null) {
-                                  controller.calculateCourierDueFor(v);
-                                }
-                              },
                             ),
-                          ),
+                            // SHOW COURIER DUE (New Feature)
+                            if (controller.selectedCourier.value != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 4, left: 4),
+                                child: Text(
+                                  "Current Due from ${controller.selectedCourier.value}: ৳${controller.calculatedCourierDue.value}",
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.orange.shade800,
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
                       ),
                       const SizedBox(width: 10),
-                      // 2. CARTONS INPUT
                       Expanded(
                         flex: 1,
                         child: _miniTextField(
@@ -413,16 +490,20 @@ class LiveOrderSalesPage extends StatelessWidget {
 
   Widget _buildSelectedDebtorCard(LiveSalesController controller) {
     return Container(
-      padding: const EdgeInsets.all(10),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.green.shade50,
+        color: const Color(0xFFF0FDF4), // Green-50
         border: Border.all(color: Colors.green.shade200),
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
         children: [
-          const Icon(Icons.check_circle, color: Colors.green, size: 20),
-          const SizedBox(width: 10),
+          CircleAvatar(
+            backgroundColor: Colors.green.shade100,
+            radius: 18,
+            child: const Icon(Icons.person, color: Colors.green, size: 20),
+          ),
+          const SizedBox(width: 12),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -431,6 +512,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 14,
+                  color: Colors.black87,
                 ),
               ),
               Text(
@@ -439,6 +521,9 @@ class LiveOrderSalesPage extends StatelessWidget {
               ),
             ],
           ),
+          const Spacer(),
+          // Show current balance if available in model
+          // Text("Due: ৳...", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold))
         ],
       ),
     );
@@ -449,17 +534,17 @@ class LiveOrderSalesPage extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.grey.shade200),
       ),
       child: Column(
         children: [
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
               color: Colors.grey.shade50,
               borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(12),
+                top: Radius.circular(16),
               ),
             ),
             child: Row(
@@ -467,17 +552,36 @@ class LiveOrderSalesPage extends StatelessWidget {
               children: const [
                 Text(
                   "Item Details",
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black54,
+                  ),
                 ),
                 Text(
-                  "Total",
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                  "Subtotal",
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black54,
+                  ),
                 ),
               ],
             ),
           ),
-          Obx(
-            () => ListView.separated(
+          Obx(() {
+            if (controller.cart.isEmpty) {
+              return Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Center(
+                  child: Text(
+                    "Cart is empty",
+                    style: TextStyle(color: Colors.grey.shade400),
+                  ),
+                ),
+              );
+            }
+            return ListView.separated(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               itemCount: controller.cart.length,
@@ -486,8 +590,8 @@ class LiveOrderSalesPage extends StatelessWidget {
                 final item = controller.cart[index];
                 return Padding(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 15,
-                    vertical: 10,
+                    horizontal: 16,
+                    vertical: 12,
                   ),
                   child: Row(
                     children: [
@@ -500,29 +604,33 @@ class LiveOrderSalesPage extends StatelessWidget {
                               item.product.name,
                               style: const TextStyle(
                                 fontWeight: FontWeight.w600,
-                                fontSize: 13,
+                                fontSize: 14,
+                                color: Colors.black87,
                               ),
                             ),
                             Text(
-                              "৳${item.priceAtSale}",
+                              "Rate: ৳${item.priceAtSale}",
                               style: const TextStyle(
                                 color: Colors.grey,
-                                fontSize: 11,
+                                fontSize: 12,
                               ),
                             ),
                           ],
                         ),
                       ),
+                      // Custom Quantity Editor
                       CartQuantityEditor(
                         currentQty: item.quantity.value,
                         maxStock: item.product.stockQty,
                         onDecrease: () {
                           if (item.quantity.value > 1) {
                             item.quantity.value--;
-                            controller.cart.refresh();
+                            controller.cart
+                                .refresh(); // Important for Obx to catch deep changes
                             controller.updatePaymentCalculations();
                           } else {
                             controller.cart.removeAt(index);
+                            controller.updatePaymentCalculations();
                           }
                         },
                         onIncrease: () {
@@ -533,40 +641,42 @@ class LiveOrderSalesPage extends StatelessWidget {
                           } else {
                             Get.snackbar(
                               "Stock Limit",
-                              "Only ${item.product.stockQty} available",
+                              "Only ${item.product.stockQty} items available in stock.",
                             );
                           }
                         },
-                        onSubmit: (val) {
-                          controller.updateQuantity(index, val);
-                        },
+                        onSubmit:
+                            (val) => controller.updateQuantity(index, val),
                       ),
                       Expanded(
                         flex: 2,
                         child: Text(
                           "৳${item.subtotal.toStringAsFixed(0)}",
                           textAlign: TextAlign.right,
-                          style: const TextStyle(fontWeight: FontWeight.bold),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
                         ),
                       ),
                     ],
                   ),
                 );
               },
-            ),
-          ),
+            );
+          }),
         ],
       ),
     );
   }
 
-  // --- 3. PAYMENT SECTION (Updated Summary Logic) ---
+  // --- 3. PAYMENT SECTION ---
   Widget _buildPaymentSection(LiveSalesController controller) {
     return Container(
-      padding: const EdgeInsets.all(15),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.blueGrey.shade100),
       ),
       child: Column(
@@ -579,9 +689,9 @@ class LiveOrderSalesPage extends StatelessWidget {
                 () => Text(
                   controller.isConditionSale.value
                       ? "Advance Payment"
-                      : "Payment Split",
+                      : "Payment Breakdown",
                   style: const TextStyle(
-                    fontSize: 12,
+                    fontSize: 13,
                     fontWeight: FontWeight.bold,
                     color: Colors.blueGrey,
                   ),
@@ -589,83 +699,112 @@ class LiveOrderSalesPage extends StatelessWidget {
               ),
               const Icon(
                 Icons.payments_outlined,
-                size: 16,
+                size: 18,
                 color: Colors.blueGrey,
               ),
             ],
           ),
-          const SizedBox(height: 15),
+          const SizedBox(height: 16),
 
+          // Payment Inputs
           Row(
             children: [
               Expanded(
                 child: _moneyInput(controller.cashC, "Cash", Colors.green),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 12),
               Expanded(
                 child: _moneyInput(controller.bkashC, "bKash", Colors.pink),
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
                 child: _moneyInput(controller.nagadC, "Nagad", Colors.orange),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 12),
               Expanded(
                 child: _moneyInput(controller.bankC, "Bank", Colors.blue),
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 16),
 
-          // Payment Summary Bar
+          // Payment Summary / Due Display
           Obx(() {
             String label = "";
             Color color = Colors.black;
 
+            // Logic derived from Controller's calculations
             if (controller.isConditionSale.value) {
-              // Condition Mode: Show Advance vs Courier Due
               double due =
                   controller.grandTotal - controller.totalPaidInput.value;
               double collect = due > 0 ? due : 0;
               label = "Courier Collect: ৳${collect.toStringAsFixed(0)}";
               color = Colors.deepOrange;
             } else {
-              // Normal Mode: Show Paid vs Due/Change
               if (controller.totalPaidInput.value > controller.grandTotal) {
                 label =
-                    "Change: ৳${controller.changeReturn.value.toStringAsFixed(0)}";
+                    "Change Return: ৳${controller.changeReturn.value.toStringAsFixed(0)}";
                 color = Colors.green;
               } else {
                 double due =
                     controller.grandTotal - controller.totalPaidInput.value;
-                label = "Due: ৳${due.toStringAsFixed(0)}";
+                label = "Due Amount: ৳${due.toStringAsFixed(0)}";
                 color = Colors.red;
               }
             }
 
             return Container(
-              padding: const EdgeInsets.all(10),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
-                color: Colors.grey.shade100,
-                borderRadius: BorderRadius.circular(8),
+                color: Colors.grey.shade50,
+                borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: Colors.grey.shade300),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    controller.isConditionSale.value
-                        ? "Total Advance: ৳${controller.totalPaidInput.value.toStringAsFixed(0)}"
-                        : "Total Paid: ৳${controller.totalPaidInput.value.toStringAsFixed(0)}",
-                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        controller.isConditionSale.value
+                            ? "Total Advance"
+                            : "Total Received",
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey,
+                        ),
+                      ),
+                      Text(
+                        "৳${controller.totalPaidInput.value.toStringAsFixed(0)}",
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ],
                   ),
-                  Text(
-                    label,
-                    style: TextStyle(fontWeight: FontWeight.bold, color: color),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: color.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      label,
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: color,
+                        fontSize: 13,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -676,29 +815,43 @@ class LiveOrderSalesPage extends StatelessWidget {
     );
   }
 
+  // --- BOTTOM TOTAL & ACTION ---
   Widget _buildBottomTotalBar(LiveSalesController controller) {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         color: Colors.white,
-        border: Border(top: BorderSide(color: Colors.grey.shade300)),
+        border: Border(top: BorderSide(color: Colors.grey.shade200)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, -5),
+          ),
+        ],
       ),
       child: Column(
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text("Discount", style: TextStyle(color: Colors.grey)),
+              const Text(
+                "Discount Adjustment",
+                style: TextStyle(color: Colors.grey, fontSize: 13),
+              ),
               SizedBox(
-                width: 80,
+                width: 100,
                 child: TextField(
                   controller: controller.discountC,
                   textAlign: TextAlign.right,
                   keyboardType: TextInputType.number,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
                   decoration: const InputDecoration(
-                    hintText: "0",
+                    hintText: "0.00",
                     isDense: true,
+                    contentPadding: EdgeInsets.symmetric(vertical: 4),
                     border: UnderlineInputBorder(),
+                    prefixText: "- ",
                   ),
                   onChanged: (v) {
                     controller.discountVal.value = double.tryParse(v) ?? 0.0;
@@ -708,30 +861,36 @@ class LiveOrderSalesPage extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text(
                 "GRAND TOTAL",
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 16,
+                  color: Colors.black87,
+                ),
               ),
               Obx(
                 () => Text(
                   "৳ ${controller.grandTotal.toStringAsFixed(2)}",
                   style: const TextStyle(
                     fontWeight: FontWeight.w900,
-                    fontSize: 22,
+                    fontSize: 24,
                     color: Color(0xFF1E293B),
                   ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 15),
+          const SizedBox(height: 20),
+
+          // Action Button
           SizedBox(
             width: double.infinity,
-            height: 50,
+            height: 54,
             child: Obx(
               () => ElevatedButton(
                 style: ElevatedButton.styleFrom(
@@ -740,9 +899,13 @@ class LiveOrderSalesPage extends StatelessWidget {
                           ? Colors.deepOrange
                           : const Color(0xFF2563EB),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  elevation: 2,
+                  elevation: 4,
+                  shadowColor: (controller.isConditionSale.value
+                          ? Colors.deepOrange
+                          : const Color(0xFF2563EB))
+                      .withOpacity(0.4),
                 ),
                 onPressed:
                     controller.isProcessing.value
@@ -750,16 +913,49 @@ class LiveOrderSalesPage extends StatelessWidget {
                         : controller.finalizeSale,
                 child:
                     controller.isProcessing.value
-                        ? const CircularProgressIndicator(color: Colors.white)
-                        : Text(
-                          controller.isConditionSale.value
-                              ? "PROCESS CONDITION & PRINT CHALLAN"
-                              : "COMPLETE SALE & PRINT",
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                            letterSpacing: 1,
-                          ),
+                        ? Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: const [
+                            SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            ),
+                            SizedBox(width: 12),
+                            Text(
+                              "PROCESSING...",
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        )
+                        : Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              controller.isConditionSale.value
+                                  ? Icons.print
+                                  : Icons.check_circle,
+                              color: Colors.white,
+                            ),
+                            const SizedBox(width: 10),
+                            Text(
+                              controller.isConditionSale.value
+                                  ? "PROCESS & PRINT CHALLAN"
+                                  : "COMPLETE SALE & INVOICE",
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                                fontSize: 15,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ],
                         ),
               ),
             ),
@@ -769,7 +965,7 @@ class LiveOrderSalesPage extends StatelessWidget {
     );
   }
 
-  // --- Helpers ---
+  // --- HELPERS ---
   Widget _miniTextField(
     TextEditingController c,
     String label,
@@ -777,15 +973,23 @@ class LiveOrderSalesPage extends StatelessWidget {
     bool isNumber = false,
   }) {
     return SizedBox(
-      height: 40,
+      height: 45,
       child: TextField(
         controller: c,
-        style: const TextStyle(fontSize: 13),
+        style: const TextStyle(fontSize: 13, color: Colors.black87),
         keyboardType: isNumber ? TextInputType.number : TextInputType.text,
         decoration: InputDecoration(
           labelText: label,
-          prefixIcon: Icon(icon, size: 16, color: Colors.grey),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          floatingLabelStyle: const TextStyle(fontSize: 12),
+          prefixIcon: Icon(icon, size: 18, color: Colors.grey),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: Colors.grey.shade300),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: Colors.grey.shade300),
+          ),
           contentPadding: const EdgeInsets.symmetric(horizontal: 10),
         ),
       ),
@@ -799,26 +1003,35 @@ class LiveOrderSalesPage extends StatelessWidget {
       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
       decoration: InputDecoration(
         labelText: label,
-        labelStyle: TextStyle(color: color, fontSize: 12),
+        labelStyle: TextStyle(
+          color: color.withOpacity(0.8),
+          fontSize: 12,
+          fontWeight: FontWeight.bold,
+        ),
         prefixText: "৳",
+        filled: true,
+        fillColor: color.withOpacity(0.03),
         enabledBorder: OutlineInputBorder(
-          borderSide: BorderSide(color: color.withOpacity(0.3)),
+          borderSide: BorderSide(color: color.withOpacity(0.2)),
           borderRadius: BorderRadius.circular(8),
         ),
         focusedBorder: OutlineInputBorder(
           borderSide: BorderSide(color: color, width: 1.5),
           borderRadius: BorderRadius.circular(8),
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 14,
+        ),
         isDense: true,
       ),
     );
   }
 }
 
-// --------------------------------------------------------
-// PRODUCTS TABLE & ROW (No Changes)
-// --------------------------------------------------------
+// ---------------------------------------------------------------------------
+// PRODUCT TABLE & QUANTITY WIDGETS (Kept consistent with your existing code)
+// ---------------------------------------------------------------------------
 
 class _ProductTableSection extends StatelessWidget {
   final LiveSalesController controller;
@@ -827,61 +1040,63 @@ class _ProductTableSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 20, 10, 20),
+      padding: const EdgeInsets.all(24),
       child: Column(
         children: [
           _buildTopHeader(),
-          const SizedBox(height: 15),
-          _buildTableHeader(),
+          const SizedBox(height: 20),
           Expanded(
             child: Container(
               decoration: BoxDecoration(
                 color: Colors.white,
-                border: Border(
-                  left: BorderSide(color: Colors.grey.shade300),
-                  right: BorderSide(color: Colors.grey.shade300),
-                  bottom: BorderSide(color: Colors.grey.shade300),
-                ),
-                borderRadius: const BorderRadius.vertical(
-                  bottom: Radius.circular(8),
-                ),
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(color: Colors.grey.shade200, blurRadius: 10),
+                ],
+                border: Border.all(color: Colors.grey.shade200),
               ),
-              child: Obx(() {
-                if (controller.productCtrl.isLoading.value) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (controller.productCtrl.allProducts.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.inventory_2_outlined,
-                          size: 40,
-                          color: Colors.grey.shade400,
-                        ),
-                        const SizedBox(height: 10),
-                        Text(
-                          "No products found",
-                          style: TextStyle(color: Colors.grey.shade500),
-                        ),
-                      ],
-                    ),
-                  );
-                }
-                return ListView.separated(
-                  itemCount: controller.productCtrl.allProducts.length,
-                  separatorBuilder:
-                      (context, index) =>
-                          const Divider(height: 1, thickness: 0.5),
-                  itemBuilder: (context, index) {
-                    return _ProductRow(
-                      product: controller.productCtrl.allProducts[index],
-                      controller: controller,
-                    );
-                  },
-                );
-              }),
+              child: Column(
+                children: [
+                  _buildTableHeader(),
+                  Expanded(
+                    child: Obx(() {
+                      if (controller.productCtrl.isLoading.value)
+                        return const Center(child: CircularProgressIndicator());
+                      if (controller.productCtrl.allProducts.isEmpty) {
+                        return Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.inventory_2_outlined,
+                                size: 48,
+                                color: Colors.grey.shade300,
+                              ),
+                              const SizedBox(height: 10),
+                              Text(
+                                "No products loaded",
+                                style: TextStyle(color: Colors.grey.shade500),
+                              ),
+                            ],
+                          ),
+                        );
+                      }
+                      return ListView.separated(
+                        itemCount: controller.productCtrl.allProducts.length,
+                        separatorBuilder:
+                            (context, index) =>
+                                const Divider(height: 1, thickness: 0.5),
+                        itemBuilder: (context, index) {
+                          return _ProductRow(
+                            product: controller.productCtrl.allProducts[index],
+                            controller: controller,
+                          );
+                        },
+                      );
+                    }),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -897,23 +1112,25 @@ class _ProductTableSection extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                "PRODUCTS",
+                "PRODUCT INVENTORY",
                 style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
+                  fontSize: 22,
+                  fontWeight: FontWeight.w900,
                   color: Color(0xFF1E293B),
+                  letterSpacing: -0.5,
                 ),
               ),
+              const SizedBox(height: 4),
               Row(
                 children: const [
-                  Icon(Icons.circle, color: Colors.green, size: 8),
-                  SizedBox(width: 5),
+                  Icon(Icons.circle, color: Colors.green, size: 10),
+                  SizedBox(width: 6),
                   Text(
-                    "System Online",
+                    "System Online & Ready",
                     style: TextStyle(
-                      fontSize: 11,
+                      fontSize: 12,
                       color: Colors.green,
-                      fontWeight: FontWeight.bold,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ],
@@ -922,11 +1139,11 @@ class _ProductTableSection extends StatelessWidget {
           ),
         ),
         Container(
-          width: 380,
-          height: 45,
+          width: 350,
+          height: 48,
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(10),
             border: Border.all(color: Colors.grey.shade300),
             boxShadow: [
               BoxShadow(
@@ -940,16 +1157,15 @@ class _ProductTableSection extends StatelessWidget {
             onChanged: (v) => controller.productCtrl.search(v),
             textAlignVertical: TextAlignVertical.center,
             decoration: const InputDecoration(
-              hintText: "Search by Model, Name or Code...",
-              hintStyle: TextStyle(fontSize: 13, color: Colors.grey),
+              hintText: "Search Model, Name, Code...",
+              hintStyle: TextStyle(fontSize: 14, color: Colors.grey),
               prefixIcon: Icon(
                 Icons.search,
-                size: 20,
+                size: 22,
                 color: Color(0xFF2563EB),
               ),
               border: InputBorder.none,
-              isDense: true,
-              contentPadding: EdgeInsets.zero,
+              contentPadding: EdgeInsets.symmetric(horizontal: 15),
             ),
           ),
         ),
@@ -959,10 +1175,10 @@ class _ProductTableSection extends StatelessWidget {
 
   Widget _buildTableHeader() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
       decoration: const BoxDecoration(
         color: Color(0xFF1E293B),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
       ),
       child: Row(
         children: const [
@@ -972,7 +1188,7 @@ class _ProductTableSection extends StatelessWidget {
               "ITEM DESCRIPTION",
               style: TextStyle(
                 color: Colors.white,
-                fontSize: 11,
+                fontSize: 12,
                 fontWeight: FontWeight.bold,
               ),
             ),
@@ -983,7 +1199,7 @@ class _ProductTableSection extends StatelessWidget {
               "STOCK",
               style: TextStyle(
                 color: Colors.white,
-                fontSize: 11,
+                fontSize: 12,
                 fontWeight: FontWeight.bold,
               ),
             ),
@@ -995,12 +1211,12 @@ class _ProductTableSection extends StatelessWidget {
               textAlign: TextAlign.right,
               style: TextStyle(
                 color: Colors.white,
-                fontSize: 11,
+                fontSize: 12,
                 fontWeight: FontWeight.bold,
               ),
             ),
           ),
-          SizedBox(width: 50),
+          SizedBox(width: 50), // Space for button
         ],
       ),
     );
@@ -1014,20 +1230,18 @@ class _ProductRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Color stockColor = Colors.green;
-    if (product.stockQty == 0) {
-      stockColor = Colors.red;
-    } else if (product.stockQty < 5) {
-      stockColor = Colors.orange;
-    }
+    Color stockColor =
+        product.stockQty == 0
+            ? Colors.red
+            : (product.stockQty < 5 ? Colors.orange : Colors.green);
 
     return Material(
       color: Colors.white,
       child: InkWell(
         onTap: () => controller.addToCart(product),
-        hoverColor: Colors.blue.withOpacity(0.02),
+        hoverColor: Colors.blue.withOpacity(0.04),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
           child: Row(
             children: [
               Expanded(
@@ -1039,14 +1253,14 @@ class _ProductRow extends StatelessWidget {
                       product.name,
                       style: const TextStyle(
                         fontWeight: FontWeight.w600,
-                        fontSize: 13,
+                        fontSize: 14,
                         color: Color(0xFF334155),
                       ),
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 4),
                     Container(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
+                        horizontal: 8,
                         vertical: 2,
                       ),
                       decoration: BoxDecoration(
@@ -1056,7 +1270,7 @@ class _ProductRow extends StatelessWidget {
                       child: Text(
                         product.model,
                         style: const TextStyle(
-                          fontSize: 10,
+                          fontSize: 11,
                           color: Color(0xFF2563EB),
                           fontWeight: FontWeight.bold,
                         ),
@@ -1070,12 +1284,12 @@ class _ProductRow extends StatelessWidget {
                 child: Row(
                   children: [
                     Icon(Icons.circle, size: 8, color: stockColor),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 8),
                     Text(
                       product.stockQty.toString(),
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        fontSize: 13,
+                        fontSize: 14,
                         color: stockColor,
                       ),
                     ),
@@ -1085,6 +1299,7 @@ class _ProductRow extends StatelessWidget {
               Expanded(
                 flex: 1,
                 child: Obx(() {
+                  // Dynamically display price based on customer type selected in controller
                   double price =
                       (controller.customerType.value == "Retailer")
                           ? product.wholesale
@@ -1094,16 +1309,16 @@ class _ProductRow extends StatelessWidget {
                     textAlign: TextAlign.right,
                     style: const TextStyle(
                       fontWeight: FontWeight.w700,
-                      fontSize: 13,
+                      fontSize: 14,
                       color: Colors.black87,
                     ),
                   );
                 }),
               ),
-              const SizedBox(width: 15),
+              const SizedBox(width: 20),
               SizedBox(
-                width: 35,
-                height: 35,
+                width: 36,
+                height: 36,
                 child: ElevatedButton(
                   onPressed: () => controller.addToCart(product),
                   style: ElevatedButton.styleFrom(
@@ -1180,47 +1395,47 @@ class _CartQuantityEditorState extends State<CartQuantityEditor> {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        InkWell(
-          onTap: widget.onDecrease,
-          child: const Padding(
-            padding: EdgeInsets.all(4.0),
-            child: Icon(
-              Icons.remove_circle_outline,
-              color: Colors.red,
-              size: 22,
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: Colors.grey.shade300),
+      ),
+      child: Row(
+        children: [
+          InkWell(
+            onTap: widget.onDecrease,
+            child: Padding(
+              padding: const EdgeInsets.all(6.0),
+              child: Icon(Icons.remove, color: Colors.red.shade400, size: 16),
             ),
           ),
-        ),
-        SizedBox(
-          width: 50,
-          child: TextField(
-            controller: _textCtrl,
-            focusNode: _focusNode,
-            textAlign: TextAlign.center,
-            keyboardType: TextInputType.number,
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-            decoration: const InputDecoration(
-              border: InputBorder.none,
-              isDense: true,
-              contentPadding: EdgeInsets.zero,
-            ),
-            onSubmitted: (val) => widget.onSubmit(val),
-          ),
-        ),
-        InkWell(
-          onTap: widget.onIncrease,
-          child: const Padding(
-            padding: EdgeInsets.all(4.0),
-            child: Icon(
-              Icons.add_circle_outline,
-              color: Colors.green,
-              size: 22,
+          Container(width: 1, height: 20, color: Colors.grey.shade300),
+          SizedBox(
+            width: 40,
+            child: TextField(
+              controller: _textCtrl,
+              focusNode: _focusNode,
+              textAlign: TextAlign.center,
+              keyboardType: TextInputType.number,
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+              decoration: const InputDecoration(
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: EdgeInsets.zero,
+              ),
+              onSubmitted: (val) => widget.onSubmit(val),
             ),
           ),
-        ),
-      ],
+          Container(width: 1, height: 20, color: Colors.grey.shade300),
+          InkWell(
+            onTap: widget.onIncrease,
+            child: Padding(
+              padding: const EdgeInsets.all(6.0),
+              child: Icon(Icons.add, color: Colors.green.shade400, size: 16),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

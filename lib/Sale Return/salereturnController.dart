@@ -1,4 +1,4 @@
-// ignore_for_file: deprecated_member_use, file_names, empty_catches
+// ignore_for_file: deprecated_member_use, file_names, empty_catches, avoid_print
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -7,18 +7,21 @@ import '../Stock/controller.dart';
 
 class SaleReturnController extends GetxController {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
+  // Inject Product Controller for Stock updates
   final ProductController productCtrl = Get.find<ProductController>();
 
-  // State
+  // --- STATE ---
   var searchController = TextEditingController();
   var isLoading = false.obs;
   var orderData = Rxn<Map<String, dynamic>>();
   var orderItems = <Map<String, dynamic>>[].obs;
 
+  // Track quantities to return
   var returnQuantities = <String, int>{}.obs;
+  // Track where the returned stock goes (Local/Air/Sea)
   var returnDestinations = <String, String>{}.obs;
 
-  // --- SAFETY HELPERS ---
+  // --- HELPERS (Safe Parsing) ---
   double toDouble(dynamic val) {
     if (val == null) return 0.0;
     double? d = double.tryParse(val.toString());
@@ -31,20 +34,21 @@ class SaleReturnController extends GetxController {
     return i ?? 0;
   }
 
-  String toStr(dynamic val) {
-    return val?.toString() ?? "";
-  }
+  String toStr(dynamic val) => val?.toString() ?? "";
 
   // --- 1. SEARCH INVOICE ---
   Future<void> findInvoice(String invoiceId) async {
     if (invoiceId.isEmpty) return;
     isLoading.value = true;
+
+    // Reset State
     orderData.value = null;
     orderItems.clear();
     returnQuantities.clear();
     returnDestinations.clear();
 
     try {
+      // Trim to prevent whitespace errors
       final doc =
           await _db.collection('sales_orders').doc(invoiceId.trim()).get();
 
@@ -71,22 +75,23 @@ class SaleReturnController extends GetxController {
           };
 
           orderItems.add(safeItem);
-          String pid = safeItem['productId'];
 
+          // Initialize return tracking
+          String pid = safeItem['productId'];
           if (pid.isNotEmpty) {
             returnQuantities[pid] = 0;
-            returnDestinations[pid] = "Local";
+            returnDestinations[pid] = "Local"; // Default destination
           }
         }
       }
     } catch (e) {
-      Get.snackbar("Error", e.toString());
+      Get.snackbar("Error", "Search Failed: $e");
     } finally {
       isLoading.value = false;
     }
   }
 
-  // --- 2. UI HELPERS ---
+  // --- 2. UI LOGIC ---
   void incrementReturn(String productId, int maxQty) {
     int current = returnQuantities[productId] ?? 0;
     if (current < maxQty) {
@@ -105,7 +110,7 @@ class SaleReturnController extends GetxController {
     returnDestinations[productId] = destination;
   }
 
-  // --- 3. CALCULATE TOTAL ---
+  // Calculate value of items being returned
   double get totalRefundAmount {
     double total = 0.0;
     for (var item in orderItems) {
@@ -117,46 +122,48 @@ class SaleReturnController extends GetxController {
     return total;
   }
 
-  // --- 4. PROCESS THE RETURN ---
+  // --- 3. PROCESS RETURN (CORE LOGIC) ---
   Future<void> processProductReturn() async {
-    // 1. Validation
+    // A. Validation
     if (totalRefundAmount <= 0) {
-      Get.snackbar("Error", "No items selected for return.");
+      Get.snackbar("Alert", "No items selected for return.");
       return;
     }
-
-    if (orderData.value == null) {
-      Get.snackbar("Error", "Data missing.");
-      return;
-    }
+    if (orderData.value == null) return;
 
     isLoading.value = true;
     String invoiceId = toStr(orderData.value!['invoiceId']);
     String debtorId = toStr(orderData.value!['debtorId']);
 
-    // START BATCH
+    // Safety check for ID
+    if (invoiceId.isEmpty) {
+      isLoading.value = false;
+      Get.snackbar("Error", "Invalid Invoice ID in data.");
+      return;
+    }
+
     WriteBatch batch = _db.batch();
 
     try {
-      // 2. GET DOCUMENT REFERENCES
+      // B. Fetch Current Invoice State
       DocumentReference orderRef = _db
           .collection('sales_orders')
           .doc(invoiceId);
       DocumentSnapshot orderSnap = await orderRef.get();
-      if (!orderSnap.exists) throw "Order Missing";
+      if (!orderSnap.exists) throw "Order Document disappeared!";
 
-      // 3. PREPARE DATA
       Map<String, dynamic> currentOrder =
           orderSnap.data() as Map<String, dynamic>;
 
+      // C. Calculate Reductions
       double refundAmt = 0.0;
       double profitReduce = 0.0;
       double costReduce = 0.0;
 
       List<dynamic> oldItemsList = currentOrder['items'] ?? [];
       List<Map<String, dynamic>> newItemsList = [];
+      List<String> returnedItemSummaries = [];
 
-      // --- REBUILD ITEMS ---
       for (var rawItem in oldItemsList) {
         if (rawItem is! Map) continue;
 
@@ -171,15 +178,21 @@ class SaleReturnController extends GetxController {
         int retQty = returnQuantities[pid] ?? 0;
 
         if (retQty > 0) {
-          if (retQty > dbQty) throw "Qty Mismatch for $name";
+          if (retQty > dbQty) throw "Cannot return more than purchased: $name";
 
-          refundAmt += (retQty * sRate);
-          costReduce += (retQty * cRate);
-          profitReduce += (retQty * (sRate - cRate));
+          double itemRefund = retQty * sRate;
+          double itemCost = retQty * cRate;
+          double itemProfit = (sRate - cRate) * retQty;
 
-          dbQty = dbQty - retQty;
+          refundAmt += itemRefund;
+          costReduce += itemCost;
+          profitReduce += itemProfit;
+
+          dbQty = dbQty - retQty; // Reduce qty in Invoice
+          returnedItemSummaries.add("$model (Returned x$retQty)");
         }
 
+        // Add to new list (even if qty is 0, we keep it to show it was returned)
         newItemsList.add({
           "productId": pid,
           "name": name,
@@ -191,7 +204,7 @@ class SaleReturnController extends GetxController {
         });
       }
 
-      // --- RECALCULATE FINANCIALS ---
+      // D. Financial Adjustment Logic (CRITICAL)
       double oldGT = toDouble(currentOrder['grandTotal']);
       double oldP = toDouble(currentOrder['profit']);
       double oldC = toDouble(currentOrder['totalCost']);
@@ -200,39 +213,35 @@ class SaleReturnController extends GetxController {
       double newP = oldP - profitReduce;
       double newC = oldC - costReduce;
 
-      // --- RECALCULATE PAYMENTS ---
-      Map<String, dynamic> rawPay =
+      Map<String, dynamic> oldPay =
           currentOrder['paymentDetails'] is Map
               ? Map<String, dynamic>.from(currentOrder['paymentDetails'])
               : {};
 
-      double actualRec = toDouble(rawPay['actualReceived']);
-      double totalIn = toDouble(rawPay['totalPaidInput']);
+      double paidSoFar = toDouble(oldPay['actualReceived']);
 
-      double newRec =
-          (actualRec - refundAmt) < 0 ? 0.0 : (actualRec - refundAmt);
-      double newIn = (totalIn - refundAmt) < 0 ? 0.0 : (totalIn - refundAmt);
+      // Logic:
+      // If I bought 5000, paid 2000 (Due 3000). Return 1000.
+      // New Total: 4000. Paid is still 2000. New Due: 2000.
+      //
+      // If I bought 5000, paid 5000 (Due 0). Return 1000.
+      // New Total: 4000. Paid 5000. Change/Credit: 1000.
+      // We do NOT reduce 'actualReceived' usually, unless you literally gave them cash back.
+      // Assuming for Debtor/System, we adjust the BILL, not the cash flow history.
 
-      // Recalculate Due (Grand Total - Paid)
-      // If user paid 500 and bill is now 400, due is 0 (overpaid logic handled via changeReturned usually, but here we floor at 0)
-      // If user paid 0 and bill is now 400, due is 400.
-      double newDue = newGT - newRec;
-      if (newDue < 0) newDue = 0;
+      double newDue = newGT - paidSoFar;
+      if (newDue < 0)
+        newDue = 0; // Negative due implies we owe them money (Credit)
 
       Map<String, dynamic> newPayDetails = {
-        "type": toStr(rawPay['type']),
-        "cash": toDouble(rawPay['cash']),
-        "bkash": toDouble(rawPay['bkash']),
-        "nagad": toDouble(rawPay['nagad']),
-        "bank": toDouble(rawPay['bank']),
-        "due": newDue, // Updated Due
-        "changeReturned": toDouble(rawPay['changeReturned']),
-        "currency": "BDT",
-        "actualReceived": newRec,
-        "totalPaidInput": newIn,
+        ...oldPay, // Keep method types
+        "due": newDue,
+        "changeReturned": (paidSoFar > newGT) ? (paidSoFar - newGT) : 0,
+        // Note: We don't change 'actualReceived' because that money was historically received.
+        // We just change the 'Due' obligation.
       };
 
-      // 4. ADD TO BATCH: SALES ORDER
+      // 1. UPDATE SALES ORDER
       batch.update(orderRef, {
         'items': newItemsList,
         'grandTotal': newGT < 0 ? 0.0 : newGT,
@@ -240,11 +249,50 @@ class SaleReturnController extends GetxController {
         'totalCost': newC < 0 ? 0.0 : newC,
         'paymentDetails': newPayDetails,
         'status': 'returned_partial',
-        'lastReturnDate': DateTime.now().toIso8601String(),
+        'lastReturnDate': FieldValue.serverTimestamp(),
         'subtotal': newGT < 0 ? 0.0 : newGT,
       });
 
-      // 5. ADD TO BATCH: DAILY SALES
+      // 2. UPDATE DEBTOR LEDGER (If Applicable)
+      if (debtorId.isNotEmpty) {
+        // Find the specific transaction document for this invoice
+        DocumentReference debtorTxRef = _db
+            .collection('debatorbody')
+            .doc(debtorId)
+            .collection('transactions')
+            .doc(invoiceId);
+
+        DocumentSnapshot debTxSnap = await debtorTxRef.get();
+
+        if (debTxSnap.exists) {
+          // We update the transaction 'amount' to the New Grand Total.
+          // This automatically fixes the balance calculation when you fetch debtor details.
+          batch.update(debtorTxRef, {
+            'amount': newGT,
+            'note':
+                "Inv $invoiceId (Returned: ${refundAmt.toStringAsFixed(0)})",
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        }
+
+        // Also update the Analytics History (Profit/Loss tracking)
+        DocumentReference analyticsRef = _db
+            .collection('debtor_transaction_history')
+            .doc(invoiceId);
+        // We use set with merge just in case the doc doesn't exist (legacy data)
+        batch.set(analyticsRef, {
+          "saleAmount": newGT,
+          "costAmount": newC,
+          "profit": newP,
+          "returnDate": FieldValue.serverTimestamp(),
+          "itemsSummary": FieldValue.arrayUnion(
+            returnedItemSummaries,
+          ), // Add return logs
+        }, SetOptions(merge: true));
+      }
+
+      // 3. UPDATE DAILY SALES ENTRY
+      // We need to find the daily sales entry to reduce the 'Amount' (Revenue)
       final dailyQuery =
           await _db
               .collection('daily_sales')
@@ -254,68 +302,36 @@ class SaleReturnController extends GetxController {
 
       if (dailyQuery.docs.isNotEmpty) {
         DocumentSnapshot dailySnap = dailyQuery.docs.first;
-        Map<String, dynamic> dData = dailySnap.data() as Map<String, dynamic>;
-
-        Map<String, dynamic> dPayMethod =
-            dData['paymentMethod'] is Map
-                ? Map<String, dynamic>.from(dData['paymentMethod'])
-                : {};
-
-        dPayMethod['actualReceived'] = newRec;
-        dPayMethod['cash'] = newIn;
-        dPayMethod['totalPaidInput'] = newIn;
-
+        // Reduce the recorded sales amount
         batch.update(dailySnap.reference, {
-          'paid': newRec,
-          'amount': newGT, // Amount becomes the new Grand Total
-          'paymentMethod': dPayMethod,
+          'amount': newGT,
+          // If pending was positive, recalculate it
+          'pending': newDue,
         });
       }
 
-      // --- 6. ADD TO BATCH: DEBTOR TRANSACTION (FIXED) ---
-      if (debtorId.isNotEmpty) {
-        // We look for the document matching invoiceId
-        DocumentReference debtorTxRef = _db
-            .collection('debatorbody')
-            .doc(debtorId)
-            .collection('transactions')
-            .doc(invoiceId); // <--- FIXED: Target the specific transaction ID
-
-        DocumentSnapshot debTxSnap = await debtorTxRef.get();
-
-        if (debTxSnap.exists) {
-          // Logic from your editTransaction method:
-          // We update the amount to the New Grand Total.
-          // Since we calculated newGT and newPayDetails above, we simply apply them.
-
-          Map<String, dynamic> oldTxData =
-              debTxSnap.data() as Map<String, dynamic>;
-          String oldNote = toStr(oldTxData['note']);
-
-          batch.update(debtorTxRef, {
-            'amount': newGT, // Update total amount
-            'paymentMethod': newPayDetails, // Update payment info/due
-            'note': "$oldNote (Return: -$refundAmt)", // Optional: Update note
-          });
-        }
-      }
-
-      // 7. COMMIT BATCH
+      // 4. COMMIT DB UPDATES
       await batch.commit();
 
-      // --- 8. STOCK RESTORATION ---
+      // 5. STOCK RESTORATION (Separate from DB Batch if using Custom Logic)
+      // Iterating through returns to restore stock
       for (var pid in returnQuantities.keys) {
         int qty = returnQuantities[pid]!;
         if (qty > 0) {
           String dest = returnDestinations[pid] ?? "Local";
+
+          // Get Cost Price for restoration logic
           var itemInfo = orderItems.firstWhere(
             (e) => toStr(e['productId']) == pid,
             orElse: () => {},
           );
           double originalCost = toDouble(itemInfo['costRate']);
+
           int? parsedPid = int.tryParse(pid);
+
           if (parsedPid != null) {
             try {
+              // Using your existing stock method
               await productCtrl.addMixedStock(
                 productId: parsedPid,
                 localQty: dest == "Local" ? qty : 0,
@@ -324,21 +340,26 @@ class SaleReturnController extends GetxController {
                 localUnitPrice: originalCost,
               );
             } catch (e) {
-              print("Stock error: $e");
+              print("Stock Restore Error for $pid: $e");
+              Get.snackbar(
+                "Warning",
+                "Stock update failed for ID $pid (Check Connection)",
+              );
             }
           }
         }
       }
 
-      Get.back();
+      Get.back(); // Close Dialog if open
       Get.snackbar(
-        "Success",
-        "Return Processed & Debtor Updated!",
+        "Return Successful",
+        "Invoice adjusted & Stock restored.\nNew Bill Total: ৳$newGT",
         backgroundColor: Colors.green,
         colorText: Colors.white,
         duration: const Duration(seconds: 4),
       );
 
+      // Cleanup
       orderData.value = null;
       searchController.clear();
       orderItems.clear();

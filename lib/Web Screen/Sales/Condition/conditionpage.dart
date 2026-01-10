@@ -8,21 +8,24 @@ import 'conditioncontroller.dart';
 class ConditionSalesPage extends StatelessWidget {
   const ConditionSalesPage({super.key});
 
-  // Theme Colors
-  static const Color darkSlate = Color(0xFF111827);
-  static const Color activeAccent = Color(0xFF3B82F6);
-  static const Color bgGrey = Color(0xFFF9FAFB);
-  static const Color textMuted = Color(0xFF6B7280);
+  // Theme Colors (Professional Slate/Blue Theme)
+  static const Color darkSlate = Color(0xFF1E293B);
+  static const Color activeAccent = Color(0xFF2563EB);
+  static const Color bgGrey = Color(0xFFF1F5F9);
+  static const Color textMuted = Color(0xFF64748B);
+  static const Color successGreen = Color(0xFF16A34A);
+  static const Color alertRed = Color(0xFFDC2626);
 
   @override
   Widget build(BuildContext context) {
+    // Inject Controller
     final ConditionSalesController ctrl = Get.put(ConditionSalesController());
 
     return Scaffold(
       backgroundColor: bgGrey,
       body: Column(
         children: [
-          _buildHeader(ctrl),
+          _buildHeader(context, ctrl),
           _buildStatsTicker(ctrl),
           const SizedBox(height: 10),
           _buildFilters(ctrl),
@@ -32,20 +35,36 @@ class ConditionSalesPage extends StatelessWidget {
     );
   }
 
-  // 1. HEADER
-  Widget _buildHeader(ConditionSalesController ctrl) {
+  // ==============================================================================
+  // 1. HEADER (Added Return Button)
+  // ==============================================================================
+  Widget _buildHeader(BuildContext context, ConditionSalesController ctrl) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-      color: Colors.white,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+      ),
       child: Row(
         children: [
-          const Icon(Icons.local_shipping, size: 28, color: darkSlate),
-          const SizedBox(width: 12),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: activeAccent.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(
+              Icons.local_shipping_outlined,
+              size: 24,
+              color: activeAccent,
+            ),
+          ),
+          const SizedBox(width: 16),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: const [
               Text(
-                "Condition Sales Manager",
+                "Condition Sales & Courier Ledger",
                 style: TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
@@ -53,18 +72,35 @@ class ConditionSalesPage extends StatelessWidget {
                 ),
               ),
               Text(
-                "Track shipments and collect payments from couriers",
+                "Track shipments, collect due, and manage returns",
                 style: TextStyle(fontSize: 12, color: textMuted),
               ),
             ],
           ),
           const Spacer(),
+
+          // --- NEW: RETURN BUTTON ---
+          ElevatedButton.icon(
+            onPressed: () => _showReturnInterface(context, ctrl),
+            icon: const Icon(Icons.assignment_return, size: 18),
+            label: const Text("PROCESS RETURN"),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange.shade800,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          ),
+          const SizedBox(width: 20),
+
           // Total Pending Card
           Obx(
             () => _headerCard(
               "TOTAL COURIER DUE",
               "৳ ${ctrl.totalPendingAmount.value.toStringAsFixed(0)}",
-              Colors.redAccent,
+              alertRed,
             ),
           ),
         ],
@@ -76,9 +112,9 @@ class ConditionSalesPage extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: color.withOpacity(0.05),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(color: color.withOpacity(0.2)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.end,
@@ -87,15 +123,16 @@ class ConditionSalesPage extends StatelessWidget {
             title,
             style: TextStyle(
               fontSize: 10,
-              fontWeight: FontWeight.bold,
+              fontWeight: FontWeight.w800,
               color: color,
+              letterSpacing: 0.5,
             ),
           ),
           Text(
             value,
             style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
+              fontSize: 22,
+              fontWeight: FontWeight.w900,
               color: color,
             ),
           ),
@@ -104,7 +141,9 @@ class ConditionSalesPage extends StatelessWidget {
     );
   }
 
-  // 2. STATS TICKER (Horizontal Scroll of Courier Balances)
+  // ==============================================================================
+  // 2. STATS TICKER
+  // ==============================================================================
   Widget _buildStatsTicker(ConditionSalesController ctrl) {
     return Obx(() {
       if (ctrl.courierBalances.isEmpty) return const SizedBox.shrink();
@@ -119,30 +158,36 @@ class ConditionSalesPage extends StatelessWidget {
               ctrl.courierBalances.entries.map((e) {
                 return Container(
                   margin: const EdgeInsets.only(right: 12),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 0,
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(25),
                     border: Border.all(color: Colors.grey.shade300),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.grey.withOpacity(0.05),
+                        blurRadius: 4,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
                   ),
                   child: Row(
                     children: [
                       Text(
                         e.key,
                         style: const TextStyle(
-                          fontWeight: FontWeight.bold,
+                          fontWeight: FontWeight.w600,
                           color: textMuted,
+                          fontSize: 13,
                         ),
                       ),
                       const SizedBox(width: 8),
                       Text(
                         "৳${e.value.toStringAsFixed(0)}",
                         style: const TextStyle(
-                          fontWeight: FontWeight.bold,
+                          fontWeight: FontWeight.w800,
                           color: darkSlate,
+                          fontSize: 14,
                         ),
                       ),
                     ],
@@ -154,13 +199,14 @@ class ConditionSalesPage extends StatelessWidget {
     });
   }
 
+  // ==============================================================================
   // 3. FILTERS
+  // ==============================================================================
   Widget _buildFilters(ConditionSalesController ctrl) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
       child: Row(
         children: [
-          // Time Filters
           _filterChip(ctrl, "Today"),
           const SizedBox(width: 8),
           _filterChip(ctrl, "This Month"),
@@ -168,27 +214,27 @@ class ConditionSalesPage extends StatelessWidget {
           _filterChip(ctrl, "This Year"),
           const SizedBox(width: 8),
           _filterChip(ctrl, "All Time"),
-
           const Spacer(),
-
           // Search
           Container(
-            width: 250,
-            height: 40,
-            padding: const EdgeInsets.symmetric(horizontal: 10),
+            width: 300,
+            height: 45,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(8),
               border: Border.all(color: Colors.grey.shade300),
             ),
             child: TextField(
               onChanged: (v) => ctrl.searchQuery.value = v,
               decoration: const InputDecoration(
-                hintText: "Search Invoice, Phone...",
+                hintText: "Search Invoice, Phone, Courier...",
                 border: InputBorder.none,
-                icon: Icon(Icons.search, size: 18),
-                contentPadding: EdgeInsets.only(bottom: 10),
+                icon: Icon(Icons.search, size: 20, color: Colors.grey),
+                isDense: true,
+                contentPadding: EdgeInsets.zero,
               ),
+              textAlignVertical: TextAlignVertical.center,
             ),
           ),
         ],
@@ -207,26 +253,38 @@ class ConditionSalesPage extends StatelessWidget {
         labelStyle: TextStyle(
           color: isSelected ? Colors.white : darkSlate,
           fontSize: 12,
-          fontWeight: FontWeight.w600,
+          fontWeight: FontWeight.bold,
         ),
         backgroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: BorderSide(
+            color: isSelected ? Colors.transparent : Colors.grey.shade300,
+          ),
+        ),
       );
     });
   }
 
+  // ==============================================================================
   // 4. DATA TABLE
+  // ==============================================================================
   Widget _buildDataTable(ConditionSalesController ctrl, BuildContext context) {
     return Obx(() {
-      if (ctrl.isLoading.value)
+      if (ctrl.isLoading.value && ctrl.filteredOrders.isEmpty)
         return const Center(child: CircularProgressIndicator());
       if (ctrl.filteredOrders.isEmpty) {
         return Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: const [
-              Icon(Icons.inventory_2_outlined, size: 48, color: Colors.grey),
-              SizedBox(height: 10),
-              Text("No condition sales found for this period"),
+              Icon(Icons.folder_off_outlined, size: 64, color: Colors.grey),
+              SizedBox(height: 16),
+              Text(
+                "No condition sales records found",
+                style: TextStyle(color: Colors.grey, fontSize: 16),
+              ),
             ],
           ),
         );
@@ -236,70 +294,99 @@ class ConditionSalesPage extends StatelessWidget {
         margin: const EdgeInsets.fromLTRB(24, 0, 24, 24),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(8),
-          boxShadow: [BoxShadow(color: Colors.grey.shade200, blurRadius: 5)],
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.shade200),
+          boxShadow: [BoxShadow(color: Colors.grey.shade100, blurRadius: 10)],
         ),
         child: Column(
           children: [
-            // Table Header
+            // Header
             Container(
-              padding: const EdgeInsets.all(12),
-              color: Colors.grey.shade100,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+              decoration: const BoxDecoration(
+                color: darkSlate,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(11)),
+              ),
               child: Row(
                 children: const [
                   Expanded(
                     flex: 2,
                     child: Text(
-                      "Date & Invoice",
-                      style: TextStyle(fontWeight: FontWeight.bold),
+                      "DATE & INVOICE",
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    flex: 3,
+                    child: Text(
+                      "CUSTOMER",
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                        fontSize: 12,
+                      ),
                     ),
                   ),
                   Expanded(
                     flex: 2,
                     child: Text(
-                      "Customer",
-                      style: TextStyle(fontWeight: FontWeight.bold),
+                      "LOGISTICS",
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                        fontSize: 12,
+                      ),
                     ),
                   ),
                   Expanded(
                     flex: 2,
                     child: Text(
-                      "Logistics",
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                  Expanded(
-                    flex: 1,
-                    child: Text(
-                      "Total",
-                      style: TextStyle(fontWeight: FontWeight.bold),
+                      "TOTAL AMOUNT",
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                        fontSize: 12,
+                      ),
                       textAlign: TextAlign.right,
                     ),
                   ),
                   Expanded(
-                    flex: 1,
+                    flex: 2,
                     child: Text(
-                      "Due",
-                      style: TextStyle(fontWeight: FontWeight.bold),
+                      "COURIER DUE",
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                        fontSize: 12,
+                      ),
                       textAlign: TextAlign.right,
                     ),
                   ),
                   Expanded(
                     flex: 2,
                     child: Text(
-                      "Action",
-                      style: TextStyle(fontWeight: FontWeight.bold),
+                      "ACTION",
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                        fontSize: 12,
+                      ),
                       textAlign: TextAlign.center,
                     ),
                   ),
                 ],
               ),
             ),
-            // Table Body
+            // Body
             Expanded(
               child: ListView.separated(
                 itemCount: ctrl.filteredOrders.length,
-                separatorBuilder: (_, __) => const Divider(height: 1),
+                separatorBuilder:
+                    (_, __) => const Divider(height: 1, thickness: 0.5),
                 itemBuilder: (context, index) {
                   final order = ctrl.filteredOrders[index];
                   return _orderRow(order, context, ctrl);
@@ -320,10 +407,10 @@ class ConditionSalesPage extends StatelessWidget {
     bool isPaid = order.courierDue <= 0;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       child: Row(
         children: [
-          // 1. Date & Inv
+          // 1. Date
           Expanded(
             flex: 2,
             child: Column(
@@ -334,10 +421,11 @@ class ConditionSalesPage extends StatelessWidget {
                   style: const TextStyle(
                     fontWeight: FontWeight.bold,
                     color: darkSlate,
+                    fontSize: 13,
                   ),
                 ),
                 Text(
-                  DateFormat('dd MMM yy').format(order.date),
+                  DateFormat('dd MMM yy, hh:mm a').format(order.date),
                   style: const TextStyle(fontSize: 11, color: textMuted),
                 ),
               ],
@@ -345,11 +433,17 @@ class ConditionSalesPage extends StatelessWidget {
           ),
           // 2. Customer
           Expanded(
-            flex: 2,
+            flex: 3,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(order.customerName, style: const TextStyle(fontSize: 13)),
+                Text(
+                  order.customerName,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
                 Text(
                   order.customerPhone,
                   style: const TextStyle(fontSize: 11, color: textMuted),
@@ -375,18 +469,15 @@ class ConditionSalesPage extends StatelessWidget {
                   child: Text(
                     order.courierName,
                     style: TextStyle(
-                      fontSize: 11,
+                      fontSize: 10,
                       fontWeight: FontWeight.bold,
                       color: Colors.blue.shade800,
                     ),
                   ),
                 ),
+                const SizedBox(height: 4),
                 Text(
                   "Challan: ${order.challanNo}",
-                  style: const TextStyle(fontSize: 11, color: textMuted),
-                ),
-                Text(
-                  "Cartons: ${order.cartons}",
                   style: const TextStyle(fontSize: 11, color: textMuted),
                 ),
               ],
@@ -394,22 +485,23 @@ class ConditionSalesPage extends StatelessWidget {
           ),
           // 4. Total
           Expanded(
-            flex: 1,
+            flex: 2,
             child: Text(
               "৳${order.grandTotal.toStringAsFixed(0)}",
               textAlign: TextAlign.right,
-              style: const TextStyle(fontWeight: FontWeight.bold),
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
             ),
           ),
           // 5. Due
           Expanded(
-            flex: 1,
+            flex: 2,
             child: Text(
-              isPaid ? "PAID" : "৳${order.courierDue.toStringAsFixed(0)}",
+              isPaid ? "CLEARED" : "৳${order.courierDue.toStringAsFixed(0)}",
               textAlign: TextAlign.right,
               style: TextStyle(
                 fontWeight: FontWeight.bold,
-                color: isPaid ? Colors.green : Colors.red,
+                color: isPaid ? successGreen : alertRed,
+                fontSize: 13,
               ),
             ),
           ),
@@ -421,22 +513,29 @@ class ConditionSalesPage extends StatelessWidget {
                   isPaid
                       ? const Icon(
                         Icons.check_circle,
-                        color: Colors.green,
-                        size: 20,
+                        color: successGreen,
+                        size: 22,
                       )
-                      : ElevatedButton.icon(
+                      : ElevatedButton(
                         onPressed:
                             () => _showPaymentDialog(context, ctrl, order),
-                        icon: const Icon(Icons.payments, size: 14),
-                        label: const Text("Receive"),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: activeAccent,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
+                            horizontal: 16,
+                            vertical: 10,
                           ),
-                          textStyle: const TextStyle(fontSize: 11),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                        ),
+                        child: const Text(
+                          "Collect",
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
             ),
@@ -446,7 +545,10 @@ class ConditionSalesPage extends StatelessWidget {
     );
   }
 
-  // 5. PAYMENT DIALOG
+  // ==============================================================================
+  // 5. DIALOGS (Payment & Return)
+  // ==============================================================================
+
   void _showPaymentDialog(
     BuildContext context,
     ConditionSalesController ctrl,
@@ -458,9 +560,9 @@ class ConditionSalesPage extends StatelessWidget {
 
     Get.dialog(
       Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: Container(
-          width: 400,
+          width: 420,
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -471,35 +573,59 @@ class ConditionSalesPage extends StatelessWidget {
                 style: const TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
+                  color: darkSlate,
                 ),
               ),
               const SizedBox(height: 8),
-              Text(
-                "Invoice: ${order.invoiceId} | Customer: ${order.customerName}",
-                style: const TextStyle(fontSize: 12, color: textMuted),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: bgGrey,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "Invoice: ${order.invoiceId}",
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          order.customerName,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: textMuted,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Text(
+                      "Due: ৳${order.courierDue}",
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: alertRed,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 20),
-
-              const Text(
-                "Amount Received",
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 5),
+              const SizedBox(height: 24),
               TextField(
                 controller: amountC,
                 keyboardType: TextInputType.number,
                 decoration: const InputDecoration(
-                  border: OutlineInputBorder(),
+                  labelText: "Received Amount",
                   prefixText: "৳ ",
+                  border: OutlineInputBorder(),
                 ),
               ),
-              const SizedBox(height: 15),
-
-              const Text(
-                "Payment Method",
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 5),
+              const SizedBox(height: 16),
               DropdownButtonFormField<String>(
                 value: method,
                 items:
@@ -507,27 +633,24 @@ class ConditionSalesPage extends StatelessWidget {
                         .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                         .toList(),
                 onChanged: (v) => method = v!,
-                decoration: const InputDecoration(border: OutlineInputBorder()),
+                decoration: const InputDecoration(
+                  labelText: "Payment Method",
+                  border: OutlineInputBorder(),
+                ),
               ),
-              const SizedBox(height: 15),
-
-              const Text(
-                "Reference / Note",
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 5),
+              const SizedBox(height: 16),
               TextField(
                 controller: refC,
                 decoration: const InputDecoration(
-                  border: OutlineInputBorder(),
+                  labelText: "Reference / Transaction ID",
                   hintText: "Optional",
+                  border: OutlineInputBorder(),
                 ),
               ),
-              const SizedBox(height: 25),
-
+              const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,
-                height: 45,
+                height: 50,
                 child: ElevatedButton(
                   onPressed: () {
                     double amt = double.tryParse(amountC.text) ?? 0;
@@ -541,16 +664,331 @@ class ConditionSalesPage extends StatelessWidget {
                     }
                   },
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
+                    backgroundColor: successGreen,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                   ),
                   child: const Text(
-                    "CONFIRM PAYMENT",
+                    "CONFIRM COLLECTION",
                     style: TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                      letterSpacing: 1,
                     ),
                   ),
                 ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // --- NEW: RETURN INTERFACE ---
+  void _showReturnInterface(
+    BuildContext context,
+    ConditionSalesController ctrl,
+  ) {
+    ctrl.returnSearchCtrl.clear();
+    ctrl.returnOrderData.value = null;
+    ctrl.returnOrderItems.clear();
+
+    Get.dialog(
+      Dialog(
+        backgroundColor: bgGrey,
+        insetPadding: const EdgeInsets.all(20),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Container(
+          width: 700, // Wide dialog for better view
+          height: 600,
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    "Condition Sales Return",
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                      color: darkSlate,
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Get.back(),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+              const Divider(height: 30),
+
+              // Search Bar inside Dialog
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: ctrl.returnSearchCtrl,
+                      decoration: const InputDecoration(
+                        hintText: "Enter Invoice ID (e.g. GTEL-24...)",
+                        prefixIcon: Icon(Icons.search),
+                        filled: true,
+                        fillColor: Colors.white,
+                        border: OutlineInputBorder(),
+                      ),
+                      onSubmitted: (val) => ctrl.findInvoiceForReturn(val),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Obx(
+                    () => ElevatedButton(
+                      onPressed:
+                          ctrl.isLoading.value
+                              ? null
+                              : () => ctrl.findInvoiceForReturn(
+                                ctrl.returnSearchCtrl.text,
+                              ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: darkSlate,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 24,
+                          vertical: 20,
+                        ),
+                      ),
+                      child:
+                          ctrl.isLoading.value
+                              ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                ),
+                              )
+                              : const Text(
+                                "Find Invoice",
+                                style: TextStyle(color: Colors.white),
+                              ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+
+              // Results Area
+              Expanded(
+                child: Obx(() {
+                  if (ctrl.returnOrderData.value == null) {
+                    return Center(
+                      child: Text(
+                        "Search for a condition order to process return.",
+                        style: TextStyle(color: Colors.grey.shade500),
+                      ),
+                    );
+                  }
+
+                  return Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      children: [
+                        // Invoice Info Header
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.shade50,
+                            borderRadius: const BorderRadius.vertical(
+                              top: Radius.circular(12),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                "Customer: ${ctrl.returnOrderData.value!['customerName']}",
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              Text(
+                                "Courier: ${ctrl.returnOrderData.value!['courierName']}",
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.deepOrange,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        // Items List
+                        Expanded(
+                          child: ListView.separated(
+                            padding: const EdgeInsets.all(16),
+                            itemCount: ctrl.returnOrderItems.length,
+                            separatorBuilder: (_, __) => const Divider(),
+                            itemBuilder: (context, index) {
+                              final item = ctrl.returnOrderItems[index];
+                              String pid = item['productId'];
+                              int maxQty = int.parse(item['qty'].toString());
+                              double price = double.parse(
+                                item['saleRate'].toString(),
+                              );
+                              int retQty = ctrl.returnQuantities[pid] ?? 0;
+
+                              if (maxQty <= 0)
+                                return const SizedBox.shrink(); // Hide previously fully returned
+
+                              return Row(
+                                children: [
+                                  Expanded(
+                                    flex: 3,
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          item['name'],
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        Text(
+                                          "Rate: ৳$price",
+                                          style: const TextStyle(
+                                            fontSize: 12,
+                                            color: textMuted,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  // Qty Control
+                                  Container(
+                                    decoration: BoxDecoration(
+                                      border: Border.all(
+                                        color: Colors.grey.shade300,
+                                      ),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        IconButton(
+                                          icon: const Icon(
+                                            Icons.remove,
+                                            size: 16,
+                                          ),
+                                          onPressed:
+                                              () => ctrl.decrementReturn(pid),
+                                          constraints: const BoxConstraints(),
+                                        ),
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                          ),
+                                          child: Text(
+                                            "$retQty",
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                        IconButton(
+                                          icon: const Icon(
+                                            Icons.add,
+                                            size: 16,
+                                            color: Colors.red,
+                                          ),
+                                          onPressed:
+                                              () => ctrl.incrementReturn(
+                                                pid,
+                                                maxQty,
+                                              ),
+                                          constraints: const BoxConstraints(),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  SizedBox(
+                                    width: 80,
+                                    child: Text(
+                                      "৳${(retQty * price).toStringAsFixed(0)}",
+                                      textAlign: TextAlign.right,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        color: alertRed,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
+                        ),
+                        // Footer Actions
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            border: Border(
+                              top: BorderSide(color: Colors.grey.shade200),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    "Total Refund Adjustment",
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: textMuted,
+                                    ),
+                                  ),
+                                  Text(
+                                    "৳ ${ctrl.totalRefundValue.toStringAsFixed(0)}",
+                                    style: const TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.bold,
+                                      color: alertRed,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              ElevatedButton.icon(
+                                onPressed: () => ctrl.processConditionReturn(),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: alertRed,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 24,
+                                    vertical: 16,
+                                  ),
+                                ),
+                                icon: const Icon(
+                                  Icons.check,
+                                  color: Colors.white,
+                                ),
+                                label: const Text(
+                                  "CONFIRM RETURN",
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
               ),
             ],
           ),

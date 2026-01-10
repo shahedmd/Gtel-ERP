@@ -335,7 +335,7 @@ Future<void> deleteTransaction(String debtorId, String transactionId) async {
 
       // --- NEW: Reference to Debtor P&L ---
       final pnlRef = db
-          .collection('debtorProfitLoss')
+          .collection('debtor_transaction_history')
           .doc(transactionId); 
 
       final txSnap = await txRef.get();
