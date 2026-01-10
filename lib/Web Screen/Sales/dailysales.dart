@@ -3,12 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import '../Sales/controller.dart';
-import 'model.dart';
+import 'controller.dart'; // Ensure this points to your file
+import 'model.dart'; // Ensure this points to your file
 
 class DailySalesPage extends StatelessWidget {
+  // Dependency Injection
   final DailySalesController ctrl = Get.put(DailySalesController());
 
+  // Theme Constants
   static const Color darkSlate = Color(0xFF111827);
   static const Color activeAccent = Color(0xFF3B82F6);
   static const Color bgGrey = Color(0xFFF9FAFB);
@@ -21,6 +23,7 @@ class DailySalesPage extends StatelessWidget {
     return Scaffold(
       backgroundColor: bgGrey,
       body: Obx(() {
+        // Loading State (Only if list is empty to prevent flicker)
         if (ctrl.isLoading.value && ctrl.salesList.isEmpty) {
           return const Center(
             child: CircularProgressIndicator(color: activeAccent),
@@ -39,11 +42,16 @@ class DailySalesPage extends StatelessWidget {
     );
   }
 
-  // --- 1. HEADER (Title, Date, Search) ---
+  // ==========================================================
+  // 1. HEADER SECTION
+  // ==========================================================
   Widget _buildHeader(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(24),
-      color: Colors.white,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+      ),
       child: Row(
         children: [
           Column(
@@ -57,6 +65,7 @@ class DailySalesPage extends StatelessWidget {
                   color: darkSlate,
                 ),
               ),
+              const SizedBox(height: 4),
               Obx(
                 () => Text(
                   "Audit for ${DateFormat('EEEE, dd MMMM yyyy').format(ctrl.selectedDate.value)}",
@@ -66,7 +75,7 @@ class DailySalesPage extends StatelessWidget {
             ],
           ),
           const Spacer(),
-          // Search Bar
+          // --- Search Bar ---
           Container(
             width: 300,
             decoration: BoxDecoration(
@@ -78,14 +87,14 @@ class DailySalesPage extends StatelessWidget {
               onChanged: (v) => ctrl.filterQuery.value = v,
               decoration: const InputDecoration(
                 hintText: "Search Name / Invoice ID...",
-                prefixIcon: Icon(Icons.search, size: 20),
+                prefixIcon: Icon(Icons.search, size: 20, color: textMuted),
                 border: InputBorder.none,
                 contentPadding: EdgeInsets.symmetric(vertical: 12),
               ),
             ),
           ),
           const SizedBox(width: 16),
-          // Date Selector
+          // --- Date Filter ---
           OutlinedButton.icon(
             onPressed: () async {
               final p = await showDatePicker(
@@ -96,7 +105,7 @@ class DailySalesPage extends StatelessWidget {
               );
               if (p != null) ctrl.changeDate(p);
             },
-            icon: const Icon(Icons.calendar_month, size: 18),
+            icon: const Icon(Icons.calendar_today, size: 16),
             label: const Text("Filter Date"),
             style: OutlinedButton.styleFrom(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
@@ -106,7 +115,7 @@ class DailySalesPage extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 12),
-          // Export Button
+          // --- Export PDF ---
           ElevatedButton.icon(
             onPressed: () => ctrl.generateProfessionalPDF(),
             icon: const FaIcon(
@@ -115,14 +124,14 @@ class DailySalesPage extends StatelessWidget {
               size: 16,
             ),
             label: const Text(
-              "Export Statement",
+              "Export Report",
               style: TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
               ),
             ),
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.redAccent,
+              backgroundColor: Colors.redAccent.shade700,
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8),
@@ -134,6 +143,9 @@ class DailySalesPage extends StatelessWidget {
     );
   }
 
+  // ==========================================================
+  // 2. METRICS ROW
+  // ==========================================================
   Widget _buildMetricsRow() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
@@ -151,19 +163,19 @@ class DailySalesPage extends StatelessWidget {
             const SizedBox(width: 16),
             Expanded(
               child: _metricCard(
-                "Total Collected",
+                "Cash Collected",
                 ctrl.paidAmount.value,
                 FontAwesomeIcons.handHoldingDollar,
-                Colors.green,
+                Colors.green.shade600,
               ),
             ),
             const SizedBox(width: 16),
             Expanded(
               child: _metricCard(
-                "Outstanding Debt",
+                "Outstanding Due",
                 ctrl.debtorPending.value,
-                FontAwesomeIcons.circleExclamation,
-                Colors.redAccent,
+                FontAwesomeIcons.fileInvoiceDollar,
+                Colors.orange.shade800,
               ),
             ),
             const SizedBox(width: 16),
@@ -192,13 +204,13 @@ class DailySalesPage extends StatelessWidget {
       child: Row(
         children: [
           Container(
-            height: 40,
-            width: 40,
+            height: 48,
+            width: 48,
             decoration: BoxDecoration(
               color: color.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(12),
             ),
-            child: Center(child: FaIcon(icon, size: 16, color: color)),
+            child: Center(child: FaIcon(icon, size: 20, color: color)),
           ),
           const SizedBox(width: 16),
           Expanded(
@@ -209,20 +221,21 @@ class DailySalesPage extends StatelessWidget {
                   title.toUpperCase(),
                   style: const TextStyle(
                     color: Color(0xFF6B7280),
-                    fontSize: 10,
+                    fontSize: 11,
                     fontWeight: FontWeight.bold,
                     letterSpacing: 0.5,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 6),
                 FittedBox(
                   fit: BoxFit.scaleDown,
                   child: Text(
                     "৳ ${value.toStringAsFixed(2)}",
-                    style: const TextStyle(
-                      fontSize: 18,
+                    style: TextStyle(
+                      fontSize: 22,
                       fontWeight: FontWeight.bold,
-                      color: Color(0xFF111827),
+                      color: darkSlate,
+                      fontFamily: 'RobotoMono', // Optional monospace look
                     ),
                   ),
                 ),
@@ -238,17 +251,24 @@ class DailySalesPage extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFF111827),
+        color: darkSlate,
         borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: darkSlate.withOpacity(0.3),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Row(
         children: [
           const CircleAvatar(
-            radius: 20,
+            radius: 24,
             backgroundColor: Colors.white10,
             child: FaIcon(
               FontAwesomeIcons.receipt,
-              size: 14,
+              size: 18,
               color: Colors.white,
             ),
           ),
@@ -257,7 +277,7 @@ class DailySalesPage extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                "TOTAL ORDERS",
+                "TOTAL TRANSACTIONS",
                 style: TextStyle(
                   color: Colors.white60,
                   fontSize: 10,
@@ -269,7 +289,7 @@ class DailySalesPage extends StatelessWidget {
               Text(
                 "${ctrl.salesList.length}",
                 style: const TextStyle(
-                  fontSize: 20,
+                  fontSize: 22,
                   fontWeight: FontWeight.bold,
                   color: Colors.white,
                 ),
@@ -281,10 +301,12 @@ class DailySalesPage extends StatelessWidget {
     );
   }
 
-  // --- 3. THE DATA TABLE ---
+  // ==========================================================
+  // 3. TABLE STRUCTURE
+  // ==========================================================
   Widget _buildTableHead() {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 24),
+      margin: const EdgeInsets.fromLTRB(24, 8, 24, 0),
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
       decoration: const BoxDecoration(
         color: darkSlate,
@@ -318,7 +340,7 @@ class DailySalesPage extends StatelessWidget {
           Expanded(
             flex: 3,
             child: Text(
-              "Payment Method",
+              "Payment Info",
               style: TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
@@ -347,18 +369,21 @@ class DailySalesPage extends StatelessWidget {
               textAlign: TextAlign.right,
             ),
           ),
-          SizedBox(width: 100), // Space for Actions
+          SizedBox(width: 100), // Actions Space
         ],
       ),
     );
   }
 
+  // ==========================================================
+  // 4. MAIN CONTENT & LIST
+  // ==========================================================
   Widget _buildMainContent(BuildContext context) {
     final filtered = _getFilteredList();
     if (filtered.isEmpty) return _buildEmptyState();
 
     return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
+      padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
       itemCount: filtered.length,
       itemBuilder: (context, index) {
         final sale = filtered[index];
@@ -369,20 +394,24 @@ class DailySalesPage extends StatelessWidget {
 
   Widget _buildSaleRow(BuildContext context, SaleModel sale) {
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: Colors.white,
-        border: Border(bottom: BorderSide(color: Color(0xFFF3F4F6))),
+        border: Border(
+          bottom: BorderSide(color: Colors.grey.shade200),
+          left: BorderSide(color: Colors.grey.shade200),
+          right: BorderSide(color: Colors.grey.shade200),
+        ),
       ),
       child: InkWell(
         onTap: () {
-          // Allow manual payment if due exists
+          // Quick Action: If pending > 0, open payment dialog
           if (sale.pending > 0) _showPaymentDialog(context, sale);
         },
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
           child: Row(
             children: [
-              // Customer Name & Invoice ID
+              // Customer & Invoice
               Expanded(
                 flex: 3,
                 child: Column(
@@ -393,25 +422,47 @@ class DailySalesPage extends StatelessWidget {
                       style: const TextStyle(
                         fontWeight: FontWeight.bold,
                         color: darkSlate,
+                        fontSize: 14,
                       ),
                     ),
-                    Text(
-                      "Inv: ${sale.transactionId ?? 'N/A'}",
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: activeAccent,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    Text(
-                      DateFormat('hh:mm a').format(sale.timestamp),
-                      style: const TextStyle(fontSize: 10, color: textMuted),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade100,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            sale.transactionId ?? 'N/A',
+                            style: const TextStyle(
+                              fontSize: 10,
+                              color: textMuted,
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          DateFormat('hh:mm a').format(sale.timestamp),
+                          style: const TextStyle(
+                            fontSize: 10,
+                            color: textMuted,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
               ),
+
               // Status Badge
               Expanded(flex: 2, child: _statusBadge(sale)),
+
               // Payment Method
               Expanded(
                 flex: 3,
@@ -426,7 +477,8 @@ class DailySalesPage extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              // Amount
+
+              // Total Amount
               Expanded(
                 flex: 2,
                 child: Text(
@@ -438,7 +490,8 @@ class DailySalesPage extends StatelessWidget {
                   ),
                 ),
               ),
-              // Pending
+
+              // Pending / Due
               Expanded(
                 flex: 2,
                 child: Text(
@@ -452,41 +505,32 @@ class DailySalesPage extends StatelessWidget {
                   ),
                 ),
               ),
-              // Actions (Refund & Delete)
+
+              // Actions
               SizedBox(
-                width: 140,
+                width: 100,
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    // Only show Refund if there is a transaction ID (meaning it's a real order)
-                    // AND they have paid something to refund.
+                    // PRINT
                     if (sale.transactionId != null)
                       IconButton(
                         tooltip: "Reprint Invoice",
                         icon: const Icon(
-                          Icons.print,
+                          Icons.print_outlined,
                           size: 20,
                           color: Colors.blueGrey,
                         ),
                         onPressed:
                             () => ctrl.reprintInvoice(sale.transactionId!),
                       ),
-                    if (sale.transactionId != null && sale.paid > 0)
-                      IconButton(
-                        tooltip: "Refund Sale",
-                        icon: const Icon(
-                          Icons.replay_circle_filled,
-                          size: 20,
-                          color: Colors.orange,
-                        ),
-                        onPressed: () => _showRefundDialog(context, sale),
-                      ),
+                    // DELETE
                     IconButton(
-                      tooltip: "Delete Record",
+                      tooltip: "Delete Daily Entry",
                       icon: const Icon(
                         Icons.delete_outline,
                         size: 20,
-                        color: Colors.black26,
+                        color: Colors.redAccent,
                       ),
                       onPressed: () => _confirmDelete(sale),
                     ),
@@ -500,21 +544,28 @@ class DailySalesPage extends StatelessWidget {
     );
   }
 
+  // ==========================================================
+  // 5. DIALOGS & HELPERS
+  // ==========================================================
+
+  // Updated: Includes Reference/Trx ID field to match future-proof controller
   void _showPaymentDialog(BuildContext context, SaleModel sale) {
     final amountC = TextEditingController(text: sale.pending.toString());
+    final refC = TextEditingController(); // New Reference Field
     final RxString method = "cash".obs;
 
     Get.dialog(
       Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: Container(
-          width: 400,
+          width: 420,
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                "Collect Payment",
+                "Collect Due Payment",
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
@@ -523,19 +574,25 @@ class DailySalesPage extends StatelessWidget {
                 style: const TextStyle(color: textMuted),
               ),
               const SizedBox(height: 24),
+
+              // Amount Field
               TextField(
                 controller: amountC,
                 keyboardType: TextInputType.number,
                 decoration: const InputDecoration(
-                  labelText: "Amount to Pay",
+                  labelText: "Amount Received",
                   border: OutlineInputBorder(),
+                  prefixText: "৳ ",
                 ),
               ),
               const SizedBox(height: 16),
+
+              // Method Dropdown
               Obx(
                 () => DropdownButtonFormField<String>(
                   value: method.value,
                   decoration: const InputDecoration(
+                    labelText: "Payment Method",
                     border: OutlineInputBorder(),
                   ),
                   items:
@@ -550,12 +607,28 @@ class DailySalesPage extends StatelessWidget {
                   onChanged: (v) => method.value = v!,
                 ),
               ),
+              const SizedBox(height: 16),
+
+              // Reference / Trx ID (Future Proofing)
+              TextField(
+                controller: refC,
+                decoration: const InputDecoration(
+                  labelText: "Transaction Ref / Note (Optional)",
+                  hintText: "e.g. Bkash Trx ID...",
+                  border: OutlineInputBorder(),
+                ),
+              ),
               const SizedBox(height: 24),
+
+              // Actions
               Row(
                 children: [
                   Expanded(
-                    child: TextButton(
+                    child: OutlinedButton(
                       onPressed: () => Get.back(),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                      ),
                       child: const Text("Cancel"),
                     ),
                   ),
@@ -563,19 +636,26 @@ class DailySalesPage extends StatelessWidget {
                   Expanded(
                     child: ElevatedButton(
                       onPressed: () async {
+                        final double amt = double.tryParse(amountC.text) ?? 0.0;
+                        if (amt <= 0) return;
+
+                        // Call controller with transactionId (ref)
                         await ctrl.applyDebtorPayment(
                           sale.name,
-                          double.parse(amountC.text),
-                          {"type": method.value},
+                          amt,
+                          {"type": method.value}, // Basic type
                           date: DateTime.now(),
+                          transactionId:
+                              refC.text.isEmpty ? null : refC.text, // Pass Ref
                         );
                         Get.back();
                       },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: activeAccent,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
                       ),
                       child: const Text(
-                        "Record Payment",
+                        "Confirm Payment",
                         style: TextStyle(color: Colors.white),
                       ),
                     ),
@@ -589,13 +669,17 @@ class DailySalesPage extends StatelessWidget {
     );
   }
 
+  // Updated Text to reflect safe delete
   void _confirmDelete(SaleModel sale) {
     Get.defaultDialog(
-      title: "Delete Transaction?",
-      middleText: "Remove entry for ${sale.name}?",
-      textConfirm: "Delete",
-      buttonColor: Colors.redAccent,
+      title: "Delete Daily Entry?",
+      titleStyle: const TextStyle(fontWeight: FontWeight.bold),
+      middleText:
+          "This will remove the transaction from the Daily Ledger only.\n\nThe Master Invoice will remain but be marked as 'Entry Removed'.",
+      textConfirm: "Delete Entry",
+      textCancel: "Cancel",
       confirmTextColor: Colors.white,
+      buttonColor: Colors.redAccent,
       onConfirm: () {
         ctrl.deleteSale(sale.id);
         Get.back();
@@ -608,18 +692,24 @@ class DailySalesPage extends StatelessWidget {
     return Align(
       alignment: Alignment.centerLeft,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
           color:
               isPaid
                   ? Colors.green.withOpacity(0.1)
                   : Colors.orange.withOpacity(0.1),
           borderRadius: BorderRadius.circular(4),
+          border: Border.all(
+            color:
+                isPaid
+                    ? Colors.green.withOpacity(0.2)
+                    : Colors.orange.withOpacity(0.2),
+          ),
         ),
         child: Text(
-          isPaid ? "PAID" : "PARTIAL / DUE",
+          isPaid ? "PAID" : "DUE",
           style: TextStyle(
-            color: isPaid ? Colors.green : Colors.orange,
+            color: isPaid ? Colors.green.shade700 : Colors.orange.shade800,
             fontSize: 10,
             fontWeight: FontWeight.bold,
           ),
@@ -631,120 +721,26 @@ class DailySalesPage extends StatelessWidget {
   List<SaleModel> _getFilteredList() {
     final q = ctrl.filterQuery.value.toLowerCase();
     if (q.isEmpty) return ctrl.salesList;
-    return ctrl.salesList
-        .where(
-          (s) =>
-              s.name.toLowerCase().contains(q) ||
-              (s.transactionId ?? '').toLowerCase().contains(
-                q,
-              ) || // Invoice Search
-              s.customerType.toLowerCase().contains(q),
-        )
-        .toList();
+    return ctrl.salesList.where((s) {
+      final name = s.name.toLowerCase();
+      final id = (s.transactionId ?? '').toLowerCase();
+      final type = s.customerType.toLowerCase();
+      return name.contains(q) || id.contains(q) || type.contains(q);
+    }).toList();
   }
 
   Widget _buildEmptyState() {
-    return const Center(
+    return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(FontAwesomeIcons.folderOpen, size: 50, color: Colors.black12),
+        children: const [
+          Icon(FontAwesomeIcons.folderOpen, size: 48, color: Colors.black12),
           SizedBox(height: 16),
-          Text("No sales records found", style: TextStyle(color: textMuted)),
-        ],
-      ),
-    );
-  }
-
-  void _showRefundDialog(BuildContext context, SaleModel sale) {
-    final refundC = TextEditingController();
-
-    Get.dialog(
-      Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 130, vertical: 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                "Process Refund",
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                "Refund for: ${sale.name}",
-                style: const TextStyle(color: Colors.grey),
-              ),
-              const SizedBox(height: 5),
-              Text(
-                "Max Refundable: ৳${sale.paid}",
-                style: const TextStyle(
-                  color: Colors.green,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 20),
-              TextField(
-                controller: refundC,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: "Enter Refund Amount",
-                  border: OutlineInputBorder(),
-                  suffixText: "BDT",
-                ),
-              ),
-              const SizedBox(height: 20),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () => Get.back(),
-                    child: const Text("Cancel"),
-                  ),
-                  const SizedBox(width: 10),
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.orange,
-                    ),
-                    onPressed: () {
-                      final amount = double.tryParse(refundC.text) ?? 0.0;
-                      if (amount <= 0 || amount > sale.paid) {
-                        Get.snackbar(
-                          "Invalid Amount",
-                          "Please enter a valid amount up to ৳${sale.paid}",
-                        );
-                        return;
-                      }
-
-                      // Ensure Transaction ID exists
-                      if (sale.transactionId == null) {
-                        Get.snackbar(
-                          "Error",
-                          "Cannot refund. Invoice ID is missing.",
-                        );
-                        return;
-                      }
-
-                      // CALL THE CONTROLLER (Updated Arguments)
-                      ctrl.processRefund(
-                        saleId: sale.id,
-                        invoiceId: sale.transactionId!,
-                        customerName: sale.name,
-                        refundAmount: amount,
-                      );
-                    },
-                    child: const Text(
-                      "Confirm Refund",
-                      style: TextStyle(color: Colors.white),
-                    ),
-                  ),
-                ],
-              ),
-            ],
+          Text(
+            "No sales records found",
+            style: TextStyle(color: textMuted, fontSize: 16),
           ),
-        ),
+        ],
       ),
     );
   }

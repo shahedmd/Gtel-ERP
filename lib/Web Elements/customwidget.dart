@@ -260,6 +260,11 @@ class SidebarMenu extends StatelessWidget {
                       title: "Sale Return",
                       isSubItem: true,
                     ),
+                    _NavTile(
+                      id: Routes.CONDITION,
+                      title: "Condition Sale",
+                      isSubItem: true,
+                    ),
                   ],
                 ),
 

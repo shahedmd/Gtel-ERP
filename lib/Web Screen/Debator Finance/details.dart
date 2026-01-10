@@ -403,7 +403,7 @@ class Debatordetails extends StatelessWidget {
                     size: 18,
                   ),
                   onPressed:
-                      () => _confirmDelete(doc.id, t['amount'].toString()),
+                      () => _confirmDelete(t['transactionId'], t['amount'].toString()),
                 ),
                 IconButton(
                   icon: const Icon(

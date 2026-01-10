@@ -65,7 +65,7 @@ class TransactionModel {
   factory TransactionModel.fromFirestore(DocumentSnapshot doc) {
     Map d = doc.data() as Map;
     return TransactionModel(
-      id: doc.id,
+      id: d['transactionId'],
       amount: (d['amount'] as num?)?.toDouble() ?? 0,
       type: d['type'] ?? 'credit',
       note: d['note'] ?? '',

@@ -117,7 +117,7 @@ class SaleReturnController extends GetxController {
     return total;
   }
 
-  // --- 4. PROCESS THE RETURN (STABLE & INVOICE REGEN READY) ---
+  // --- 4. PROCESS THE RETURN ---
   Future<void> processProductReturn() async {
     // 1. Validation
     if (totalRefundAmount <= 0) {
@@ -132,34 +132,20 @@ class SaleReturnController extends GetxController {
 
     isLoading.value = true;
     String invoiceId = toStr(orderData.value!['invoiceId']);
-    String saleId = "";
+    String debtorId = toStr(orderData.value!['debtorId']);
+
+    // START BATCH
+    WriteBatch batch = _db.batch();
 
     try {
-
       // 2. GET DOCUMENT REFERENCES
       DocumentReference orderRef = _db
           .collection('sales_orders')
           .doc(invoiceId);
-
-      // 3. READ DATA (Direct Read)
       DocumentSnapshot orderSnap = await orderRef.get();
       if (!orderSnap.exists) throw "Order Missing";
 
-      // Find Linked Daily Sale
-      try {
-        final dailyQuery =
-            await _db
-                .collection('daily_sales')
-                .where('transactionId', isEqualTo: invoiceId)
-                .limit(1)
-                .get();
-        if (dailyQuery.docs.isNotEmpty) {
-          saleId = dailyQuery.docs.first.id;
-        }
-      } catch (e) {
-      }
-
-      // 4. PREPARE DATA
+      // 3. PREPARE DATA
       Map<String, dynamic> currentOrder =
           orderSnap.data() as Map<String, dynamic>;
 
@@ -170,7 +156,7 @@ class SaleReturnController extends GetxController {
       List<dynamic> oldItemsList = currentOrder['items'] ?? [];
       List<Map<String, dynamic>> newItemsList = [];
 
-      // --- REBUILD ITEMS (This allows Invoice Regeneration) ---
+      // --- REBUILD ITEMS ---
       for (var rawItem in oldItemsList) {
         if (rawItem is! Map) continue;
 
@@ -185,7 +171,7 @@ class SaleReturnController extends GetxController {
         int retQty = returnQuantities[pid] ?? 0;
 
         if (retQty > 0) {
-          if (retQty > dbQty) throw "Qty Mismatch";
+          if (retQty > dbQty) throw "Qty Mismatch for $name";
 
           refundAmt += (retQty * sRate);
           costReduce += (retQty * cRate);
@@ -194,19 +180,16 @@ class SaleReturnController extends GetxController {
           dbQty = dbQty - retQty;
         }
 
-        // Create CLEAN Item Map
-        // The Invoice Generator will read this 'newItemsList' to print the PDF
         newItemsList.add({
           "productId": pid,
           "name": name,
           "model": model,
-          "qty": dbQty, // Updated Quantity
+          "qty": dbQty,
           "saleRate": sRate,
           "costRate": cRate,
-          "subtotal": toDouble(dbQty * sRate), // Updated Subtotal
+          "subtotal": toDouble(dbQty * sRate),
         });
       }
-
 
       // --- RECALCULATE FINANCIALS ---
       double oldGT = toDouble(currentOrder['grandTotal']);
@@ -230,21 +213,27 @@ class SaleReturnController extends GetxController {
           (actualRec - refundAmt) < 0 ? 0.0 : (actualRec - refundAmt);
       double newIn = (totalIn - refundAmt) < 0 ? 0.0 : (totalIn - refundAmt);
 
+      // Recalculate Due (Grand Total - Paid)
+      // If user paid 500 and bill is now 400, due is 0 (overpaid logic handled via changeReturned usually, but here we floor at 0)
+      // If user paid 0 and bill is now 400, due is 400.
+      double newDue = newGT - newRec;
+      if (newDue < 0) newDue = 0;
+
       Map<String, dynamic> newPayDetails = {
         "type": toStr(rawPay['type']),
         "cash": toDouble(rawPay['cash']),
         "bkash": toDouble(rawPay['bkash']),
         "nagad": toDouble(rawPay['nagad']),
         "bank": toDouble(rawPay['bank']),
-        "due": toDouble(rawPay['due']),
+        "due": newDue, // Updated Due
         "changeReturned": toDouble(rawPay['changeReturned']),
         "currency": "BDT",
         "actualReceived": newRec,
         "totalPaidInput": newIn,
       };
 
-      // 5. UPDATE FIRESTORE (DIRECT UPDATE)
-      await orderRef.update({
+      // 4. ADD TO BATCH: SALES ORDER
+      batch.update(orderRef, {
         'items': newItemsList,
         'grandTotal': newGT < 0 ? 0.0 : newGT,
         'profit': newP,
@@ -252,52 +241,78 @@ class SaleReturnController extends GetxController {
         'paymentDetails': newPayDetails,
         'status': 'returned_partial',
         'lastReturnDate': DateTime.now().toIso8601String(),
+        'subtotal': newGT < 0 ? 0.0 : newGT,
       });
 
-      // Update Daily Sales (FIXED MAP UPDATE)
-      if (saleId.isNotEmpty) {
-        DocumentReference dailyRef = _db.collection('daily_sales').doc(saleId);
-        DocumentSnapshot dailySnap = await dailyRef.get();
+      // 5. ADD TO BATCH: DAILY SALES
+      final dailyQuery =
+          await _db
+              .collection('daily_sales')
+              .where('transactionId', isEqualTo: invoiceId)
+              .limit(1)
+              .get();
 
-        if (dailySnap.exists) {
-          Map<String, dynamic> dData = dailySnap.data() as Map<String, dynamic>;
-          double dPaid = toDouble(dData['paid']);
-          double dAmt = toDouble(dData['amount']);
+      if (dailyQuery.docs.isNotEmpty) {
+        DocumentSnapshot dailySnap = dailyQuery.docs.first;
+        Map<String, dynamic> dData = dailySnap.data() as Map<String, dynamic>;
 
-          double newDPaid = (dPaid - refundAmt) < 0 ? 0.0 : (dPaid - refundAmt);
-          double newDAmt = (dAmt - refundAmt) < 0 ? 0.0 : (dAmt - refundAmt);
+        Map<String, dynamic> dPayMethod =
+            dData['paymentMethod'] is Map
+                ? Map<String, dynamic>.from(dData['paymentMethod'])
+                : {};
 
-          // Get Existing Payment Method Map to preserve Payment Type info
-          Map<String, dynamic> dPayMethod =
-              dData['paymentMethod'] is Map
-                  ? Map<String, dynamic>.from(dData['paymentMethod'])
-                  : {};
+        dPayMethod['actualReceived'] = newRec;
+        dPayMethod['cash'] = newIn;
+        dPayMethod['totalPaidInput'] = newIn;
 
-          // Update values inside the map
-          dPayMethod['actualReceived'] = newDPaid;
-          dPayMethod['totalPaidInput'] = newDPaid;
+        batch.update(dailySnap.reference, {
+          'paid': newRec,
+          'amount': newGT, // Amount becomes the new Grand Total
+          'paymentMethod': dPayMethod,
+        });
+      }
 
-          await dailyRef.update({
-            'paid': newDPaid,
-            'amount': newDAmt,
-            'paymentMethod': dPayMethod, // Update with merged map
+      // --- 6. ADD TO BATCH: DEBTOR TRANSACTION (FIXED) ---
+      if (debtorId.isNotEmpty) {
+        // We look for the document matching invoiceId
+        DocumentReference debtorTxRef = _db
+            .collection('debatorbody')
+            .doc(debtorId)
+            .collection('transactions')
+            .doc(invoiceId); // <--- FIXED: Target the specific transaction ID
+
+        DocumentSnapshot debTxSnap = await debtorTxRef.get();
+
+        if (debTxSnap.exists) {
+          // Logic from your editTransaction method:
+          // We update the amount to the New Grand Total.
+          // Since we calculated newGT and newPayDetails above, we simply apply them.
+
+          Map<String, dynamic> oldTxData =
+              debTxSnap.data() as Map<String, dynamic>;
+          String oldNote = toStr(oldTxData['note']);
+
+          batch.update(debtorTxRef, {
+            'amount': newGT, // Update total amount
+            'paymentMethod': newPayDetails, // Update payment info/due
+            'note': "$oldNote (Return: -$refundAmt)", // Optional: Update note
           });
         }
       }
 
+      // 7. COMMIT BATCH
+      await batch.commit();
 
-      // --- C. SUPABASE STOCK RESTORATION ---
+      // --- 8. STOCK RESTORATION ---
       for (var pid in returnQuantities.keys) {
         int qty = returnQuantities[pid]!;
         if (qty > 0) {
           String dest = returnDestinations[pid] ?? "Local";
-
           var itemInfo = orderItems.firstWhere(
             (e) => toStr(e['productId']) == pid,
             orElse: () => {},
           );
           double originalCost = toDouble(itemInfo['costRate']);
-
           int? parsedPid = int.tryParse(pid);
           if (parsedPid != null) {
             try {
@@ -309,16 +324,16 @@ class SaleReturnController extends GetxController {
                 localUnitPrice: originalCost,
               );
             } catch (e) {
+              print("Stock error: $e");
             }
           }
         }
       }
 
-
-      Get.back(); // Close Dialog
+      Get.back();
       Get.snackbar(
         "Success",
-        "Return Processed! Invoice Updated.",
+        "Return Processed & Debtor Updated!",
         backgroundColor: Colors.green,
         colorText: Colors.white,
         duration: const Duration(seconds: 4),

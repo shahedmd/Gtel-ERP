@@ -2,7 +2,6 @@
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-
 import '../Stock/model.dart';
 import 'salemodel.dart';
 
@@ -11,18 +10,19 @@ class LiveOrderSalesPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Inject the updated controller
     final controller = Get.put(LiveSalesController());
 
     return Scaffold(
       backgroundColor: const Color(0xFFF1F5F9), // Slate-100
       body: Row(
         children: [
-          // LEFT: Products (Same as before, simplified for brevity)
+          // LEFT: Products Section
           Expanded(flex: 6, child: _ProductTableSection(controller)),
 
           // RIGHT: Checkout Panel
           Container(
-            width: 500, // Slightly wider for better inputs
+            width: 500,
             decoration: BoxDecoration(
               color: Colors.white,
               boxShadow: [
@@ -35,13 +35,15 @@ class LiveOrderSalesPage extends StatelessWidget {
             ),
             child: Column(
               children: [
-                _buildHeader(),
+                _buildHeader(controller),
                 Expanded(
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.all(20),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        _buildModeToggle(controller),
+                        const SizedBox(height: 15),
                         _buildCustomerSection(controller),
                         const SizedBox(height: 20),
                         _buildCartSection(controller),
@@ -60,26 +62,94 @@ class LiveOrderSalesPage extends StatelessWidget {
     );
   }
 
-  Widget _buildHeader() {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 15),
-      decoration: const BoxDecoration(
-        color: Color(0xFF1E293B), // Slate-800
-      ),
-      child: const Center(
-        child: Text(
-          "CHECKOUT & BILLING",
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-            letterSpacing: 1.5,
+  // --- HEADER ---
+  Widget _buildHeader(LiveSalesController controller) {
+    return Obx(
+      () => Container(
+        padding: const EdgeInsets.symmetric(vertical: 15),
+        decoration: BoxDecoration(
+          color:
+              controller.isConditionSale.value
+                  ? const Color(0xFFC2410C) // Orange-700
+                  : const Color(0xFF1E293B), // Slate-800
+        ),
+        child: Center(
+          child: Text(
+            controller.isConditionSale.value
+                ? "CONDITION SALE & CHALLAN"
+                : "CHECKOUT & BILLING",
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1.5,
+            ),
           ),
         ),
       ),
     );
   }
 
-  // --- 1. CUSTOMER INFO (UPDATED) ---
+  // --- MODE TOGGLE ---
+  Widget _buildModeToggle(LiveSalesController controller) {
+    return Obx(
+      () => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color:
+              controller.isConditionSale.value
+                  ? Colors.orange.shade50
+                  : Colors.blue.shade50,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color:
+                controller.isConditionSale.value
+                    ? Colors.orange.shade200
+                    : Colors.blue.shade200,
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  controller.isConditionSale.value
+                      ? Icons.local_shipping
+                      : Icons.store,
+                  color:
+                      controller.isConditionSale.value
+                          ? Colors.orange.shade800
+                          : Colors.blue.shade800,
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  controller.isConditionSale.value
+                      ? "Condition / Courier Mode"
+                      : "Direct Sales Mode",
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color:
+                        controller.isConditionSale.value
+                            ? Colors.orange.shade900
+                            : Colors.blue.shade900,
+                  ),
+                ),
+              ],
+            ),
+            Switch(
+              value: controller.isConditionSale.value,
+              activeColor: Colors.deepOrange,
+              onChanged: (val) {
+                controller.isConditionSale.value = val;
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // --- 1. CUSTOMER & LOGISTICS INFO (UPDATED) ---
   Widget _buildCustomerSection(LiveSalesController controller) {
     return Container(
       padding: const EdgeInsets.all(15),
@@ -102,19 +172,21 @@ class LiveOrderSalesPage extends StatelessWidget {
           ),
           const SizedBox(height: 10),
 
-          // Customer Type Tabs
-          Obx(
-            () => Row(
+          // Customer Type Tabs (Hidden/Limited in Condition Mode)
+          Obx(() {
+            return Row(
               children:
                   ["Retailer", "Agent", "Debtor"].map((type) {
                     bool isSelected = controller.customerType.value == type;
+                    // Disable Debtor in Condition mode
+                    bool isDisabled =
+                        controller.isConditionSale.value && type == "Debtor";
+
+                    if (isDisabled) return const SizedBox.shrink();
+
                     return Expanded(
                       child: GestureDetector(
-                        onTap: () {
-                          controller.customerType.value = type;
-                          controller.cart.clear(); // Clear cart to reset prices
-                          controller.updatePaymentCalculations();
-                        },
+                        onTap: () => controller.customerType.value = type,
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 200),
                           margin: const EdgeInsets.only(right: 5),
@@ -141,18 +213,20 @@ class LiveOrderSalesPage extends StatelessWidget {
                       ),
                     );
                   }).toList(),
-            ),
-          ),
+            );
+          }),
           const SizedBox(height: 15),
 
           Obx(() {
-            if (controller.customerType.value == "Debtor") {
+            // DEBTOR SEARCH (Only for Direct Debtor Sales)
+            if (controller.customerType.value == "Debtor" &&
+                !controller.isConditionSale.value) {
               return Column(
                 children: [
                   TextField(
                     controller: controller.debtorPhoneSearch,
                     decoration: InputDecoration(
-                      labelText: "Search Debtor (Name or Phone)",
+                      labelText: "Search Debtor",
                       prefixIcon: const Icon(Icons.search, size: 18),
                       suffixIcon:
                           controller.debtorPhoneSearch.text.isNotEmpty
@@ -170,7 +244,6 @@ class LiveOrderSalesPage extends StatelessWidget {
                       isDense: true,
                     ),
                     onChanged: (v) {
-                      // Case-insensitive search for name OR phone
                       if (v.isEmpty) {
                         controller.selectedDebtor.value = null;
                         return;
@@ -185,46 +258,8 @@ class LiveOrderSalesPage extends StatelessWidget {
                     },
                   ),
                   const SizedBox(height: 8),
-
-                  // Debtor Result Display
                   if (controller.selectedDebtor.value != null)
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: Colors.green.shade50,
-                        border: Border.all(color: Colors.green.shade200),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(
-                            Icons.check_circle,
-                            color: Colors.green,
-                            size: 20,
-                          ),
-                          const SizedBox(width: 10),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                controller.selectedDebtor.value!.name,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 14,
-                                ),
-                              ),
-                              Text(
-                                controller.selectedDebtor.value!.phone,
-                                style: TextStyle(
-                                  color: Colors.grey[600],
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    )
+                    _buildSelectedDebtorCard(controller)
                   else if (controller.debtorPhoneSearch.text.isNotEmpty)
                     Container(
                       padding: const EdgeInsets.all(10),
@@ -238,7 +273,8 @@ class LiveOrderSalesPage extends StatelessWidget {
                 ],
               );
             }
-            // RETAILER FORM
+
+            // MANUAL ENTRY & LOGISTICS (Condition Fields Updated Here)
             return Column(
               children: [
                 Row(
@@ -266,9 +302,143 @@ class LiveOrderSalesPage extends StatelessWidget {
                   "Shop Name (Optional)",
                   Icons.store,
                 ),
+
+                // --- NEW: LOGISTICS FIELDS FOR CONDITION SALE ---
+                if (controller.isConditionSale.value) ...[
+                  const SizedBox(height: 15),
+                  const Divider(thickness: 1),
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      "Logistics & Courier Info",
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.deepOrange,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: _miniTextField(
+                          controller.addressC,
+                          "Delivery Address",
+                          Icons.location_on,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        flex: 1,
+                        child: _miniTextField(
+                          controller.challanC,
+                          "Challan No",
+                          Icons.receipt_long,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      // 1. COURIER DROPDOWN
+                      Expanded(
+                        flex: 2,
+                        child: Container(
+                          height: 40,
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.grey.shade400),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<String>(
+                              value: controller.selectedCourier.value,
+                              hint: const Text(
+                                "Select Courier",
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: Colors.black54,
+                                ),
+                              ),
+                              isExpanded: true,
+                              items:
+                                  controller.courierList
+                                      .map(
+                                        (c) => DropdownMenuItem(
+                                          value: c,
+                                          child: Text(
+                                            c,
+                                            style: const TextStyle(
+                                              fontSize: 13,
+                                            ),
+                                          ),
+                                        ),
+                                      )
+                                      .toList(),
+                              onChanged: (v) {
+                                controller.selectedCourier.value = v;
+                                // Optional: Trigger due calculation when selected
+                                if (v != null) {
+                                  controller.calculateCourierDueFor(v);
+                                }
+                              },
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      // 2. CARTONS INPUT
+                      Expanded(
+                        flex: 1,
+                        child: _miniTextField(
+                          controller.cartonsC,
+                          "Cartons",
+                          Icons.inventory_2,
+                          isNumber: true,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             );
           }),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSelectedDebtorCard(LiveSalesController controller) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.green.shade50,
+        border: Border.all(color: Colors.green.shade200),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.check_circle, color: Colors.green, size: 20),
+          const SizedBox(width: 10),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                controller.selectedDebtor.value!.name,
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+              ),
+              Text(
+                controller.selectedDebtor.value!.phone,
+                style: TextStyle(color: Colors.grey[600], fontSize: 12),
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -346,20 +516,15 @@ class LiveOrderSalesPage extends StatelessWidget {
                       CartQuantityEditor(
                         currentQty: item.quantity.value,
                         maxStock: item.product.stockQty,
-
-                        // Decrease Logic
                         onDecrease: () {
                           if (item.quantity.value > 1) {
                             item.quantity.value--;
                             controller.cart.refresh();
-                            controller
-                                .updatePaymentCalculations(); // Ensure this method is public in controller
+                            controller.updatePaymentCalculations();
                           } else {
                             controller.cart.removeAt(index);
                           }
                         },
-
-                        // Increase Logic
                         onIncrease: () {
                           if (item.quantity.value < item.product.stockQty) {
                             item.quantity.value++;
@@ -372,8 +537,6 @@ class LiveOrderSalesPage extends StatelessWidget {
                             );
                           }
                         },
-
-                        // Type Logic
                         onSubmit: (val) {
                           controller.updateQuantity(index, val);
                         },
@@ -397,7 +560,7 @@ class LiveOrderSalesPage extends StatelessWidget {
     );
   }
 
-  // --- 3. MULTI-PAYMENT SECTION (Professional Style) ---
+  // --- 3. PAYMENT SECTION (Updated Summary Logic) ---
   Widget _buildPaymentSection(LiveSalesController controller) {
     return Container(
       padding: const EdgeInsets.all(15),
@@ -411,16 +574,24 @@ class LiveOrderSalesPage extends StatelessWidget {
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: const [
-              Text(
-                "Payment Split",
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.blueGrey,
+            children: [
+              Obx(
+                () => Text(
+                  controller.isConditionSale.value
+                      ? "Advance Payment"
+                      : "Payment Split",
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.blueGrey,
+                  ),
                 ),
               ),
-              Icon(Icons.payments_outlined, size: 16, color: Colors.blueGrey),
+              const Icon(
+                Icons.payments_outlined,
+                size: 16,
+                color: Colors.blueGrey,
+              ),
             ],
           ),
           const SizedBox(height: 15),
@@ -452,32 +623,49 @@ class LiveOrderSalesPage extends StatelessWidget {
 
           // Payment Summary Bar
           Obx(() {
-            double due =
-                controller.grandTotal - controller.totalPaidInput.value;
-            bool isFullyPaid = due <= 0.5; // Tolerance
+            String label = "";
+            Color color = Colors.black;
+
+            if (controller.isConditionSale.value) {
+              // Condition Mode: Show Advance vs Courier Due
+              double due =
+                  controller.grandTotal - controller.totalPaidInput.value;
+              double collect = due > 0 ? due : 0;
+              label = "Courier Collect: ৳${collect.toStringAsFixed(0)}";
+              color = Colors.deepOrange;
+            } else {
+              // Normal Mode: Show Paid vs Due/Change
+              if (controller.totalPaidInput.value > controller.grandTotal) {
+                label =
+                    "Change: ৳${controller.changeReturn.value.toStringAsFixed(0)}";
+                color = Colors.green;
+              } else {
+                double due =
+                    controller.grandTotal - controller.totalPaidInput.value;
+                label = "Due: ৳${due.toStringAsFixed(0)}";
+                color = Colors.red;
+              }
+            }
 
             return Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color:
-                    isFullyPaid ? Colors.green.shade50 : Colors.orange.shade50,
+                color: Colors.grey.shade100,
                 borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey.shade300),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    "Total Paid: ৳${controller.totalPaidInput.value.toStringAsFixed(0)}",
+                    controller.isConditionSale.value
+                        ? "Total Advance: ৳${controller.totalPaidInput.value.toStringAsFixed(0)}"
+                        : "Total Paid: ৳${controller.totalPaidInput.value.toStringAsFixed(0)}",
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                   Text(
-                    isFullyPaid
-                        ? "Change: ৳${controller.changeReturn.value.toStringAsFixed(0)}"
-                        : "Due: ৳${due.toStringAsFixed(0)}",
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: isFullyPaid ? Colors.green : Colors.deepOrange,
-                    ),
+                    label,
+                    style: TextStyle(fontWeight: FontWeight.bold, color: color),
                   ),
                 ],
               ),
@@ -514,8 +702,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                   ),
                   onChanged: (v) {
                     controller.discountVal.value = double.tryParse(v) ?? 0.0;
-                    controller
-                        .updatePaymentCalculations(); // Recalculate change/due
+                    controller.updatePaymentCalculations();
                   },
                 ),
               ),
@@ -548,7 +735,10 @@ class LiveOrderSalesPage extends StatelessWidget {
             child: Obx(
               () => ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF2563EB),
+                  backgroundColor:
+                      controller.isConditionSale.value
+                          ? Colors.deepOrange
+                          : const Color(0xFF2563EB),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
@@ -561,9 +751,11 @@ class LiveOrderSalesPage extends StatelessWidget {
                 child:
                     controller.isProcessing.value
                         ? const CircularProgressIndicator(color: Colors.white)
-                        : const Text(
-                          "COMPLETE SALE & PRINT",
-                          style: TextStyle(
+                        : Text(
+                          controller.isConditionSale.value
+                              ? "PROCESS CONDITION & PRINT CHALLAN"
+                              : "COMPLETE SALE & PRINT",
+                          style: const TextStyle(
                             fontWeight: FontWeight.bold,
                             color: Colors.white,
                             letterSpacing: 1,
@@ -578,12 +770,18 @@ class LiveOrderSalesPage extends StatelessWidget {
   }
 
   // --- Helpers ---
-  Widget _miniTextField(TextEditingController c, String label, IconData icon) {
+  Widget _miniTextField(
+    TextEditingController c,
+    String label,
+    IconData icon, {
+    bool isNumber = false,
+  }) {
     return SizedBox(
       height: 40,
       child: TextField(
         controller: c,
         style: const TextStyle(fontSize: 13),
+        keyboardType: isNumber ? TextInputType.number : TextInputType.text,
         decoration: InputDecoration(
           labelText: label,
           prefixIcon: Icon(icon, size: 16, color: Colors.grey),
@@ -618,6 +816,10 @@ class LiveOrderSalesPage extends StatelessWidget {
   }
 }
 
+// --------------------------------------------------------
+// PRODUCTS TABLE & ROW (No Changes)
+// --------------------------------------------------------
+
 class _ProductTableSection extends StatelessWidget {
   final LiveSalesController controller;
   const _ProductTableSection(this.controller);
@@ -625,12 +827,7 @@ class _ProductTableSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        20,
-        20,
-        10,
-        20,
-      ), // Left padding slightly larger
+      padding: const EdgeInsets.fromLTRB(20, 20, 10, 20),
       child: Column(
         children: [
           _buildTopHeader(),
@@ -692,11 +889,9 @@ class _ProductTableSection extends StatelessWidget {
     );
   }
 
-  // --- TOP BAR: Title & Search ---
   Widget _buildTopHeader() {
     return Row(
       children: [
-        // Title Section
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -726,8 +921,6 @@ class _ProductTableSection extends StatelessWidget {
             ],
           ),
         ),
-
-        // Search Bar (Professional Style)
         Container(
           width: 380,
           height: 45,
@@ -745,8 +938,7 @@ class _ProductTableSection extends StatelessWidget {
           ),
           child: TextField(
             onChanged: (v) => controller.productCtrl.search(v),
-            textAlignVertical:
-                TextAlignVertical.center, // CRITICAL: Centers text vertically
+            textAlignVertical: TextAlignVertical.center,
             decoration: const InputDecoration(
               hintText: "Search by Model, Name or Code...",
               hintStyle: TextStyle(fontSize: 13, color: Colors.grey),
@@ -757,8 +949,7 @@ class _ProductTableSection extends StatelessWidget {
               ),
               border: InputBorder.none,
               isDense: true,
-              contentPadding:
-                  EdgeInsets.zero, // CRITICAL: Removes padding issues
+              contentPadding: EdgeInsets.zero,
             ),
           ),
         ),
@@ -766,12 +957,11 @@ class _ProductTableSection extends StatelessWidget {
     );
   }
 
-  // --- TABLE HEADERS ---
   Widget _buildTableHeader() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
       decoration: const BoxDecoration(
-        color: Color(0xFF1E293B), // Dark Slate Header
+        color: Color(0xFF1E293B),
         borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
       ),
       child: Row(
@@ -810,43 +1000,36 @@ class _ProductTableSection extends StatelessWidget {
               ),
             ),
           ),
-          SizedBox(width: 50), // Space for button
+          SizedBox(width: 50),
         ],
       ),
     );
   }
 }
 
-// --- INDIVIDUAL ROW ITEM ---
 class _ProductRow extends StatelessWidget {
   final Product product;
   final LiveSalesController controller;
-
   const _ProductRow({required this.product, required this.controller});
 
   @override
   Widget build(BuildContext context) {
-    // Determine Color based on stock
     Color stockColor = Colors.green;
     if (product.stockQty == 0) {
       stockColor = Colors.red;
-    }
-    if (product.stockQty < 5) {
+    } else if (product.stockQty < 5) {
       stockColor = Colors.orange;
     }
 
     return Material(
       color: Colors.white,
       child: InkWell(
-        onTap:
-            () =>
-                controller.addToCart(product), // Clicking row also adds to cart
+        onTap: () => controller.addToCart(product),
         hoverColor: Colors.blue.withOpacity(0.02),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
           child: Row(
             children: [
-              // 1. Name & Model
               Expanded(
                 flex: 3,
                 child: Column(
@@ -882,8 +1065,6 @@ class _ProductRow extends StatelessWidget {
                   ],
                 ),
               ),
-
-              // 2. Stock with Indicator
               Expanded(
                 flex: 1,
                 child: Row(
@@ -901,8 +1082,6 @@ class _ProductRow extends StatelessWidget {
                   ],
                 ),
               ),
-
-              // 3. Dynamic Price (Changes based on Retailer/Agent/Debtor selection)
               Expanded(
                 flex: 1,
                 child: Obx(() {
@@ -910,7 +1089,6 @@ class _ProductRow extends StatelessWidget {
                       (controller.customerType.value == "Retailer")
                           ? product.wholesale
                           : product.agent;
-
                   return Text(
                     "৳ ${price.toStringAsFixed(2)}",
                     textAlign: TextAlign.right,
@@ -922,8 +1100,6 @@ class _ProductRow extends StatelessWidget {
                   );
                 }),
               ),
-
-              // 4. Add Button
               const SizedBox(width: 15),
               SizedBox(
                 width: 35,
@@ -931,7 +1107,7 @@ class _ProductRow extends StatelessWidget {
                 child: ElevatedButton(
                   onPressed: () => controller.addToCart(product),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFEFF6FF), // Light Blue
+                    backgroundColor: const Color(0xFFEFF6FF),
                     elevation: 0,
                     padding: EdgeInsets.zero,
                     shape: RoundedRectangleBorder(
@@ -982,20 +1158,14 @@ class _CartQuantityEditorState extends State<CartQuantityEditor> {
     super.initState();
     _textCtrl = TextEditingController(text: widget.currentQty.toString());
     _focusNode = FocusNode();
-
-    // Listen to focus changes to submit when user clicks away
     _focusNode.addListener(() {
-      if (!_focusNode.hasFocus) {
-        widget.onSubmit(_textCtrl.text);
-      }
+      if (!_focusNode.hasFocus) widget.onSubmit(_textCtrl.text);
     });
   }
 
   @override
   void didUpdateWidget(covariant CartQuantityEditor oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Only update text if the value changed externally (e.g. via + / - buttons)
-    // and the user is NOT currently typing (doesn't have focus)
     if (widget.currentQty != oldWidget.currentQty && !_focusNode.hasFocus) {
       _textCtrl.text = widget.currentQty.toString();
     }
@@ -1012,7 +1182,6 @@ class _CartQuantityEditorState extends State<CartQuantityEditor> {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        // Decrease Button
         InkWell(
           onTap: widget.onDecrease,
           child: const Padding(
@@ -1024,8 +1193,6 @@ class _CartQuantityEditorState extends State<CartQuantityEditor> {
             ),
           ),
         ),
-
-        // Text Input
         SizedBox(
           width: 50,
           child: TextField(
@@ -1039,17 +1206,9 @@ class _CartQuantityEditorState extends State<CartQuantityEditor> {
               isDense: true,
               contentPadding: EdgeInsets.zero,
             ),
-            // Update when user presses Enter
-            onSubmitted: (val) {
-              widget.onSubmit(val);
-              // Keep focus to allow typing more or tabbing,
-              // or un-comment below to dismiss keyboard
-              // _focusNode.unfocus();
-            },
+            onSubmitted: (val) => widget.onSubmit(val),
           ),
         ),
-
-        // Increase Button
         InkWell(
           onTap: widget.onIncrease,
           child: const Padding(

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Stock/Service/servicepage.dart';
+import 'package:gtel_erp/Web%20Screen/Sales/Condition/conditionpage.dart';
 import '../Cash/page.dart';
 import '../Live order/liveorder.dart';
 import '../Profit&loss/page.dart';
@@ -80,6 +81,9 @@ class _AdminHomepageState extends State<AdminHomepage> {
                   }
                   if (settings.name == Routes.SHIPMENT) {
                     return GetPageRoute(page: () => ShipmentPage());
+                  }
+                  if (settings.name == Routes.CONDITION) {
+                    return GetPageRoute(page: () => ConditionSalesPage());
                   }
                   return GetPageRoute(
                     page: () => const Center(child: Text("Not Found")),

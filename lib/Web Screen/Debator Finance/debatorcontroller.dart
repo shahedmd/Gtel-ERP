@@ -181,6 +181,7 @@ class DebatorController extends GetxController {
     required String type,
     required DateTime date,
     Map<String, dynamic>? selectedPaymentMethod,
+    String? txid,
   }) async {
     gbIsLoading.value = true;
     try {
@@ -199,18 +200,24 @@ class DebatorController extends GetxController {
 
       if (typeLower == 'credit') {
         // PURCHASE (SALE)
-        final txRef = await db
-            .collection('debatorbody')
-            .doc(debtorId)
-            .collection('transactions')
-            .add({
-              'amount': amount,
-              'note': note,
-              'type': 'credit',
-              'date': Timestamp.fromDate(date),
-              'paymentMethod': null,
-              'createdAt': FieldValue.serverTimestamp(),
-            });
+        // 1. Create a reference to a new document (this auto-generates the ID)
+        final newTxRef =
+            db
+                .collection('debatorbody')
+                .doc(debtorId)
+                .collection('transactions')
+                .doc(txid);
+
+        // 2. Use .set() to save data including the generated ID
+        await newTxRef.set({
+          'transactionId': txid, // <--- Storing the ID here
+          'amount': amount,
+          'note': note,
+          'type': 'credit',
+          'date': Timestamp.fromDate(date),
+          'paymentMethod': null,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
 
         await daily.addSale(
           name: debtorName,
@@ -220,7 +227,7 @@ class DebatorController extends GetxController {
           date: date,
           paymentMethod: null,
           source: "credit",
-          transactionId: txRef.id,
+          transactionId: txid,
         );
       } else {
         // PAYMENT (COLLECTION)
@@ -231,7 +238,7 @@ class DebatorController extends GetxController {
           }
         }
 
-        final txRef = await db
+         await db
             .collection('debatorbody')
             .doc(debtorId)
             .collection('transactions')
@@ -242,6 +249,7 @@ class DebatorController extends GetxController {
               'date': Timestamp.fromDate(date),
               'paymentMethod': paymentMethod,
               'createdAt': FieldValue.serverTimestamp(),
+              'transactionId': txid,
             });
 
         // FIX: The daily controller now uses the 'date' provided to filter only THIS day
@@ -250,7 +258,7 @@ class DebatorController extends GetxController {
           amount,
           paymentMethod ?? {},
           date: date,
-          transactionId: txRef.id,
+          transactionId: txid,
         );
       }
 
@@ -276,7 +284,6 @@ class DebatorController extends GetxController {
       gbIsLoading.value = false;
     }
   }
-
 
   // ------------------------------------------------------------------
   // 5. DATA STREAMS
@@ -310,22 +317,38 @@ class DebatorController extends GetxController {
   // ------------------------------------------------------------------
   // 6. DELETE TRANSACTION (FIXED: NO GLOBAL RE-CALCULATION)
   // ------------------------------------------------------------------
-  Future<void> deleteTransaction(String debtorId, String transactionId) async {
+Future<void> deleteTransaction(String debtorId, String transactionId) async {
     final daily = Get.find<DailySalesController>();
     gbIsLoading.value = true;
 
     try {
+      // 1. Get references
       final txRef = db
           .collection('debatorbody')
           .doc(debtorId)
           .collection('transactions')
           .doc(transactionId);
+
+      final salesOrderRef = db
+          .collection('sales_orders')
+          .doc(transactionId); // Reference to Sales Order
+
+      // --- NEW: Reference to Debtor P&L ---
+      final pnlRef = db
+          .collection('debtorProfitLoss')
+          .doc(transactionId); 
+
       final txSnap = await txRef.get();
-      if (!txSnap.exists) return;
+      if (!txSnap.exists) {
+        gbIsLoading.value = false;
+        return;
+      }
 
       final debtorSnap = await db.collection('debatorbody').doc(debtorId).get();
       final debtorName = debtorSnap['name'];
 
+      // 2. Find associated Daily Sales
+      // Note: This queries all entries for this debtor to check for payments/sales
       final salesSnap =
           await db
               .collection('daily_sales')
@@ -334,11 +357,12 @@ class DebatorController extends GetxController {
 
       final WriteBatch batch = db.batch();
 
+      // 3. Handle Daily Sales updates
       for (final doc in salesSnap.docs) {
         final data = doc.data();
         final List applied = List.from(data['appliedDebits'] ?? []);
 
-        // Case A: This was the specific purchase entry
+        // Case A: This was the specific purchase entry linked to the transaction
         if (data['transactionId'] == transactionId) {
           batch.delete(doc.reference);
         }
@@ -353,19 +377,29 @@ class DebatorController extends GetxController {
           batch.update(doc.reference, {
             'paid': (currentPaid - usedAmt).clamp(0, double.infinity),
             'appliedDebits': applied,
-            'isPaid': false,
-            'paymentMethod': null,
+            // Only reset isPaid if it was fully paid before and now isn't
+            // 'isPaid': false, 
+            // 'paymentMethod': null, 
           });
         }
       }
 
-      await batch.commit();
-      await txRef.delete();
+      // 4. Delete the Sales Order
+      batch.delete(salesOrderRef);
 
-      // REMOVED _normalizeDebits here to stop the "Messed up" re-calculation of other days
+      // 5. Delete the Debtor Transaction
+      batch.delete(txRef);
+      
+      // 6. Delete the Debtor Profit Loss Doc (NEW)
+      // Even if this is a 'payment' transaction and the P&L doc doesn't exist, 
+      // Firestore batch.delete is safe to call.
+      batch.delete(pnlRef);
+
+      // 7. Commit all changes at once
+      await batch.commit();
 
       await daily.loadDailySales();
-      Get.snackbar("Deleted", "Transaction removed from daily records");
+      Get.snackbar("Deleted", "Transaction, Invoice & P&L removed successfully");
     } catch (e) {
       Get.snackbar("Deletion Error", e.toString());
     } finally {

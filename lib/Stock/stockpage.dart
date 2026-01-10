@@ -287,6 +287,14 @@ class ProductScreen extends StatelessWidget {
                                           ),
                                         ),
                                       ),
+                                      DataColumn(
+                                        label: Text(
+                                          'Brand',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
                                       // --- NEW COLUMNS ---
                                       DataColumn(
                                         label: Text(
@@ -413,6 +421,15 @@ class ProductScreen extends StatelessWidget {
                                               DataCell(
                                                 Text(
                                                   p.model,
+                                                  style: const TextStyle(
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                ),
+                                              ),
+
+                                              DataCell(
+                                                Text(
+                                                  p.brand,
                                                   style: const TextStyle(
                                                     fontWeight: FontWeight.w600,
                                                   ),

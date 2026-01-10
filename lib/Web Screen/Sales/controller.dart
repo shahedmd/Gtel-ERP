@@ -14,6 +14,7 @@ class DailySalesController extends GetxController {
   // Observables
   final Rx<DateTime> selectedDate = DateTime.now().obs;
   final RxList<SaleModel> salesList = <SaleModel>[].obs;
+  final RxList<SaleModel> filteredList = <SaleModel>[].obs; // For searching
   final RxBool isLoading = false.obs;
   final RxString filterQuery = "".obs;
 
@@ -27,6 +28,13 @@ class DailySalesController extends GetxController {
     super.onInit();
     loadDailySales();
     ever(selectedDate, (_) => loadDailySales());
+    // Auto-filter when query changes
+    ever(filterQuery, (_) => _applyFilter());
+  }
+
+  // --- HELPER: Fix Floating Point Math ---
+  double _round(double val) {
+    return double.parse(val.toStringAsFixed(2));
   }
 
   // 1. CHANGE DATE
@@ -57,12 +65,36 @@ class DailySalesController extends GetxController {
               .get();
 
       salesList.value =
-          snap.docs.map((doc) {
-            return SaleModel.fromFirestore(doc);
-          }).toList();
+          snap.docs.map((doc) => SaleModel.fromFirestore(doc)).toList();
+      _applyFilter(); // Apply search if any
       _computeTotals();
+    } on FirebaseException catch (e) {
+      if (e.code == 'failed-precondition') {
+        print("🔥 INDEX MISSING: ${e.message}");
+      }
+      Get.snackbar("Database Error", "Index missing or permission denied.");
+    } catch (e) {
+      Get.snackbar("Error", e.toString());
     } finally {
       isLoading.value = false;
+    }
+  }
+
+  // 2.1 APPLY SEARCH FILTER
+  void _applyFilter() {
+    if (filterQuery.value.isEmpty) {
+      filteredList.assignAll(salesList);
+    } else {
+      filteredList.assignAll(
+        salesList.where((sale) {
+          return sale.name.toLowerCase().contains(
+                filterQuery.value.toLowerCase(),
+              ) ||
+              (sale.transactionId ?? "").toLowerCase().contains(
+                filterQuery.value.toLowerCase(),
+              );
+        }).toList(),
+      );
     }
   }
 
@@ -81,25 +113,34 @@ class DailySalesController extends GetxController {
               .orderBy('timestamp', descending: true)
               .get();
 
-      double remainingToReverse = amount;
+      double remainingToReverse = _round(amount);
       final batch = _db.batch();
 
       for (var doc in salesSnap.docs) {
         if (remainingToReverse <= 0) break;
 
         final data = doc.data();
-        double currentPaid = (data['paid'] as num).toDouble();
+        double currentPaid = _round((data['paid'] as num).toDouble());
 
         if (currentPaid > 0) {
           double toSubtract =
               remainingToReverse >= currentPaid
                   ? currentPaid
                   : remainingToReverse;
+          toSubtract = _round(toSubtract);
+
           batch.update(doc.reference, {
-            'paid': currentPaid - toSubtract,
+            'paid': _round(currentPaid - toSubtract),
             'lastReversalAt': FieldValue.serverTimestamp(),
+            'reversalHistory': FieldValue.arrayUnion([
+              {
+                'amount': toSubtract,
+                'date': Timestamp.now(),
+                'reason': 'Manual Reversal',
+              },
+            ]),
           });
-          remainingToReverse -= toSubtract;
+          remainingToReverse = _round(remainingToReverse - toSubtract);
         }
       }
       await batch.commit();
@@ -109,12 +150,15 @@ class DailySalesController extends GetxController {
     }
   }
 
-  // 4. COMPUTE TOTALS
+  // 4. COMPUTE TOTALS (Using Filtered List)
   void _computeTotals() {
     double total = 0.0;
     double paid = 0.0;
     double pending = 0.0;
 
+    // We calculate totals based on the original list (actual daily totals),
+    // not the filtered list, unless you want totals to reflect search results.
+    // Usually, daily totals should remain constant.
     for (var s in salesList) {
       total += s.amount;
       paid += s.paid;
@@ -123,9 +167,9 @@ class DailySalesController extends GetxController {
       }
     }
 
-    totalSales.value = total;
-    paidAmount.value = paid;
-    debtorPending.value = pending;
+    totalSales.value = _round(total);
+    paidAmount.value = _round(paid);
+    debtorPending.value = _round(pending);
   }
 
   // 5. ADD SALE
@@ -143,13 +187,23 @@ class DailySalesController extends GetxController {
     try {
       final paidPart = (customerType == "debtor" && !isPaid) ? 0.0 : amount;
 
+      List<Map<String, dynamic>> initialHistory = [];
+      if (paidPart > 0 && paymentMethod != null) {
+        initialHistory.add({
+          ...paymentMethod,
+          'amount': paidPart,
+          'timestamp': Timestamp.fromDate(date),
+        });
+      }
+
       final entry = {
         "name": name,
-        "amount": amount,
-        "paid": paidPart,
+        "amount": _round(amount),
+        "paid": _round(paidPart),
         "customerType": customerType,
         "timestamp": Timestamp.fromDate(date),
         "paymentMethod": paymentMethod,
+        "paymentHistory": initialHistory,
         "createdAt": FieldValue.serverTimestamp(),
         "source": source,
         "appliedDebits": appliedDebits ?? [],
@@ -172,7 +226,9 @@ class DailySalesController extends GetxController {
     String? transactionId,
   }) async {
     try {
-      double remaining = paymentAmount;
+      double remaining = _round(paymentAmount);
+
+      // Query Setup
       final DateTime startOfDay = DateTime(date.year, date.month, date.day);
       final DateTime endOfDay = startOfDay.add(const Duration(days: 1));
 
@@ -186,7 +242,7 @@ class DailySalesController extends GetxController {
                 isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay),
               )
               .where("timestamp", isLessThan: Timestamp.fromDate(endOfDay))
-              .orderBy("timestamp", descending: false)
+              .orderBy("timestamp", descending: false) // FIFO: Pay oldest first
               .get();
 
       final batch = _db.batch();
@@ -197,7 +253,7 @@ class DailySalesController extends GetxController {
         final data = doc.data();
         final double amt = (data['amount'] as num).toDouble();
         final double alreadyPaid = (data['paid'] as num).toDouble();
-        final double due = amt - alreadyPaid;
+        final double due = _round(amt - alreadyPaid);
 
         if (due > 0) {
           final double toApply = remaining >= due ? due : remaining;
@@ -207,16 +263,25 @@ class DailySalesController extends GetxController {
             applied.add({"id": transactionId, "amount": toApply});
           }
 
+          final newHistoryEntry = {
+            ...paymentMethod,
+            'amount': toApply,
+            'paidAt': Timestamp.now(),
+            'appliedTo': doc.id,
+          };
+
           batch.update(doc.reference, {
-            "paid": alreadyPaid + toApply,
+            "paid": _round(alreadyPaid + toApply),
             "paymentMethod": paymentMethod,
             "lastPaymentAt": FieldValue.serverTimestamp(),
             "appliedDebits": applied,
+            "paymentHistory": FieldValue.arrayUnion([newHistoryEntry]),
           });
-          remaining -= toApply;
+          remaining = _round(remaining - toApply);
         }
       }
 
+      // Advance Payment (Excess)
       if (remaining > 0) {
         await addSale(
           name: debtorName,
@@ -243,49 +308,94 @@ class DailySalesController extends GetxController {
     }
   }
 
-  // 7. DELETE SALE & DELETE ENTIRE ORDER DOCUMENT
+  // 7. DELETE SALE (UPDATED: INCLUDES STOCK REVERSAL)
   Future<void> deleteSale(String saleId) async {
     isLoading.value = true;
     try {
-      DocumentSnapshot saleSnap =
-          await _db.collection("daily_sales").doc(saleId).get();
-
-      if (!saleSnap.exists) {
-        await loadDailySales();
-        return;
-      }
-
-      final saleData = saleSnap.data() as Map<String, dynamic>;
-      String? invoiceId = saleData['transactionId'] ?? saleData['invoiceId'];
-
       await _db.runTransaction((transaction) async {
-        // 1. Delete Daily Sales
-        transaction.delete(_db.collection("daily_sales").doc(saleId));
+        // 1. Read the Daily Sale Entry
+        DocumentReference dailyRef = _db.collection("daily_sales").doc(saleId);
+        DocumentSnapshot dailySnap = await transaction.get(dailyRef);
 
-        // 2. Delete Master Sales Order (P&L Data)
+        if (!dailySnap.exists) throw "Daily entry does not exist!";
+
+        final saleData = dailySnap.data() as Map<String, dynamic>;
+        String? invoiceId = saleData['transactionId'] ?? saleData['invoiceId'];
+
+        // 2. Logic for Invoice & Stock Reversal
         if (invoiceId != null && invoiceId.isNotEmpty) {
-          transaction.delete(_db.collection("sales_orders").doc(invoiceId));
+          DocumentReference invRef = _db
+              .collection("sales_orders")
+              .doc(invoiceId);
+          DocumentSnapshot invSnap = await transaction.get(invRef);
+
+          if (invSnap.exists) {
+            final invData = invSnap.data() as Map<String, dynamic>;
+            final String customerType =
+                (invData['customerType'] ?? 'general').toLowerCase();
+            final String? customerPhone = invData['customerPhone'];
+            final List<dynamic> items = invData['items'] ?? [];
+
+            // --- A. STOCK REVERSAL (CRITICAL UPDATE) ---
+            // Only reverse stock if the invoice is NOT already returned/deleted
+            if (invData['status'] != 'deleted') {
+              for (var item in items) {
+                // Assuming you have 'productId' or 'id' in your item map
+                // and a 'products' collection.
+                String? pId = item['productId'] ?? item['id'];
+                if (pId != null) {
+                  DocumentReference prodRef = _db
+                      .collection('products')
+                      .doc(pId);
+                  // We use FieldValue.increment to safely add back stock
+                  // Note: In a transaction, you ideally read first, but increment is safe for blindly adding back
+                  transaction.update(prodRef, {
+                    'stock': FieldValue.increment(item['qty'] ?? 0),
+                  });
+                }
+              }
+            }
+
+            // --- B. DELETE/UPDATE INVOICE ---
+            if (customerType.contains('debtor')) {
+              // Soft Delete for Debtor to keep ID in Ledger, but mark deleted
+              transaction.update(invRef, {
+                'daily_entry_status': 'deleted',
+                'status': 'deleted_entry',
+                'last_updated': FieldValue.serverTimestamp(),
+                'note': 'Daily sales entry manually removed',
+              });
+            } else {
+              // Hard Delete for General Customers
+              transaction.delete(invRef);
+
+              // C. Customer History Cleanup
+              if (customerPhone != null) {
+                DocumentReference custOrderRef = _db
+                    .collection('customers')
+                    .doc(customerPhone)
+                    .collection('orders')
+                    .doc(invoiceId);
+                transaction.delete(custOrderRef);
+              }
+            }
+          }
         }
 
-        // 3. Delete Customer's copy (Legacy)
-        // We skip searching every subcollection for performance,
-        // assuming Master Record is what matters for P&L.
+        // 3. Delete the Daily Sales Entry
+        transaction.delete(dailyRef);
       });
 
       await loadDailySales();
       Get.snackbar(
         "Deleted",
-        "Sale removed from Daily and P&L records.",
+        "Sale deleted & Stock returned to inventory.",
         backgroundColor: Colors.redAccent,
         colorText: Colors.white,
       );
     } catch (e) {
-      Get.snackbar(
-        "Error",
-        "Could not delete: $e",
-        backgroundColor: Colors.red,
-        colorText: Colors.white,
-      );
+      print("Delete Error: $e");
+      Get.snackbar("Error", "Could not delete: $e");
     } finally {
       isLoading.value = false;
     }
@@ -325,8 +435,7 @@ class DailySalesController extends GetxController {
       case "bank":
         String bName = (pm["bankName"] ?? "BANK").toString();
         String acc = (pm["accountNumber"] ?? "").toString();
-        if (acc.isNotEmpty) return "$bName\n($acc)";
-        return bName;
+        return acc.isNotEmpty ? "$bName\n($acc)" : bName;
       default:
         return type.toUpperCase();
     }
@@ -337,6 +446,12 @@ class DailySalesController extends GetxController {
     final pdf = pw.Document();
     final dateStr = DateFormat("dd MMMM yyyy").format(selectedDate.value);
     final primaryColor = PdfColors.blue900;
+
+    // Use filtered list for PDF if a filter is active, otherwise all sales
+    final listToPrint =
+        filteredList.isEmpty && filterQuery.value.isEmpty
+            ? salesList
+            : filteredList;
 
     pdf.addPage(
       pw.MultiPage(
@@ -365,6 +480,7 @@ class DailySalesController extends GetxController {
             ),
         build:
             (context) => [
+              // Summary Box
               pw.Container(
                 padding: const pw.EdgeInsets.all(15),
                 decoration: pw.BoxDecoration(
@@ -391,6 +507,7 @@ class DailySalesController extends GetxController {
                 ),
               ),
               pw.SizedBox(height: 20),
+              // Table
               pw.Table.fromTextArray(
                 headers: [
                   "Customer",
@@ -417,7 +534,7 @@ class DailySalesController extends GetxController {
                   5: pw.Alignment.centerRight,
                 },
                 data:
-                    salesList
+                    listToPrint
                         .map(
                           (s) => [
                             s.name,
@@ -458,107 +575,10 @@ class DailySalesController extends GetxController {
     );
   }
 
-  // ==========================================
-  // 10. PROCESS REFUND (UPDATED FOR P&L SYNC)
-  // ==========================================
-  Future<void> processRefund({
-    required String saleId,
-    required String invoiceId,
-    required String customerName,
-    required double refundAmount,
-  }) async {
-    isLoading.value = true;
-    try {
-      if (invoiceId.isEmpty) throw "Invalid Invoice ID, cannot process refund.";
-
-      // 1. Get Daily Sale Ref
-      final dailySaleRef = _db.collection('daily_sales').doc(saleId);
-
-      // 2. Get Master Order Ref (The P&L Source)
-      final masterOrderRef = _db.collection('sales_orders').doc(invoiceId);
-
-      await _db.runTransaction((transaction) async {
-        // A. Read Data
-        final saleSnap = await transaction.get(dailySaleRef);
-        final orderSnap = await transaction.get(masterOrderRef);
-
-        if (!saleSnap.exists) throw "Sales entry missing.";
-        // Order might be missing if it was created before the update
-        bool hasOrder = orderSnap.exists;
-
-        final saleData = saleSnap.data() as Map<String, dynamic>;
-
-        // B. Calculate Daily Sale Update
-        final double currentSaleAmount =
-            (saleData['amount'] as num?)?.toDouble() ?? 0.0;
-        final double currentSalePaid =
-            (saleData['paid'] as num?)?.toDouble() ?? 0.0;
-
-        if (refundAmount > currentSalePaid) {
-          throw "Refund (৳$refundAmount) cannot exceed paid amount (৳$currentSalePaid).";
-        }
-
-        // C. Update Daily Sales (Cash Flow)
-        transaction.update(dailySaleRef, {
-          'amount': currentSaleAmount - refundAmount,
-          'paid': currentSalePaid - refundAmount,
-          'lastRefundAt': FieldValue.serverTimestamp(),
-        });
-
-        // D. Update Master P&L Record (If exists)
-        if (hasOrder) {
-          final orderData = orderSnap.data() as Map<String, dynamic>;
-          final double currentProfit =
-              (orderData['profit'] as num?)?.toDouble() ?? 0.0;
-          final double currentGrandTotal =
-              (orderData['grandTotal'] as num?)?.toDouble() ?? 0.0;
-
-          // CRITICAL P&L UPDATE:
-          // Profit decreases by the refund amount directly
-          transaction.update(masterOrderRef, {
-            'profit': currentProfit - refundAmount,
-            'grandTotal': currentGrandTotal - refundAmount,
-            'status': 'refunded_partial',
-            // Add to refunds log
-            'refunds': FieldValue.arrayUnion([
-              {
-                'amount': refundAmount,
-                'date': Timestamp.now(),
-                'reason': 'Manual Refund from Daily Sales',
-              },
-            ]),
-          });
-        }
-      });
-
-      await loadDailySales();
-      if (Get.isDialogOpen ?? false) Get.back();
-
-      Get.snackbar(
-        "Refund Successful",
-        "Refunded ৳$refundAmount. P&L updated.",
-        backgroundColor: Colors.green,
-        colorText: Colors.white,
-        duration: const Duration(seconds: 4),
-      );
-    } catch (e) {
-      Get.snackbar(
-        "Refund Failed",
-        e.toString(),
-        backgroundColor: Colors.red,
-        colorText: Colors.white,
-      );
-    } finally {
-      isLoading.value = false;
-    }
-  }
-
-  // --- RE-PRINT INDIVIDUAL INVOICE (UPDATED) ---
+  // 10. REPRINT INVOICE (With Safe Parsing)
   Future<void> reprintInvoice(String invoiceId) async {
     isLoading.value = true;
     try {
-      // 1. Fetch the UP-TO-DATE Order from sales_orders
-      // We do this instead of using local data to ensure we get the "Returned" version
       DocumentSnapshot doc =
           await _db.collection('sales_orders').doc(invoiceId).get();
 
@@ -571,9 +591,9 @@ class DailySalesController extends GetxController {
       List<dynamic> items = data['items'] ?? [];
       Map<String, dynamic> payMap = data['paymentDetails'] ?? {};
 
-      // 2. Generate PDF
-      // We reuse the exact same PDF logic you already have in LiveSalesController
-      // or we build a quick one here.
+      // SAFE PARSING HELPERS
+      double getDouble(dynamic val) => double.tryParse(val.toString()) ?? 0.0;
+
       final pdf = pw.Document();
       final boldFont = await PdfGoogleFonts.nunitoBold();
       final regularFont = await PdfGoogleFonts.nunitoRegular();
@@ -611,7 +631,6 @@ class DailySalesController extends GetxController {
                     ],
                   ),
                 ),
-
                 pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
@@ -648,8 +667,6 @@ class DailySalesController extends GetxController {
                   ],
                 ),
                 pw.SizedBox(height: 20),
-
-                // ITEMS TABLE
                 pw.TableHelper.fromTextArray(
                   border: pw.TableBorder.all(color: PdfColors.grey300),
                   headerStyle: pw.TextStyle(
@@ -666,22 +683,14 @@ class DailySalesController extends GetxController {
                           .map(
                             (e) => [
                               e['name'],
-                              double.parse(
-                                e['saleRate'].toString(),
-                              ).toStringAsFixed(2),
-                              e['qty']
-                                  .toString(), // This will show the NEW reduced Qty
-                              double.parse(
-                                e['subtotal'].toString(),
-                              ).toStringAsFixed(2),
+                              getDouble(e['saleRate']).toStringAsFixed(2),
+                              e['qty'].toString(),
+                              getDouble(e['subtotal']).toStringAsFixed(2),
                             ],
                           )
                           .toList(),
                 ),
-
                 pw.SizedBox(height: 10),
-
-                // TOTALS
                 pw.Align(
                   alignment: pw.Alignment.centerRight,
                   child: pw.Container(
@@ -698,7 +707,7 @@ class DailySalesController extends GetxController {
                               style: pw.TextStyle(font: boldFont, fontSize: 16),
                             ),
                             pw.Text(
-                              "Tk ${double.parse(data['grandTotal'].toString()).toStringAsFixed(2)}",
+                              "Tk ${getDouble(data['grandTotal']).toStringAsFixed(2)}",
                               style: pw.TextStyle(font: boldFont, fontSize: 16),
                             ),
                           ],
@@ -712,7 +721,7 @@ class DailySalesController extends GetxController {
                               style: pw.TextStyle(font: regularFont),
                             ),
                             pw.Text(
-                              "Tk ${double.parse(payMap['actualReceived'].toString()).toStringAsFixed(2)}",
+                              "Tk ${getDouble(payMap['actualReceived']).toStringAsFixed(2)}",
                               style: pw.TextStyle(font: regularFont),
                             ),
                           ],
@@ -726,7 +735,6 @@ class DailySalesController extends GetxController {
           },
         ),
       );
-
       await Printing.layoutPdf(onLayout: (f) => pdf.save());
     } catch (e) {
       Get.snackbar("Error", "Could not reprint: $e");
