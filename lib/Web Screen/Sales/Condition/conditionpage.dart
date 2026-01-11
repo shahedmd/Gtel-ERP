@@ -272,8 +272,9 @@ class ConditionSalesPage extends StatelessWidget {
   // ==============================================================================
   Widget _buildDataTable(ConditionSalesController ctrl, BuildContext context) {
     return Obx(() {
-      if (ctrl.isLoading.value && ctrl.filteredOrders.isEmpty)
+      if (ctrl.isLoading.value && ctrl.filteredOrders.isEmpty) {
         return const Center(child: CircularProgressIndicator());
+      }
       if (ctrl.filteredOrders.isEmpty) {
         return Center(
           child: Column(
@@ -840,8 +841,9 @@ class ConditionSalesPage extends StatelessWidget {
                               );
                               int retQty = ctrl.returnQuantities[pid] ?? 0;
 
-                              if (maxQty <= 0)
+                              if (maxQty <= 0) {
                                 return const SizedBox.shrink(); // Hide previously fully returned
+                              }
 
                               return Row(
                                 children: [

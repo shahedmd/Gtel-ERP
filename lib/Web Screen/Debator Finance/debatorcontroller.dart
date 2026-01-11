@@ -1,4 +1,4 @@
-// ignore_for_file: deprecated_member_use, empty_catches
+// ignore_for_file: deprecated_member_use, empty_catches, avoid_print
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -7,12 +7,12 @@ import 'dart:typed_data';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:intl/intl.dart';
 import '../Sales/controller.dart';
-import 'model.dart';
+import 'model.dart'; // Ensure TransactionModel is defined here
 
 class DebatorController extends GetxController {
   final FirebaseFirestore db = FirebaseFirestore.instance;
 
-  // Observables
+  // --- OBSERVABLES (DEBTOR LIST) ---
   var bodies = <DebtorModel>[].obs;
   var filteredBodies = <DebtorModel>[].obs;
 
@@ -20,30 +20,80 @@ class DebatorController extends GetxController {
   RxBool gbIsLoading = false.obs; // Global Transaction loading
   RxBool isAddingBody = false.obs;
 
+  // --- PAGINATION STATE (DEBTOR LIST) ---
+  final int _limit = 20;
+  DocumentSnapshot? _lastDocument;
+  final RxBool hasMore = true.obs;
+  final RxBool isMoreLoading = false.obs;
+
+  // --- OBSERVABLES (TRANSACTION PAGINATION - NEW UPDATE) ---
+  // Stores the list of transactions for the currently viewed debtor
+  final RxList<TransactionModel> currentTransactions = <TransactionModel>[].obs;
+  DocumentSnapshot? _lastTxDoc; // Cursor for transactions
+  final RxBool isTxLoading = false.obs;
+  final RxBool hasMoreTx = true.obs;
+  final int _txLimit = 20; // Load 20 transactions at a time
+
   @override
   void onInit() {
     super.onInit();
-    loadBodies();
+    loadBodies(); // Initial load
   }
 
   // ------------------------------------------------------------------
-  // 1. DATA LOADING & SEARCH
+  // 1. DATA LOADING & SEARCH (DEBTORS)
   // ------------------------------------------------------------------
-  Future<void> loadBodies() async {
-    isBodiesLoading.value = true;
+
+  Future<void> loadBodies({bool loadMore = false}) async {
+    if (loadMore) {
+      if (isMoreLoading.value || !hasMore.value) return;
+      isMoreLoading.value = true;
+    } else {
+      isBodiesLoading.value = true;
+      _lastDocument = null;
+      hasMore.value = true;
+    }
+
     try {
-      final snap =
-          await db
-              .collection('debatorbody')
-              .orderBy('createdAt', descending: true)
-              .get();
-      bodies.value =
-          snap.docs.map((d) => DebtorModel.fromFirestore(d)).toList();
-      filteredBodies.assignAll(bodies);
+      Query query = db
+          .collection('debatorbody')
+          .orderBy('createdAt', descending: true)
+          .limit(_limit);
+
+      if (loadMore && _lastDocument != null) {
+        query = query.startAfterDocument(_lastDocument!);
+      }
+
+      final snap = await query.get();
+
+      if (snap.docs.length < _limit) {
+        hasMore.value = false;
+      }
+
+      if (snap.docs.isNotEmpty) {
+        _lastDocument = snap.docs.last;
+        List<DebtorModel> newBodies =
+            snap.docs.map((d) => DebtorModel.fromFirestore(d)).toList();
+
+        if (loadMore) {
+          bodies.addAll(newBodies);
+        } else {
+          bodies.value = newBodies;
+        }
+      } else {
+        if (!loadMore) bodies.clear();
+      }
+
+      if (filteredBodies.isEmpty || !loadMore) {
+        filteredBodies.assignAll(bodies);
+      } else {
+        filteredBodies.assignAll(bodies);
+      }
     } catch (e) {
       Get.snackbar("Error", "Could not load debtors: $e");
     } finally {
       isBodiesLoading.value = false;
+      isMoreLoading.value = false;
     }
   }
 
@@ -67,7 +117,71 @@ class DebatorController extends GetxController {
   }
 
   // ------------------------------------------------------------------
-  // 2. ADD & EDIT DEBTOR INFORMATION
+  // 2. TRANSACTION PAGINATION LOGIC (NEW FUTURE PROOF UPDATE)
+  // ------------------------------------------------------------------
+
+  /// Resets state before opening a new debtor details page
+  void clearTransactionState() {
+    currentTransactions.clear();
+    _lastTxDoc = null;
+    hasMoreTx.value = true;
+    isTxLoading.value = false;
+  }
+
+  /// Loads transactions for a specific debtor in chunks
+  Future<void> loadDebtorTransactions(
+    String debtorId, {
+    bool loadMore = false,
+  }) async {
+    // Prevent duplicate calls
+    if (loadMore) {
+      if (isTxLoading.value || !hasMoreTx.value) return;
+    } else {
+      clearTransactionState();
+      isTxLoading.value = true;
+    }
+
+    try {
+      Query query = db
+          .collection('debatorbody')
+          .doc(debtorId)
+          .collection('transactions')
+          .orderBy('date', descending: true)
+          .limit(_txLimit);
+
+      // Pagination cursor logic
+      if (loadMore && _lastTxDoc != null) {
+        query = query.startAfterDocument(_lastTxDoc!);
+      }
+
+      final snap = await query.get();
+
+      // Check if end reached
+      if (snap.docs.length < _txLimit) {
+        hasMoreTx.value = false;
+      }
+
+      if (snap.docs.isNotEmpty) {
+        _lastTxDoc = snap.docs.last;
+
+        final newTx =
+            snap.docs.map((d) => TransactionModel.fromFirestore(d)).toList();
+
+        if (loadMore) {
+          currentTransactions.addAll(newTx);
+        } else {
+          currentTransactions.value = newTx;
+        }
+      }
+    } catch (e) {
+      print("Error loading transactions: $e");
+    } finally {
+      isTxLoading.value = false;
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // 3. ADD & EDIT DEBTOR INFORMATION
   // ------------------------------------------------------------------
   Future<void> addBody({
     required String name,
@@ -80,15 +194,16 @@ class DebatorController extends GetxController {
     isAddingBody.value = true;
     try {
       await db.collection('debatorbody').add({
-        "name": name,
+        "name": name.trim(),
         "des": des,
         "nid": nid,
-        "phone": phone,
+        "phone": phone.trim(),
         "address": address,
         "payments": payments,
         "createdAt": FieldValue.serverTimestamp(),
       });
-      await loadBodies();
+
+      await loadBodies(loadMore: false);
 
       if (Get.isDialogOpen ?? false) {
         Get.back();
@@ -129,10 +244,10 @@ class DebatorController extends GetxController {
       DocumentReference debtorRef = db.collection('debatorbody').doc(id);
 
       batch.update(debtorRef, {
-        "name": newName,
+        "name": newName.trim(),
         "des": des,
         "nid": nid,
-        "phone": phone,
+        "phone": phone.trim(),
         "address": address,
         "payments": payments,
       });
@@ -145,12 +260,12 @@ class DebatorController extends GetxController {
                 .where('name', isEqualTo: oldName)
                 .get();
         for (var doc in salesSnap.docs) {
-          batch.update(doc.reference, {"name": newName});
+          batch.update(doc.reference, {"name": newName.trim()});
         }
       }
 
       await batch.commit();
-      await loadBodies();
+      await loadBodies(loadMore: false);
 
       Get.back(closeOverlays: true);
       Get.snackbar(
@@ -172,7 +287,7 @@ class DebatorController extends GetxController {
   }
 
   // ------------------------------------------------------------------
-  // 3. TRANSACTION LOGIC (SALES LINKED)
+  // 4. TRANSACTION LOGIC (SALES LINKED & PROTECTED)
   // ------------------------------------------------------------------
   Future<void> addTransaction({
     required String debtorId,
@@ -200,17 +315,39 @@ class DebatorController extends GetxController {
 
       if (typeLower == 'credit') {
         // PURCHASE (SALE)
-        // 1. Create a reference to a new document (this auto-generates the ID)
-        final newTxRef =
-            db
-                .collection('debatorbody')
-                .doc(debtorId)
-                .collection('transactions')
-                .doc(txid);
+        if (txid != null) {
+          final existingTx =
+              await db
+                  .collection('debatorbody')
+                  .doc(debtorId)
+                  .collection('transactions')
+                  .doc(txid)
+                  .get();
 
-        // 2. Use .set() to save data including the generated ID
+          if (existingTx.exists) {
+            throw "Transaction ID already exists. Please refresh.";
+          }
+        }
+
+        DocumentReference newTxRef;
+        if (txid != null && txid.isNotEmpty) {
+          newTxRef = db
+              .collection('debatorbody')
+              .doc(debtorId)
+              .collection('transactions')
+              .doc(txid);
+        } else {
+          newTxRef =
+              db
+                  .collection('debatorbody')
+                  .doc(debtorId)
+                  .collection('transactions')
+                  .doc();
+          txid = newTxRef.id;
+        }
+
         await newTxRef.set({
-          'transactionId': txid, // <--- Storing the ID here
+          'transactionId': txid,
           'amount': amount,
           'note': note,
           'type': 'credit',
@@ -238,7 +375,7 @@ class DebatorController extends GetxController {
           }
         }
 
-         await db
+        await db
             .collection('debatorbody')
             .doc(debtorId)
             .collection('transactions')
@@ -252,7 +389,6 @@ class DebatorController extends GetxController {
               'transactionId': txid,
             });
 
-        // FIX: The daily controller now uses the 'date' provided to filter only THIS day
         await daily.applyDebtorPayment(
           debtorName,
           amount,
@@ -261,6 +397,10 @@ class DebatorController extends GetxController {
           transactionId: txid,
         );
       }
+
+      // Update the local transaction list if we are currently viewing this debtor
+      // This makes the UI update instantly without full reload
+      loadDebtorTransactions(debtorId);
 
       if (Get.isDialogOpen ?? false) {
         Get.back();
@@ -286,7 +426,7 @@ class DebatorController extends GetxController {
   }
 
   // ------------------------------------------------------------------
-  // 5. DATA STREAMS
+  // 5. DATA STREAMS (KEPT FOR LEGACY/SUMMARY)
   // ------------------------------------------------------------------
   Stream<QuerySnapshot> loadTransactions(String id) {
     return db
@@ -315,28 +455,23 @@ class DebatorController extends GetxController {
   }
 
   // ------------------------------------------------------------------
-  // 6. DELETE TRANSACTION (FIXED: NO GLOBAL RE-CALCULATION)
+  // 6. DELETE TRANSACTION
   // ------------------------------------------------------------------
-Future<void> deleteTransaction(String debtorId, String transactionId) async {
+  Future<void> deleteTransaction(String debtorId, String transactionId) async {
     final daily = Get.find<DailySalesController>();
     gbIsLoading.value = true;
 
     try {
-      // 1. Get references
       final txRef = db
           .collection('debatorbody')
           .doc(debtorId)
           .collection('transactions')
           .doc(transactionId);
 
-      final salesOrderRef = db
-          .collection('sales_orders')
-          .doc(transactionId); // Reference to Sales Order
-
-      // --- NEW: Reference to Debtor P&L ---
+      final salesOrderRef = db.collection('sales_orders').doc(transactionId);
       final pnlRef = db
           .collection('debtor_transaction_history')
-          .doc(transactionId); 
+          .doc(transactionId);
 
       final txSnap = await txRef.get();
       if (!txSnap.exists) {
@@ -345,10 +480,8 @@ Future<void> deleteTransaction(String debtorId, String transactionId) async {
       }
 
       final debtorSnap = await db.collection('debatorbody').doc(debtorId).get();
-      final debtorName = debtorSnap['name'];
+      final debtorName = debtorSnap.data()?['name'] ?? "";
 
-      // 2. Find associated Daily Sales
-      // Note: This queries all entries for this debtor to check for payments/sales
       final salesSnap =
           await db
               .collection('daily_sales')
@@ -357,17 +490,13 @@ Future<void> deleteTransaction(String debtorId, String transactionId) async {
 
       final WriteBatch batch = db.batch();
 
-      // 3. Handle Daily Sales updates
       for (final doc in salesSnap.docs) {
         final data = doc.data();
         final List applied = List.from(data['appliedDebits'] ?? []);
 
-        // Case A: This was the specific purchase entry linked to the transaction
         if (data['transactionId'] == transactionId) {
           batch.delete(doc.reference);
-        }
-        // Case B: This was a payment that was applied to a sale
-        else if (applied.any((e) => e['id'] == transactionId)) {
+        } else if (applied.any((e) => e['id'] == transactionId)) {
           final entry = applied.firstWhere((e) => e['id'] == transactionId);
           final double usedAmt = (entry['amount'] as num?)?.toDouble() ?? 0;
           final double currentPaid = (data['paid'] as num?)?.toDouble() ?? 0;
@@ -377,29 +506,24 @@ Future<void> deleteTransaction(String debtorId, String transactionId) async {
           batch.update(doc.reference, {
             'paid': (currentPaid - usedAmt).clamp(0, double.infinity),
             'appliedDebits': applied,
-            // Only reset isPaid if it was fully paid before and now isn't
-            // 'isPaid': false, 
-            // 'paymentMethod': null, 
           });
         }
       }
 
-      // 4. Delete the Sales Order
       batch.delete(salesOrderRef);
-
-      // 5. Delete the Debtor Transaction
       batch.delete(txRef);
-      
-      // 6. Delete the Debtor Profit Loss Doc (NEW)
-      // Even if this is a 'payment' transaction and the P&L doc doesn't exist, 
-      // Firestore batch.delete is safe to call.
       batch.delete(pnlRef);
 
-      // 7. Commit all changes at once
       await batch.commit();
 
       await daily.loadDailySales();
-      Get.snackbar("Deleted", "Transaction, Invoice & P&L removed successfully");
+      // Update local paginated list
+      loadDebtorTransactions(debtorId);
+
+      Get.snackbar(
+        "Deleted",
+        "Transaction, Invoice & P&L removed successfully",
+      );
     } catch (e) {
       Get.snackbar("Deletion Error", e.toString());
     } finally {
@@ -408,7 +532,7 @@ Future<void> deleteTransaction(String debtorId, String transactionId) async {
   }
 
   // ------------------------------------------------------------------
-  // 7. PDF GENERATOR & HELPERS
+  // 7. PDF GENERATOR
   // ------------------------------------------------------------------
   String formatPaymentMethod(Map<String, dynamic>? method) {
     if (method == null) return "-";
@@ -525,7 +649,7 @@ Future<void> deleteTransaction(String debtorId, String transactionId) async {
   }
 
   // ------------------------------------------------------------------
-  // 8. EDIT TRANSACTION (SALES SYNC)
+  // 8. EDIT TRANSACTION
   // ------------------------------------------------------------------
   Future<void> editTransaction({
     required String debtorId,
@@ -545,6 +669,7 @@ Future<void> deleteTransaction(String debtorId, String transactionId) async {
           .doc(debtorId)
           .collection('transactions')
           .doc(transactionId);
+
       final WriteBatch batch = db.batch();
 
       batch.update(txRef, {
@@ -573,11 +698,25 @@ Future<void> deleteTransaction(String debtorId, String transactionId) async {
         }
       }
 
+      if (newType == 'credit') {
+        final analyticsRef = db
+            .collection('debtor_transaction_history')
+            .doc(transactionId);
+
+        batch.set(analyticsRef, {
+          'saleAmount': newAmount,
+        }, SetOptions(merge: true));
+      }
+
       await batch.commit();
+
+      // Update local paginated list
+      loadDebtorTransactions(debtorId);
+
       Get.back(closeOverlays: true);
       Get.snackbar(
         "Success",
-        "Transaction updated",
+        "Transaction & Records updated",
         backgroundColor: const Color(0xFF3B82F6),
         colorText: Colors.white,
       );

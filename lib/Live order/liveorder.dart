@@ -1060,8 +1060,9 @@ class _ProductTableSection extends StatelessWidget {
                   _buildTableHeader(),
                   Expanded(
                     child: Obx(() {
-                      if (controller.productCtrl.isLoading.value)
+                      if (controller.productCtrl.isLoading.value) {
                         return const Center(child: CircularProgressIndicator());
+                      }
                       if (controller.productCtrl.allProducts.isEmpty) {
                         return Center(
                           child: Column(

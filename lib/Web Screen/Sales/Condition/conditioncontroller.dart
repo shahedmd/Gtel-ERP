@@ -6,8 +6,6 @@ import 'package:gtel_erp/Stock/controller.dart';
 import 'package:gtel_erp/Web%20Screen/Sales/Condition/cmodel.dart';
 import 'package:gtel_erp/Web%20Screen/Sales/controller.dart';
 
-
-
 class ConditionSalesController extends GetxController {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
@@ -20,6 +18,12 @@ class ConditionSalesController extends GetxController {
   final RxList<ConditionOrderModel> filteredOrders =
       <ConditionOrderModel>[].obs;
   final RxBool isLoading = false.obs;
+
+  // --- PAGINATION STATE (FUTURE PROOFING) ---
+  final int _limit = 20; // Load 20 items at a time
+  DocumentSnapshot? _lastDocument; // Track the last loaded document
+  final RxBool hasMore = true.obs; // Check if more data exists in DB
+  final RxBool isMoreLoading = false.obs; // Prevent multiple fetch calls
 
   // Stats
   final RxDouble totalPendingAmount = 0.0.obs;
@@ -41,37 +45,98 @@ class ConditionSalesController extends GetxController {
   @override
   void onInit() {
     super.onInit();
-    loadConditionSales();
+    loadConditionSales(); // Initial Load
 
     ever(selectedFilter, (_) => _applyFilters());
     ever(searchQuery, (_) => _applyFilters());
     ever(selectedCourierFilter, (_) => _applyFilters());
   }
 
+  // --- HELPERS ---
+  double toDouble(dynamic val) {
+    if (val == null) return 0.0;
+    double? d = double.tryParse(val.toString());
+    return (d == null || d.isNaN) ? 0.0 : d;
+  }
+
+  int toInt(dynamic val) {
+    if (val == null) return 0;
+    int? i = int.tryParse(val.toString());
+    return i ?? 0;
+  }
+
+  String toStr(dynamic val) => val?.toString() ?? "";
+
+  // Helper to ensure Stock Location is always Capitalized (e.g. "sea" -> "Sea")
+  String _normalizeLocation(String? input) {
+    if (input == null || input.isEmpty) return "Sea"; // Default fallback
+    String trimmed = input.trim();
+    if (trimmed.isEmpty) return "Sea";
+    return trimmed[0].toUpperCase() + trimmed.substring(1).toLowerCase();
+  }
+
   // ==============================================================================
-  // 1. DATA LOADING & FILTERING
+  // 1. DATA LOADING & FILTERING (PAGINATED)
   // ==============================================================================
 
-  Future<void> loadConditionSales() async {
-    isLoading.value = true;
+  /// Loads data. Call this without arguments for initial load/refresh.
+  /// set [loadMore] to true when scrolling down.
+  Future<void> loadConditionSales({bool loadMore = false}) async {
+    // Prevent loading if already loading or no more data
+    if (loadMore) {
+      if (isMoreLoading.value || !hasMore.value) return;
+      isMoreLoading.value = true;
+    } else {
+      isLoading.value = true;
+      _lastDocument = null; // Reset for fresh load
+      hasMore.value = true;
+    }
+
     try {
-      final snap =
-          await _db
-              .collection('sales_orders')
-              .where('isCondition', isEqualTo: true)
-              .orderBy('timestamp', descending: true)
-              .get();
+      Query query = _db
+          .collection('sales_orders')
+          .where('isCondition', isEqualTo: true)
+          .orderBy('timestamp', descending: true)
+          .limit(_limit);
 
-      allOrders.value =
-          snap.docs
-              .map((doc) => ConditionOrderModel.fromFirestore(doc))
-              .toList();
+      // If pagination, start after the last loaded doc
+      if (loadMore && _lastDocument != null) {
+        query = query.startAfterDocument(_lastDocument!);
+      }
+
+      final snap = await query.get();
+
+      // Check if we reached the end of the collection
+      if (snap.docs.length < _limit) {
+        hasMore.value = false;
+      }
+
+      if (snap.docs.isNotEmpty) {
+        _lastDocument = snap.docs.last;
+
+        List<ConditionOrderModel> newOrders =
+            snap.docs
+                .map((doc) => ConditionOrderModel.fromFirestore(doc))
+                .toList();
+
+        if (loadMore) {
+          allOrders.addAll(newOrders); // Append
+        } else {
+          allOrders.value = newOrders; // Overwrite
+        }
+      } else {
+        if (!loadMore) {
+          allOrders.clear();
+        }
+      }
+
       _calculateStats();
       _applyFilters();
     } catch (e) {
       Get.snackbar("Error", "Could not load condition sales: $e");
     } finally {
       isLoading.value = false;
+      isMoreLoading.value = false;
     }
   }
 
@@ -146,7 +211,6 @@ class ConditionSalesController extends GetxController {
   // 2. PAYMENT RECEIVING
   // ==============================================================================
 
-
   Future<void> receiveConditionPayment({
     required ConditionOrderModel order,
     required double receivedAmount,
@@ -219,7 +283,9 @@ class ConditionSalesController extends GetxController {
         transactionId: order.invoiceId,
       );
 
-      await loadConditionSales();
+      // Refresh data to reflect changes
+      await loadConditionSales(loadMore: false);
+
       Get.back();
       Get.snackbar(
         "Success",
@@ -237,10 +303,6 @@ class ConditionSalesController extends GetxController {
   // ==============================================================================
   // 3. RETURN LOGIC
   // ==============================================================================
-
-  double toDouble(dynamic val) => double.tryParse(val.toString()) ?? 0.0;
-  int toInt(dynamic val) => int.tryParse(val.toString()) ?? 0;
-  String toStr(dynamic val) => val?.toString() ?? "";
 
   Future<void> findInvoiceForReturn(String invoiceId) async {
     if (invoiceId.isEmpty) return;
@@ -283,7 +345,8 @@ class ConditionSalesController extends GetxController {
           String pid = safeItem['productId'];
           if (pid.isNotEmpty) {
             returnQuantities[pid] = 0;
-            returnDestinations[pid] = "Local";
+            // CHANGE: Default destination set to "Sea"
+            returnDestinations[pid] = "Sea";
           }
         }
       }
@@ -320,6 +383,7 @@ class ConditionSalesController extends GetxController {
   }
 
   Future<void> processConditionReturn() async {
+    // 1. VALIDATION
     if (totalRefundValue <= 0) {
       Get.snackbar("Alert", "Select items to return");
       return;
@@ -332,20 +396,7 @@ class ConditionSalesController extends GetxController {
     String custPhone = toStr(returnOrderData.value!['customerPhone']);
 
     try {
-      // 1. RESTORE STOCK (HTTP)
-      List<Map<String, dynamic>> restockUpdates = [];
-      for (var item in returnOrderItems) {
-        String pid = item['productId'];
-        int qty = returnQuantities[pid] ?? 0;
-        if (qty > 0) {
-          restockUpdates.add({'id': pid, 'qty': -qty}); // Negative to Add stock
-        }
-      }
-
-      bool stockSuccess = await productCtrl.updateStockBulk(restockUpdates);
-      if (!stockSuccess) throw "Stock restoration failed";
-
-      // 2. FIRESTORE TRANSACTION
+      // 2. FIRESTORE TRANSACTION FOR LEDGERS & INVOICE
       await _db.runTransaction((transaction) async {
         // A. Read Master Sales Order
         DocumentReference orderRef = _db
@@ -417,21 +468,18 @@ class ConditionSalesController extends GetxController {
           "totalCourierDue": FieldValue.increment(-refundAmt),
         });
 
-        // F. Update Customer's Specific Order Document (Subcollection) - 🔥 NEW REQ
+        // F. Update Customer's Specific Order Document (Subcollection)
         DocumentReference custOrderRef = custRef
             .collection('orders')
             .doc(invoiceId);
         transaction.update(custOrderRef, {
           "grandTotal": newGT,
           "courierDue": newDue,
-          "items": newItems, // Update the array inside the customer history too
-          "status":
-              newDue <= 0
-                  ? "returned_completed"
-                  : "pending_courier", // Status match
+          "items": newItems,
+          "status": newDue <= 0 ? "returned_completed" : "pending_courier",
         });
 
-        // G. Handle Daily Sales (if applicable)
+        // G. Handle Daily Sales
         final dailyQuery =
             await _db
                 .collection('daily_sales')
@@ -449,18 +497,70 @@ class ConditionSalesController extends GetxController {
         }
       });
 
-      await loadConditionSales();
+      // 3. STOCK RESTORATION (OPTIMIZED & SAFE)
+      // Using Future.wait for parallel execution, with safe capitalization
+      List<Future<void>> stockUpdates = [];
+
+      for (var pid in returnQuantities.keys) {
+        int qty = returnQuantities[pid]!;
+
+        if (qty > 0) {
+          // Future Proofing: Normalize "sea" to "Sea" to match Product Controller keys exactly
+          String rawDest = returnDestinations[pid] ?? "Sea";
+          String dest = _normalizeLocation(rawDest);
+
+          // Get Original Cost Price
+          var itemInfo = returnOrderItems.firstWhere(
+            (e) => toStr(e['productId']) == pid,
+            orElse: () => {},
+          );
+          double originalCost = toDouble(itemInfo['costRate']);
+
+          int? parsedPid = int.tryParse(pid);
+
+          if (parsedPid != null) {
+            // Add update task to list
+            stockUpdates.add(
+              productCtrl
+                  .addMixedStock(
+                    productId: parsedPid,
+                    localQty: dest == "Local" ? qty : 0,
+                    airQty: dest == "Air" ? qty : 0,
+                    seaQty: dest == "Sea" ? qty : 0,
+                    localUnitPrice: originalCost,
+                  )
+                  .catchError((e) {
+                    // Catch individual errors so one failure doesn't crash the whole batch
+                    print("Stock Restore Error for $pid: $e");
+                  }),
+            );
+          }
+        }
+      }
+
+      // Execute all stock updates concurrently
+      if (stockUpdates.isNotEmpty) {
+        await Future.wait(stockUpdates);
+      }
+
+      // 4. CLEANUP
+      // Refresh only the first page to see latest status
+      await loadConditionSales(loadMore: false);
+
       returnOrderData.value = null;
       returnOrderItems.clear();
       returnSearchCtrl.clear();
-      Get.back();
+
+      if (Get.isDialogOpen ?? false) Get.back();
+
       Get.snackbar(
         "Return Complete",
-        "Stock Restored & All Ledgers (Main, Courier, Customer) Updated",
+        "Stock Restored to SEA & All Ledgers Updated",
         backgroundColor: Colors.green,
         colorText: Colors.white,
       );
     } catch (e) {
+      if (Get.isDialogOpen ?? false) Get.back();
       Get.snackbar(
         "Return Failed",
         e.toString(),

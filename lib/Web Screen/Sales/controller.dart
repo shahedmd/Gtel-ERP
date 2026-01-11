@@ -235,8 +235,9 @@ class DailySalesController extends GetxController {
         if (due > 0) {
           final double toApply = remaining >= due ? due : remaining;
           List applied = List.from(data['appliedDebits'] ?? []);
-          if (transactionId != null)
+          if (transactionId != null) {
             applied.add({"id": transactionId, "amount": toApply});
+          }
 
           final newHistoryEntry = {
             ...paymentMethod,

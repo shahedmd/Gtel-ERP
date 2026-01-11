@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:gtel_erp/Web%20Screen/Debator%20Finance/Debtor%20Purchase/purchasepage.dart';
 import 'package:intl/intl.dart';
 import 'debatorcontroller.dart';
 import 'transaction.dart'; // addTransactionDialog
@@ -12,13 +13,22 @@ import 'dart:js_interop'; // Required for .toJS conversion
 import 'dart:typed_data';
 import 'package:web/web.dart' as web;
 
-class Debatordetails extends StatelessWidget {
+// UPDATED: Converted to StatefulWidget for Pagination Lifecycle
+class Debatordetails extends StatefulWidget {
   final String id;
   final String name;
 
-  Debatordetails({super.key, required this.id, required this.name});
+  const Debatordetails({super.key, required this.id, required this.name});
 
+  @override
+  State<Debatordetails> createState() => _DebatordetailsState();
+}
+
+class _DebatordetailsState extends State<Debatordetails> {
   final controller = Get.find<DebatorController>();
+
+  // Future Proofing: Scroll Controller for Pagination
+  final ScrollController _scrollController = ScrollController();
 
   // ERP Theme Colors
   static const Color darkSlate = Color(0xFF111827);
@@ -26,10 +36,48 @@ class Debatordetails extends StatelessWidget {
   static const Color bgGrey = Color(0xFFF9FAFB);
   static const Color textMuted = Color(0xFF6B7280);
 
+  // Transaction Type Colors
+  static const Color creditRed = Color(0xFFEF4444);
+  static const Color debitGreen = Color(0xFF10B981);
+
+  @override
+  void initState() {
+    super.initState();
+    // 1. Initial Load of first 20 transactions
+    controller.loadDebtorTransactions(widget.id);
+
+    // 2. Setup Scroll Listener for "Load More"
+    _scrollController.addListener(_onScroll);
+  }
+
+  void _onScroll() {
+    // If we scroll to the bottom (minus 100px buffer)
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 100) {
+      // Trigger load more
+      controller.loadDebtorTransactions(widget.id, loadMore: true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     // Find the current debtor model from controller for editing
-    final debtor = controller.bodies.firstWhere((element) => element.id == id);
+    // Using firstWhereOrNull is safer in case debtor was just deleted
+    final debtor = controller.bodies.firstWhereOrNull(
+      (element) => element.id == widget.id,
+    );
+
+    if (debtor == null) {
+      return const Scaffold(
+        body: Center(child: Text("Debtor profile not found")),
+      );
+    }
 
     return Scaffold(
       backgroundColor: bgGrey,
@@ -44,7 +92,7 @@ class Debatordetails extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              name,
+              widget.name,
               style: const TextStyle(
                 color: darkSlate,
                 fontWeight: FontWeight.bold,
@@ -58,6 +106,18 @@ class Debatordetails extends StatelessWidget {
           ],
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.shopping_bag, color: Colors.blueGrey),
+            tooltip: "Purchases & Payables",
+            onPressed: () {
+              Get.to(
+                () => DebtorPurchasePage(
+                  debtorId: widget.id,
+                  debtorName: widget.name,
+                ),
+              );
+            },
+          ),
           // Edit Profile Button
           _actionButton(
             icon: Icons.edit_note,
@@ -71,14 +131,14 @@ class Debatordetails extends StatelessWidget {
             icon: FontAwesomeIcons.filePdf,
             label: "Export Statement",
             color: Colors.redAccent,
-            onTap: () => downloadPDF(id, name),
+            onTap: () => downloadPDF(widget.id, widget.name),
           ),
           const SizedBox(width: 24),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         backgroundColor: activeAccent,
-        onPressed: () => addTransactionDialog(controller, id),
+        onPressed: () => addTransactionDialog(controller, widget.id),
         icon: const Icon(Icons.add, color: Colors.white),
         label: const Text(
           "New Entry",
@@ -86,12 +146,14 @@ class Debatordetails extends StatelessWidget {
         ),
       ),
       body: SingleChildScrollView(
+        controller: _scrollController, // Attach Scroll Controller Here
         padding: const EdgeInsets.all(24),
         child: Column(
           children: [
             // --- ANALYTICS SUMMARY CARDS ---
+            // We keep StreamBuilder for summary as it often needs real-time balance
             StreamBuilder<Map<String, dynamic>>(
-              stream: controller.summary(id),
+              stream: controller.summary(widget.id),
               builder: (context, snap) {
                 if (!snap.hasData) return const LinearProgressIndicator();
                 final data = snap.data!;
@@ -101,8 +163,22 @@ class Debatordetails extends StatelessWidget {
 
             const SizedBox(height: 32),
 
-            // --- TRANSACTION TABLE ---
+            // --- TRANSACTION TABLE (PAGINATED) ---
             _buildTableSection(),
+
+            // Loading Indicator at the bottom for pagination
+            Obx(() {
+              if (controller.isTxLoading.value &&
+                  controller.currentTransactions.isNotEmpty) {
+                return const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 20),
+                  child: CircularProgressIndicator(),
+                );
+              }
+              return const SizedBox.shrink();
+            }),
+            // Bottom padding for FAB
+            const SizedBox(height: 80),
           ],
         ),
       ),
@@ -132,19 +208,19 @@ class Debatordetails extends StatelessWidget {
   }
 
   Widget _buildSummaryRow(Map<String, dynamic> data) {
-    final balance = data['balance'] as double;
+    final balance = (data['balance'] as num).toDouble();
     return Row(
       children: [
         _statCard(
           "Total Credit (Purchased)",
-          data['credit'],
+          (data['credit'] as num).toDouble(),
           FontAwesomeIcons.fileInvoiceDollar,
           darkSlate,
         ),
         const SizedBox(width: 16),
         _statCard(
           "Total Debit (Paid)",
-          data['debit'],
+          (data['debit'] as num).toDouble(),
           FontAwesomeIcons.handHoldingDollar,
           Colors.green,
         ),
@@ -221,31 +297,43 @@ class Debatordetails extends StatelessWidget {
             children: [
               // Table Header
               _tableHeader(),
-              // Table Body
-              StreamBuilder(
-                stream: controller.loadTransactions(id),
-                builder: (context, snap) {
-                  if (!snap.hasData) {
-                    return const Center(
-                      child: Padding(
-                        padding: EdgeInsets.all(20),
-                        child: CircularProgressIndicator(),
-                      ),
-                    );
-                  }
-                  final docs = snap.data!.docs;
-                  return ListView.separated(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    itemCount: docs.length,
-                    separatorBuilder:
-                        (context, index) => const Divider(height: 1),
-                    itemBuilder: (context, index) {
-                      return _tableRow(docs[index]);
-                    },
+
+              // Table Body - UPDATED TO USE OBX & Pagination List
+              Obx(() {
+                // Initial Loading State
+                if (controller.isTxLoading.value &&
+                    controller.currentTransactions.isEmpty) {
+                  return const Padding(
+                    padding: EdgeInsets.all(40),
+                    child: Center(child: CircularProgressIndicator()),
                   );
-                },
-              ),
+                }
+
+                if (controller.currentTransactions.isEmpty) {
+                  return const Padding(
+                    padding: EdgeInsets.all(40),
+                    child: Center(
+                      child: Text(
+                        "No transactions found.",
+                        style: TextStyle(color: textMuted),
+                      ),
+                    ),
+                  );
+                }
+
+                return ListView.separated(
+                  shrinkWrap: true,
+                  physics:
+                      const NeverScrollableScrollPhysics(), // Parent handles scroll
+                  itemCount: controller.currentTransactions.length,
+                  separatorBuilder:
+                      (context, index) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final tx = controller.currentTransactions[index];
+                    return _tableRow(tx);
+                  },
+                );
+              }),
             ],
           ),
         ),
@@ -322,10 +410,11 @@ class Debatordetails extends StatelessWidget {
     );
   }
 
-  Widget _tableRow(DocumentSnapshot doc) {
-    final t = doc.data() as Map<String, dynamic>;
-    final DateTime tDate = (t["date"] as Timestamp).toDate();
-    final bool isCredit = t['type'].toString().toLowerCase() == 'credit';
+  // UPDATED: Now accepts TransactionModel instead of DocumentSnapshot
+  Widget _tableRow(TransactionModel t) {
+    // using the model directly
+    final DateTime tDate = t.date;
+    final bool isCredit = t.type.toLowerCase() == 'credit';
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
@@ -344,15 +433,15 @@ class Debatordetails extends StatelessWidget {
               children: [
                 Icon(
                   isCredit ? Icons.arrow_downward : Icons.arrow_upward,
-                  color: isCredit ? Colors.red : Colors.green,
+                  color: isCredit ? creditRed : debitGreen,
                   size: 14,
                 ),
                 const SizedBox(width: 8),
                 Text(
-                  t['type'].toString().toUpperCase(),
+                  t.type.toUpperCase(),
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
-                    color: isCredit ? Colors.red : Colors.green,
+                    color: isCredit ? creditRed : debitGreen,
                     fontSize: 12,
                   ),
                 ),
@@ -364,16 +453,16 @@ class Debatordetails extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (t['paymentMethod'] != null)
+                if (t.paymentMethod != null)
                   Text(
-                    formatPaymentMethod(t['paymentMethod'] as Map),
+                    formatPaymentMethod(t.paymentMethod!),
                     style: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
                 Text(
-                  t['note'] ?? "-",
+                  t.note.isNotEmpty ? t.note : "-",
                   style: const TextStyle(fontSize: 12, color: textMuted),
                 ),
               ],
@@ -382,7 +471,7 @@ class Debatordetails extends StatelessWidget {
           Expanded(
             flex: 2,
             child: Text(
-              "Tk ${t['amount']}",
+              "Tk ${t.amount}",
               textAlign: TextAlign.right,
               style: const TextStyle(
                 fontWeight: FontWeight.bold,
@@ -402,8 +491,7 @@ class Debatordetails extends StatelessWidget {
                     color: Colors.redAccent,
                     size: 18,
                   ),
-                  onPressed:
-                      () => _confirmDelete(t['transactionId'], t['amount'].toString()),
+                  onPressed: () => _confirmDelete(t.id, t.amount.toString()),
                 ),
                 IconButton(
                   icon: const Icon(
@@ -414,8 +502,8 @@ class Debatordetails extends StatelessWidget {
                   onPressed:
                       () => editTransactionDialog(
                         controller,
-                        id,
-                        TransactionModel.fromFirestore(doc),
+                        widget.id, // Use widget.id for stateful widget
+                        t,
                       ),
                 ),
               ],
@@ -438,7 +526,7 @@ class Debatordetails extends StatelessWidget {
       buttonColor: Colors.redAccent,
       onConfirm: () async {
         Get.back();
-        await controller.deleteTransaction(id, txId);
+        await controller.deleteTransaction(widget.id, txId);
       },
     );
   }
@@ -493,7 +581,7 @@ class Debatordetails extends StatelessWidget {
                     ),
                     onPressed: () async {
                       await controller.editDebtor(
-                        id: id,
+                        id: widget.id,
                         oldName: debtor.name, // Used for syncing sales
                         newName: nameC.text,
                         des: shopC.text,
@@ -679,8 +767,7 @@ class Debatordetails extends StatelessWidget {
     );
   }
 
-  // ... inside your class
-
+  // --- PDF Export Logic (Kept as is) ---
   Future<void> downloadPDF(String id, String name) async {
     // 1. Fetch data from Firebase
     final snap =

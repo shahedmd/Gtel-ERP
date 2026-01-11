@@ -230,8 +230,9 @@ class SaleReturnController extends GetxController {
       // Assuming for Debtor/System, we adjust the BILL, not the cash flow history.
 
       double newDue = newGT - paidSoFar;
-      if (newDue < 0)
+      if (newDue < 0) {
         newDue = 0; // Negative due implies we owe them money (Credit)
+      }
 
       Map<String, dynamic> newPayDetails = {
         ...oldPay, // Keep method types
