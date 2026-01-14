@@ -15,7 +15,6 @@ abstract class Routes {
   static const String SERVICE = '/service';
   static const String SALERETURN = '/salereturn';
   static const String SHIPMENT = '/shipment';
-    static const String CONDITION = '/condition';
-
-
+  static const String CONDITION = '/condition';
+  static const String VENDOR = '/vendor';
 }

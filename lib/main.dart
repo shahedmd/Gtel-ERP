@@ -17,11 +17,8 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-
-  // 1. Inject Auth Controller first to manage session
   Get.put(AuthController());
-
-  // 2. Your existing controllers (DO NOT REMOVE)
+   // 2. Your existing controllers (DO NOT REMOVE)
   Get.put(MonthlyExpensesController());
   Get.put(DailySalesController());
   Get.put(DailyExpensesController());
@@ -34,7 +31,6 @@ Future<void> main() async {
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
-
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
@@ -55,7 +51,7 @@ class MyApp extends StatelessWidget {
                 textTheme: Typography.englishLike2021.apply(
                   fontSizeFactor: 1.sp,
                   bodyColor:
-                      Colors.black, // Adjusted for light theme visibility
+                      Colors.black,
                 ),
               ),
               initialRoute: '/',

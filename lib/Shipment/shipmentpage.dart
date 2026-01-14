@@ -2,467 +2,592 @@
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:gtel_erp/Shipment/controller.dart';
+import 'package:gtel_erp/Shipment/shipmentdialog.dart';
+import 'package:intl/intl.dart';
 import 'package:gtel_erp/Shipment/shipmodel.dart';
 import 'package:gtel_erp/Stock/controller.dart';
-import 'package:intl/intl.dart';
-import 'controller.dart';
 
-
-// --- YOUR DESIGN SYSTEM ---
-const Color kDarkSlate = Color(0xFF111827);
-const Color kActiveAccent = Color(0xFF3B82F6);
-const Color kBgGrey = Color(0xFFF9FAFB);
-const Color kTextMuted = Color(0xFF6B7280);
-const Color kWhite = Colors.white;
+const Color kDarkSlate = Color(0xFF1E293B);
+const Color kPrimary = Color(0xFF2563EB);
+const Color kBg = Color(0xFFF8FAFC);
 
 class ShipmentPage extends StatelessWidget {
   const ShipmentPage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    // Inject Controllers
     final ShipmentController controller = Get.put(ShipmentController());
     final ProductController productController = Get.find<ProductController>();
 
     return Scaffold(
-      backgroundColor: kBgGrey,
+      backgroundColor: kBg,
       appBar: AppBar(
-        backgroundColor: kWhite,
-        elevation: 0.5,
         title: const Text(
-          "Shipment Management",
+          "Shipment Dashboard",
           style: TextStyle(color: kDarkSlate, fontWeight: FontWeight.bold),
         ),
+        backgroundColor: Colors.white,
+        elevation: 0,
         iconTheme: const IconThemeData(color: kDarkSlate),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.picture_as_pdf_outlined),
-            tooltip: "Download Manifest",
-            onPressed: controller.generatePdf,
-          ),
-          const SizedBox(width: 10),
-        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: kActiveAccent,
-        icon: const Icon(Icons.add_location_alt_outlined),
-        label: const Text("New Shipment"),
-        onPressed: () => _openAddDialog(context, controller, productController),
-      ),
-      body: Obx(() {
-        if (controller.shipments.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.local_shipping_outlined,
-                  size: 64,
-                  color: kTextMuted.withOpacity(0.3),
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  "No shipments found",
-                  style: TextStyle(color: kTextMuted),
-                ),
-              ],
+        backgroundColor: kPrimary,
+        icon: const Icon(Icons.add_location_alt),
+        label: const Text("Create Shipment"),
+        onPressed:
+            () => _openCreateManifestScreen(
+              context,
+              controller,
+              productController,
             ),
-          );
-        }
+      ),
+      body: Column(
+        children: [
+          // 1. DASHBOARD TOTALS (Goal #1)
+          _buildDashboard(controller),
 
-        return ListView.separated(
-          padding: const EdgeInsets.all(16),
-          itemCount: controller.shipments.length,
-          separatorBuilder: (c, i) => const SizedBox(height: 12),
-          itemBuilder: (context, index) {
-            final item = controller.shipments[index];
-            return _ShipmentCard(item: item, controller: controller);
-          },
-        );
-      }),
+          // 2. SHIPMENT LIST
+          Expanded(
+            child: Obx(() {
+              if (controller.shipments.isEmpty) {
+                return const Center(child: Text("No Data"));
+              }
+              return ListView.separated(
+                padding: const EdgeInsets.all(16),
+                itemCount: controller.shipments.length,
+                separatorBuilder: (c, i) => const SizedBox(height: 12),
+                itemBuilder:
+                    (ctx, i) => _ShipmentCard(
+                      item: controller.shipments[i],
+                      controller: controller,
+                    ),
+              );
+            }),
+          ),
+        ],
+      ),
     );
   }
 
-  // --- DIALOG: MATCHING STOCK PAGE SEARCH ---
-  void _openAddDialog(
+  Widget _buildDashboard(ShipmentController ctrl) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      color: Colors.white,
+      child: Row(
+        children: [
+          Expanded(
+            child: Obx(
+              () => _summaryCard(
+                "On The Way",
+                ctrl.totalOnWayValue,
+                Colors.orange,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Obx(
+              () => _summaryCard(
+                "Completed",
+                ctrl.totalCompletedValue,
+                Colors.green,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _summaryCard(String title, double value, Color color) {
+    final fmt = NumberFormat.compactCurrency(symbol: '৳').format(value);
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title.toUpperCase(),
+            style: TextStyle(
+              color: color,
+              fontWeight: FontWeight.bold,
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            fmt,
+            style: TextStyle(
+              color: kDarkSlate,
+              fontWeight: FontWeight.bold,
+              fontSize: 20,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- CREATE SCREEN (UI Logic) ---
+  void _openCreateManifestScreen(
     BuildContext context,
     ShipmentController ctrl,
     ProductController prodCtrl,
   ) {
-    // Reset state
-    ctrl.resetInputs();
+    ctrl.currentManifestItems.clear();
+    ctrl.shipmentNameCtrl.clear();
+    ctrl.totalCartonCtrl.text = "0";
+    ctrl.totalWeightCtrl.text = "0";
+    ctrl.shipmentDateInput.value = DateTime.now(); // Departure Date
+    ctrl.searchCtrl.clear();
+    prodCtrl.allProducts.clear();
 
-    Get.dialog(
-      Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        child: Container(
-          width: 500,
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    "Create Shipment",
-                    style: TextStyle(
-                      fontSize: 18,
+    Get.to(
+      () => Scaffold(
+        appBar: AppBar(
+          title: const Text(
+            "New Shipment Manifest",
+            style: TextStyle(color: kDarkSlate),
+          ),
+          backgroundColor: Colors.white,
+          iconTheme: const IconThemeData(color: kDarkSlate),
+          actions: [
+            Obx(
+              () => Center(
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 16.0),
+                  child: Text(
+                    "Total: ৳${ctrl.currentManifestTotalCost.toStringAsFixed(0)}",
+                    style: const TextStyle(
+                      color: kPrimary,
                       fontWeight: FontWeight.bold,
-                      color: kDarkSlate,
+                      fontSize: 16,
                     ),
                   ),
-                  IconButton(
-                    onPressed: () => Get.back(),
-                    icon: const Icon(Icons.close, color: kTextMuted),
-                  ),
-                ],
-              ),
-              const Divider(),
-              const SizedBox(height: 10),
-
-              // 1. Search Box (Triggers Controller Search)
-              TextField(
-                controller: ctrl.searchCtrl,
-                decoration: InputDecoration(
-                  hintText: "Search Product Name/Model...",
-                  prefixIcon: const Icon(Icons.search, color: kTextMuted),
-                  filled: true,
-                  fillColor: kBgGrey,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide.none,
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(
-                    vertical: 0,
-                    horizontal: 10,
-                  ),
                 ),
-                onChanged: (val) => prodCtrl.search(val),
               ),
-              const SizedBox(height: 10),
-
-              // 2. Search Results List (Reactive)
-              Container(
-                height: 150,
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey.shade200),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Obx(() {
-                  if (prodCtrl.isLoading.value) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  if (prodCtrl.allProducts.isEmpty) {
-                    return const Center(child: Text("No products found"));
-                  }
-
-                  return ListView.builder(
-                    itemCount: prodCtrl.allProducts.length,
-                    itemBuilder: (ctx, i) {
-                      final p = prodCtrl.allProducts[i];
-                      return Obx(() {
-                        final isSelected =
-                            ctrl.selectedProduct.value?.id == p.id;
-                        return ListTile(
-                          dense: true,
-                          selected: isSelected,
-                          selectedTileColor: kActiveAccent.withOpacity(0.1),
-                          title: Text(
-                            p.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          subtitle: Text("${p.model} | Stock: ${p.stockQty}"),
-                          onTap: () => ctrl.selectedProduct.value = p,
-                          trailing:
-                              isSelected
-                                  ? const Icon(
-                                    Icons.check_circle,
-                                    color: kActiveAccent,
-                                  )
-                                  : null,
-                        );
-                      });
-                    },
-                  );
-                }),
-              ),
-
-              const SizedBox(height: 15),
-
-              // 3. Qty Inputs
-              Row(
+            ),
+            IconButton(
+              icon: const Icon(Icons.save, color: kPrimary),
+              onPressed: ctrl.saveShipmentToFirestore,
+            ),
+          ],
+        ),
+        body: Row(
+          children: [
+            // Left: List
+            Expanded(
+              flex: 3,
+              child: Column(
                 children: [
+                  _buildManifestHeader(context, ctrl), // Date Picker is here
                   Expanded(
-                    child: _buildInput(
-                      ctrl.seaCtrl,
-                      "Sea Qty",
-                      Icons.water,
-                      Colors.blue,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _buildInput(
-                      ctrl.airCtrl,
-                      "Air Qty",
-                      Icons.air,
-                      Colors.orange,
+                    child: Obx(
+                      () => ListView.separated(
+                        itemCount: ctrl.currentManifestItems.length,
+                        separatorBuilder: (c, i) => const Divider(height: 1),
+                        itemBuilder: (ctx, i) {
+                          final item = ctrl.currentManifestItems[i];
+                          return ListTile(
+                            title: Text(item.productName),
+                            subtitle: Text(
+                              "${item.productModel} | Ctn: ${item.cartonNo}",
+                            ),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  "৳${item.totalItemCost.toStringAsFixed(0)}",
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.close,
+                                    color: Colors.red,
+                                  ),
+                                  onPressed: () => ctrl.removeFromManifest(i),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
                     ),
                   ),
                 ],
               ),
-
-              const SizedBox(height: 15),
-
-              // 4. Shipment Date Picker
-              const Text(
-                "Shipment Date (Departure)",
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  color: kTextMuted,
+            ),
+            // Right: Search
+            Expanded(
+              flex: 2,
+              child: Container(
+                decoration: BoxDecoration(
+                  border: Border(left: BorderSide(color: Colors.grey.shade300)),
+                ),
+                child: Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(8.0),
+                      child: TextField(
+                        controller: ctrl.searchCtrl,
+                        decoration: const InputDecoration(
+                          hintText: "Search...",
+                          prefixIcon: Icon(Icons.search),
+                          border: OutlineInputBorder(),
+                        ),
+                        onChanged: (val) => prodCtrl.search(val),
+                      ),
+                    ),
+                    Expanded(
+                      child: Obx(() {
+                        if (prodCtrl.isLoading.value) {
+                          return const Center(
+                            child: CircularProgressIndicator(),
+                          );
+                        }
+                        return ListView.builder(
+                          itemCount: prodCtrl.allProducts.length,
+                          itemBuilder: (ctx, i) {
+                            final p = prodCtrl.allProducts[i];
+                            return ListTile(
+                              title: Text(p.name),
+                              subtitle: Text(p.model),
+                              trailing: const Icon(
+                                Icons.add_circle,
+                                color: kPrimary,
+                              ),
+                              onTap:
+                                  () => showShipmentEntryDialog(
+                                    p,
+                                    ctrl,
+                                    prodCtrl,
+                                  ),
+                            );
+                          },
+                        );
+                      }),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 5),
-              Obx(
-                () => InkWell(
+            ),
+          ],
+        ),
+      ),
+      fullscreenDialog: true,
+    );
+  }
+
+  Widget _buildManifestHeader(BuildContext context, ShipmentController ctrl) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      color: Colors.white,
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                flex: 2,
+                child: TextField(
+                  controller: ctrl.shipmentNameCtrl,
+                  decoration: const InputDecoration(
+                    labelText: "Shipment Name",
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: InkWell(
                   onTap: () async {
                     final d = await showDatePicker(
                       context: context,
-                      initialDate: ctrl.shipmentDateInput.value,
+                      initialDate: DateTime.now(),
                       firstDate: DateTime(2020),
                       lastDate: DateTime(2030),
                     );
                     if (d != null) ctrl.shipmentDateInput.value = d;
                   },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 12,
-                    ),
-                    decoration: BoxDecoration(
-                      color: kBgGrey,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.grey.shade300),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(
-                          Icons.calendar_month,
-                          color: kDarkSlate,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 10),
-                        Text(
-                          DateFormat(
-                            'yyyy-MM-dd',
-                          ).format(ctrl.shipmentDateInput.value),
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 20),
-
-              // 5. Submit
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: kActiveAccent,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                  onPressed: ctrl.createShipment,
-                  child: const Text(
-                    "ADD TO MANIFEST",
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
+                  child: Obx(
+                    () => InputDecorator(
+                      decoration: const InputDecoration(
+                        labelText: "Ship Date",
+                        border: OutlineInputBorder(),
+                      ),
+                      child: Text(
+                        DateFormat(
+                          'yyyy-MM-dd',
+                        ).format(ctrl.shipmentDateInput.value),
+                      ),
                     ),
                   ),
                 ),
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildInput(
-    TextEditingController c,
-    String label,
-    IconData icon,
-    Color color,
-  ) {
-    return TextField(
-      controller: c,
-      keyboardType: TextInputType.number,
-      decoration: InputDecoration(
-        labelText: label,
-        prefixIcon: Icon(icon, color: color, size: 18),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: ctrl.totalCartonCtrl,
+                  decoration: const InputDecoration(
+                    labelText: "Cartons",
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextField(
+                  controller: ctrl.totalWeightCtrl,
+                  decoration: const InputDecoration(
+                    labelText: "Weight",
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
 }
 
-// --- CARD COMPONENT ---
 class _ShipmentCard extends StatelessWidget {
   final ShipmentModel item;
   final ShipmentController controller;
-
   const _ShipmentCard({required this.item, required this.controller});
 
   @override
   Widget build(BuildContext context) {
-    final bool isDone = item.isReceived;
-
-    return Container(
-      decoration: BoxDecoration(
-        color: kWhite,
+    final fmt = NumberFormat.simpleCurrency(name: '৳', decimalDigits: 0);
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-        border: Border(
-          left: BorderSide(
-            color: isDone ? Colors.green : Colors.orange,
-            width: 4,
-          ),
-        ),
+        side: BorderSide(color: Colors.grey.shade300),
       ),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  item.shipmentName,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+                _statusChip(item.isReceived),
+              ],
+            ),
+            const Divider(height: 24),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                // Goal #4: Show Both Dates
+                Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    _dateRow("Ship Date:", item.createdDate, Colors.grey),
+                    if (item.arrivalDate != null)
+                      _dateRow("Arrival:", item.arrivalDate!, Colors.green),
+                  ],
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
                     Text(
-                      item.productName,
+                      "${item.totalCartons} Cartons",
+                      style: const TextStyle(color: Colors.grey),
+                    ),
+                    Text(
+                      fmt.format(item.totalAmount),
                       style: const TextStyle(
                         fontWeight: FontWeight.bold,
-                        fontSize: 16,
+                        fontSize: 18,
                         color: kDarkSlate,
                       ),
                     ),
-                    Text(
-                      "${item.productModel} • ${item.productBrand}",
-                      style: const TextStyle(fontSize: 13, color: kTextMuted),
-                    ),
                   ],
                 ),
-              ),
-              _statusChip(isDone),
-            ],
-          ),
-          const Divider(height: 24, color: kBgGrey),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _detailItem(
-                "Sea Qty",
-                "${item.seaQty}",
-                Icons.water_drop,
-                Colors.blue,
-              ),
-              _detailItem(
-                "Air Qty",
-                "${item.airQty}",
-                Icons.air,
-                Colors.orange,
-              ),
-              _detailItem(
-                "Ship Date",
-                DateFormat('MM-dd').format(item.createdDate),
-                Icons.date_range,
-                kDarkSlate,
-              ),
-              _detailItem(
-                "Entry Date",
-                item.arrivalDate != null
-                    ? DateFormat('MM-dd').format(item.arrivalDate!)
-                    : "--",
-                Icons.check_circle_outline,
-                isDone ? Colors.green : kTextMuted,
-              ),
-            ],
-          ),
-          if (!isDone) ...[
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                icon: const Icon(Icons.download_rounded, size: 18),
-                label: const Text("INPUT TO STOCK"),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: kDarkSlate,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                onPressed: () => controller.receiveShipment(item),
-              ),
+              ],
             ),
+            const SizedBox(height: 16),
+            if (!item.isReceived)
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: kDarkSlate,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  icon: const Icon(Icons.download),
+                  label: const Text("RECEIVE STOCK"),
+                  onPressed: () => _showReceiveDialog(context, item),
+                ),
+              ),
           ],
-        ],
+        ),
       ),
     );
   }
 
-  Widget _detailItem(String label, String val, IconData icon, Color color) {
-    return Column(
-      children: [
-        Icon(icon, size: 16, color: color.withOpacity(0.8)),
-        const SizedBox(height: 4),
-        Text(
-          val,
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            color: color,
-            fontSize: 14,
+  // REPLACE THE OLD _showReceiveDialog WITH THIS VERSION
+  void _showReceiveDialog(BuildContext context, ShipmentModel item) {
+    // We use a reactive variable for the dialog state
+    final Rx<DateTime> selectedDate = DateTime.now().obs;
+
+    Get.dialog(
+      Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.warehouse, size: 40, color: kDarkSlate),
+              const SizedBox(height: 15),
+              const Text(
+                "Confirm Stock Entry",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                "Select the date these goods arrived at the warehouse:",
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.grey),
+              ),
+              const SizedBox(height: 20),
+
+              // DATE PICKER BUTTON (Safe & Crash Proof)
+              InkWell(
+                onTap: () async {
+                  final d = await showDatePicker(
+                    context: context,
+                    initialDate: selectedDate.value,
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime(2030),
+                  );
+                  if (d != null) selectedDate.value = d;
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey.shade300),
+                    borderRadius: BorderRadius.circular(8),
+                    color: Colors.grey.shade50,
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.calendar_month, color: kPrimary),
+                      const SizedBox(width: 10),
+                      Obx(
+                        () => Text(
+                          DateFormat('yyyy-MM-dd').format(selectedDate.value),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 25),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () => Get.back(),
+                      child: const Text(
+                        "Cancel",
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: kDarkSlate,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      onPressed: () {
+                        Get.back();
+                        controller.receiveShipmentFast(
+                          item,
+                          selectedDate.value,
+                        );
+                      },
+                      child: const Text("CONFIRM"),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
-        Text(label, style: const TextStyle(fontSize: 10, color: kTextMuted)),
-      ],
+      ),
+    );
+  }
+
+  Widget _dateRow(String label, DateTime d, Color color) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4.0),
+      child: Row(
+        children: [
+          Icon(Icons.calendar_today, size: 14, color: color),
+          const SizedBox(width: 4),
+          Text(
+            "$label ${DateFormat('MM-dd').format(d)}",
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _statusChip(bool done) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color:
             done
                 ? Colors.green.withOpacity(0.1)
                 : Colors.orange.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Text(
-        done ? "COMPLETED" : "ON WAY",
+        done ? "RECEIVED" : "ON WAY",
         style: TextStyle(
-          fontSize: 10,
+          fontSize: 11,
           fontWeight: FontWeight.bold,
           color: done ? Colors.green : Colors.orange,
         ),

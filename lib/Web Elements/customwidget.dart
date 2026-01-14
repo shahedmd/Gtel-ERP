@@ -219,6 +219,11 @@ class SidebarMenu extends StatelessWidget {
                       title: "Debtor Account",
                       isSubItem: true,
                     ),
+                    _NavTile(
+                      id: Routes.VENDOR,
+                      title: "Vendor Account",
+                      isSubItem: true,
+                    ),
                   ],
                 ),
 

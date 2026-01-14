@@ -4,13 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
-import 'controller.dart';
-import '../Expenses/dailycontroller.dart'; // Ensure correct path
+import 'controller.dart'; // Imports StaffController & Enums
 
 // Consistent Professional Theme
 const Color darkSlate = Color(0xFF111827);
 const Color activeAccent = Color(0xFF3B82F6);
 const Color bgGrey = Color(0xFFF3F4F6);
+const Color creditGreen = Color(0xFF10B981); // For Repayments
+const Color debtRed = Color(0xFFEF4444); // For Advances
 
 void addSalaryDialog(
   StaffController controller,
@@ -26,8 +27,9 @@ void addSalaryDialog(
   );
 
   final Rx<DateTime?> selectedDate = Rx<DateTime?>(DateTime.now());
-  final DailyExpensesController expensesController =
-      Get.find<DailyExpensesController>();
+
+  // NEW: State for Transaction Type (Salary, Advance, Repayment)
+  final Rx<StaffTransactionType> selectedType = StaffTransactionType.SALARY.obs;
 
   Get.dialog(
     Dialog(
@@ -42,7 +44,7 @@ void addSalaryDialog(
           mainAxisSize: MainAxisSize.min,
           children: [
             // --- HEADER ---
-            _buildHeader(staffName),
+            Obx(() => _buildHeader(staffName, selectedType.value)),
 
             // --- FORM CONTENT ---
             Flexible(
@@ -51,6 +53,12 @@ void addSalaryDialog(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // 1. Transaction Type Selector
+                    _sectionLabel("Transaction Type"),
+                    _buildTypeSelector(selectedType),
+                    const SizedBox(height: 20),
+
+                    // 2. Payment Details
                     _sectionLabel("Payment Details"),
                     Row(
                       children: [
@@ -68,7 +76,7 @@ void addSalaryDialog(
                           flex: 3,
                           child: _buildField(
                             monthC,
-                            "Salary Month",
+                            "Month / Ref",
                             FontAwesomeIcons.calendarDay,
                           ),
                         ),
@@ -82,6 +90,7 @@ void addSalaryDialog(
                     ),
                     const SizedBox(height: 24),
 
+                    // 3. Date Selection
                     _sectionLabel("Transaction Date"),
                     _buildDatePicker(selectedDate),
                   ],
@@ -90,19 +99,22 @@ void addSalaryDialog(
             ),
 
             // --- FOOTER ACTIONS ---
-            _buildFooter(
-              onCancel: () => Get.back(),
-              onSave:
-                  () => _handleSalaryTransaction(
-                    controller,
-                    expensesController,
-                    staffId,
-                    staffName,
-                    amountC,
-                    monthC,
-                    noteC,
-                    selectedDate,
-                  ),
+            Obx(
+              () => _buildFooter(
+                onCancel: () => Get.back(),
+                type: selectedType.value,
+                onSave:
+                    () => _handleTransaction(
+                      controller,
+                      staffId,
+                      staffName,
+                      amountC,
+                      monthC,
+                      noteC,
+                      selectedDate,
+                      selectedType.value,
+                    ),
+              ),
             ),
           ],
         ),
@@ -114,40 +126,51 @@ void addSalaryDialog(
 
 // --- UI COMPONENTS ---
 
-Widget _buildHeader(String name) {
+Widget _buildHeader(String name, StaffTransactionType type) {
+  // Dynamic Title based on selection
+  String title = "Disburse Salary";
+  Color color = darkSlate;
+  IconData icon = FontAwesomeIcons.fileInvoiceDollar;
+
+  if (type == StaffTransactionType.ADVANCE) {
+    title = "Give Advance (Loan)";
+    color = debtRed;
+    icon = FontAwesomeIcons.handHoldingDollar;
+  } else if (type == StaffTransactionType.REPAYMENT) {
+    title = "Record Repayment";
+    color = creditGreen;
+    icon = FontAwesomeIcons.moneyBillTransfer;
+  }
+
   return Container(
     padding: const EdgeInsets.all(20),
-    decoration: const BoxDecoration(
-      color: darkSlate,
-      borderRadius: BorderRadius.only(
+    decoration: BoxDecoration(
+      color: color,
+      borderRadius: const BorderRadius.only(
         topLeft: Radius.circular(16),
         topRight: Radius.circular(16),
       ),
     ),
     child: Row(
       children: [
-        const Icon(
-          FontAwesomeIcons.fileInvoiceDollar,
-          color: Colors.white,
-          size: 18,
-        ),
+        Icon(icon, color: Colors.white, size: 18),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                "Disburse Salary",
-                style: TextStyle(
+              Text(
+                title,
+                style: const TextStyle(
                   color: Colors.white,
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
                 ),
               ),
               Text(
-                "Paying: $name",
+                "Staff: $name",
                 style: TextStyle(
-                  color: Colors.white.withOpacity(0.7),
+                  color: Colors.white.withOpacity(0.8),
                   fontSize: 12,
                 ),
               ),
@@ -159,6 +182,74 @@ Widget _buildHeader(String name) {
           icon: const Icon(Icons.close, color: Colors.white54),
         ),
       ],
+    ),
+  );
+}
+
+// NEW: Segmented Control for Transaction Type
+Widget _buildTypeSelector(Rx<StaffTransactionType> selectedType) {
+  return Obx(
+    () => Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: bgGrey,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.black12),
+      ),
+      child: Row(
+        children: [
+          _typeButton("Salary", StaffTransactionType.SALARY, selectedType),
+          _typeButton("Advance", StaffTransactionType.ADVANCE, selectedType),
+          _typeButton(
+            "Repayment",
+            StaffTransactionType.REPAYMENT,
+            selectedType,
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+Widget _typeButton(
+  String label,
+  StaffTransactionType type,
+  Rx<StaffTransactionType> current,
+) {
+  final isSelected = current.value == type;
+  Color activeColor = activeAccent;
+  if (type == StaffTransactionType.ADVANCE) activeColor = debtRed;
+  if (type == StaffTransactionType.REPAYMENT) activeColor = creditGreen;
+
+  return Expanded(
+    child: InkWell(
+      onTap: () => current.value = type,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: isSelected ? Colors.white : Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
+          boxShadow:
+              isSelected
+                  ? [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 4,
+                    ),
+                  ]
+                  : [],
+        ),
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+            color: isSelected ? activeColor : Colors.grey[600],
+            fontSize: 13,
+          ),
+        ),
+      ),
     ),
   );
 }
@@ -211,7 +302,19 @@ Widget _buildDatePicker(Rx<DateTime?> selectedDate) {
 Widget _buildFooter({
   required VoidCallback onCancel,
   required VoidCallback onSave,
+  required StaffTransactionType type,
 }) {
+  String btnLabel = "Process Payment";
+  Color btnColor = activeAccent;
+
+  if (type == StaffTransactionType.ADVANCE) {
+    btnLabel = "Record Advance";
+    btnColor = debtRed;
+  } else if (type == StaffTransactionType.REPAYMENT) {
+    btnLabel = "Confirm Repayment";
+    btnColor = creditGreen;
+  }
+
   return Container(
     padding: const EdgeInsets.all(20),
     decoration: const BoxDecoration(
@@ -228,15 +331,18 @@ Widget _buildFooter({
         ElevatedButton(
           onPressed: onSave,
           style: ElevatedButton.styleFrom(
-            backgroundColor: activeAccent,
+            backgroundColor: btnColor,
             padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 18),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(8),
             ),
           ),
-          child: const Text(
-            "Process Payment",
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          child: Text(
+            btnLabel,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+            ),
           ),
         ),
       ],
@@ -244,23 +350,23 @@ Widget _buildFooter({
   );
 }
 
-// --- TRANSACTION LOGIC ---
+// --- TRANSACTION LOGIC (UPDATED) ---
 
-Future<void> _handleSalaryTransaction(
+Future<void> _handleTransaction(
   StaffController staffCtrl,
-  DailyExpensesController expCtrl,
   String staffId,
   String staffName,
   TextEditingController amountC,
   TextEditingController monthC,
   TextEditingController noteC,
   Rx<DateTime?> date,
+  StaffTransactionType type,
 ) async {
   // 1. Validation
-  if (amountC.text.isEmpty || monthC.text.isEmpty || date.value == null) {
+  if (amountC.text.isEmpty || date.value == null) {
     Get.snackbar(
       "Missing Info",
-      "Amount and Month are required.",
+      "Amount and Date are required.",
       backgroundColor: Colors.orange,
       colorText: Colors.white,
     );
@@ -269,68 +375,46 @@ Future<void> _handleSalaryTransaction(
 
   final double? amount = double.tryParse(amountC.text);
   if (amount == null || amount <= 0) {
-    Get.snackbar("Invalid Amount", "Please enter a valid salary figure.");
+    Get.snackbar("Invalid Amount", "Please enter a valid numeric amount.");
     return;
   }
 
-  try {
-    // 2. Perform Dual Update (Staff Record + Expense Record)
-    // We use Get.showOverlay to prevent user interaction during the dual write
-    await Get.showOverlay(
-      asyncFunction: () async {
-        // Step A: Add to Staff Sub-collection
-        await staffCtrl.addSalary(
-          staffId,
-          amount,
-          noteC.text,
-          monthC.text,
-          date.value!,
-        );
-
-        // Step B: Add to Global Daily Expenses
-        await expCtrl.addDailyExpense(
-          "Salary: $staffName (${monthC.text})",
-          amount.toInt(),
-          note: "Staff ID: $staffId. ${noteC.text}",
-          date: date.value,
-        );
-      },
-      loadingWidget: const Center(
-        child: CircularProgressIndicator(color: activeAccent),
-      ),
-    );
-
-    Get.back(); // Close Dialog
-    Get.snackbar(
-      "Success",
-      "Salary processed and expense recorded.",
-      backgroundColor: Colors.green,
-      colorText: Colors.white,
-    );
-  } catch (e) {
-    Get.snackbar(
-      "Transaction Failed",
-      e.toString(),
-      backgroundColor: Colors.red,
-      colorText: Colors.white,
-    );
+  // 2. Determine Note
+  String finalNote = noteC.text;
+  if (finalNote.isEmpty) {
+    finalNote =
+        type == StaffTransactionType.SALARY
+            ? "Monthly Salary"
+            : type == StaffTransactionType.ADVANCE
+            ? "Advance Payment"
+            : "Loan Repayment";
   }
+
+  // 3. Perform Transaction (Controller handles DB + Daily Expenses)
+  // We do NOT call dailyExpensesController here manually anymore.
+  await staffCtrl.addTransaction(
+    staffId: staffId,
+    staffName: staffName,
+    amount: amount,
+    note: finalNote,
+    date: date.value!,
+    type: type,
+    month: monthC.text, // Passed for reference
+  );
 }
 
-// Reuse buildField and sectionLabel from the AddStaff refactor for consistency
-
-// --- HELPER COMPONENTS FOR DIALOGS ---
+// --- HELPER COMPONENTS ---
 
 /// Creates a small, uppercase blue label for form sections
 Widget _sectionLabel(String label) {
   return Padding(
-    padding: const EdgeInsets.only(bottom: 12, top: 4),
+    padding: const EdgeInsets.only(bottom: 8, top: 4),
     child: Text(
       label.toUpperCase(),
       style: const TextStyle(
         fontSize: 11,
         fontWeight: FontWeight.bold,
-        color: Color(0xFF3B82F6), // Matches activeAccent
+        color: Color(0xFF6B7280), // Muted Text for labels
         letterSpacing: 1.1,
       ),
     ),

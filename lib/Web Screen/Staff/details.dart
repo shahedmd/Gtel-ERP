@@ -11,6 +11,13 @@ import 'dart:js_interop';
 import 'dart:typed_data';
 import 'package:web/web.dart' as web;
 
+// Theme Colors
+const Color darkSlate = Color(0xFF111827);
+const Color activeAccent = Color(0xFF3B82F6);
+const Color bgGrey = Color(0xFFF9FAFB);
+const Color debtRed = Color(0xFFEF4444);
+const Color creditGreen = Color(0xFF10B981);
+
 class StaffDetailsPage extends StatelessWidget {
   final String staffId;
   final String name;
@@ -19,15 +26,10 @@ class StaffDetailsPage extends StatelessWidget {
 
   final controller = Get.find<StaffController>();
 
-  // Colors aligned with Sidebar
-  static const Color darkSlate = Color(0xFF111827);
-  static const Color activeAccent = Color(0xFF3B82F6);
-  static const Color bgGrey = Color(0xFFF9FAFB);
-
   @override
   Widget build(BuildContext context) {
-    // Find the specific staff member from the controller's list
-    final staff = controller.staffList.firstWhere((s) => s.id == staffId);
+    // Find the specific staff member from the controller's list to get live updates
+    // Using Obx/StreamBuilder inside widgets to keep UI reactive
 
     return Scaffold(
       backgroundColor: bgGrey,
@@ -49,7 +51,7 @@ class StaffDetailsPage extends StatelessWidget {
         actions: [
           // Professional PDF Action
           TextButton.icon(
-            onPressed: () => _handlePdfDownload(staff),
+            onPressed: () => _handlePdfDownload(staffId),
             icon: const FaIcon(
               FontAwesomeIcons.filePdf,
               size: 16,
@@ -67,17 +69,20 @@ class StaffDetailsPage extends StatelessWidget {
         backgroundColor: activeAccent,
         onPressed: () => addSalaryDialog(controller, staffId, name),
         icon: const Icon(Icons.add, color: Colors.white),
-        label: const Text("Pay Salary", style: TextStyle(color: Colors.white)),
+        label: const Text(
+          "New Transaction",
+          style: TextStyle(color: Colors.white),
+        ),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildInfoSummary(staff),
+            _buildInfoSummary(),
             const SizedBox(height: 32),
             const Text(
-              "Salary Payment History",
+              "Ledger History",
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
@@ -85,7 +90,7 @@ class StaffDetailsPage extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 16),
-            _buildSalaryHistoryTable(),
+            _buildHistoryTable(),
           ],
         ),
       ),
@@ -93,44 +98,61 @@ class StaffDetailsPage extends StatelessWidget {
   }
 
   // --- TOP SUMMARY SECTION (Quick Stats) ---
-  Widget _buildInfoSummary(dynamic staff) {
-    return StreamBuilder<List<SalaryModel>>(
-      stream: controller.streamSalaries(staffId),
-      builder: (context, snapshot) {
-        double totalPaid = 0;
-        if (snapshot.hasData) {
-          totalPaid = snapshot.data!.fold(
-            0.0,
-            (sum, item) => sum + item.amount,
-          );
-        }
+  Widget _buildInfoSummary() {
+    // We listen to the staff list to get live updates on Debt without reloading the page
+    return Obx(() {
+      final staff = controller.staffList.firstWhere(
+        (s) => s.id == staffId,
+        orElse:
+            () => StaffModel(
+              id: '',
+              name: '',
+              phone: '',
+              nid: '',
+              des: '',
+              salary: 0,
+              joiningDate: DateTime.now(),
+            ),
+      );
 
-        return Row(
-          children: [
-            _statCard(
-              "Designation",
-              staff.des,
-              FontAwesomeIcons.userTag,
-              activeAccent,
-            ),
-            const SizedBox(width: 16),
-            _statCard(
-              "Base Salary",
-              "\$${staff.salary}",
-              FontAwesomeIcons.moneyBillWave,
-              Colors.green,
-            ),
-            const SizedBox(width: 16),
-            _statCard(
-              "Total Disbursed",
-              "\$${totalPaid.toStringAsFixed(2)}",
-              FontAwesomeIcons.wallet,
-              Colors.orange,
-            ),
-          ],
-        );
-      },
-    );
+      return StreamBuilder<List<SalaryModel>>(
+        stream: controller.streamSalaries(staffId),
+        builder: (context, snapshot) {
+          double totalPaid = 0;
+          if (snapshot.hasData) {
+            // Calculate total SALARY paid (excluding advances/repayments for this specific stat)
+            totalPaid = snapshot.data!
+                .where((item) => item.type == 'SALARY' || item.type == null)
+                .fold(0.0, (sum, item) => sum + item.amount);
+          }
+
+          return Row(
+            children: [
+              _statCard(
+                "Base Salary",
+                "Tk ${staff.salary}", // Assuming BDT/Tk
+                FontAwesomeIcons.moneyBillWave,
+                activeAccent,
+              ),
+              const SizedBox(width: 16),
+              _statCard(
+                "Current Debt",
+                "Tk ${(staff.currentDebt).toStringAsFixed(0)}",
+                FontAwesomeIcons.handHoldingDollar,
+                (staff.currentDebt) > 0 ? debtRed : creditGreen,
+              ),
+              const SizedBox(width: 16),
+              _statCard(
+                "Total Salary Paid",
+                "Tk ${totalPaid.toStringAsFixed(0)}",
+                FontAwesomeIcons.wallet,
+                Colors.orange,
+              ),
+            ],
+          );
+        },
+      );
+    });
   }
 
   Widget _statCard(String label, String value, IconData icon, Color color) {
@@ -141,6 +163,13 @@ class StaffDetailsPage extends StatelessWidget {
           color: Colors.white,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: Colors.black12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.03),
+              blurRadius: 8,
+              offset: const Offset(0, 4),
+            ),
+          ],
         ),
         child: Row(
           children: [
@@ -149,22 +178,27 @@ class StaffDetailsPage extends StatelessWidget {
               child: FaIcon(icon, size: 16, color: color),
             ),
             const SizedBox(width: 16),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: const TextStyle(color: Colors.grey, fontSize: 12),
-                ),
-                Text(
-                  value,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: darkSlate,
+            Flexible(
+              // Prevents overflow on small screens
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: const TextStyle(color: Colors.grey, fontSize: 12),
+                    overflow: TextOverflow.ellipsis,
                   ),
-                ),
-              ],
+                  Text(
+                    value,
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: darkSlate,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -173,7 +207,7 @@ class StaffDetailsPage extends StatelessWidget {
   }
 
   // --- TABLE HISTORY ---
-  Widget _buildSalaryHistoryTable() {
+  Widget _buildHistoryTable() {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -194,46 +228,11 @@ class StaffDetailsPage extends StatelessWidget {
             ),
             child: Row(
               children: const [
-                Expanded(
-                  flex: 2,
-                  child: Text(
-                    "Month",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                Expanded(
-                  flex: 2,
-                  child: Text(
-                    "Payment Date",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                Expanded(
-                  flex: 3,
-                  child: Text(
-                    "Note",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                Expanded(
-                  flex: 2,
-                  child: Text(
-                    "Amount",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
+                Expanded(flex: 2, child: _HeaderTxt("Date")),
+                Expanded(flex: 2, child: _HeaderTxt("Type")),
+                Expanded(flex: 2, child: _HeaderTxt("Month/Ref")),
+                Expanded(flex: 3, child: _HeaderTxt("Note")),
+                Expanded(flex: 2, child: _HeaderTxt("Amount")),
                 SizedBox(width: 40),
               ],
             ),
@@ -244,14 +243,14 @@ class StaffDetailsPage extends StatelessWidget {
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Padding(
-                  padding: EdgeInsets.all(20),
-                  child: CircularProgressIndicator(),
+                  padding: EdgeInsets.all(30),
+                  child: Center(child: CircularProgressIndicator()),
                 );
               }
               if (!snapshot.hasData || snapshot.data!.isEmpty) {
                 return const Padding(
                   padding: EdgeInsets.all(40),
-                  child: Text("No payment history found."),
+                  child: Center(child: Text("No transaction history found.")),
                 );
               }
 
@@ -259,10 +258,11 @@ class StaffDetailsPage extends StatelessWidget {
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 itemCount: snapshot.data!.length,
-                separatorBuilder: (context, index) => const Divider(height: 1),
+                separatorBuilder:
+                    (context, index) => const Divider(height: 1, color: bgGrey),
                 itemBuilder: (context, index) {
-                  final salary = snapshot.data![index];
-                  return _buildSalaryRow(salary);
+                  final t = snapshot.data![index];
+                  return _buildTransactionRow(t);
                 },
               );
             },
@@ -272,7 +272,20 @@ class StaffDetailsPage extends StatelessWidget {
     );
   }
 
-  Widget _buildSalaryRow(SalaryModel salary) {
+  Widget _buildTransactionRow(SalaryModel t) {
+    // Determine Color and Label based on Type
+    String typeLabel = t.type ?? "SALARY";
+    Color typeColor = activeAccent;
+    Color bgColor = activeAccent.withOpacity(0.1);
+
+    if (typeLabel == "ADVANCE") {
+      typeColor = debtRed;
+      bgColor = debtRed.withOpacity(0.1);
+    } else if (typeLabel == "REPAYMENT") {
+      typeColor = creditGreen;
+      bgColor = creditGreen.withOpacity(0.1);
+    }
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 15),
       child: Row(
@@ -280,32 +293,56 @@ class StaffDetailsPage extends StatelessWidget {
           Expanded(
             flex: 2,
             child: Text(
-              salary.month,
-              style: const TextStyle(fontWeight: FontWeight.w600),
+              DateFormat("dd MMM yy").format(t.date),
+              style: const TextStyle(color: Colors.grey, fontSize: 13),
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: bgColor,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    typeLabel,
+                    style: TextStyle(
+                      color: typeColor,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
           Expanded(
             flex: 2,
             child: Text(
-              DateFormat("dd MMM yyyy").format(salary.date),
-              style: const TextStyle(color: Colors.grey),
+              t.month,
+              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
             ),
           ),
           Expanded(
             flex: 3,
             child: Text(
-              salary.note.isEmpty ? "No note" : salary.note,
-              style: const TextStyle(color: Colors.grey),
+              t.note.isEmpty ? "-" : t.note,
+              style: const TextStyle(color: Colors.grey, fontSize: 13),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
           Expanded(
             flex: 2,
             child: Text(
-              "\$${salary.amount}",
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                color: activeAccent,
-              ),
+              "Tk ${t.amount.toStringAsFixed(0)}",
+              style: TextStyle(fontWeight: FontWeight.bold, color: typeColor),
             ),
           ),
 
@@ -318,7 +355,7 @@ class StaffDetailsPage extends StatelessWidget {
                 color: Colors.redAccent,
                 size: 20,
               ),
-              onPressed: () => _confirmDelete(salary),
+              onPressed: () => _confirmDelete(t),
             ),
           ),
         ],
@@ -326,78 +363,108 @@ class StaffDetailsPage extends StatelessWidget {
     );
   }
 
-  void _confirmDelete(SalaryModel salary) {
+  void _confirmDelete(SalaryModel t) {
     Get.defaultDialog(
       title: "Confirm Deletion",
       middleText:
-          "Are you sure you want to remove the salary record for ${salary.month}?",
-      textConfirm: "Delete",
+          "Are you sure you want to delete this record?\n\nDeleting an Advance/Repayment will automatically reverse the staff's debt balance.",
+      textConfirm: "Delete & Reverse",
       textCancel: "Cancel",
       confirmTextColor: Colors.white,
       buttonColor: Colors.redAccent,
       onConfirm: () async {
-        await controller.db
-            .collection("staff")
-            .doc(staffId)
-            .collection("salaries")
-            .doc(salary.id)
-            .delete();
-        Get.back();
-        Get.snackbar(
-          "Deleted",
-          "Record removed successfully",
-          snackPosition: SnackPosition.BOTTOM,
-        );
+        try {
+          // 1. Reference the Staff Document
+          final staffRef = controller.db.collection("staff").doc(staffId);
+
+          await controller.db.runTransaction((transaction) async {
+            // 2. Get current staff data to update debt
+            final staffSnapshot = await transaction.get(staffRef);
+            if (staffSnapshot.exists) {
+              double currentDebt =
+                  (staffSnapshot.data() as Map)['currentDebt']?.toDouble() ??
+                  0.0;
+
+              // 3. Reverse logic based on what we are deleting
+              if (t.type == "ADVANCE") {
+                // If we delete an Advance (Debt), we REDUCE the debt
+                transaction.update(staffRef, {
+                  'currentDebt': currentDebt - t.amount,
+                });
+              } else if (t.type == "REPAYMENT") {
+                // If we delete a Repayment, the debt goes BACK UP
+                transaction.update(staffRef, {
+                  'currentDebt': currentDebt + t.amount,
+                });
+              }
+              // Salaries usually don't affect debt, so no update needed for type == SALARY
+            }
+
+            // 4. Delete the actual transaction record
+            final docRef = staffRef.collection("salaries").doc(t.id);
+            transaction.delete(docRef);
+          });
+
+          // 5. Update UI
+          await controller.loadStaff(); // Reload global list to refresh Debt UI
+          Get.back();
+          Get.snackbar(
+            "Deleted",
+            "Record removed and balance updated.",
+            snackPosition: SnackPosition.BOTTOM,
+          );
+        } catch (e) {
+          Get.back();
+          Get.snackbar("Error", "Failed to delete: $e");
+        }
       },
     );
   }
 
-  Future<void> _handlePdfDownload(dynamic staff) async {
-    // 1. Get the current salaries (Assuming staffId is staff.id or similar)
-    final salaries = await controller.streamSalaries(staff.id).first;
-
-    // 2. Generate the PDF bytes
-    final List<int> pdfData = await controller.generateProfessionalPDF(
-      staff,
-      salaries,
-    );
-
+  Future<void> _handlePdfDownload(String staffId) async {
     try {
-      // 3. Convert List<int> to Uint8List
+      // Fetch latest staff info
+      final staff = controller.staffList.firstWhere((s) => s.id == staffId);
+      // Fetch all transactions
+      final transactions = await controller.streamSalaries(staffId).first;
+
+      // 2. Generate the PDF bytes
+      final List<int> pdfData = await controller.generateProfessionalPDF(
+        staff,
+        transactions,
+      );
+
+      // Web Download Logic
       final Uint8List uint8list = Uint8List.fromList(pdfData);
-
-      // 4. Convert to JS-compatible types for WASM
       final JSUint8Array jsBytes = uint8list.toJS;
-
-      // 5. Create the JSArray and cast it to the required BlobPart view
       final blobParts = [jsBytes].toJS as JSArray<web.BlobPart>;
-
-      // 6. Create the Blob using package:web
       final blob = web.Blob(
         blobParts,
         web.BlobPropertyBag(type: 'application/pdf'),
       );
-
-      // 7. Create the Object URL
       final String url = web.URL.createObjectURL(blob);
-
-      // 8. Create Anchor Element and trigger download
       final web.HTMLAnchorElement anchor =
           web.document.createElement('a') as web.HTMLAnchorElement;
       anchor.href = url;
-
-      // Professional naming with unique timestamp
       final timestamp = DateTime.now().millisecondsSinceEpoch;
-      anchor.download = "Statement_${staff.name}_$timestamp.pdf";
-
+      anchor.download = "Ledger_${staff.name}_$timestamp.pdf";
       anchor.click();
-
-      // 9. Clean up memory
       web.URL.revokeObjectURL(url);
     } catch (e) {
-      debugPrint("Error generating or downloading PDF: $e");
-      // Optional: show a user-friendly snackbar
-      Get.snackbar("Download Error", "Could not generate the PDF statement.");
+      debugPrint("Error generating PDF: $e");
+      Get.snackbar("Error", "Could not generate PDF statement.");
     }
+  }
+}
+
+class _HeaderTxt extends StatelessWidget {
+  final String text;
+  const _HeaderTxt(this.text);
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+    );
   }
 }

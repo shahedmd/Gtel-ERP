@@ -408,6 +408,7 @@ class ProductController extends GetxController {
           colorText: Colors.white,
         );
       } else {
+        print(res.body);
         _showError('Operation Failed: ${res.body}');
       }
     } catch (e) {
