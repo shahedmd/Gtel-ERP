@@ -296,7 +296,7 @@ class DebatorController extends GetxController {
     required String type,
     required DateTime date,
     Map<String, dynamic>? selectedPaymentMethod,
-    String? txid,
+    String? txid, // <--- If this is passed (Invoice ID), we MUST use it.
   }) async {
     gbIsLoading.value = true;
     try {
@@ -313,41 +313,38 @@ class DebatorController extends GetxController {
       final typeLower = type.toLowerCase();
       Map<String, dynamic>? paymentMethod = selectedPaymentMethod;
 
+      // ---------------------------------------------------------
+      // 1. DETERMINE ID & REFERENCE
+      // ---------------------------------------------------------
+      DocumentReference newTxRef;
+      final collectionRef = db
+          .collection('debatorbody')
+          .doc(debtorId)
+          .collection('transactions');
+
+      if (txid != null && txid.isNotEmpty) {
+        // CASE A: Invoice ID provided (Credit Sale). USE IT.
+        newTxRef = collectionRef.doc(txid);
+      } else {
+        // CASE B: No ID provided (Manual Payment). GENERATE ONE.
+        newTxRef = collectionRef.doc();
+        txid = newTxRef.id; // <--- Capture the generated ID so it is not null
+      }
+
+      // ---------------------------------------------------------
+      // 2. SAVE DATA (Using .set() to enforce the ID)
+      // ---------------------------------------------------------
+
       if (typeLower == 'credit') {
-        // PURCHASE (SALE)
-        if (txid != null) {
-          final existingTx =
-              await db
-                  .collection('debatorbody')
-                  .doc(debtorId)
-                  .collection('transactions')
-                  .doc(txid)
-                  .get();
-
-          if (existingTx.exists) {
-            throw "Transaction ID already exists. Please refresh.";
-          }
-        }
-
-        DocumentReference newTxRef;
-        if (txid != null && txid.isNotEmpty) {
-          newTxRef = db
-              .collection('debatorbody')
-              .doc(debtorId)
-              .collection('transactions')
-              .doc(txid);
-        } else {
-          newTxRef =
-              db
-                  .collection('debatorbody')
-                  .doc(debtorId)
-                  .collection('transactions')
-                  .doc();
-          txid = newTxRef.id;
+        // --- CREDIT (SALE) ---
+        // Ensure we don't overwrite if it already exists (safety check)
+        final docSnap = await newTxRef.get();
+        if (docSnap.exists) {
+          throw "Transaction ID $txid already exists.";
         }
 
         await newTxRef.set({
-          'transactionId': txid,
+          'transactionId': txid, // This is now guaranteed to be the Invoice ID
           'amount': amount,
           'note': note,
           'type': 'credit',
@@ -367,7 +364,7 @@ class DebatorController extends GetxController {
           transactionId: txid,
         );
       } else {
-        // PAYMENT (COLLECTION)
+        // --- DEBIT (PAYMENT) ---
         if (paymentMethod == null) {
           final payments = (debtorData['payments'] as List? ?? []);
           if (payments.isNotEmpty) {
@@ -375,31 +372,26 @@ class DebatorController extends GetxController {
           }
         }
 
-        await db
-            .collection('debatorbody')
-            .doc(debtorId)
-            .collection('transactions')
-            .add({
-              'amount': amount,
-              'note': note,
-              'type': 'debit',
-              'date': Timestamp.fromDate(date),
-              'paymentMethod': paymentMethod,
-              'createdAt': FieldValue.serverTimestamp(),
-              'transactionId': txid,
-            });
+        // We use .set() here too because we determined the ID above
+        await newTxRef.set({
+          'transactionId': txid, // This is now the Generated ID (Not Null)
+          'amount': amount,
+          'note': note,
+          'type': 'debit',
+          'date': Timestamp.fromDate(date),
+          'paymentMethod': paymentMethod,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
 
         await daily.applyDebtorPayment(
           debtorName,
           amount,
           paymentMethod ?? {},
           date: date,
-          transactionId: txid,
+          transactionId: txid, // Passes the ID to Daily Sales
         );
       }
 
-      // Update the local transaction list if we are currently viewing this debtor
-      // This makes the UI update instantly without full reload
       loadDebtorTransactions(debtorId);
 
       if (Get.isDialogOpen ?? false) {

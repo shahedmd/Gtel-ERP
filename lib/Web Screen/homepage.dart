@@ -69,7 +69,7 @@ class _AdminHomepageState extends State<AdminHomepage> {
                     return GetPageRoute(page: () => LiveOrderSalesPage());
                   }
                   if (settings.name == Routes.PROFITLOSS) {
-                    return GetPageRoute(page: () => ProfitLossPage());
+                    return GetPageRoute(page: () => ProfitView());
                   }
                   if (settings.name == Routes.CASH) {
                     return GetPageRoute(page: () => CashDrawerPage());

@@ -211,6 +211,12 @@ class ConditionSalesController extends GetxController {
   // 2. PAYMENT RECEIVING
   // ==============================================================================
 
+  // ... imports
+
+  // ==============================================================================
+  // 2. PAYMENT RECEIVING (FIXED)
+  // ==============================================================================
+
   Future<void> receiveConditionPayment({
     required ConditionOrderModel order,
     required double receivedAmount,
@@ -227,14 +233,27 @@ class ConditionSalesController extends GetxController {
     try {
       WriteBatch batch = _db.batch();
 
-      // 1. Update Invoice
+      // --- FIX START: Get current paid amount to increment it ---
       DocumentReference orderRef = _db
           .collection('sales_orders')
           .doc(order.invoiceId);
+
+      // We need to fetch the latest data to ensure 'actualReceived' is accurate
+      DocumentSnapshot latestSnap = await orderRef.get();
+      Map<String, dynamic> data = latestSnap.data() as Map<String, dynamic>;
+      Map<String, dynamic> paymentDetails = data['paymentDetails'] ?? {};
+
+      double currentPaid =
+          double.tryParse(paymentDetails['actualReceived'].toString()) ?? 0.0;
+      double newPaidTotal = currentPaid + receivedAmount;
       double newDue = order.courierDue - receivedAmount;
 
+      // 1. Update Invoice (Crucial: Update 'actualReceived' & 'lastPaymentDate')
       batch.update(orderRef, {
         "courierDue": newDue,
+        "paymentDetails.actualReceived": newPaidTotal, // <--- THIS WAS MISSING
+        "lastPaymentDate":
+            FieldValue.serverTimestamp(), // <--- NEW FIELD FOR P&L
         "status": newDue <= 0 ? "completed" : "on_delivery",
         "isFullyPaid": newDue <= 0,
         "collectionHistory": FieldValue.arrayUnion([
@@ -247,6 +266,7 @@ class ConditionSalesController extends GetxController {
           },
         ]),
       });
+      // --- FIX END ---
 
       // 2. Update Courier Ledger
       DocumentReference courierRef = _db
@@ -267,7 +287,7 @@ class ConditionSalesController extends GetxController {
 
       await batch.commit();
 
-      // 4. Add to Daily Sales
+      // 4. Add to Daily Sales (This drives the Realized Profit Report)
       await dailyCtrl.addSale(
         name: "${order.courierName} (Ref: ${order.invoiceId})",
         amount: receivedAmount,
@@ -283,13 +303,11 @@ class ConditionSalesController extends GetxController {
         transactionId: order.invoiceId,
       );
 
-      // Refresh data to reflect changes
       await loadConditionSales(loadMore: false);
-
       Get.back();
       Get.snackbar(
         "Success",
-        "Payment received & Ledgers Updated",
+        "Payment Received & Profit Realized",
         backgroundColor: Colors.green,
         colorText: Colors.white,
       );
@@ -299,6 +317,8 @@ class ConditionSalesController extends GetxController {
       isLoading.value = false;
     }
   }
+
+  // ... rest of the file
 
   // ==============================================================================
   // 3. RETURN LOGIC

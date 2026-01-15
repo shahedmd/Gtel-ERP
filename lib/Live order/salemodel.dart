@@ -218,7 +218,7 @@ class LiveSalesController extends GetxController {
   }
 
   // ==================================================================
-  // 🔥 FINALIZATION LOGIC
+  // 🔥 FINALIZATION LOGIC (Updated with Rollback Protection)
   // ==================================================================
   Future<void> finalizeSale() async {
     if (cart.isEmpty) {
@@ -226,6 +226,7 @@ class LiveSalesController extends GetxController {
       return;
     }
 
+    // --- Validation ---
     if (isConditionSale.value) {
       if (addressC.text.isEmpty) {
         Get.snackbar("Required", "Delivery Address required");
@@ -267,9 +268,10 @@ class LiveSalesController extends GetxController {
     }
 
     isProcessing.value = true;
+
+    // Prepare Data
     final String invNo = _generateInvoiceID();
     final DateTime saleDate = DateTime.now();
-
     double paidAmountInput = totalPaidInput.value;
     double actualReceived = 0.0;
     double dueOrConditionAmount = 0.0;
@@ -310,18 +312,20 @@ class LiveSalesController extends GetxController {
           };
         }).toList();
 
+    // 1. UPDATE STOCK (HTTP CALL)
+    List<Map<String, dynamic>> stockUpdates =
+        cart
+            .map((item) => {'id': item.product.id, 'qty': item.quantity.value})
+            .toList();
+
+    bool stockSuccess = await productCtrl.updateStockBulk(stockUpdates);
+    if (!stockSuccess) {
+      isProcessing.value = false;
+      Get.snackbar("Stock Error", "Stock update failed. Sale canceled.");
+      return;
+    }
+
     try {
-      // 1. UPDATE STOCK (HTTP CALL)
-      List<Map<String, dynamic>> stockUpdates =
-          cart
-              .map(
-                (item) => {'id': item.product.id, 'qty': item.quantity.value},
-              )
-              .toList();
-
-      bool stockSuccess = await productCtrl.updateStockBulk(stockUpdates);
-      if (!stockSuccess) throw "Stock update failed (Server)";
-
       WriteBatch batch = _db.batch();
 
       // 2. MASTER INVOICE
@@ -387,7 +391,6 @@ class LiveSalesController extends GetxController {
           "status": "pending_courier",
         });
 
-        // Store Courier Due (Fetchable)
         if (selectedCourier.value != null && dueOrConditionAmount > 0) {
           DocumentReference courierRef = _db
               .collection('courier_ledgers')
@@ -501,6 +504,7 @@ class LiveSalesController extends GetxController {
 
       await batch.commit();
 
+      // --- PDF & CLEANUP ---
       await _generatePdf(
         invNo,
         fName,
@@ -522,6 +526,29 @@ class LiveSalesController extends GetxController {
         colorText: Colors.white,
       );
     } catch (e) {
+      // ⚠️ CRITICAL ROLLBACK: If Firestore fails, add items back to stock
+      print("Transaction failed. Attempting stock rollback...");
+      try {
+        List<Map<String, dynamic>> rollbackStock =
+            cart
+                .map(
+                  (item) => {
+                    'id': item.product.id,
+                    'qty': -item.quantity.value,
+                  },
+                )
+                .toList();
+        await productCtrl.updateStockBulk(rollbackStock);
+        print("Stock rollback successful.");
+      } catch (rollbackErr) {
+        print("CRITICAL: Stock rollback failed: $rollbackErr");
+        Get.defaultDialog(
+          title: "CRITICAL ERROR",
+          middleText:
+              "Database failed AND Stock rollback failed. Please screenshot this and contact support.\nError: $e",
+        );
+      }
+
       Get.snackbar(
         "Error",
         "Transaction Failed: $e",
