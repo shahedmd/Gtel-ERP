@@ -13,8 +13,13 @@ class SaleReturnController extends GetxController {
   // --- STATE ---
   var searchController = TextEditingController();
   var isLoading = false.obs;
+
+  // Loaded Order Data
   var orderData = Rxn<Map<String, dynamic>>();
   var orderItems = <Map<String, dynamic>>[].obs;
+
+  // Handling Multiple Search Results (Collision on 4 digits)
+  var multipleSearchResults = <Map<String, dynamic>>[].obs;
 
   // Track quantities to return
   var returnQuantities = <String, int>{}.obs;
@@ -36,59 +41,172 @@ class SaleReturnController extends GetxController {
 
   String toStr(dynamic val) => val?.toString() ?? "";
 
-  // --- 1. SEARCH INVOICE ---
-  Future<void> findInvoice(String invoiceId) async {
-    if (invoiceId.isEmpty) return;
-    isLoading.value = true;
+  // --- 1. SMART SEARCH (Entry Point) ---
+  Future<void> smartSearch(String input) async {
+    if (input.trim().isEmpty) return;
 
-    // Reset State
+    // Clear previous state
+    multipleSearchResults.clear();
     orderData.value = null;
     orderItems.clear();
-    returnQuantities.clear();
-    returnDestinations.clear();
 
+    String query = input.trim();
+
+    // If input is short (4 digits), search recent docs.
+    // If long (likely full ID), search directly.
+    if (query.length <= 5) {
+      await _searchByShortCode(query);
+    } else {
+      await _loadInvoiceByFullId(query);
+    }
+  }
+
+  // A. Search by Last 4 Digits (Scans recent 100 orders)
+  Future<void> _searchByShortCode(String shortCode) async {
+    isLoading.value = true;
     try {
-      // Trim to prevent whitespace errors
-      final doc =
-          await _db.collection('sales_orders').doc(invoiceId.trim()).get();
+      // 1. Fetch last 100 orders (Optimization: Returns usually happen on recent sales)
+      final snap =
+          await _db
+              .collection('sales_orders')
+              .orderBy('timestamp', descending: true)
+              .limit(100)
+              .get();
 
+      // 2. Filter locally
+      List<Map<String, dynamic>> matches = [];
+
+      for (var doc in snap.docs) {
+        String fullId = doc.id;
+        if (fullId.endsWith(shortCode)) {
+          Map<String, dynamic> data = doc.data();
+          // Exclude already returned/cancelled if needed
+          if (data['status'] != 'deleted') {
+            matches.add(data);
+          }
+        }
+      }
+
+      if (matches.isEmpty) {
+        Get.snackbar(
+          "Not Found",
+          "No recent invoice ending in '$shortCode' found.",
+        );
+      } else if (matches.length == 1) {
+        // Exact match found -> Load it
+        _parseOrderData(matches.first);
+      } else {
+        // Multiple matches -> UI should show a selection dialog
+        multipleSearchResults.assignAll(matches);
+        _showSelectionDialog();
+      }
+    } catch (e) {
+      Get.snackbar("Error", "Search failed: $e");
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+  // B. Direct Load
+  Future<void> _loadInvoiceByFullId(String invoiceId) async {
+    isLoading.value = true;
+    try {
+      final doc = await _db.collection('sales_orders').doc(invoiceId).get();
       if (!doc.exists) {
         Get.snackbar("Not Found", "Invoice #$invoiceId does not exist.");
         return;
       }
-
-      final data = doc.data() as Map<String, dynamic>;
-      orderData.value = data;
-
-      List<dynamic> rawItems = data['items'] ?? [];
-
-      for (var item in rawItems) {
-        if (item is Map) {
-          Map<String, dynamic> safeItem = {
-            "productId": toStr(item['productId']),
-            "name": toStr(item['name']),
-            "model": toStr(item['model']),
-            "qty": toInt(item['qty']),
-            "saleRate": toDouble(item['saleRate']),
-            "costRate": toDouble(item['costRate']),
-            "subtotal": toDouble(item['subtotal']),
-          };
-
-          orderItems.add(safeItem);
-
-          // Initialize return tracking
-          String pid = safeItem['productId'];
-          if (pid.isNotEmpty) {
-            returnQuantities[pid] = 0;
-            returnDestinations[pid] = "Local"; // Default destination
-          }
-        }
-      }
+      _parseOrderData(doc.data() as Map<String, dynamic>);
     } catch (e) {
-      Get.snackbar("Error", "Search Failed: $e");
+      Get.snackbar("Error", "Load failed: $e");
     } finally {
       isLoading.value = false;
     }
+  }
+
+  // C. Parse Data to State
+  void _parseOrderData(Map<String, dynamic> data) {
+    orderData.value = data;
+    returnQuantities.clear();
+    returnDestinations.clear();
+    orderItems.clear();
+
+    List<dynamic> rawItems = data['items'] ?? [];
+
+    for (var item in rawItems) {
+      if (item is Map) {
+        Map<String, dynamic> safeItem = {
+          "productId": toStr(item['productId']),
+          "name": toStr(item['name']),
+          "model": toStr(item['model']),
+          "qty": toInt(item['qty']),
+          "saleRate": toDouble(item['saleRate']),
+          "costRate": toDouble(item['costRate']),
+          "subtotal": toDouble(item['subtotal']),
+        };
+
+        orderItems.add(safeItem);
+
+        // Initialize return tracking
+        String pid = safeItem['productId'];
+        if (pid.isNotEmpty) {
+          returnQuantities[pid] = 0;
+          returnDestinations[pid] = "Local"; // Default destination
+        }
+      }
+    }
+
+    // Clear search list if we successfully loaded one
+    multipleSearchResults.clear();
+  }
+
+  // Helper Dialog for Multiple Matches
+  void _showSelectionDialog() {
+    Get.dialog(
+      Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          width: 400,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                "Select Invoice",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 10),
+              const Text("Multiple invoices found with this code."),
+              const SizedBox(height: 10),
+              SizedBox(
+                height: 200,
+                child: ListView.builder(
+                  itemCount: multipleSearchResults.length,
+                  itemBuilder: (ctx, i) {
+                    var item = multipleSearchResults[i];
+                    return ListTile(
+                      title: Text(item['customerName'] ?? 'Unknown'),
+                      subtitle: Text(
+                        "${item['invoiceId']} • ৳${item['grandTotal']}",
+                      ),
+                      trailing: const Icon(Icons.arrow_forward_ios, size: 14),
+                      onTap: () {
+                        Get.back(); // Close dialog
+                        _parseOrderData(item); // Load selected
+                      },
+                    );
+                  },
+                ),
+              ),
+              TextButton(
+                onPressed: () => Get.back(),
+                child: const Text("Cancel"),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   // --- 2. UI LOGIC ---
@@ -155,7 +273,7 @@ class SaleReturnController extends GetxController {
       Map<String, dynamic> currentOrder =
           orderSnap.data() as Map<String, dynamic>;
 
-      // C. Calculate Reductions
+      // C. Calculate Reductions (Items & Cost)
       double refundAmt = 0.0;
       double profitReduce = 0.0;
       double costReduce = 0.0;
@@ -192,19 +310,19 @@ class SaleReturnController extends GetxController {
           returnedItemSummaries.add("$model (Returned x$retQty)");
         }
 
-        // Add to new list (even if qty is 0, we keep it to show it was returned)
+        // Add to new list
         newItemsList.add({
           "productId": pid,
           "name": name,
           "model": model,
-          "qty": dbQty,
+          "qty": dbQty, // Updated Qty
           "saleRate": sRate,
           "costRate": cRate,
-          "subtotal": toDouble(dbQty * sRate),
+          "subtotal": toDouble(dbQty * sRate), // Updated Subtotal
         });
       }
 
-      // D. Financial Adjustment Logic (CRITICAL)
+      // D. Financial Adjustment Logic
       double oldGT = toDouble(currentOrder['grandTotal']);
       double oldP = toDouble(currentOrder['profit']);
       double oldC = toDouble(currentOrder['totalCost']);
@@ -212,6 +330,10 @@ class SaleReturnController extends GetxController {
       double newGT = oldGT - refundAmt;
       double newP = oldP - profitReduce;
       double newC = oldC - costReduce;
+      if (newGT < 0) newGT = 0;
+
+      // --- PAYMENT MODIFICATION LOGIC (NEW) ---
+      // Instead of calculating "changeReturned", we reduce payment methods directly.
 
       Map<String, dynamic> oldPay =
           currentOrder['paymentDetails'] is Map
@@ -220,43 +342,95 @@ class SaleReturnController extends GetxController {
 
       double paidSoFar = toDouble(oldPay['actualReceived']);
 
-      // Logic:
-      // If I bought 5000, paid 2000 (Due 3000). Return 1000.
-      // New Total: 4000. Paid is still 2000. New Due: 2000.
-      //
-      // If I bought 5000, paid 5000 (Due 0). Return 1000.
-      // New Total: 4000. Paid 5000. Change/Credit: 1000.
-      // We do NOT reduce 'actualReceived' usually, unless you literally gave them cash back.
-      // Assuming for Debtor/System, we adjust the BILL, not the cash flow history.
+      // 1. Extract Individual Payment Amounts
+      double pCash = toDouble(oldPay['cash']);
+      double pBkash = toDouble(oldPay['bkash']);
+      double pNagad = toDouble(oldPay['nagad']);
+      double pBank = toDouble(oldPay['bank']);
 
-      double newDue = newGT - paidSoFar;
-      if (newDue < 0) {
-        newDue = 0; // Negative due implies we owe them money (Credit)
+      double amountToReduce = 0.0;
+
+      // 2. Determine how much we need to "Refund" (remove from history)
+      if (paidSoFar > newGT) {
+        amountToReduce = paidSoFar - newGT;
       }
 
+      // 3. Deduct from Payment Methods iteratively (Priority: Cash -> Bkash -> Nagad -> Bank)
+      if (amountToReduce > 0) {
+        // Reduce Cash
+        if (pCash > 0) {
+          if (pCash >= amountToReduce) {
+            pCash -= amountToReduce;
+            amountToReduce = 0;
+          } else {
+            amountToReduce -= pCash;
+            pCash = 0;
+          }
+        }
+        // Reduce Bkash
+        if (amountToReduce > 0 && pBkash > 0) {
+          if (pBkash >= amountToReduce) {
+            pBkash -= amountToReduce;
+            amountToReduce = 0;
+          } else {
+            amountToReduce -= pBkash;
+            pBkash = 0;
+          }
+        }
+        // Reduce Nagad
+        if (amountToReduce > 0 && pNagad > 0) {
+          if (pNagad >= amountToReduce) {
+            pNagad -= amountToReduce;
+            amountToReduce = 0;
+          } else {
+            amountToReduce -= pNagad;
+            pNagad = 0;
+          }
+        }
+        // Reduce Bank
+        if (amountToReduce > 0 && pBank > 0) {
+          if (pBank >= amountToReduce) {
+            pBank -= amountToReduce;
+            amountToReduce = 0;
+          } else {
+            amountToReduce -= pBank;
+            pBank = 0;
+          }
+        }
+      }
+
+      // 4. Recalculate Totals based on reduced methods
+      double newActualReceived = pCash + pBkash + pNagad + pBank;
+      double newDue = newGT - newActualReceived;
+      if (newDue < 0) newDue = 0;
+
+      // 5. Construct New Payment Map
       Map<String, dynamic> newPayDetails = {
-        ...oldPay, // Keep method types
+        ...oldPay,
+        "cash": pCash,
+        "bkash": pBkash,
+        "nagad": pNagad,
+        "bank": pBank,
+        "actualReceived": newActualReceived,
+        "totalPaidInput": newActualReceived,
         "due": newDue,
-        "changeReturned": (paidSoFar > newGT) ? (paidSoFar - newGT) : 0,
-        // Note: We don't change 'actualReceived' because that money was historically received.
-        // We just change the 'Due' obligation.
+        "changeReturned": 0.0, // Explicitly set to 0 as requested
       };
 
       // 1. UPDATE SALES ORDER
       batch.update(orderRef, {
         'items': newItemsList,
-        'grandTotal': newGT < 0 ? 0.0 : newGT,
+        'grandTotal': newGT,
         'profit': newP,
         'totalCost': newC < 0 ? 0.0 : newC,
         'paymentDetails': newPayDetails,
         'status': 'returned_partial',
         'lastReturnDate': FieldValue.serverTimestamp(),
-        'subtotal': newGT < 0 ? 0.0 : newGT,
+        'subtotal': newGT,
       });
 
       // 2. UPDATE DEBTOR LEDGER (If Applicable)
       if (debtorId.isNotEmpty) {
-        // Find the specific transaction document for this invoice
         DocumentReference debtorTxRef = _db
             .collection('debatorbody')
             .doc(debtorId)
@@ -266,34 +440,29 @@ class SaleReturnController extends GetxController {
         DocumentSnapshot debTxSnap = await debtorTxRef.get();
 
         if (debTxSnap.exists) {
-          // We update the transaction 'amount' to the New Grand Total.
-          // This automatically fixes the balance calculation when you fetch debtor details.
+          // Update transaction amount to match new bill
           batch.update(debtorTxRef, {
             'amount': newGT,
-            'note':
-                "Inv $invoiceId (Returned: ${refundAmt.toStringAsFixed(0)})",
+            'note': "Inv $invoiceId (Ret: ${refundAmt.toStringAsFixed(0)})",
             'updatedAt': FieldValue.serverTimestamp(),
           });
         }
 
-        // Also update the Analytics History (Profit/Loss tracking)
+        // Update Analytics
         DocumentReference analyticsRef = _db
             .collection('debtor_transaction_history')
             .doc(invoiceId);
-        // We use set with merge just in case the doc doesn't exist (legacy data)
+
         batch.set(analyticsRef, {
           "saleAmount": newGT,
           "costAmount": newC,
           "profit": newP,
           "returnDate": FieldValue.serverTimestamp(),
-          "itemsSummary": FieldValue.arrayUnion(
-            returnedItemSummaries,
-          ), // Add return logs
+          "itemsSummary": FieldValue.arrayUnion(returnedItemSummaries),
         }, SetOptions(merge: true));
       }
 
       // 3. UPDATE DAILY SALES ENTRY
-      // We need to find the daily sales entry to reduce the 'Amount' (Revenue)
       final dailyQuery =
           await _db
               .collection('daily_sales')
@@ -303,19 +472,20 @@ class SaleReturnController extends GetxController {
 
       if (dailyQuery.docs.isNotEmpty) {
         DocumentSnapshot dailySnap = dailyQuery.docs.first;
-        // Reduce the recorded sales amount
+
+        // Directly sync with the new reduced values
         batch.update(dailySnap.reference, {
           'amount': newGT,
-          // If pending was positive, recalculate it
+          'paid': newActualReceived, // Now matches the reduced payment
           'pending': newDue,
+          'paymentMethod': newPayDetails,
         });
       }
 
       // 4. COMMIT DB UPDATES
       await batch.commit();
 
-      // 5. STOCK RESTORATION (Separate from DB Batch if using Custom Logic)
-      // Iterating through returns to restore stock
+      // 5. STOCK RESTORATION
       for (var pid in returnQuantities.keys) {
         int qty = returnQuantities[pid]!;
         if (qty > 0) {
@@ -327,12 +497,11 @@ class SaleReturnController extends GetxController {
             orElse: () => {},
           );
           double originalCost = toDouble(itemInfo['costRate']);
-
           int? parsedPid = int.tryParse(pid);
 
           if (parsedPid != null) {
             try {
-              // Using your existing stock method
+              // Server Calculation for WAC update
               await productCtrl.addMixedStock(
                 productId: parsedPid,
                 localQty: dest == "Local" ? qty : 0,
@@ -342,16 +511,12 @@ class SaleReturnController extends GetxController {
               );
             } catch (e) {
               print("Stock Restore Error for $pid: $e");
-              Get.snackbar(
-                "Warning",
-                "Stock update failed for ID $pid (Check Connection)",
-              );
             }
           }
         }
       }
 
-      Get.back(); // Close Dialog if open
+      Get.back(); // Close Dialog/Screen
       Get.snackbar(
         "Return Successful",
         "Invoice adjusted & Stock restored.\nNew Bill Total: ৳$newGT",
@@ -364,6 +529,7 @@ class SaleReturnController extends GetxController {
       orderData.value = null;
       searchController.clear();
       orderItems.clear();
+      multipleSearchResults.clear();
     } catch (e) {
       if (Get.isDialogOpen ?? false) Get.back();
       Get.snackbar(

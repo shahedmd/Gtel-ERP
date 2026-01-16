@@ -650,6 +650,34 @@ class ProductScreen extends StatelessWidget {
                   }),
                 ),
               ),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade800,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      "Total Warehouse Value (BDT)",
+                      style: TextStyle(color: Colors.white70, fontSize: 14),
+                    ),
+                    const SizedBox(height: 8),
+                    // This Obx widget listens to changes in your controller
+                    Obx(
+                      () => Text(
+                        "৳ ${controller.formattedTotalValuation}",
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 26,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
 
               _buildPagination(),
             ],

@@ -196,6 +196,11 @@ class SidebarMenu extends StatelessWidget {
               padding: const EdgeInsets.symmetric(vertical: 10),
               physics: const BouncingScrollPhysics(),
               children: [
+                _NavTile(
+                  id: Routes.OVERVIEWACCOUNT,
+                  icon: FontAwesomeIcons.chartPie,
+                  title: "Overview Dashboard",
+                ),
                 // --- DASHBOARD ---
                 _NavTile(
                   id: Routes.DASHBOARD,

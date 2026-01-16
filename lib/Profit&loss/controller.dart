@@ -132,8 +132,9 @@ class ProfitController extends GetxController {
 
     for (var doc in invoiceSnap.docs) {
       var data = doc.data() as Map<String, dynamic>;
-      if (data['status'] == 'deleted' || data['status'] == 'cancelled')
+      if (data['status'] == 'deleted' || data['status'] == 'cancelled') {
         continue;
+      }
       tempRev += double.tryParse(data['grandTotal'].toString()) ?? 0;
       tempCost += double.tryParse(data['totalCost'].toString()) ?? 0;
     }
@@ -203,7 +204,9 @@ class ProfitController extends GetxController {
 
     // Buckets for Chart
     Map<int, double> monthlyProfitMap = {};
-    for (int i = 1; i <= 12; i++) monthlyProfitMap[i] = 0.0;
+    for (int i = 1; i <= 12; i++) {
+      monthlyProfitMap[i] = 0.0;
+    }
 
     for (var doc in dailySnap.docs) {
       var data = doc.data() as Map<String, dynamic>;

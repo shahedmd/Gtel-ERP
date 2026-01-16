@@ -2,7 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:gtel_erp/Live%20order/salemodel.dart';
+import 'package:gtel_erp/Live%20order/salemodel.dart'; // Ensure this matches your path
 import '../Stock/model.dart';
 
 class LiveOrderSalesPage extends StatelessWidget {
@@ -51,8 +51,9 @@ class LiveOrderSalesPage extends StatelessWidget {
                         const SizedBox(height: 20),
                         _buildCartSection(controller),
                         const SizedBox(height: 20),
+                        // UPDATED PAYMENT SECTION
                         _buildPaymentSection(controller),
-                        const SizedBox(height: 20), // Bottom padding for scroll
+                        const SizedBox(height: 20),
                       ],
                     ),
                   ),
@@ -75,8 +76,8 @@ class LiveOrderSalesPage extends StatelessWidget {
         decoration: BoxDecoration(
           color:
               controller.isConditionSale.value
-                  ? const Color(0xFFC2410C) // Orange-700 (Condition)
-                  : const Color(0xFF1E293B), // Slate-800 (Normal)
+                  ? const Color(0xFFC2410C) // Orange-700
+                  : const Color(0xFF1E293B), // Slate-800
         ),
         child: Center(
           child: Row(
@@ -196,7 +197,7 @@ class LiveOrderSalesPage extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            children: [
+            children: const [
               Icon(Icons.person_outline, size: 18, color: Colors.blueGrey),
               SizedBox(width: 8),
               Text(
@@ -217,7 +218,6 @@ class LiveOrderSalesPage extends StatelessWidget {
               children:
                   ["Retailer", "Agent", "Debtor"].map((type) {
                     bool isSelected = controller.customerType.value == type;
-                    // Disable Debtor in Condition mode (Logic: Condition is Courier-based, distinct from Ledger Debtor)
                     bool isDisabled =
                         controller.isConditionSale.value && type == "Debtor";
 
@@ -263,7 +263,7 @@ class LiveOrderSalesPage extends StatelessWidget {
           const SizedBox(height: 16),
 
           Obx(() {
-            // DEBTOR SEARCH (Direct Sale Only)
+            // DEBTOR SEARCH
             if (controller.customerType.value == "Debtor" &&
                 !controller.isConditionSale.value) {
               return Column(
@@ -293,7 +293,6 @@ class LiveOrderSalesPage extends StatelessWidget {
                         controller.selectedDebtor.value = null;
                         return;
                       }
-                      // Use your existing debtor controller list
                       final match = controller.debtorCtrl.bodies
                           .firstWhereOrNull(
                             (e) =>
@@ -332,7 +331,7 @@ class LiveOrderSalesPage extends StatelessWidget {
               );
             }
 
-            // MANUAL ENTRY & LOGISTICS
+            // MANUAL ENTRY
             return Column(
               children: [
                 Row(
@@ -404,7 +403,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Courier Dropdown with Due Display
+                      // Courier Dropdown
                       Expanded(
                         flex: 2,
                         child: Column(
@@ -446,17 +445,15 @@ class LiveOrderSalesPage extends StatelessWidget {
                                           .toList(),
                                   onChanged: (v) {
                                     controller.selectedCourier.value = v;
-                                    // The controller listens to this change and fetches due automatically
                                   },
                                 ),
                               ),
                             ),
-                            // SHOW COURIER DUE (New Feature)
                             if (controller.selectedCourier.value != null)
                               Padding(
                                 padding: const EdgeInsets.only(top: 4, left: 4),
                                 child: Text(
-                                  "Current Due from ${controller.selectedCourier.value}: ৳${controller.calculatedCourierDue.value}",
+                                  "Current Due: ৳${controller.calculatedCourierDue.value}",
                                   style: TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.bold,
@@ -492,7 +489,7 @@ class LiveOrderSalesPage extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFFF0FDF4), // Green-50
+        color: const Color(0xFFF0FDF4),
         border: Border.all(color: Colors.green.shade200),
         borderRadius: BorderRadius.circular(8),
       ),
@@ -521,9 +518,6 @@ class LiveOrderSalesPage extends StatelessWidget {
               ),
             ],
           ),
-          const Spacer(),
-          // Show current balance if available in model
-          // Text("Due: ৳...", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold))
         ],
       ),
     );
@@ -618,15 +612,13 @@ class LiveOrderSalesPage extends StatelessWidget {
                           ],
                         ),
                       ),
-                      // Custom Quantity Editor
                       CartQuantityEditor(
                         currentQty: item.quantity.value,
                         maxStock: item.product.stockQty,
                         onDecrease: () {
                           if (item.quantity.value > 1) {
                             item.quantity.value--;
-                            controller.cart
-                                .refresh(); // Important for Obx to catch deep changes
+                            controller.cart.refresh();
                             controller.updatePaymentCalculations();
                           } else {
                             controller.cart.removeAt(index);
@@ -641,7 +633,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                           } else {
                             Get.snackbar(
                               "Stock Limit",
-                              "Only ${item.product.stockQty} items available in stock.",
+                              "Only ${item.product.stockQty} items available",
                             );
                           }
                         },
@@ -670,7 +662,7 @@ class LiveOrderSalesPage extends StatelessWidget {
     );
   }
 
-  // --- 3. PAYMENT SECTION ---
+  // --- 3. PAYMENT SECTION (UPDATED) ---
   Widget _buildPaymentSection(LiveSalesController controller) {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -689,7 +681,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                 () => Text(
                   controller.isConditionSale.value
                       ? "Advance Payment"
-                      : "Payment Breakdown",
+                      : "Payment Details",
                   style: const TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.bold,
@@ -706,38 +698,92 @@ class LiveOrderSalesPage extends StatelessWidget {
           ),
           const SizedBox(height: 16),
 
-          // Payment Inputs
+          // 1. CASH
+          _moneyInput(controller.cashC, "Cash Received", Colors.green),
+          const SizedBox(height: 12),
+
+          // 2. MOBILE BANKING (Side by side with number input)
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: _moneyInput(controller.cashC, "Cash", Colors.green),
+                flex: 4,
+                child: _moneyInput(controller.bkashC, "Bkash Amt", Colors.pink),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 8),
               Expanded(
-                child: _moneyInput(controller.bkashC, "bKash", Colors.pink),
+                flex: 6,
+                child: _detailInput(
+                  controller.bkashNumberC,
+                  "Bkash Number (017...)",
+                  Icons.phone_android,
+                ),
               ),
             ],
           ),
           const SizedBox(height: 12),
+
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: _moneyInput(controller.nagadC, "Nagad", Colors.orange),
+                flex: 4,
+                child: _moneyInput(
+                  controller.nagadC,
+                  "Nagad Amt",
+                  Colors.orange,
+                ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 8),
               Expanded(
-                child: _moneyInput(controller.bankC, "Bank", Colors.blue),
+                flex: 6,
+                child: _detailInput(
+                  controller.nagadNumberC,
+                  "Nagad Number (016...)",
+                  Icons.phone_android,
+                ),
               ),
             ],
           ),
+          const SizedBox(height: 12),
+
+          // 3. BANKING (Multiline)
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                flex: 4,
+                child: _moneyInput(
+                  controller.bankC,
+                  "Bank Amt",
+                  Colors.blue.shade800,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 6,
+                child: _detailInput(
+                  controller.bankNameC,
+                  "Bank Name (e.g. City Bank)",
+                  Icons.account_balance,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          _detailInput(
+            controller.bankAccC,
+            "Bank Account Number / Transaction ID",
+            Icons.numbers,
+          ),
+
           const SizedBox(height: 16),
 
-          // Payment Summary / Due Display
+          // Payment Summary
           Obx(() {
             String label = "";
             Color color = Colors.black;
 
-            // Logic derived from Controller's calculations
             if (controller.isConditionSale.value) {
               double due =
                   controller.grandTotal - controller.totalPaidInput.value;
@@ -747,12 +793,12 @@ class LiveOrderSalesPage extends StatelessWidget {
             } else {
               if (controller.totalPaidInput.value > controller.grandTotal) {
                 label =
-                    "Change Return: ৳${controller.changeReturn.value.toStringAsFixed(0)}";
+                    "Change: ৳${controller.changeReturn.value.toStringAsFixed(0)}";
                 color = Colors.green;
               } else {
                 double due =
                     controller.grandTotal - controller.totalPaidInput.value;
-                label = "Due Amount: ৳${due.toStringAsFixed(0)}";
+                label = "Due: ৳${due.toStringAsFixed(0)}";
                 color = Colors.red;
               }
             }
@@ -815,7 +861,7 @@ class LiveOrderSalesPage extends StatelessWidget {
     );
   }
 
-  // --- BOTTOM TOTAL & ACTION ---
+  // --- BOTTOM TOTAL ---
   Widget _buildBottomTotalBar(LiveSalesController controller) {
     return Container(
       padding: const EdgeInsets.all(24),
@@ -1004,13 +1050,13 @@ class LiveOrderSalesPage extends StatelessWidget {
       decoration: InputDecoration(
         labelText: label,
         labelStyle: TextStyle(
-          color: color.withOpacity(0.8),
-          fontSize: 12,
-          fontWeight: FontWeight.bold,
+          color: color.withOpacity(0.9),
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
         ),
         prefixText: "৳",
         filled: true,
-        fillColor: color.withOpacity(0.03),
+        fillColor: color.withOpacity(0.04),
         enabledBorder: OutlineInputBorder(
           borderSide: BorderSide(color: color.withOpacity(0.2)),
           borderRadius: BorderRadius.circular(8),
@@ -1020,8 +1066,36 @@ class LiveOrderSalesPage extends StatelessWidget {
           borderRadius: BorderRadius.circular(8),
         ),
         contentPadding: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 14,
+          horizontal: 10,
+          vertical: 12,
+        ),
+        isDense: true,
+      ),
+    );
+  }
+
+  // NEW HELPER FOR DETAIL INPUTS
+  Widget _detailInput(TextEditingController c, String hint, IconData icon) {
+    return TextField(
+      controller: c,
+      style: const TextStyle(fontSize: 13),
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle: const TextStyle(fontSize: 12, color: Colors.grey),
+        prefixIcon: Icon(icon, size: 16, color: Colors.grey),
+        filled: true,
+        fillColor: Colors.grey.shade50,
+        enabledBorder: OutlineInputBorder(
+          borderSide: BorderSide(color: Colors.grey.shade300),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderSide: const BorderSide(color: Colors.blueGrey),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 10,
+          vertical: 12,
         ),
         isDense: true,
       ),
@@ -1030,9 +1104,8 @@ class LiveOrderSalesPage extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// PRODUCT TABLE & QUANTITY WIDGETS (Kept consistent with your existing code)
+// PRODUCT TABLE SECTION (Unchanged)
 // ---------------------------------------------------------------------------
-
 class _ProductTableSection extends StatelessWidget {
   final LiveSalesController controller;
   const _ProductTableSection(this.controller);
@@ -1217,7 +1290,7 @@ class _ProductTableSection extends StatelessWidget {
               ),
             ),
           ),
-          SizedBox(width: 50), // Space for button
+          SizedBox(width: 50),
         ],
       ),
     );
@@ -1300,7 +1373,6 @@ class _ProductRow extends StatelessWidget {
               Expanded(
                 flex: 1,
                 child: Obx(() {
-                  // Dynamically display price based on customer type selected in controller
                   double price =
                       (controller.customerType.value == "Retailer")
                           ? product.wholesale

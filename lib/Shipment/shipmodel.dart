@@ -5,10 +5,14 @@ class ShipmentItem {
   final String productName;
   final String productModel;
   final String productBrand;
+  final String productCategory; // Added for better filtering/reporting
+  final double
+  unitWeightSnapshot; // Added to calculate accurate logistics weight later
   final int seaQty;
   final int airQty;
   final String cartonNo;
-  // Snapshot prices to calculate accurate shipment cost
+
+  // Snapshot prices to calculate accurate shipment cost (Landed Cost at time of shipment)
   final double seaPriceSnapshot;
   final double airPriceSnapshot;
 
@@ -17,6 +21,8 @@ class ShipmentItem {
     required this.productName,
     required this.productModel,
     required this.productBrand,
+    required this.productCategory,
+    required this.unitWeightSnapshot,
     required this.seaQty,
     required this.airQty,
     required this.cartonNo,
@@ -30,6 +36,8 @@ class ShipmentItem {
       'productName': productName,
       'productModel': productModel,
       'productBrand': productBrand,
+      'productCategory': productCategory,
+      'unitWeightSnapshot': unitWeightSnapshot,
       'seaQty': seaQty,
       'airQty': airQty,
       'cartonNo': cartonNo,
@@ -40,10 +48,12 @@ class ShipmentItem {
 
   factory ShipmentItem.fromMap(Map<String, dynamic> map) {
     return ShipmentItem(
-      productId: map['productId'],
+      productId: map['productId'] ?? 0,
       productName: map['productName'] ?? '',
       productModel: map['productModel'] ?? '',
       productBrand: map['productBrand'] ?? '',
+      productCategory: map['productCategory'] ?? '',
+      unitWeightSnapshot: (map['unitWeightSnapshot'] ?? 0.0).toDouble(),
       seaQty: map['seaQty'] ?? 0,
       airQty: map['airQty'] ?? 0,
       cartonNo: map['cartonNo'] ?? '',
@@ -52,9 +62,14 @@ class ShipmentItem {
     );
   }
 
-  // Helper to get total cost of this specific item line
+  // --- HELPERS ---
+
+  // Total cost of this line item
   double get totalItemCost =>
       (seaQty * seaPriceSnapshot) + (airQty * airPriceSnapshot);
+
+  // Total weight of this line item (Used for manifest weight sanity checks)
+  double get totalLineWeight => (seaQty + airQty) * unitWeightSnapshot;
 }
 
 class ShipmentModel {
@@ -109,9 +124,10 @@ class ShipmentModel {
       totalAmount: (data['totalAmount'] ?? 0.0).toDouble(),
       isReceived: data['isReceived'] ?? false,
       items:
-          (data['items'] as List<dynamic>)
-              .map((e) => ShipmentItem.fromMap(e))
-              .toList(),
+          (data['items'] as List<dynamic>?)
+              ?.map((e) => ShipmentItem.fromMap(e))
+              .toList() ??
+          [],
     );
   }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:gtel_erp/Account%20Overview/aopage.dart';
 import 'package:gtel_erp/Stock/Service/servicepage.dart';
 import 'package:gtel_erp/Vendor/vendorpage.dart';
 import 'package:gtel_erp/Web%20Screen/Sales/Condition/conditionpage.dart';
@@ -86,10 +87,13 @@ class _AdminHomepageState extends State<AdminHomepage> {
                   if (settings.name == Routes.CONDITION) {
                     return GetPageRoute(page: () => ConditionSalesPage());
                   }
-                   if (settings.name == Routes.VENDOR) {
+                  if (settings.name == Routes.VENDOR) {
                     return GetPageRoute(page: () => VendorPage());
                   }
-                  return GetPageRoute(
+                  if (settings.name == Routes.OVERVIEWACCOUNT) {
+                    return GetPageRoute(page: () => AccountOverviewPage());
+                  }
+                  return GetPageRoute( 
                     page: () => const Center(child: Text("Not Found")),
                   );
                 },

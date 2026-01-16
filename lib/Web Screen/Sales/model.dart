@@ -7,7 +7,13 @@ class SaleModel {
   final double paid;
   final String customerType;
   final DateTime timestamp;
+
+  // Stores the LATEST or Primary payment method details
   final Map<String, dynamic>? paymentMethod;
+
+  // NEW: Stores the list of all payment transactions for this sale
+  final List<Map<String, dynamic>> paymentHistory;
+
   final List<dynamic> appliedDebits;
   final String? transactionId; // Links to sales_orders
   final String source;
@@ -20,6 +26,7 @@ class SaleModel {
     required this.customerType,
     required this.timestamp,
     this.paymentMethod,
+    this.paymentHistory = const [], // Default to empty list
     required this.appliedDebits,
     this.transactionId,
     required this.source,
@@ -39,13 +46,19 @@ class SaleModel {
       // 2. Timestamp Safety
       timestamp: (d['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
 
-      // 3. Payment Method Casting
+      // 3. Payment Method Casting (The map containing details like bkashNumber)
       paymentMethod: d['paymentMethod'] as Map<String, dynamic>?,
+
+      // 4. Payment History Parsing (NEW)
+      paymentHistory:
+          (d['paymentHistory'] as List<dynamic>?)
+              ?.map((e) => e as Map<String, dynamic>)
+              .toList() ??
+          [],
 
       appliedDebits: d['appliedDebits'] ?? [],
 
-      // 4. CRITICAL: Fallback logic to find the Link ID
-      // If 'transactionId' is missing, check 'invoiceId'
+      // 5. CRITICAL: Fallback logic to find the Link ID
       transactionId: d['transactionId'] ?? d['invoiceId'],
 
       source: d['source'] ?? 'direct',

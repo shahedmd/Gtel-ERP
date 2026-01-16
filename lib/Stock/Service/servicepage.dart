@@ -1,6 +1,5 @@
 // ignore_for_file: deprecated_member_use
 
-
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
@@ -41,7 +40,7 @@ class _ServicePageState extends State<ServicePage> {
   }
 
   /// ==================================================
-  /// PDF GENERATION LOGIC (NEW)
+  /// PDF GENERATION LOGIC
   /// ==================================================
   Future<void> _generateAndDownloadPdf(String reportType) async {
     final pdf = pw.Document();
@@ -69,8 +68,6 @@ class _ServicePageState extends State<ServicePage> {
         totalValue += (q * c);
       }
     }
-
-    // Load Font (Optional, uses standard font by default)
 
     pdf.addPage(
       pw.MultiPage(
@@ -182,10 +179,83 @@ class _ServicePageState extends State<ServicePage> {
       ),
     );
 
-    // This opens the native print dialog (which includes "Save as PDF")
     await Printing.layoutPdf(
       onLayout: (PdfPageFormat format) async => pdf.save(),
       name: '${title}_${DateFormat('yyyyMMdd').format(DateTime.now())}.pdf',
+    );
+  }
+
+  // ==================================================
+  // NEW: PARTIAL RETURN DIALOG (The Fix)
+  // ==================================================
+  void _showReturnDialog(
+    BuildContext context,
+    int id,
+    String modelName,
+    int maxQty,
+  ) {
+    final TextEditingController qtyController = TextEditingController();
+
+    // Default to full quantity for convenience
+    qtyController.text = maxQty.toString();
+
+    Get.defaultDialog(
+      title: "Return to Stock",
+      titleStyle: const TextStyle(fontWeight: FontWeight.bold),
+      content: Column(
+        children: [
+          Text("Return $modelName from Service?"),
+          const SizedBox(height: 10),
+          Text(
+            "Max available: $maxQty",
+            style: const TextStyle(color: Colors.grey, fontSize: 12),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: qtyController,
+            keyboardType: TextInputType.number,
+            textAlign: TextAlign.center,
+            decoration: const InputDecoration(
+              labelText: "Enter Quantity",
+              border: OutlineInputBorder(),
+              contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            ),
+          ),
+        ],
+      ),
+      textConfirm: "Confirm",
+      textCancel: "Cancel",
+      confirmTextColor: Colors.white,
+      buttonColor: Colors.green,
+      onConfirm: () {
+        final int enteredQty = int.tryParse(qtyController.text) ?? 0;
+
+        // VALIDATION LOGIC
+        if (enteredQty <= 0) {
+          Get.snackbar(
+            "Error",
+            "Quantity must be at least 1",
+            backgroundColor: Colors.red,
+            colorText: Colors.white,
+          );
+          return;
+        }
+
+        if (enteredQty > maxQty) {
+          Get.snackbar(
+            "Error",
+            "Cannot return more than $maxQty",
+            backgroundColor: Colors.red,
+            colorText: Colors.white,
+          );
+          return;
+        }
+
+        Get.back(); // Close Dialog
+
+        // Pass both ID and Quantity to the controller
+        controller.returnFromService(id, enteredQty);
+      },
     );
   }
 
@@ -432,18 +502,12 @@ class _ServicePageState extends State<ServicePage> {
                             if (isActive)
                               ElevatedButton.icon(
                                 onPressed: () {
-                                  Get.defaultDialog(
-                                    title: "Confirm Return",
-                                    middleText:
-                                        "Return ${item['model']} (Qty: $qty) back to Local Stock?",
-                                    textConfirm: "Yes, Return",
-                                    textCancel: "Cancel",
-                                    confirmTextColor: Colors.white,
-                                    buttonColor: Colors.green,
-                                    onConfirm: () {
-                                      Get.back(); // Close dialog
-                                      controller.returnFromService(id);
-                                    },
+                                  // CHANGED: Open the partial return dialog
+                                  _showReturnDialog(
+                                    context,
+                                    id,
+                                    item['model'],
+                                    qty,
                                   );
                                 },
                                 icon: const Icon(Icons.undo, size: 16),

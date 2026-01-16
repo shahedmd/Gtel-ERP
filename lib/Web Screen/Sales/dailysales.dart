@@ -106,7 +106,7 @@ class DailySalesPage extends StatelessWidget {
 
           // --- Search Bar ---
           Container(
-            width: 280,
+            width: 250,
             height: 45,
             decoration: BoxDecoration(
               color: bgSlate,
@@ -126,6 +126,20 @@ class DailySalesPage extends StatelessWidget {
                 ),
                 border: InputBorder.none,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 10),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+
+          // --- REFRESH BUTTON (NEW) ---
+          IconButton(
+            onPressed: () => ctrl.loadDailySales(),
+            icon: const Icon(Icons.refresh, color: primaryBlue),
+            tooltip: "Refresh Data",
+            style: IconButton.styleFrom(
+              backgroundColor: Colors.blue.shade50,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
               ),
             ),
           ),
@@ -416,8 +430,8 @@ class DailySalesPage extends StatelessWidget {
   // 4. MAIN SALES LIST
   // ==========================================================
   Widget _buildMainContent(BuildContext context) {
-    final filtered =
-        _getFilteredList(); // Using logic from controller via local method
+    // Controller logic is already filtering the sales list
+    final filtered = ctrl.filteredList;
 
     if (filtered.isEmpty) {
       return Center(
@@ -572,6 +586,8 @@ class DailySalesPage extends StatelessWidget {
               flex: 2,
               child: Text(
                 ctrl.formatPaymentMethod(sale.paymentMethod),
+                maxLines: 2, // Allow multiline for details
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
@@ -658,16 +674,17 @@ class DailySalesPage extends StatelessWidget {
   // 5. DIALOGS & UTILS
   // ==========================================================
 
+  /// Shows dialog to collect due payment with details (Number/Bank)
   void _showPaymentDialog(BuildContext context, SaleModel sale) {
     final amountC = TextEditingController(text: sale.pending.toString());
-    final refC = TextEditingController();
+    final detailsC = TextEditingController(); // For Number or Bank Name
     final RxString method = "cash".obs;
 
     Get.dialog(
       Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: Container(
-          width: 400,
+          width: 450,
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -717,6 +734,8 @@ class DailySalesPage extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 16),
+
+              // Method Selection
               Obx(
                 () => DropdownButtonFormField<String>(
                   value: method.value,
@@ -739,15 +758,33 @@ class DailySalesPage extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 16),
-              TextField(
-                controller: refC,
-                decoration: InputDecoration(
-                  labelText: "Transaction Ref (Optional)",
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
+
+              // Dynamic Detail Input based on Method
+              Obx(() {
+                if (method.value == 'cash') return const SizedBox.shrink();
+
+                String label = "Details";
+                IconData icon = Icons.info;
+
+                if (method.value == 'bkash' || method.value == 'nagad') {
+                  label = "${method.value.toUpperCase()} Number";
+                  icon = Icons.phone_android;
+                } else if (method.value == 'bank') {
+                  label = "Bank Name & Account No";
+                  icon = Icons.account_balance;
+                }
+
+                return TextField(
+                  controller: detailsC,
+                  decoration: InputDecoration(
+                    labelText: label,
+                    prefixIcon: Icon(icon, size: 18),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                   ),
-                ),
-              ),
+                );
+              }),
               const SizedBox(height: 24),
 
               // Buttons
@@ -768,13 +805,25 @@ class DailySalesPage extends StatelessWidget {
                       onPressed: () async {
                         final double amt = double.tryParse(amountC.text) ?? 0.0;
                         if (amt <= 0) return;
+
+                        // Construct Payment Method Map
+                        Map<String, dynamic> payMethodMap = {
+                          "type": method.value,
+                        };
+
+                        if (method.value == 'bkash' ||
+                            method.value == 'nagad') {
+                          payMethodMap['number'] = detailsC.text;
+                        } else if (method.value == 'bank') {
+                          payMethodMap['bankName'] = detailsC.text;
+                        }
+
                         await ctrl.applyDebtorPayment(
                           sale.name,
                           amt,
-                          {"type": method.value},
+                          payMethodMap,
                           date: DateTime.now(),
-                          transactionId:
-                              refC.text.isNotEmpty ? refC.text : null,
+                          transactionId: null, // Optional Ref
                         );
                         Get.back();
                       },
@@ -824,22 +873,9 @@ class DailySalesPage extends StatelessWidget {
       buttonColor: alertRed,
       cancelTextColor: Colors.black87,
       onConfirm: () {
-        ctrl.deleteSale(
-          sale.id,
-        ); // The controller now handles the stock restoration logic
+        ctrl.deleteSale(sale.id);
         Get.back();
       },
     );
-  }
-
-  // Helper to filter list based on search query
-  List<SaleModel> _getFilteredList() {
-    final q = ctrl.filterQuery.value.toLowerCase();
-    if (q.isEmpty) return ctrl.salesList;
-    return ctrl.salesList.where((s) {
-      return s.name.toLowerCase().contains(q) ||
-          (s.transactionId ?? '').toLowerCase().contains(q) ||
-          s.customerType.toLowerCase().contains(q);
-    }).toList();
   }
 }

@@ -38,6 +38,9 @@ class DailySalesController extends GetxController {
     selectedDate.value = date;
   }
 
+  // ==========================================
+  // 1. LOAD DATA
+  // ==========================================
   Future<void> loadDailySales() async {
     isLoading.value = true;
     try {
@@ -87,6 +90,194 @@ class DailySalesController extends GetxController {
     }
   }
 
+  void _computeTotals() {
+    double total = 0.0;
+    double paid = 0.0;
+    double pending = 0.0;
+
+    for (var s in salesList) {
+      total += s.amount;
+      paid += s.paid;
+      if (s.customerType == "debtor") {
+        pending += s.pending;
+      }
+    }
+
+    totalSales.value = _round(total);
+    paidAmount.value = _round(paid);
+    debtorPending.value = _round(pending);
+  }
+
+  // ==========================================
+  // 2. ADD SALE (UPDATED FOR PAYMENT DETAILS)
+  // ==========================================
+  /// [paymentMethod] expected structure:
+  /// - Cash: {'type': 'cash', 'amount': 500}
+  /// - Mobile: {'type': 'bkash', 'amount': 500, 'number': '017xx...'}
+  /// - Bank: {'type': 'bank', 'amount': 500, 'bankName': 'City', 'accountNumber': '123'}
+  Future<void> addSale({
+    required String name,
+    required double amount,
+    required String customerType,
+    required DateTime date,
+    String source = "direct",
+    bool isPaid = false,
+    Map<String, dynamic>? paymentMethod,
+    List<Map<String, dynamic>>? appliedDebits,
+    String? transactionId,
+  }) async {
+    try {
+      final paidPart = (customerType == "debtor" && !isPaid) ? 0.0 : amount;
+      List<Map<String, dynamic>> initialHistory = [];
+
+      // Only add to history if there is a payment
+      if (paidPart > 0 && paymentMethod != null) {
+        // We create a clean map to ensure no nulls are passed for details
+        Map<String, dynamic> historyEntry = {
+          'type': paymentMethod['type'] ?? 'cash',
+          'amount': paidPart,
+          'timestamp': Timestamp.fromDate(date),
+        };
+
+        // Add details if they exist
+        if (paymentMethod.containsKey('number')) {
+          historyEntry['number'] = paymentMethod['number'];
+        }
+        if (paymentMethod.containsKey('bankName')) {
+          historyEntry['bankName'] = paymentMethod['bankName'];
+        }
+        if (paymentMethod.containsKey('accountNumber')) {
+          historyEntry['accountNumber'] = paymentMethod['accountNumber'];
+        }
+
+        initialHistory.add(historyEntry);
+      }
+
+      final entry = {
+        "name": name,
+        "amount": _round(amount),
+        "paid": _round(paidPart),
+        "customerType": customerType,
+        "timestamp": Timestamp.fromDate(date),
+        // Save the current payment method details for quick access
+        "paymentMethod": paymentMethod,
+        "paymentHistory": initialHistory,
+        "createdAt": FieldValue.serverTimestamp(),
+        "source": source,
+        "appliedDebits": appliedDebits ?? [],
+        "transactionId": transactionId,
+      };
+
+      await _db.collection("daily_sales").add(entry);
+      await loadDailySales();
+    } catch (e) {
+      Get.snackbar("Error", "Failed to add sale: $e");
+    }
+  }
+
+  // ==========================================
+  // 3. APPLY DEBTOR PAYMENT (UPDATED)
+  // ==========================================
+  Future<void> applyDebtorPayment(
+    String debtorName,
+    double paymentAmount,
+    Map<String, dynamic> paymentMethod, {
+    required DateTime date,
+    String? transactionId,
+  }) async {
+    try {
+      double remaining = _round(paymentAmount);
+      final DateTime startOfDay = DateTime(date.year, date.month, date.day);
+      final DateTime endOfDay = startOfDay.add(const Duration(days: 1));
+
+      // Fetch unpaid or partial debtor records for this day
+      final snap =
+          await _db
+              .collection("daily_sales")
+              .where("customerType", isEqualTo: "debtor")
+              .where("name", isEqualTo: debtorName)
+              .where(
+                "timestamp",
+                isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay),
+              )
+              .where("timestamp", isLessThan: Timestamp.fromDate(endOfDay))
+              .orderBy("timestamp", descending: false)
+              .get();
+
+      final batch = _db.batch();
+
+      // Distribute payment across existing entries
+      for (var doc in snap.docs) {
+        if (remaining <= 0) break;
+        final data = doc.data();
+        final double amt = (data['amount'] as num).toDouble();
+        final double alreadyPaid = (data['paid'] as num).toDouble();
+        final double due = _round(amt - alreadyPaid);
+
+        if (due > 0) {
+          final double toApply = remaining >= due ? due : remaining;
+          List applied = List.from(data['appliedDebits'] ?? []);
+
+          if (transactionId != null) {
+            applied.add({"id": transactionId, "amount": toApply});
+          }
+
+          // Create detailed history entry
+          final newHistoryEntry = {
+            'type': paymentMethod['type'] ?? 'cash',
+            'amount': toApply,
+            'paidAt': Timestamp.now(),
+            'appliedTo': doc.id,
+            // Include details explicitly
+            'number': paymentMethod['number'],
+            'bankName': paymentMethod['bankName'],
+            'accountNumber': paymentMethod['accountNumber'],
+          };
+
+          // Remove nulls just in case
+          newHistoryEntry.removeWhere((key, value) => value == null);
+
+          batch.update(doc.reference, {
+            "paid": _round(alreadyPaid + toApply),
+            "paymentMethod": paymentMethod, // Update latest method
+            "lastPaymentAt": FieldValue.serverTimestamp(),
+            "appliedDebits": applied,
+            "paymentHistory": FieldValue.arrayUnion([newHistoryEntry]),
+          });
+          remaining = _round(remaining - toApply);
+        }
+      }
+
+      // If money is left over (Advance Payment), create a new entry
+      if (remaining > 0) {
+        await addSale(
+          name: debtorName,
+          amount: remaining,
+          customerType: "debtor",
+          isPaid: true,
+          date: date,
+          paymentMethod: paymentMethod, // Pass full details here
+          source: "advance_payment",
+          transactionId: transactionId,
+          appliedDebits:
+              transactionId != null
+                  ? [
+                    {"id": transactionId, "amount": remaining},
+                  ]
+                  : [],
+        );
+      }
+
+      await batch.commit();
+      await loadDailySales();
+    } catch (e) {
+      Get.snackbar("Payment Error", "Could not process daily payment.");
+    }
+  }
+
+  // ==========================================
+  // 4. REVERSE PAYMENT
+  // ==========================================
   Future<void> reverseDebtorPayment(
     String debtorName,
     double amount,
@@ -137,155 +328,9 @@ class DailySalesController extends GetxController {
     }
   }
 
-  void _computeTotals() {
-    double total = 0.0;
-    double paid = 0.0;
-    double pending = 0.0;
-
-    for (var s in salesList) {
-      total += s.amount;
-      paid += s.paid;
-      if (s.customerType == "debtor") {
-        pending += s.pending;
-      }
-    }
-
-    totalSales.value = _round(total);
-    paidAmount.value = _round(paid);
-    debtorPending.value = _round(pending);
-  }
-
-  Future<void> addSale({
-    required String name,
-    required double amount,
-    required String customerType,
-    required DateTime date,
-    String source = "direct",
-    bool isPaid = false,
-    Map<String, dynamic>? paymentMethod,
-    List<Map<String, dynamic>>? appliedDebits,
-    String? transactionId,
-  }) async {
-    try {
-      final paidPart = (customerType == "debtor" && !isPaid) ? 0.0 : amount;
-      List<Map<String, dynamic>> initialHistory = [];
-      if (paidPart > 0 && paymentMethod != null) {
-        initialHistory.add({
-          ...paymentMethod,
-          'amount': paidPart,
-          'timestamp': Timestamp.fromDate(date),
-        });
-      }
-
-      final entry = {
-        "name": name,
-        "amount": _round(amount),
-        "paid": _round(paidPart),
-        "customerType": customerType,
-        "timestamp": Timestamp.fromDate(date),
-        "paymentMethod": paymentMethod,
-        "paymentHistory": initialHistory,
-        "createdAt": FieldValue.serverTimestamp(),
-        "source": source,
-        "appliedDebits": appliedDebits ?? [],
-        "transactionId": transactionId,
-      };
-
-      await _db.collection("daily_sales").add(entry);
-      await loadDailySales();
-    } catch (e) {
-      Get.snackbar("Error", "Failed to add sale: $e");
-    }
-  }
-
-  Future<void> applyDebtorPayment(
-    String debtorName,
-    double paymentAmount,
-    Map<String, dynamic> paymentMethod, {
-    required DateTime date,
-    String? transactionId,
-  }) async {
-    try {
-      double remaining = _round(paymentAmount);
-      final DateTime startOfDay = DateTime(date.year, date.month, date.day);
-      final DateTime endOfDay = startOfDay.add(const Duration(days: 1));
-
-      final snap =
-          await _db
-              .collection("daily_sales")
-              .where("customerType", isEqualTo: "debtor")
-              .where("name", isEqualTo: debtorName)
-              .where(
-                "timestamp",
-                isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay),
-              )
-              .where("timestamp", isLessThan: Timestamp.fromDate(endOfDay))
-              .orderBy("timestamp", descending: false)
-              .get();
-
-      final batch = _db.batch();
-
-      for (var doc in snap.docs) {
-        if (remaining <= 0) break;
-        final data = doc.data();
-        final double amt = (data['amount'] as num).toDouble();
-        final double alreadyPaid = (data['paid'] as num).toDouble();
-        final double due = _round(amt - alreadyPaid);
-
-        if (due > 0) {
-          final double toApply = remaining >= due ? due : remaining;
-          List applied = List.from(data['appliedDebits'] ?? []);
-          if (transactionId != null) {
-            applied.add({"id": transactionId, "amount": toApply});
-          }
-
-          final newHistoryEntry = {
-            ...paymentMethod,
-            'amount': toApply,
-            'paidAt': Timestamp.now(),
-            'appliedTo': doc.id,
-          };
-
-          batch.update(doc.reference, {
-            "paid": _round(alreadyPaid + toApply),
-            "paymentMethod": paymentMethod,
-            "lastPaymentAt": FieldValue.serverTimestamp(),
-            "appliedDebits": applied,
-            "paymentHistory": FieldValue.arrayUnion([newHistoryEntry]),
-          });
-          remaining = _round(remaining - toApply);
-        }
-      }
-
-      if (remaining > 0) {
-        await addSale(
-          name: debtorName,
-          amount: remaining,
-          customerType: "debtor",
-          isPaid: true,
-          date: date,
-          paymentMethod: paymentMethod,
-          source: "advance_payment",
-          transactionId: transactionId,
-          appliedDebits:
-              transactionId != null
-                  ? [
-                    {"id": transactionId, "amount": remaining},
-                  ]
-                  : [],
-        );
-      }
-
-      await batch.commit();
-      await loadDailySales();
-    } catch (e) {
-      Get.snackbar("Payment Error", "Could not process daily payment.");
-    }
-  }
-
-  // ==================================================================
-  // 🗑️ DELETE SALE (UPDATED WITH HTTP RESTOCK)
-  // ==================================================================
+  // ==========================================
+  // 5. DELETE & RESTORE STOCK
+  // ==========================================
   Future<void> deleteSale(String saleId) async {
     isLoading.value = true;
     try {
@@ -297,7 +342,6 @@ class DailySalesController extends GetxController {
       String customerType =
           (saleData['customerType'] ?? '').toString().toLowerCase();
 
-      // REQ: Block Debtor Deletion
       if (customerType.contains('debtor')) {
         Get.snackbar(
           "Access Denied",
@@ -309,7 +353,6 @@ class DailySalesController extends GetxController {
         return;
       }
 
-      // REQ: Delete Normal Sale
       String? invoiceId = saleData['transactionId'] ?? saleData['invoiceId'];
 
       if (invoiceId != null && invoiceId.isNotEmpty) {
@@ -320,18 +363,16 @@ class DailySalesController extends GetxController {
           final invData = invSnap.data() as Map<String, dynamic>;
           final List<dynamic> items = invData['items'] ?? [];
 
-          // 1. RESTORE STOCK VIA HTTP (Negative qty to add)
+          // RESTORE STOCK
           if (invData['status'] != 'deleted') {
             List<Map<String, dynamic>> restockUpdates = [];
             for (var item in items) {
               String? pId = item['productId'] ?? item['id'];
               int qty = item['qty'] ?? 0;
               if (pId != null && qty > 0) {
-                // Sending NEGATIVE quantity to simulate adding back (since the API usually subtracts)
                 restockUpdates.add({'id': pId, 'qty': -qty});
               }
             }
-            // Use the injected product controller
             bool restockSuccess = await Get.find<ProductController>()
                 .updateStockBulk(restockUpdates);
             if (!restockSuccess) {
@@ -343,7 +384,7 @@ class DailySalesController extends GetxController {
             }
           }
 
-          // 2. DELETE DOCUMENTS (Transaction)
+          // DELETE
           await _db.runTransaction((transaction) async {
             DocumentReference invRef = _db
                 .collection("sales_orders")
@@ -363,7 +404,6 @@ class DailySalesController extends GetxController {
           });
         }
       } else {
-        // If no invoice ID attached, just delete the daily entry
         await dailySnap.reference.delete();
       }
 
@@ -381,12 +421,16 @@ class DailySalesController extends GetxController {
     }
   }
 
+  // ==========================================
+  // 6. FORMATTING (UPDATED FOR DETAILS)
+  // ==========================================
   String formatPaymentMethod(dynamic pm) {
     if (pm == null || pm == "") return "CREDIT/DUE";
     if (pm is! Map) return pm.toString().toUpperCase();
 
     String type = (pm["type"] ?? "CASH").toString().toLowerCase();
 
+    // 1. Handle Multi-Pay
     if (type == "multi") {
       List<String> parts = [];
       double cash = double.tryParse(pm['cash'].toString()) ?? 0;
@@ -395,31 +439,65 @@ class DailySalesController extends GetxController {
       double bank = double.tryParse(pm['bank'].toString()) ?? 0;
 
       if (cash > 0) parts.add("Cash: ${cash.toStringAsFixed(0)}");
-      if (bkash > 0) parts.add("Bkash: ${bkash.toStringAsFixed(0)}");
-      if (nagad > 0) parts.add("Nagad: ${nagad.toStringAsFixed(0)}");
-      if (bank > 0) parts.add("Bank: ${bank.toStringAsFixed(0)}");
+      if (bkash > 0) {
+        String num = pm['bkashNumber'] ?? "";
+        parts.add(
+          num.isEmpty
+              ? "Bkash: ${bkash.toStringAsFixed(0)}"
+              : "Bkash($num): ${bkash.toStringAsFixed(0)}",
+        );
+      }
+      if (nagad > 0) {
+        String num = pm['nagadNumber'] ?? "";
+        parts.add(
+          num.isEmpty
+              ? "Nagad: ${nagad.toStringAsFixed(0)}"
+              : "Nagad($num): ${nagad.toStringAsFixed(0)}",
+        );
+      }
+      if (bank > 0) {
+        String bName = pm['bankName'] ?? "Bank";
+        parts.add("$bName: ${bank.toStringAsFixed(0)}");
+      }
 
       return parts.isEmpty ? "MULTI-PAY" : parts.join("\n");
     }
 
+    // 2. Handle Single Payment Methods with details
     switch (type) {
       case "cash":
         return "CASH";
+
       case "bkash":
       case "nagad":
+      case "rocket":
+        // Look for 'number' or 'details'
         String number = (pm["number"] ?? pm["details"] ?? "").toString();
         return number.isEmpty
             ? type.toUpperCase()
-            : "${type.toUpperCase()}: $number";
+            : "${type.toUpperCase()}\n($number)";
+
       case "bank":
         String bName = (pm["bankName"] ?? "BANK").toString();
         String acc = (pm["accountNumber"] ?? "").toString();
-        return acc.isNotEmpty ? "$bName\n($acc)" : bName;
+
+        if (bName != "BANK" && acc.isNotEmpty) {
+          return "$bName\n($acc)";
+        } else if (bName != "BANK") {
+          return bName;
+        } else if (acc.isNotEmpty) {
+          return "BANK ($acc)";
+        }
+        return "BANK";
+
       default:
         return type.toUpperCase();
     }
   }
 
+  // ==========================================
+  // 7. PDF GENERATION
+  // ==========================================
   Future<void> generateProfessionalPDF() async {
     final pdf = pw.Document();
     final dateStr = DateFormat("dd MMMM yyyy").format(selectedDate.value);
@@ -499,10 +577,12 @@ class DailySalesController extends GetxController {
                 headerDecoration: const pw.BoxDecoration(
                   color: PdfColors.blueGrey900,
                 ),
-                cellHeight: 25,
+                cellHeight:
+                    30, // Increased height for multiline payment details
                 cellStyle: const pw.TextStyle(fontSize: 9),
                 cellAlignments: {
                   0: pw.Alignment.centerLeft,
+                  2: pw.Alignment.centerLeft, // Payment details left aligned
                   3: pw.Alignment.centerRight,
                   4: pw.Alignment.centerRight,
                   5: pw.Alignment.centerRight,
@@ -515,7 +595,7 @@ class DailySalesController extends GetxController {
                             s.transactionId ?? "-",
                             formatPaymentMethod(
                               s.paymentMethod,
-                            ).replaceAll("\n", ", "),
+                            ), // Handles \n automatically
                             s.amount.toStringAsFixed(2),
                             s.paid.toStringAsFixed(2),
                             s.pending.toStringAsFixed(2),
@@ -549,6 +629,7 @@ class DailySalesController extends GetxController {
   }
 
   Future<void> reprintInvoice(String invoiceId) async {
+    // ... (This method remains unchanged as it fetches from master record)
     isLoading.value = true;
     try {
       DocumentSnapshot doc =

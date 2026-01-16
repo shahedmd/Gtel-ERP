@@ -59,7 +59,7 @@ class SaleReturnPage extends StatelessWidget {
                       ),
                       const SizedBox(height: 16),
                       Text(
-                        "Enter Invoice ID to begin return",
+                        "Scan Invoice or enter last 4 digits",
                         style: TextStyle(color: Colors.grey.shade500),
                       ),
                     ],
@@ -147,7 +147,7 @@ class SaleReturnPage extends StatelessWidget {
               child: TextField(
                 controller: controller.searchController,
                 decoration: InputDecoration(
-                  hintText: "Scan or Enter Invoice ID (e.g. GTEL-24...)",
+                  hintText: "Enter Full ID or Last 4 Digits...",
                   prefixIcon: const Icon(
                     Icons.qr_code_scanner,
                     color: Colors.blueGrey,
@@ -162,7 +162,8 @@ class SaleReturnPage extends StatelessWidget {
                   ),
                   contentPadding: const EdgeInsets.symmetric(horizontal: 15),
                 ),
-                onSubmitted: (val) => controller.findInvoice(val),
+                // UPDATED: Now calls smartSearch
+                onSubmitted: (val) => controller.smartSearch(val),
               ),
             ),
           ),
@@ -170,9 +171,10 @@ class SaleReturnPage extends StatelessWidget {
           SizedBox(
             height: 50,
             child: ElevatedButton(
+              // UPDATED: Now calls smartSearch
               onPressed:
                   () =>
-                      controller.findInvoice(controller.searchController.text),
+                      controller.smartSearch(controller.searchController.text),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF1E293B),
                 shape: RoundedRectangleBorder(
@@ -246,6 +248,15 @@ class SaleReturnPage extends StatelessWidget {
                     style: const TextStyle(
                       fontSize: 13,
                       color: Colors.blueGrey,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    "INV: ${data['invoiceId']}",
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                      color: Colors.grey,
                     ),
                   ),
                 ],

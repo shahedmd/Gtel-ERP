@@ -11,6 +11,9 @@ class ProductController extends GetxController {
   // ==========================================
   final RxList<Product> allProducts = <Product>[].obs;
 
+  // NEW: Holds the total valuation of ALL products (calculated by server)
+  final RxDouble overallTotalValuation = 0.0.obs;
+
   // State for Service/Damage Logs
   final RxList<Map<String, dynamic>> serviceLogs = <Map<String, dynamic>>[].obs;
 
@@ -48,7 +51,7 @@ class ProductController extends GetxController {
   }
 
   // ==========================================
-  // 1. FETCH PRODUCTS (READ)
+  // 1. FETCH PRODUCTS (READ & VALUATION)
   // ==========================================
   Future<void> fetchProducts({int? page}) async {
     isLoading.value = true;
@@ -79,9 +82,13 @@ class ProductController extends GetxController {
 
         allProducts.assignAll(loadedProducts);
 
-        // Handle total count
+        // Handle total count for pagination
         var totalRaw = data['total'];
         totalProducts.value = int.tryParse(totalRaw.toString()) ?? 0;
+
+        // NEW: Handle Total Valuation from Server (All Pages)
+        var valRaw = data['total_value'];
+        overallTotalValuation.value = double.tryParse(valRaw.toString()) ?? 0.0;
       } else {
         _showError('Server Error: ${res.statusCode}');
       }
@@ -361,21 +368,26 @@ class ProductController extends GetxController {
   }
 
   /// Return product from Service (Restores stock to Local)
-  Future<void> returnFromService(int logId) async {
+  /// Updated to support Partial Quantity
+  Future<void> returnFromService(int logId, int qty) async {
     isActionLoading.value = true;
     try {
       final res = await http.post(
         Uri.parse('$baseUrl/service/return'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'log_id': logId}),
+        body: jsonEncode({
+          'log_id': logId,
+          'qty': qty, // <--- Sent the specific quantity to return
+        }),
       );
 
       if (res.statusCode == 200) {
         await fetchProducts(); // Stock increased on server
-        await fetchServiceLogs(); // Log status updated
+        await fetchServiceLogs(); // Log updated (qty reduced or status changed)
+
         Get.snackbar(
           'Success',
-          'Item returned to stock',
+          '$qty item(s) returned to stock',
           backgroundColor: Colors.blue,
           colorText: Colors.white,
         );
@@ -452,4 +464,25 @@ class ProductController extends GetxController {
     unique.sort();
     return ['All', ...unique];
   }
+
+  // ==========================================
+  // 8. STOCK VALUATION (UPDATED FOR PAGINATION)
+  // ==========================================
+
+  /// Returns total warehouse value in BDT using SERVER DATA
+  /// This ensures it counts ALL products in DB, not just the 20 on the page.
+  double get totalStockValuation {
+    return overallTotalValuation.value;
+  }
+
+  /// Returns the formatted value string (e.g., "1,500,200")
+  String get formattedTotalValuation {
+    return overallTotalValuation.value
+        .toStringAsFixed(0)
+        .replaceAllMapped(
+          RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+          (Match m) => '${m[1]},',
+        );
+  }
+  print(formattedTotalValuation){}
 }
