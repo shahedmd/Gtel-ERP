@@ -90,7 +90,6 @@ class ShipmentController extends GetxController {
                 event.docs.map((e) => ShipmentModel.fromSnapshot(e)).toList();
           },
           onError: (e) {
-            print("Firestore Stream Error: $e");
           },
         );
   }

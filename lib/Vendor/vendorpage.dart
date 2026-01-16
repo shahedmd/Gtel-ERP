@@ -1006,10 +1006,11 @@ class VendorDetailPage extends StatelessWidget {
                   // Rows
                   ...sortedList.map((t) {
                     final isCredit = t.type == 'CREDIT';
-                    if (isCredit)
+                    if (isCredit) {
                       calculatedDue += t.amount;
-                    else
+                    } else {
                       calculatedDue -= t.amount;
+                    }
 
                     return pw.TableRow(
                       decoration: const pw.BoxDecoration(

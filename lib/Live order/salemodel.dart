@@ -838,7 +838,7 @@ class LiveSalesController extends GetxController {
                           style: pw.TextStyle(font: reg, fontSize: 9),
                         ),
                       )
-                      .toList(),
+                      ,
                 ],
               ),
             ),

@@ -1,3 +1,5 @@
+// ignore_for_file: deprecated_member_use, non_constant_identifier_names
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
@@ -299,7 +301,7 @@ class ProfitView extends StatelessWidget {
 
   Widget _buildFilterChips() {
     List<String> filters = ['Today', 'This Month', 'Last 30 Days', 'This Year'];
-    return Container(
+    return SizedBox(
       height: 40,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
@@ -363,8 +365,9 @@ class ProfitView extends StatelessWidget {
             children:
                 controller.monthlyStats.map((stat) {
                   double heightPct = (stat['profit'] as double) / maxProfit;
-                  if (heightPct < 0.05 && (stat['profit'] as double) > 0)
+                  if (heightPct < 0.05 && (stat['profit'] as double) > 0) {
                     heightPct = 0.05; // min height
+                  }
 
                   return Column(
                     children: [

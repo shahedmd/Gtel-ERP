@@ -865,11 +865,12 @@ class _ShipmentCard extends StatelessWidget {
                 ),
                 child: Obx(() {
                   // If no vendors exist, show hint
-                  if (vendorCtrl.vendors.isEmpty)
+                  if (vendorCtrl.vendors.isEmpty) {
                     return const Padding(
                       padding: EdgeInsets.all(12),
                       child: Text("No Vendors Found"),
                     );
+                  }
 
                   return DropdownButtonHideUnderline(
                     child: DropdownButton<String>(
