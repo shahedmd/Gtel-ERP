@@ -91,7 +91,7 @@ class _AdminHomepageState extends State<AdminHomepage> {
                     return GetPageRoute(page: () => VendorPage());
                   }
                   if (settings.name == Routes.OVERVIEWACCOUNT) {
-                    return GetPageRoute(page: () => AccountOverviewPage());
+                    return GetPageRoute(page: () => FinancialOverviewPage());
                   }
                   return GetPageRoute( 
                     page: () => const Center(child: Text("Not Found")),
