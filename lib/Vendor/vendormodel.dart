@@ -4,8 +4,7 @@ class VendorModel {
   String? docId;
   final String name;
   final String contact;
-  final double
-  totalDue; // Positive = We owe them, Negative = They owe us (Advance)
+  final double totalDue; // Positive = We owe them, Negative = They owe us
   final DateTime? createdAt;
 
   VendorModel({
@@ -38,7 +37,8 @@ class VendorModel {
 
 class VendorTransaction {
   String? id;
-  final String type; // 'CREDIT' (Bill/Purchase) or 'DEBIT' (Payment)
+  final String
+  type; // 'CREDIT' (Bill/Purchase/Received Advance) or 'DEBIT' (Payment)
   final double amount;
   final DateTime date;
 
@@ -49,6 +49,7 @@ class VendorTransaction {
   final String? notes;
   final DateTime? shipmentDate;
   final DateTime? receiveDate;
+  final bool isIncomingCash; // NEW: True if money came IN (Advance from Vendor)
 
   VendorTransaction({
     this.id,
@@ -61,6 +62,7 @@ class VendorTransaction {
     this.notes,
     this.shipmentDate,
     this.receiveDate,
+    this.isIncomingCash = false,
   });
 
   factory VendorTransaction.fromSnapshot(DocumentSnapshot doc) {
@@ -76,9 +78,10 @@ class VendorTransaction {
 
       // Nullable fields
       paymentMethod: data['paymentMethod'],
-      shipmentName: data['shipmentName'], // Important for your new feature
+      shipmentName: data['shipmentName'],
       cartons: data['cartons'],
       notes: data['notes'],
+      isIncomingCash: data['isIncomingCash'] ?? false,
 
       // Date handling
       shipmentDate:

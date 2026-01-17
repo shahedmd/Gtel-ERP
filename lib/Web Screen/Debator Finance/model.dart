@@ -3,74 +3,77 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 class DebtorModel {
   final String id;
   final String name;
-  final String phone;
-  final String nid;
-  final String address;
   final String des;
+  final String nid;
+  final String phone;
+  final String address;
   final List<Map<String, dynamic>> payments;
   final DateTime? createdAt;
+  final DateTime? lastTransactionDate; // New Field
+  final double balance; // New Field
 
   DebtorModel({
     required this.id,
     required this.name,
-    required this.phone,
-    required this.nid,
-    required this.address,
     required this.des,
+    required this.nid,
+    required this.phone,
+    required this.address,
     required this.payments,
     this.createdAt,
+    this.lastTransactionDate,
+    this.balance = 0.0,
   });
 
-  // Change your factory inside DebtorModel to this:
   factory DebtorModel.fromFirestore(DocumentSnapshot doc) {
-    Map d = doc.data() as Map;
-
-    // THE FIX: Use List.from().map().toList() for total type safety on Web
-    final List rawPayments = d['payments'] as List? ?? [];
-    final List<Map<String, dynamic>> typedPayments =
-        rawPayments.map((e) {
-          return Map<String, dynamic>.from(e as Map);
-        }).toList();
+    Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
 
     return DebtorModel(
       id: doc.id,
-      name: d['name'] ?? '',
-      phone: d['phone'] ?? '',
-      nid: d['nid'] ?? '',
-      address: d['address'] ?? '',
-      des: d['des'] ?? '',
-      payments: typedPayments, // Now it is strictly List<Map<String, dynamic>>
-      createdAt: (d['createdAt'] as Timestamp?)?.toDate(),
+      name: data['name'] ?? '',
+      des: data['des'] ?? '',
+      nid: data['nid'] ?? '',
+      phone: data['phone'] ?? '',
+      address: data['address'] ?? '',
+      // Safely parse balance (handle int/double/string/null)
+      balance: (data['balance'] as num?)?.toDouble() ?? 0.0,
+      payments: List<Map<String, dynamic>>.from(data['payments'] ?? []),
+      createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
+      lastTransactionDate:
+          (data['lastTransactionDate'] as Timestamp?)?.toDate(),
     );
   }
 }
 
 class TransactionModel {
   final String id;
+  final String transactionId;
   final double amount;
-  final String type;
   final String note;
+  final String type;
   final DateTime date;
   final Map<String, dynamic>? paymentMethod;
 
   TransactionModel({
     required this.id,
+    required this.transactionId,
     required this.amount,
-    required this.type,
     required this.note,
+    required this.type,
     required this.date,
     this.paymentMethod,
   });
 
   factory TransactionModel.fromFirestore(DocumentSnapshot doc) {
-    Map d = doc.data() as Map;
+    Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
     return TransactionModel(
-      id: d['transactionId'],
-      amount: (d['amount'] as num?)?.toDouble() ?? 0,
-      type: d['type'] ?? 'credit',
-      note: d['note'] ?? '',
-      date: (d['date'] as Timestamp).toDate(),
-      paymentMethod: d['paymentMethod'],
+      id: doc.id,
+      transactionId: data['transactionId'] ?? '',
+      amount: (data['amount'] as num?)?.toDouble() ?? 0.0,
+      note: data['note'] ?? '',
+      type: data['type'] ?? 'credit',
+      date: (data['date'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      paymentMethod: data['paymentMethod'],
     );
   }
 }

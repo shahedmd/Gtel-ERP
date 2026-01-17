@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:gtel_erp/Cash/controller.dart'; // Your Cash Controller Import
 import 'package:gtel_erp/Vendor/vendormodel.dart';
 import 'package:gtel_erp/Web%20Screen/Expenses/dailycontroller.dart';
 
@@ -16,7 +17,6 @@ class VendorController extends GetxController {
       <VendorTransaction>[].obs;
   final RxBool isLoading = false.obs;
 
-  // --- SUBSCRIPTIONS (Memory Management) ---
   StreamSubscription? _vendorSub;
   StreamSubscription? _historySub;
 
@@ -53,7 +53,7 @@ class VendorController extends GetxController {
   // 2. FETCH HISTORY
   void fetchHistory(String vendorId) {
     currentTransactions.clear();
-    _historySub?.cancel(); // Cancel previous listener if switching vendors
+    _historySub?.cancel();
 
     _historySub = _firestore
         .collection('vendors')
@@ -93,9 +93,7 @@ class VendorController extends GetxController {
     }
   }
 
-  // 4. AUTOMATED SHIPMENT CREDIT (The New Feature)
-  /// Called by ShipmentController when stock is received.
-  /// Does NOT trigger DailyExpenses (because Credit is just a bill, not a cash outflow yet).
+  // 4. AUTOMATED SHIPMENT CREDIT
   Future<void> addAutomatedShipmentCredit({
     required String vendorId,
     required double amount,
@@ -111,31 +109,27 @@ class VendorController extends GetxController {
         if (!vendorSnapshot.exists) throw "Vendor not found";
 
         double currentDue = (vendorSnapshot.data() as Map)['totalDue'] ?? 0.0;
-        double newDue = currentDue + amount; // Credit increases what we owe
+        double newDue = currentDue + amount;
 
-        // Update Balance
         transaction.update(vendorRef, {'totalDue': newDue});
 
-        // Add Log
         transaction.set(historyRef, {
           'type': 'CREDIT',
           'amount': amount,
           'date': Timestamp.fromDate(date),
           'paymentMethod': 'Stock Receive',
           'shipmentName': shipmentName,
-          'cartons': 'N/A', // Can be updated if needed
+          'cartons': 'N/A',
           'notes': 'Auto-entry from Shipment: $shipmentName',
+          'isIncomingCash': false,
         });
       });
-
-      // We don't show a snackbar here because ShipmentController will show the "Success" message.
     } catch (e) {
-      // Re-throw so ShipmentController knows something went wrong
       throw "Vendor Credit Failed: $e";
     }
   }
 
-  // 5. MANUAL TRANSACTION (UI Based)
+  // 5. MANUAL TRANSACTION (Updated & Fixed)
   Future<void> addTransaction({
     required String vendorId,
     required String vendorName,
@@ -146,6 +140,8 @@ class VendorController extends GetxController {
     String? shipmentName,
     String? cartons,
     String? notes,
+    // New Parameter: Set this to true in your UI Switch/Checkbox
+    bool isIncomingCash = false,
   }) async {
     isLoading.value = true;
     try {
@@ -157,27 +153,52 @@ class VendorController extends GetxController {
         if (!vendorSnapshot.exists) throw "Vendor does not exist!";
 
         double currentDue = (vendorSnapshot.data() as Map)['totalDue'] ?? 0.0;
+        double newDue;
 
-        // CREDIT (Bill) = Increases Due
-        // DEBIT (Payment) = Decreases Due
-        double newDue =
-            type == 'CREDIT' ? currentDue + amount : currentDue - amount;
+        // LOGIC FOR DUE AMOUNT:
+        // 1. We Received Advance (isIncomingCash = true):
+        //    We got money, so we owe the vendor MORE (Liability increases).
+        //    Treat exactly like a Credit/Bill.
+        if (isIncomingCash) {
+          newDue = currentDue + amount;
+        }
+        // 2. Normal Bill (Credit): We owe more.
+        else if (type == 'CREDIT') {
+          newDue = currentDue + amount;
+        }
+        // 3. Normal Payment (Debit): We owe less.
+        else {
+          newDue = currentDue - amount;
+        }
 
         transaction.update(vendorRef, {'totalDue': newDue});
 
+        // If it's incoming cash, we force type to CREDIT (Liability) in history
         transaction.set(historyRef, {
-          'type': type,
+          'type': isIncomingCash ? 'CREDIT' : type,
           'amount': amount,
           'date': Timestamp.fromDate(date),
           'paymentMethod': paymentMethod,
           'shipmentName': shipmentName,
           'cartons': cartons,
           'notes': notes,
+          'isIncomingCash': isIncomingCash, // Save the flag
         });
       });
 
-      // INTEGRATE WITH EXPENSES (ONLY FOR DEBIT/PAYMENT)
-      if (type == 'DEBIT') {
+      // --- INTEGRATION: CONNECTING TO CASH & EXPENSES ---
+
+      // SCENARIO 1: Vendor Paid Us (Incoming Advance)
+      if (isIncomingCash) {
+        // FIXED: Using helper method that handles "Fallback" if controller is missing
+        await _ensureCashLedgerEntry(
+          amount: amount,
+          method: paymentMethod ?? 'cash',
+          desc: "Advance/Refund from Vendor: $vendorName",
+        );
+      }
+      // SCENARIO 2: We Paid Vendor (Outgoing Payment)
+      else if (type == 'DEBIT') {
         _logToDailyExpenses(
           vendorName,
           amount,
@@ -206,7 +227,40 @@ class VendorController extends GetxController {
     }
   }
 
-  // Helper for Daily Expenses
+  // --- HELPER METHODS ---
+
+  // 1. Safe Cash Ledger Entry (Fallback Mechanism)
+  Future<void> _ensureCashLedgerEntry({
+    required double amount,
+    required String method,
+    required String desc,
+  }) async {
+    try {
+      if (Get.isRegistered<CashDrawerController>()) {
+        // CASE A: Controller is active (User visited Cash screen)
+        // Update via controller to refresh UI immediately
+        await Get.find<CashDrawerController>().addManualCash(
+          amount: amount,
+          method: method,
+          desc: desc,
+        );
+      } else {
+        // CASE B: Controller is NOT active (User hasn't visited Cash screen yet)
+        // Write directly to Firestore so data is not lost
+        await _firestore.collection('cash_ledger').add({
+          'type': 'deposit',
+          'amount': amount,
+          'method': method,
+          'description': desc,
+          'timestamp': FieldValue.serverTimestamp(),
+        });
+      }
+    } catch (e) {
+      debugPrint("CRITICAL ERROR: Could not save to Cash Ledger: $e");
+    }
+  }
+
+  // 2. Helper for Daily Expenses
   void _logToDailyExpenses(
     String vendorName,
     double amount,
@@ -222,6 +276,8 @@ class VendorController extends GetxController {
           date: date,
         );
       }
+      // Expenses are complex to add manually via fallback due to subcollections,
+      // usually Expense controller is initialized early in the app.
     } catch (e) {
       debugPrint("Expense Log Error: $e");
     }

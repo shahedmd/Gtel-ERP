@@ -31,7 +31,7 @@ class DailyExpensesController extends GetxController {
   void onInit() {
     super.onInit();
     monthlyController = Get.find<MonthlyExpensesController>();
-    _listenToDailyExpenses();
+    listenToDailyExpenses();
   }
 
   @override
@@ -40,7 +40,7 @@ class DailyExpensesController extends GetxController {
     super.onClose();
   }
 
-  void _listenToDailyExpenses() {
+  void listenToDailyExpenses() {
     // Cancel existing listener if date changes
     _expenseSubscription?.cancel();
 
@@ -73,7 +73,7 @@ class DailyExpensesController extends GetxController {
 
   void changeDate(DateTime date) {
     selectedDate.value = date;
-    _listenToDailyExpenses();
+    listenToDailyExpenses();
   }
 
   // --- ADD EXPENSE ---

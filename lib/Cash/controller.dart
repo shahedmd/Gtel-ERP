@@ -1,151 +1,469 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
+/// Enum for Date Filters
+enum DateFilter { daily, monthly, yearly, custom }
+
+/// Model to unify Sales, Expenses, and Ledger items for the UI
+class DrawerTransaction {
+  final DateTime date;
+  final String description;
+  final double amount;
+  final String type; // 'sale', 'expense', 'deposit', 'withdraw'
+  final String method; // 'cash', 'bank', 'bkash', 'nagad', 'mixed', 'deducted'
+
+  DrawerTransaction({
+    required this.date,
+    required this.description,
+    required this.amount,
+    required this.type,
+    required this.method,
+  });
+}
+
 class CashDrawerController extends GetxController {
+  static CashDrawerController get to => Get.find();
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  // Observables
-  final RxList<Map<String, dynamic>> filteredSales =
-      <Map<String, dynamic>>[].obs;
+  // --- Observables (State) ---
   final RxBool isLoading = false.obs;
+  final Rx<DateFilter> filterType = DateFilter.monthly.obs;
+  final Rx<DateTimeRange> selectedRange =
+      DateTimeRange(start: DateTime.now(), end: DateTime.now()).obs;
 
-  // Filters
-  final RxInt selectedYear = DateTime.now().year.obs;
-  final RxInt selectedMonth = DateTime.now().month.obs;
-
-  // Totals
-  final RxDouble cashTotal = 0.0.obs;
-  final RxDouble bkashTotal = 0.0.obs;
-  final RxDouble nagadTotal = 0.0.obs;
-  final RxDouble bankTotal = 0.0.obs;
+  // --- Real-Time Calculated Balances (The "Actual" Cash) ---
+  final RxDouble netCash = 0.0.obs;
+  final RxDouble netBank = 0.0.obs;
+  final RxDouble netBkash = 0.0.obs;
+  final RxDouble netNagad = 0.0.obs;
   final RxDouble grandTotal = 0.0.obs;
+
+  // --- Raw Totals for Reporting ---
+  final RxDouble rawSalesTotal = 0.0.obs;
+  final RxDouble rawExpenseTotal = 0.0.obs;
+  final RxDouble rawManualAddTotal = 0.0.obs;
+
+  // --- Transaction History ---
+  final RxList<DrawerTransaction> recentTransactions =
+      <DrawerTransaction>[].obs;
 
   @override
   void onInit() {
     super.onInit();
-    fetchDrawerData();
+    setFilter(DateFilter.monthly);
   }
 
-  Future<void> fetchDrawerData() async {
+  // =========================================================
+  // 1. FILTER LOGIC
+  // =========================================================
+  void setFilter(DateFilter filter) {
+    filterType.value = filter;
+    DateTime now = DateTime.now();
+
+    switch (filter) {
+      case DateFilter.daily:
+        selectedRange.value = DateTimeRange(start: now, end: now);
+        break;
+      case DateFilter.monthly:
+        selectedRange.value = DateTimeRange(
+          start: DateTime(now.year, now.month, 1),
+          end: DateTime(now.year, now.month + 1, 0),
+        );
+        break;
+      case DateFilter.yearly:
+        // This is now safe to use because of the optimization below
+        selectedRange.value = DateTimeRange(
+          start: DateTime(now.year, 1, 1),
+          end: DateTime(now.year, 12, 31),
+        );
+        break;
+      default:
+        break;
+    }
+    fetchData();
+  }
+
+  void updateCustomDate(DateTimeRange range) {
+    selectedRange.value = range;
+    filterType.value = DateFilter.custom;
+    fetchData();
+  }
+
+  // =========================================================
+  // 2. MAIN DATA FETCHING & CALCULATION ENGINE
+  // =========================================================
+  Future<void> fetchData() async {
     isLoading.value = true;
     try {
-      DateTime startOfMonth = DateTime(
-        selectedYear.value,
-        selectedMonth.value,
-        1,
-      );
-      DateTime endOfMonth = DateTime(
-        selectedYear.value,
-        selectedMonth.value + 1,
+      // 1. Define Boundaries
+      DateTime start = DateTime(
+        selectedRange.value.start.year,
+        selectedRange.value.start.month,
+        selectedRange.value.start.day,
         0,
+        0,
+        0,
+      );
+      DateTime end = DateTime(
+        selectedRange.value.end.year,
+        selectedRange.value.end.month,
+        selectedRange.value.end.day,
         23,
         59,
         59,
       );
 
-      QuerySnapshot snap =
-          await _db
+      // 2. Prepare Futures (Request Data in Parallel)
+
+      // A. Sales
+      var salesFuture =
+          _db
               .collection('daily_sales')
-              .where('timestamp', isGreaterThanOrEqualTo: startOfMonth)
-              .where('timestamp', isLessThanOrEqualTo: endOfMonth)
+              .where('timestamp', isGreaterThanOrEqualTo: start)
+              .where('timestamp', isLessThanOrEqualTo: end)
               .orderBy('timestamp', descending: true)
               .get();
 
-      double cash = 0, bkash = 0, nagad = 0, bank = 0;
-      List<Map<String, dynamic>> tempList = [];
+      // B. Ledger (Adds/Withdrawals)
+      var ledgerFuture =
+          _db
+              .collection('cash_ledger')
+              .where('timestamp', isGreaterThanOrEqualTo: start)
+              .where('timestamp', isLessThanOrEqualTo: end)
+              .orderBy('timestamp', descending: true)
+              .get();
 
-      for (var doc in snap.docs) {
-        Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
-        tempList.add(data);
+      // C. Expenses (Optimized)
+      var expensesFuture = _fetchExpensesOptimized(start, end);
 
-        // --- NEW LOGIC: Handle Multi-Payment & Legacy Data ---
-        var payMethod = data['paymentMethod'];
+      // 3. Wait for all data to arrive
+      var results = await Future.wait([
+        salesFuture,
+        ledgerFuture,
+        expensesFuture,
+      ]);
 
-        // Case 1: New Multi-Payment System
-        if (payMethod is Map && payMethod['type'] == 'multi') {
-          cash += (double.tryParse(payMethod['cash'].toString()) ?? 0.0);
-          bkash += (double.tryParse(payMethod['bkash'].toString()) ?? 0.0);
-          nagad += (double.tryParse(payMethod['nagad'].toString()) ?? 0.0);
-          bank += (double.tryParse(payMethod['bank'].toString()) ?? 0.0);
+      var salesSnap = results[0] as QuerySnapshot;
+      var ledgerSnap = results[1] as QuerySnapshot;
+      List<DrawerTransaction> expenseList =
+          results[2] as List<DrawerTransaction>;
+
+      // --- PROCESS DATA ---
+      List<DrawerTransaction> allTx = [...expenseList];
+
+      double tempCash = 0, tempBank = 0, tempBkash = 0, tempNagad = 0;
+      double tSales = 0, tExp = 0, tAdd = 0;
+
+      // Process Sales
+      for (var doc in salesSnap.docs) {
+        var data = doc.data() as Map<String, dynamic>;
+        double c = 0, b = 0, bk = 0, n = 0;
+
+        var pm = data['paymentMethod'];
+
+        // Handle Multi-Payment
+        if (pm is Map && pm['type'] == 'multi') {
+          c = double.tryParse(pm['cash'].toString()) ?? 0;
+          b = double.tryParse(pm['bank'].toString()) ?? 0;
+          bk = double.tryParse(pm['bkash'].toString()) ?? 0;
+          n = double.tryParse(pm['nagad'].toString()) ?? 0;
         }
-        // Case 2: Old/Simple System
+        // Handle Legacy/Single Payment
         else {
-          double amount = double.tryParse(data['paid'].toString()) ?? 0.0;
-          String type = 'cash';
+          double paid = double.tryParse(data['paid'].toString()) ?? 0;
+          String type = (pm is Map ? pm['type'] : pm).toString().toLowerCase();
+          if (type.contains('bank')) {
+            b = paid;
+          } else if (type.contains('bkash'))
+            {bk = paid;}
+          else if (type.contains('nagad'))
+            {n = paid;}
+          else
+           { c = paid;}
+        }
 
-          if (payMethod is Map) {
-            type = (payMethod['type'] ?? 'cash').toString().toLowerCase();
-          } else if (payMethod is String) {
-            type = payMethod.toString().toLowerCase();
-          }
+        tempCash += c;
+        tempBank += b;
+        tempBkash += bk;
+        tempNagad += n;
+        tSales += (c + b + bk + n);
 
-          switch (type) {
-            case 'bkash':
-              bkash += amount;
-              break;
-            case 'nagad':
-              nagad += amount;
-              break;
-            case 'bank':
-              bank += amount;
-              break;
-            default:
-              cash += amount;
-              break;
-          }
+        allTx.add(
+          DrawerTransaction(
+            date: (data['timestamp'] as Timestamp).toDate(),
+            description:
+                "Sale #${data['transactionId'] ?? data['invoiceId'] ?? 'NA'}",
+            amount: (c + b + bk + n),
+            type: 'sale',
+            method: 'mixed',
+          ),
+        );
+      }
+
+      // Process Ledger
+      for (var doc in ledgerSnap.docs) {
+        var data = doc.data() as Map<String, dynamic>;
+        double amount = double.tryParse(data['amount'].toString()) ?? 0;
+        String type = data['type']; // 'deposit' or 'withdraw'
+        String method = data['method'] ?? 'cash';
+
+        if (type == 'deposit') {
+          if (method == 'bank') {
+            tempBank += amount;
+          } else if (method == 'bkash')
+            {tempBkash += amount;}
+          else if (method == 'nagad')
+           { tempNagad += amount;}
+          else
+           { tempCash += amount;}
+          tAdd += amount;
+        } else if (type == 'withdraw') {
+          if (method == 'bank') {
+            tempBank -= amount;
+          } else if (method == 'bkash')
+           { tempBkash -= amount;}
+          else if (method == 'nagad')
+           { tempNagad -= amount;}
+          tempCash += amount; // Added to Cash Hand
+        }
+
+        allTx.add(
+          DrawerTransaction(
+            date: (data['timestamp'] as Timestamp).toDate(),
+            description: data['description'] ?? type,
+            amount: amount,
+            type: type,
+            method: method,
+          ),
+        );
+      }
+
+      // Process Expenses (Cascading Logic)
+      for (var ex in expenseList) {
+        tExp += ex.amount;
+      }
+
+      double remainingExpense = tExp;
+
+      // Deduct from Cash -> Bank -> Bkash -> Nagad
+      if (tempCash >= remainingExpense) {
+        tempCash -= remainingExpense;
+        remainingExpense = 0;
+      } else {
+        remainingExpense -= tempCash;
+        tempCash = 0;
+      }
+
+      if (remainingExpense > 0) {
+        if (tempBank >= remainingExpense) {
+          tempBank -= remainingExpense;
+          remainingExpense = 0;
+        } else {
+          remainingExpense -= tempBank;
+          tempBank = 0;
         }
       }
 
-      filteredSales.assignAll(tempList);
-      cashTotal.value = cash;
-      bkashTotal.value = bkash;
-      nagadTotal.value = nagad;
-      bankTotal.value = bank;
+      if (remainingExpense > 0) {
+        if (tempBkash >= remainingExpense) {
+          tempBkash -= remainingExpense;
+          remainingExpense = 0;
+        } else {
+          remainingExpense -= tempBkash;
+          tempBkash = 0;
+        }
+      }
 
-      // Grand Total is the sum of all settled payments
-      grandTotal.value = cash + bkash + nagad + bank;
+      if (remainingExpense > 0) {
+        if (tempNagad >= remainingExpense) {
+          tempNagad -= remainingExpense;
+          remainingExpense = 0;
+        } else {
+          remainingExpense -= tempNagad;
+          tempNagad = 0;
+        }
+      }
+
+      // --- UPDATE STATE ---
+      netCash.value = tempCash;
+      netBank.value = tempBank;
+      netBkash.value = tempBkash;
+      netNagad.value = tempNagad;
+      grandTotal.value = tempCash + tempBank + tempBkash + tempNagad;
+
+      rawSalesTotal.value = tSales;
+      rawExpenseTotal.value = tExp;
+      rawManualAddTotal.value = tAdd;
+
+      // Sort & Update History
+      allTx.sort((a, b) => b.date.compareTo(a.date));
+      recentTransactions.assignAll(allTx.take(15).toList());
     } catch (e) {
-      Get.snackbar("Error", "Failed to fetch data: $e");
+      Get.snackbar("Error", "Could not calculate cash drawer.");
     } finally {
       isLoading.value = false;
     }
   }
 
-  void changeDate(int month, int year) {
-    selectedMonth.value = month;
-    selectedYear.value = year;
-    fetchDrawerData();
+  // =========================================================
+  // 3. OPTIMIZED EXPENSE FETCHING
+  // =========================================================
+
+  // This replaces the old slow loop
+  Future<List<DrawerTransaction>> _fetchExpensesOptimized(
+    DateTime start,
+    DateTime end,
+  ) async {
+    List<DrawerTransaction> expenses = [];
+
+    try {
+      // METHOD 1: Collection Group Query (The Fastest Way)
+      // NOTE: This requires a Firestore Index on 'items' collection -> 'time' field.
+      // If the index is missing, the catch block will run Method 2.
+      var snap =
+          await _db
+              .collectionGroup('items')
+              .where('time', isGreaterThanOrEqualTo: start)
+              .where('time', isLessThanOrEqualTo: end)
+              .orderBy('time', descending: true)
+              .get();
+
+      for (var doc in snap.docs) {
+        var data = doc.data();
+        _addExpenseFromDoc(data, expenses);
+      }
+    } catch (e) {
+      // METHOD 2: Parallel Fetch (Fallback if Index is missing)
+      // This is still much faster than your old linear loop
+      return await _fetchExpensesParallel(start, end);
+    }
+
+    return expenses;
   }
 
-  // --- PDF GENERATION LOGIC ---
+  Future<List<DrawerTransaction>> _fetchExpensesParallel(
+    DateTime start,
+    DateTime end,
+  ) async {
+    List<DrawerTransaction> allExpenses = [];
+    List<Future<void>> tasks = [];
+    int days = end.difference(start).inDays;
+
+    // Create a request for every single day simultaneously
+    for (int i = 0; i <= days; i++) {
+      DateTime current = start.add(Duration(days: i));
+      tasks.add(_fetchSingleDayExpense(current, allExpenses));
+    }
+
+    // Wait for all days to finish
+    await Future.wait(tasks);
+    return allExpenses;
+  }
+
+  Future<void> _fetchSingleDayExpense(
+    DateTime date,
+    List<DrawerTransaction> list,
+  ) async {
+    String dateDocId = DateFormat('yyyy-MM-dd').format(date);
+    try {
+      var snap =
+          await _db
+              .collection('daily_expenses')
+              .doc(dateDocId)
+              .collection('items')
+              .get();
+      for (var doc in snap.docs) {
+        _addExpenseFromDoc(doc.data(), list);
+      }
+    } catch (e) {
+      // No expense this day, ignore
+    }
+  }
+
+  void _addExpenseFromDoc(
+    Map<String, dynamic> data,
+    List<DrawerTransaction> list,
+  ) {
+    double amt = double.tryParse(data['amount'].toString()) ?? 0.0;
+
+    DateTime txDate = DateTime.now();
+    if (data['time'] is Timestamp) {
+      txDate = (data['time'] as Timestamp).toDate();
+    } else if (data['lastUpdated'] is Timestamp) {
+      txDate = (data['lastUpdated'] as Timestamp).toDate();
+    }
+
+    list.add(
+      DrawerTransaction(
+        date: txDate,
+        description: data['name'] ?? data['note'] ?? 'Expense',
+        amount: amt,
+        type: 'expense',
+        method: 'deducted',
+      ),
+    );
+  }
+
+  // =========================================================
+  // 4. ACTIONS & PDF
+  // =========================================================
+
+  Future<void> addManualCash({
+    required double amount,
+    required String method,
+    required String desc,
+  }) async {
+    await _db.collection('cash_ledger').add({
+      'type': 'deposit',
+      'amount': amount,
+      'method': method,
+      'description': desc,
+      'timestamp': FieldValue.serverTimestamp(),
+    });
+    fetchData();
+  }
+
+  Future<void> cashOutFromBank({
+    required double amount,
+    required String fromMethod,
+  }) async {
+    await _db.collection('cash_ledger').add({
+      'type': 'withdraw',
+      'amount': amount,
+      'method': fromMethod,
+      'description': 'Cash Out / Withdrawal',
+      'timestamp': FieldValue.serverTimestamp(),
+    });
+    fetchData();
+    Get.back();
+  }
+
   Future<void> downloadPdf() async {
     final doc = pw.Document();
-    final font = await PdfGoogleFonts.nunitoExtraLight();
-    final bold = await PdfGoogleFonts.nunitoBold();
+    final font = await PdfGoogleFonts.nunitoRegular();
+    final fontBold = await PdfGoogleFonts.nunitoBold();
 
-    String monthName = DateFormat(
-      'MMMM yyyy',
-    ).format(DateTime(selectedYear.value, selectedMonth.value));
+    String period =
+        "${DateFormat('dd MMM').format(selectedRange.value.start)} - ${DateFormat('dd MMM yyyy').format(selectedRange.value.end)}";
 
     doc.addPage(
-      pw.Page(
+      pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
-        build: (pw.Context context) {
-          return pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
+        build:
+            (context) => [
               pw.Header(
                 level: 0,
                 child: pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
                     pw.Text(
-                      "Monthly Revenue Report",
-                      style: pw.TextStyle(font: font, fontSize: 24),
+                      "Cash Drawer Report",
+                      style: pw.TextStyle(font: fontBold, fontSize: 22),
                     ),
                     pw.Text(
                       "Generated: ${DateFormat('dd-MMM-yyyy').format(DateTime.now())}",
@@ -155,120 +473,160 @@ class CashDrawerController extends GetxController {
                 ),
               ),
               pw.Text(
-                "Period: $monthName",
-                style: pw.TextStyle(font: font, fontSize: 16),
+                "Period: $period",
+                style: pw.TextStyle(font: font, fontSize: 12),
               ),
-              pw.SizedBox(height: 20),
+              pw.SizedBox(height: 15),
 
-              // Summary Box
+              // Overview Box
               pw.Container(
-                padding: const pw.EdgeInsets.all(15),
+                padding: const pw.EdgeInsets.all(10),
                 decoration: pw.BoxDecoration(
-                  border: pw.Border.all(color: PdfColors.grey400),
+                  border: pw.Border.all(color: PdfColors.grey),
                   borderRadius: const pw.BorderRadius.all(
-                    pw.Radius.circular(8),
+                    pw.Radius.circular(5),
                   ),
                 ),
                 child: pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceEvenly,
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
                   children: [
-                    _pdfSummaryItem("Cash", cashTotal.value),
-                    _pdfSummaryItem("Bkash", bkashTotal.value),
-                    _pdfSummaryItem("Nagad", nagadTotal.value),
-                    _pdfSummaryItem("Bank", bankTotal.value),
+                    _pdfStat(
+                      "Sales Income",
+                      rawSalesTotal.value,
+                      fontBold,
+                      isPos: true,
+                    ),
+                    _pdfStat(
+                      "Total Expenses",
+                      rawExpenseTotal.value,
+                      fontBold,
+                      isPos: false,
+                    ),
+                    _pdfStat(
+                      "Manual Adds",
+                      rawManualAddTotal.value,
+                      fontBold,
+                      isPos: true,
+                    ),
                   ],
                 ),
+              ),
+              pw.SizedBox(height: 20),
+
+              // Net Balances
+              pw.Text(
+                "NET HOLDINGS (Actual Cash in Hand)",
+                style: pw.TextStyle(font: fontBold, fontSize: 14),
+              ),
+              pw.SizedBox(height: 5),
+              pw.Table(
+                border: pw.TableBorder.all(color: PdfColors.grey300),
+                children: [
+                  _pdfTableRow(
+                    "Direct Cash",
+                    netCash.value,
+                    fontBold,
+                    isTotal: true,
+                  ),
+                  _pdfTableRow("Bank Balance", netBank.value, font),
+                  _pdfTableRow("Bkash", netBkash.value, font),
+                  _pdfTableRow("Nagad", netNagad.value, font),
+                ],
               ),
               pw.SizedBox(height: 10),
               pw.Align(
                 alignment: pw.Alignment.centerRight,
                 child: pw.Text(
-                  "Total Revenue: ${grandTotal.value.toStringAsFixed(2)} BDT",
-                  style: pw.TextStyle(font: bold, fontSize: 18),
+                  "Total Asset Value: ${grandTotal.value.toStringAsFixed(2)}",
+                  style: pw.TextStyle(font: fontBold, fontSize: 16),
                 ),
               ),
-              pw.SizedBox(height: 20),
 
-              // Data Table
+              pw.SizedBox(height: 20),
+              pw.Text(
+                "Transaction Log",
+                style: pw.TextStyle(font: fontBold, fontSize: 14),
+              ),
+              pw.Divider(),
+
+              // Transactions Table
               pw.TableHelper.fromTextArray(
                 context: context,
-                headerStyle: pw.TextStyle(font: bold, color: PdfColors.white),
-                headerDecoration: const pw.BoxDecoration(
-                  color: PdfColors.blueGrey800,
-                ),
-                headers: [
-                  'Date',
-                  'Invoice ID',
-                  'Customer',
-                  'Method',
-                  'Paid Amount',
-                ],
+                headers: ['Date', 'Description', 'Type', 'Amount'],
                 data:
-                    filteredSales.map((item) {
-                      String date = "-";
-                      if (item['timestamp'] != null) {
-                        date = DateFormat(
-                          'dd-MMM',
-                        ).format((item['timestamp'] as Timestamp).toDate());
-                      }
-
-                      String inv = item['transactionId'] ?? '-';
-                      String name = item['name'] ?? 'Unknown';
-
-                      // Handle Method Display for PDF
-                      String methodDisplay = "CASH";
-                      var pm = item['paymentMethod'];
-                      if (pm is Map && pm['type'] == 'multi') {
-                        methodDisplay = "SPLIT/MULTI";
-                      } else if (pm is Map) {
-                        methodDisplay =
-                            (pm['type'] ?? 'cash').toString().toUpperCase();
-                      }
-
-                      // Handle Total Paid amount specifically for this transaction
-                      double amount = 0.0;
-                      if (pm is Map && pm['type'] == 'multi') {
-                        amount =
-                            double.tryParse(pm['totalPaid'].toString()) ?? 0.0;
-                      } else {
-                        amount =
-                            double.tryParse(item['paid'].toString()) ?? 0.0;
-                      }
-
+                    recentTransactions.map((tx) {
+                      String sign = tx.type == 'expense' ? '-' : '+';
                       return [
-                        date,
-                        inv,
-                        name,
-                        methodDisplay,
-                        amount.toStringAsFixed(2),
+                        DateFormat('dd-MMM HH:mm').format(tx.date),
+                        tx.description,
+                        tx.type.toUpperCase(),
+                        "$sign${tx.amount.toStringAsFixed(0)}",
                       ];
                     }).toList(),
+                headerStyle: pw.TextStyle(
+                  font: fontBold,
+                  color: PdfColors.white,
+                  fontSize: 10,
+                ),
+                headerDecoration: const pw.BoxDecoration(
+                  color: PdfColors.black,
+                ),
+                cellStyle: const pw.TextStyle(fontSize: 9),
+                cellAlignment: pw.Alignment.centerLeft,
               ),
             ],
-          );
-        },
       ),
     );
 
-    await Printing.layoutPdf(
-      onLayout: (PdfPageFormat format) async => doc.save(),
-      name: 'Revenue_Report_$monthName.pdf',
-    );
+    await Printing.layoutPdf(onLayout: (f) => doc.save());
   }
 
-  pw.Widget _pdfSummaryItem(String title, double amount) {
+  pw.Widget _pdfStat(
+    String label,
+    double val,
+    pw.Font font, {
+    bool isPos = true,
+  }) {
     return pw.Column(
       children: [
         pw.Text(
-          title,
-          style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey600),
+          label,
+          style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
         ),
         pw.Text(
-          amount.toStringAsFixed(0),
-          style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold),
+          val.toStringAsFixed(0),
+          style: pw.TextStyle(
+            font: font,
+            fontSize: 14,
+            color: isPos ? PdfColors.black : PdfColors.red,
+          ),
+        ),
+      ],
+    );
+  }
+
+  pw.TableRow _pdfTableRow(
+    String label,
+    double val,
+    pw.Font font, {
+    bool isTotal = false,
+  }) {
+    return pw.TableRow(
+      decoration:
+          isTotal ? const pw.BoxDecoration(color: PdfColors.grey100) : null,
+      children: [
+        pw.Padding(
+          padding: const pw.EdgeInsets.all(6),
+          child: pw.Text(label, style: pw.TextStyle(font: font)),
+        ),
+        pw.Padding(
+          padding: const pw.EdgeInsets.all(6),
+          child: pw.Text(
+            "${val.toStringAsFixed(2)} BDT",
+            style: pw.TextStyle(font: font),
+          ),
         ),
       ],
     );
   }
 }
- 

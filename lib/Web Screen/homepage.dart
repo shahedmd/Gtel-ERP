@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Account%20Overview/aopage.dart';
+import 'package:gtel_erp/Cash/page.dart';
 import 'package:gtel_erp/Stock/Service/servicepage.dart';
 import 'package:gtel_erp/Vendor/vendorpage.dart';
 import 'package:gtel_erp/Web%20Screen/Sales/Condition/conditionpage.dart';
-import '../Cash/page.dart';
 import '../Live order/liveorder.dart';
 import '../Profit&loss/page.dart';
 import '../Sale Return/salereturnpage.dart';
@@ -73,7 +73,7 @@ class _AdminHomepageState extends State<AdminHomepage> {
                     return GetPageRoute(page: () => ProfitView());
                   }
                   if (settings.name == Routes.CASH) {
-                    return GetPageRoute(page: () => CashDrawerPage());
+                    return GetPageRoute(page: () => CashDrawerView());
                   }
                   if (settings.name == Routes.SERVICE) {
                     return GetPageRoute(page: () => ServicePage());
