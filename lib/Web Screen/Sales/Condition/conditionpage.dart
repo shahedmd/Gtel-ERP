@@ -452,7 +452,7 @@ class ConditionSalesPage extends StatelessWidget {
               ],
             ),
           ),
-          // 3. Logistics
+          // 3. Logistics (WITH EDIT ICON)
           Expanded(
             flex: 2,
             child: Column(
@@ -477,9 +477,24 @@ class ConditionSalesPage extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 4),
-                Text(
-                  "Challan: ${order.challanNo}",
-                  style: const TextStyle(fontSize: 11, color: textMuted),
+                // --- NEW EDITABLE CHALLAN ROW ---
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      "Challan: ${order.challanNo}",
+                      style: const TextStyle(fontSize: 11, color: textMuted),
+                    ),
+                    const SizedBox(width: 4),
+                    InkWell(
+                      onTap: () => _showEditChallanDialog(context, ctrl, order),
+                      child: const Icon(
+                        Icons.edit,
+                        size: 12,
+                        color: Colors.blue,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -547,8 +562,64 @@ class ConditionSalesPage extends StatelessWidget {
   }
 
   // ==============================================================================
-  // 5. DIALOGS (Payment & Return)
+  // 5. DIALOGS (Payment, Return, Edit Challan)
   // ==============================================================================
+
+  // --- NEW: EDIT CHALLAN DIALOG ---
+  void _showEditChallanDialog(
+    BuildContext context,
+    ConditionSalesController ctrl,
+    ConditionOrderModel order,
+  ) {
+    final cController = TextEditingController(text: order.challanNo);
+    Get.dialog(
+      Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          width: 300,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                "Edit Challan Number",
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+              const SizedBox(height: 15),
+              TextField(
+                controller: cController,
+                decoration: const InputDecoration(
+                  labelText: "New Challan No",
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 15),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: activeAccent,
+                  ),
+                  onPressed: () {
+                    ctrl.updateChallanNumber(
+                      order.invoiceId,
+                      order.customerPhone,
+                      cController.text,
+                    );
+                  },
+                  child: const Text(
+                    "Update",
+                    style: TextStyle(color: Colors.white),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   void _showPaymentDialog(
     BuildContext context,
@@ -688,7 +759,7 @@ class ConditionSalesPage extends StatelessWidget {
     );
   }
 
-  // --- NEW: RETURN INTERFACE ---
+  // --- RETURN INTERFACE ---
   void _showReturnInterface(
     BuildContext context,
     ConditionSalesController ctrl,

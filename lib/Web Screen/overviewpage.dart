@@ -150,13 +150,6 @@ class DailyOverviewPage extends StatelessWidget {
           FontAwesomeIcons.fileInvoiceDollar,
           Colors.pinkAccent,
         ),
-        _statCard(
-          "Net Profit",
-          ctrl.netProfiit.value,
-          FontAwesomeIcons.vault,
-          Colors.indigo,
-          isHighlight: true,
-        ),
       ],
     );
   }
@@ -251,12 +244,6 @@ class DailyOverviewPage extends StatelessWidget {
             "৳${ctrl.outstandingDebt.value.toStringAsFixed(0)}",
             FontAwesomeIcons.clockRotateLeft,
           ),
-          const Divider(height: 40),
-          _profitBar(
-            "Net Profit Margin",
-            ctrl.grossSales.value,
-            ctrl.netProfiit.value,
-          ),
         ],
       ),
     );
@@ -283,37 +270,6 @@ class DailyOverviewPage extends StatelessWidget {
     );
   }
 
-  Widget _profitBar(String label, double total, double profit) {
-    double percent = total > 0 ? (profit / total) : 0;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(label, style: const TextStyle(fontWeight: FontWeight.bold)),
-            Text(
-              "${(percent * 100).toStringAsFixed(1)}%",
-              style: const TextStyle(
-                color: colorCash,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(10),
-          child: LinearProgressIndicator(
-            value: percent.clamp(0, 1),
-            minHeight: 12,
-            backgroundColor: scaffoldBg,
-            color: colorCash,
-          ),
-        ),
-      ],
-    );
-  }
 
   Widget _buildPaymentBreakdownCard() {
     return Container(

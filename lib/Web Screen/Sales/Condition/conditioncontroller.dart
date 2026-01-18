@@ -19,7 +19,7 @@ class ConditionSalesController extends GetxController {
       <ConditionOrderModel>[].obs;
   final RxBool isLoading = false.obs;
 
-  // --- PAGINATION STATE (FUTURE PROOFING) ---
+  // --- PAGINATION STATE ---
   final int _limit = 20; // Load 20 items at a time
   DocumentSnapshot? _lastDocument; // Track the last loaded document
   final RxBool hasMore = true.obs; // Check if more data exists in DB
@@ -79,8 +79,6 @@ class ConditionSalesController extends GetxController {
   // 1. DATA LOADING & FILTERING (PAGINATED)
   // ==============================================================================
 
-  /// Loads data. Call this without arguments for initial load/refresh.
-  /// set [loadMore] to true when scrolling down.
   Future<void> loadConditionSales({bool loadMore = false}) async {
     // Prevent loading if already loading or no more data
     if (loadMore) {
@@ -211,12 +209,6 @@ class ConditionSalesController extends GetxController {
   // 2. PAYMENT RECEIVING
   // ==============================================================================
 
-  // ... imports
-
-  // ==============================================================================
-  // 2. PAYMENT RECEIVING (FIXED)
-  // ==============================================================================
-
   Future<void> receiveConditionPayment({
     required ConditionOrderModel order,
     required double receivedAmount,
@@ -233,12 +225,10 @@ class ConditionSalesController extends GetxController {
     try {
       WriteBatch batch = _db.batch();
 
-      // --- FIX START: Get current paid amount to increment it ---
       DocumentReference orderRef = _db
           .collection('sales_orders')
           .doc(order.invoiceId);
 
-      // We need to fetch the latest data to ensure 'actualReceived' is accurate
       DocumentSnapshot latestSnap = await orderRef.get();
       Map<String, dynamic> data = latestSnap.data() as Map<String, dynamic>;
       Map<String, dynamic> paymentDetails = data['paymentDetails'] ?? {};
@@ -248,12 +238,11 @@ class ConditionSalesController extends GetxController {
       double newPaidTotal = currentPaid + receivedAmount;
       double newDue = order.courierDue - receivedAmount;
 
-      // 1. Update Invoice (Crucial: Update 'actualReceived' & 'lastPaymentDate')
+      // 1. Update Invoice
       batch.update(orderRef, {
         "courierDue": newDue,
-        "paymentDetails.actualReceived": newPaidTotal, // <--- THIS WAS MISSING
-        "lastPaymentDate":
-            FieldValue.serverTimestamp(), // <--- NEW FIELD FOR P&L
+        "paymentDetails.actualReceived": newPaidTotal,
+        "lastPaymentDate": FieldValue.serverTimestamp(),
         "status": newDue <= 0 ? "completed" : "on_delivery",
         "isFullyPaid": newDue <= 0,
         "collectionHistory": FieldValue.arrayUnion([
@@ -266,7 +255,6 @@ class ConditionSalesController extends GetxController {
           },
         ]),
       });
-      // --- FIX END ---
 
       // 2. Update Courier Ledger
       DocumentReference courierRef = _db
@@ -287,7 +275,7 @@ class ConditionSalesController extends GetxController {
 
       await batch.commit();
 
-      // 4. Add to Daily Sales (This drives the Realized Profit Report)
+      // 4. Add to Daily Sales
       await dailyCtrl.addSale(
         name: "${order.courierName} (Ref: ${order.invoiceId})",
         amount: receivedAmount,
@@ -318,10 +306,65 @@ class ConditionSalesController extends GetxController {
     }
   }
 
-  // ... rest of the file
+  // ==============================================================================
+  // 3. EDIT CHALLAN FUNCTION
+  // ==============================================================================
+
+  Future<void> updateChallanNumber(
+    String invoiceId,
+    String phone,
+    String newChallan,
+  ) async {
+    if (newChallan.isEmpty) {
+      Get.snackbar("Error", "Challan number cannot be empty");
+      return;
+    }
+
+    isLoading.value = true;
+    try {
+      WriteBatch batch = _db.batch();
+
+      // 1. Update Master Sales Order
+      DocumentReference masterRef = _db
+          .collection('sales_orders')
+          .doc(invoiceId);
+      batch.update(masterRef, {'challanNo': newChallan});
+
+      // 2. Update Customer Sub-collection Order
+      DocumentReference subOrderRef = _db
+          .collection('condition_customers')
+          .doc(phone)
+          .collection('orders')
+          .doc(invoiceId);
+      batch.update(subOrderRef, {'challanNo': newChallan});
+
+      // 3. Update Customer Main Profile (Last Challan)
+      DocumentReference custRef = _db
+          .collection('condition_customers')
+          .doc(phone);
+      batch.update(custRef, {'lastChallan': newChallan});
+
+      await batch.commit();
+
+      // Refresh list
+      await loadConditionSales(loadMore: false);
+
+      Get.back(); // Close dialog
+      Get.snackbar(
+        "Success",
+        "Challan Number Updated",
+        backgroundColor: Colors.green,
+        colorText: Colors.white,
+      );
+    } catch (e) {
+      Get.snackbar("Error", "Failed to update: $e");
+    } finally {
+      isLoading.value = false;
+    }
+  }
 
   // ==============================================================================
-  // 3. RETURN LOGIC
+  // 4. RETURN LOGIC
   // ==============================================================================
 
   Future<void> findInvoiceForReturn(String invoiceId) async {
@@ -365,7 +408,6 @@ class ConditionSalesController extends GetxController {
           String pid = safeItem['productId'];
           if (pid.isNotEmpty) {
             returnQuantities[pid] = 0;
-            // CHANGE: Default destination set to "Sea"
             returnDestinations[pid] = "Sea";
           }
         }
@@ -517,15 +559,13 @@ class ConditionSalesController extends GetxController {
         }
       });
 
-      // 3. STOCK RESTORATION (OPTIMIZED & SAFE)
-      // Using Future.wait for parallel execution, with safe capitalization
+      // 3. STOCK RESTORATION
       List<Future<void>> stockUpdates = [];
 
       for (var pid in returnQuantities.keys) {
         int qty = returnQuantities[pid]!;
 
         if (qty > 0) {
-          // Future Proofing: Normalize "sea" to "Sea" to match Product Controller keys exactly
           String rawDest = returnDestinations[pid] ?? "Sea";
           String dest = _normalizeLocation(rawDest);
 
@@ -539,7 +579,6 @@ class ConditionSalesController extends GetxController {
           int? parsedPid = int.tryParse(pid);
 
           if (parsedPid != null) {
-            // Add update task to list
             stockUpdates.add(
               productCtrl
                   .addMixedStock(
@@ -550,7 +589,6 @@ class ConditionSalesController extends GetxController {
                     localUnitPrice: originalCost,
                   )
                   .catchError((e) {
-                    // Catch individual errors so one failure doesn't crash the whole batch
                     print("Stock Restore Error for $pid: $e");
                   }),
             );
@@ -558,13 +596,11 @@ class ConditionSalesController extends GetxController {
         }
       }
 
-      // Execute all stock updates concurrently
       if (stockUpdates.isNotEmpty) {
         await Future.wait(stockUpdates);
       }
 
       // 4. CLEANUP
-      // Refresh only the first page to see latest status
       await loadConditionSales(loadMore: false);
 
       returnOrderData.value = null;

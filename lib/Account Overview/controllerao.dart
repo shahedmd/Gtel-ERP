@@ -1,4 +1,5 @@
-import 'dart:typed_data';
+// ignore_for_file: deprecated_member_use
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -93,7 +94,7 @@ class FinancialController extends GetxController {
     if (Get.isRegistered<VendorController>()) {
       return _vendorCtrl.vendors.fold(
         0.0,
-        (sum, vendor) => sum + vendor.totalDue,
+        (sumv, vendor) => sumv + vendor.totalDue,
       );
     }
     return 0.0;

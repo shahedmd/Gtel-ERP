@@ -45,6 +45,8 @@ class LiveSalesController extends GetxController {
     'Sundarban',
     'Afjal',
     'S.A.P',
+    'Steadfast',
+    'RedX',
   ];
 
   // --- STATE VARIABLES ---
@@ -70,18 +72,15 @@ class LiveSalesController extends GetxController {
   final discountC = TextEditingController();
   final RxDouble discountVal = 0.0.obs;
 
-  // --- PAYMENT CONTROLLERS (UPDATED) ---
+  // --- PAYMENT CONTROLLERS ---
   final cashC = TextEditingController();
-
   final bkashC = TextEditingController();
-  final bkashNumberC = TextEditingController(); // NEW: Bkash Number
-
+  final bkashNumberC = TextEditingController();
   final nagadC = TextEditingController();
-  final nagadNumberC = TextEditingController(); // NEW: Nagad Number
-
+  final nagadNumberC = TextEditingController();
   final bankC = TextEditingController();
-  final bankNameC = TextEditingController(); // NEW: Bank Name
-  final bankAccC = TextEditingController(); // NEW: Account Number
+  final bankNameC = TextEditingController();
+  final bankAccC = TextEditingController();
 
   final RxDouble totalPaidInput = 0.0.obs;
   final RxDouble changeReturn = 0.0.obs;
@@ -225,7 +224,7 @@ class LiveSalesController extends GetxController {
   }
 
   // ==================================================================
-  // 🔥 FINALIZATION LOGIC (UPDATED FOR PAYMENT DETAILS)
+  // 🔥 FINALIZATION LOGIC (UPDATED WITH FIXES)
   // ==================================================================
   Future<void> finalizeSale() async {
     if (cart.isEmpty) {
@@ -239,10 +238,6 @@ class LiveSalesController extends GetxController {
         Get.snackbar("Required", "Delivery Address required");
         return;
       }
-      if (challanC.text.isEmpty) {
-        Get.snackbar("Required", "Challan No required");
-        return;
-      }
       if (selectedCourier.value == null) {
         Get.snackbar("Required", "Select Courier");
         return;
@@ -252,6 +247,10 @@ class LiveSalesController extends GetxController {
         return;
       }
     }
+
+    // 1. DEFAULT CHALLAN LOGIC
+    String finalChallan =
+        challanC.text.trim().isEmpty ? "0" : challanC.text.trim();
 
     String fName = "";
     String fPhone = "";
@@ -293,7 +292,6 @@ class LiveSalesController extends GetxController {
     }
     if (dueOrConditionAmount < 0) dueOrConditionAmount = 0;
 
-    // --- UPDATED PAYMENT MAP ---
     Map<String, dynamic> paymentMap = {
       "type": isConditionSale.value ? "condition_partial" : "multi",
 
@@ -303,7 +301,7 @@ class LiveSalesController extends GetxController {
       "nagad": double.tryParse(nagadC.text) ?? 0,
       "bank": double.tryParse(bankC.text) ?? 0,
 
-      // Details (NEW)
+      // Details
       "bkashNumber": bkashNumberC.text.trim(),
       "nagadNumber": nagadNumberC.text.trim(),
       "bankName": bankNameC.text.trim(),
@@ -329,7 +327,7 @@ class LiveSalesController extends GetxController {
           };
         }).toList();
 
-    // 1. UPDATE STOCK
+    // 2. UPDATE STOCK
     List<Map<String, dynamic>> stockUpdates =
         cart
             .map((item) => {'id': item.product.id, 'qty': item.quantity.value})
@@ -345,7 +343,7 @@ class LiveSalesController extends GetxController {
     try {
       WriteBatch batch = _db.batch();
 
-      // 2. MASTER INVOICE
+      // 3. MASTER INVOICE (Always Created)
       int cartonsInt = int.tryParse(cartonsC.text) ?? 0;
       DocumentReference orderRef = _db.collection('sales_orders').doc(invNo);
 
@@ -360,7 +358,7 @@ class LiveSalesController extends GetxController {
         "shopName": shopC.text,
         "isCondition": isConditionSale.value,
         "deliveryAddress": addressC.text,
-        "challanNo": challanC.text,
+        "challanNo": finalChallan, // Use the finalized challan
         "cartons": isConditionSale.value ? cartonsInt : 0,
         "courierName": isConditionSale.value ? selectedCourier.value : null,
         "courierDue": isConditionSale.value ? dueOrConditionAmount : 0,
@@ -370,12 +368,15 @@ class LiveSalesController extends GetxController {
         "grandTotal": grandTotal,
         "totalCost": totalInvoiceCost,
         "profit": invoiceProfit,
-        "paymentDetails": paymentMap, // Includes updated details
+        "paymentDetails": paymentMap,
         "isFullyPaid": dueOrConditionAmount <= 0,
-        "status": isConditionSale.value ? "on_delivery" : "completed",
+        "status":
+            isConditionSale.value
+                ? (dueOrConditionAmount <= 0 ? "completed" : "on_delivery")
+                : "completed",
       });
 
-      // 3. LOGIC BRANCHING
+      // 4. LOGIC BRANCHING
       if (isConditionSale.value) {
         // --- CONDITION SALE ---
         DocumentReference condCustRef = _db
@@ -386,7 +387,7 @@ class LiveSalesController extends GetxController {
           "phone": fPhone,
           "address": addressC.text,
           "shop": shopC.text,
-          "lastChallan": challanC.text,
+          "lastChallan": finalChallan,
           "lastCourier": selectedCourier.value,
           "lastUpdated": FieldValue.serverTimestamp(),
           "totalCourierDue": FieldValue.increment(dueOrConditionAmount),
@@ -397,7 +398,7 @@ class LiveSalesController extends GetxController {
             .doc(invNo);
         batch.set(condTxRef, {
           "invoiceId": invNo,
-          "challanNo": challanC.text,
+          "challanNo": finalChallan,
           "grandTotal": grandTotal,
           "advance": actualReceived,
           "courierDue": dueOrConditionAmount,
@@ -405,7 +406,7 @@ class LiveSalesController extends GetxController {
           "cartons": cartonsInt,
           "items": orderItems,
           "date": Timestamp.fromDate(saleDate),
-          "status": "pending_courier",
+          "status": dueOrConditionAmount <= 0 ? "completed" : "pending_courier",
         });
 
         if (selectedCourier.value != null && dueOrConditionAmount > 0) {
@@ -417,6 +418,26 @@ class LiveSalesController extends GetxController {
             "totalDue": FieldValue.increment(dueOrConditionAmount),
             "lastUpdated": FieldValue.serverTimestamp(),
           }, SetOptions(merge: true));
+        }
+
+        // --- FIX: CREATE DAILY SALE FOR ADVANCE/FULL PAYMENT ---
+        // If customer paid anything upfront (partial or full)
+        if (actualReceived > 0) {
+          DocumentReference dailyRef = _db.collection('daily_sales').doc();
+          batch.set(dailyRef, {
+            "name": "$fName (Condition Sales)",
+            "amount": grandTotal, // The full invoice amount
+            "paid": actualReceived, // The cash actually received now
+            "pending": dueOrConditionAmount,
+            "customerType": "condition_advance",
+            "timestamp": Timestamp.fromDate(saleDate),
+            "paymentMethod": paymentMap,
+            "createdAt": FieldValue.serverTimestamp(),
+            "source": "pos_condition_sale",
+            "transactionId": invNo,
+            "invoiceId": invNo,
+            "status": dueOrConditionAmount <= 0 ? "paid" : "partial",
+          });
         }
       } else if (customerType.value == "Debtor" && debtorId != null) {
         // --- DEBTOR SALE ---
@@ -459,7 +480,7 @@ class LiveSalesController extends GetxController {
             "pending": dueOrConditionAmount,
             "customerType": "debtor",
             "timestamp": Timestamp.fromDate(saleDate),
-            "paymentMethod": paymentMap, // Saves details to daily log
+            "paymentMethod": paymentMap,
             "createdAt": FieldValue.serverTimestamp(),
             "source": "pos_sale",
             "transactionId": invNo,
@@ -476,7 +497,7 @@ class LiveSalesController extends GetxController {
             "pending": 0.0,
             "customerType": "debtor",
             "timestamp": Timestamp.fromDate(saleDate),
-            "paymentMethod": paymentMap, // Saves details
+            "paymentMethod": paymentMap,
             "createdAt": FieldValue.serverTimestamp(),
             "source": "pos_sale",
             "transactionId": invNo,
@@ -511,7 +532,7 @@ class LiveSalesController extends GetxController {
           "pending": 0.0,
           "customerType": "retailer",
           "timestamp": Timestamp.fromDate(saleDate),
-          "paymentMethod": paymentMap, // Saves details
+          "paymentMethod": paymentMap,
           "createdAt": FieldValue.serverTimestamp(),
           "source": "pos_sale",
           "transactionId": invNo,
@@ -529,7 +550,7 @@ class LiveSalesController extends GetxController {
         paymentMap,
         orderItems,
         isCondition: isConditionSale.value,
-        challan: challanC.text,
+        challan: finalChallan,
         address: addressC.text,
         courier: selectedCourier.value,
         cartons: cartonsInt,
@@ -589,12 +610,12 @@ class LiveSalesController extends GetxController {
     // Clear Payment Fields
     cashC.clear();
     bkashC.clear();
-    bkashNumberC.clear(); // Clear Detail
+    bkashNumberC.clear();
     nagadC.clear();
-    nagadNumberC.clear(); // Clear Detail
+    nagadNumberC.clear();
     bankC.clear();
-    bankNameC.clear(); // Clear Detail
-    bankAccC.clear(); // Clear Detail
+    bankNameC.clear();
+    bankAccC.clear();
 
     discountVal.value = 0.0;
     totalPaidInput.value = 0.0;
@@ -646,7 +667,6 @@ class LiveSalesController extends GetxController {
     );
 
     if (isCondition) {
-      // (Challan page remains same as before)
       pdf.addPage(
         pw.Page(
           pageFormat: PdfPageFormat.a4,
@@ -686,7 +706,6 @@ class LiveSalesController extends GetxController {
     String? courier,
     int? cartons,
   ) {
-    // Helper to format text lines for payment details
     List<String> getPaymentLines() {
       List<String> lines = [];
       double cash = double.tryParse(payMap['cash'].toString()) ?? 0;
@@ -724,7 +743,6 @@ class LiveSalesController extends GetxController {
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        // ... (Header remains same)
         pw.Header(
           level: 0,
           child: pw.Row(
@@ -783,7 +801,6 @@ class LiveSalesController extends GetxController {
         ),
         pw.SizedBox(height: 20),
 
-        // Items Table
         pw.TableHelper.fromTextArray(
           border: pw.TableBorder.all(color: PdfColors.grey300),
           headerStyle: pw.TextStyle(font: bold, color: PdfColors.white),
@@ -807,12 +824,10 @@ class LiveSalesController extends GetxController {
 
         pw.SizedBox(height: 10),
 
-        // Footer & Payment Breakdown
         pw.Row(
           mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
-            // Left Side: Payment Details (NEW)
             pw.Container(
               width: 200,
               padding: const pw.EdgeInsets.all(5),
@@ -831,19 +846,14 @@ class LiveSalesController extends GetxController {
                       decoration: pw.TextDecoration.underline,
                     ),
                   ),
-                  ...getPaymentLines()
-                      .map(
-                        (l) => pw.Text(
-                          l,
-                          style: pw.TextStyle(font: reg, fontSize: 9),
-                        ),
-                      )
-                      ,
+                  ...getPaymentLines().map(
+                    (l) =>
+                        pw.Text(l, style: pw.TextStyle(font: reg, fontSize: 9)),
+                  ),
                 ],
               ),
             ),
 
-            // Right Side: Totals
             pw.Container(
               width: 200,
               child: pw.Column(
@@ -892,8 +902,6 @@ class LiveSalesController extends GetxController {
       ],
     );
   }
-
-  // ... (Challan Layout and _pdfRow remain exactly as they were in your previous code)
 
   pw.Widget _buildChallanLayout(
     pw.Context context,
