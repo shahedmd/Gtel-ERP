@@ -1,98 +1,180 @@
+import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Account%20Overview/model.dart';
-// import 'package:gtel_erp/models/financial_models.dart'; // Import your models here
+import 'package:gtel_erp/Shipment/controller.dart';
+import 'package:gtel_erp/Web%20Screen/Debator%20Finance/debatorcontroller.dart';
+import 'package:gtel_erp/Web%20Screen/Staff/controller.dart';
+import 'package:intl/intl.dart';
+
+// PDF & PRINTING
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
+
+// EXTERNAL CONTROLLERS
+import 'package:gtel_erp/Cash/controller.dart';
+import 'package:gtel_erp/Stock/controller.dart';
+import 'package:gtel_erp/Vendor/vendorcontroller.dart';
+
 
 class FinancialController extends GetxController {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  // --- STATE VARIABLES ---
+  // =========================================================
+  // 1. STATE VARIABLES
+  // =========================================================
 
-  // 1. Assets State
+  // Local Lists
   RxList<FixedAssetModel> fixedAssets = <FixedAssetModel>[].obs;
-  RxDouble totalFixedAssets = 0.0.obs;
+  RxList<RecurringExpenseModel> recurringExpenses =
+      <RecurringExpenseModel>[].obs;
 
-  // 2. Liquid Cash State (Placeholders for your Cash Controller)
-  RxDouble cashInHand = 0.0.obs;
-  RxDouble cashInBank = 0.0.obs;
-  RxDouble cashInBkash = 0.0.obs;
-  RxDouble cashInNagad = 0.0.obs;
+  // Calculated Debtor Payable (Global)
+  RxDouble globalDebtorPurchasePayable = 0.0.obs;
 
-  // 3. Liabilities State (Placeholders for Vendor/Debtor Controllers)
-  RxDouble totalVendorDue = 0.0.obs; // We owe them
-  RxDouble totalDebtorReceivable = 0.0.obs; // They owe us (Asset)
+  // =========================================================
+  // 2. DEPENDENCIES (Safe Getters)
+  // =========================================================
+  CashDrawerController get _cashCtrl => Get.find<CashDrawerController>();
+  DebatorController get _debtorCtrl => Get.find<DebatorController>();
+  ProductController get _stockCtrl => Get.find<ProductController>();
+  ShipmentController get _shipmentCtrl => Get.find<ShipmentController>();
+  StaffController get _staffCtrl => Get.find<StaffController>();
+  VendorController get _vendorCtrl => Get.find<VendorController>();
 
-  // 4. Payroll State
-  RxList<PayrollItemModel> payrollItems = <PayrollItemModel>[].obs;
-  RxDouble totalMonthlyPayroll = 0.0.obs;
+  // =========================================================
+  // 3. ASSET CALCULATIONS
+  // =========================================================
 
-  // --- SUMMARY CALCULATED VARS ---
-  RxDouble get totalAssets =>
-      (totalFixedAssets.value +
-              cashInHand.value +
-              cashInBank.value +
-              cashInBkash.value +
-              cashInNagad.value +
-              totalDebtorReceivable.value)
-          .obs;
+  // 1. Total Liquid Cash
+  double get totalCash => _cashCtrl.grandTotal.value;
 
-  RxDouble get totalLiabilities =>
-      (totalVendorDue.value + totalMonthlyPayroll.value).obs;
-  // Payroll is technically an expense, but treated as liability for projection
+  // 2. Fixed Assets (Manual)
+  double get totalFixedAssets =>
+      fixedAssets.fold(0.0, (sumv, item) => sumv + item.value);
 
-  RxDouble get netWorth => (totalAssets.value - totalVendorDue.value).obs;
-  // Net worth usually doesn't subtract future payroll, but subtracts actual debt.
+  // 3. Stock Inventory
+  double get totalStockValuation => _stockCtrl.overallTotalValuation.value;
 
+  // 4. Shipments On Way
+  double get totalShipmentValuation => _shipmentCtrl.totalOnWayValue;
+
+  // 5. Receivables (Money Debtors Owe Us from Sales)
+  double get totalDebtorReceivables => _debtorCtrl.totalMarketOutstanding.value;
+
+  // 6. Staff Loans (Money Employees Owe Us)
+  double get totalEmployeeDebt {
+    if (Get.isRegistered<StaffController>()) {
+      return _staffCtrl.staffList.fold(
+        0.0,
+        (sumv, item) => sumv + item.currentDebt,
+      );
+    }
+    return 0.0;
+  }
+
+  // >>> TOTAL ASSETS <<<
+  double get grandTotalAssets =>
+      totalCash +
+      totalFixedAssets +
+      totalStockValuation +
+      totalShipmentValuation +
+      totalDebtorReceivables +
+      totalEmployeeDebt;
+
+  // =========================================================
+  // 4. LIABILITY CALCULATIONS
+  // =========================================================
+
+  // 1. Vendor Payables (Money we owe Vendors)
+  double get totalVendorDue {
+    if (Get.isRegistered<VendorController>()) {
+      return _vendorCtrl.vendors.fold(
+        0.0,
+        (sum, vendor) => sum + vendor.totalDue,
+      );
+    }
+    return 0.0;
+  }
+
+  // 2. Debtor Payables (Money we owe Debtors from Purchases)
+  // This is streamed directly from 'debatorbody' where 'purchaseDue' > 0
+  double get totalDebtorPayable => globalDebtorPurchasePayable.value;
+
+  // 3. Monthly Payroll (Recurring Commitment)
+  double get totalMonthlyPayroll =>
+      recurringExpenses.fold(0.0, (sumv, item) => sumv + item.monthlyAmount);
+
+  // >>> TOTAL LIABILITIES <<<
+  // (Vendor Due + Debtor Payable + Payroll)
+  double get grandTotalLiabilities =>
+      totalVendorDue + totalDebtorPayable + totalMonthlyPayroll;
+
+  // =========================================================
+  // 5. NET WORTH & LEFTOVER
+  // =========================================================
+
+  double get netWorth => grandTotalAssets - grandTotalLiabilities;
+
+  // =========================================================
+  // 6. INITIALIZATION
+  // =========================================================
   @override
   void onInit() {
     super.onInit();
-    _bindFixedAssets();
-    _bindPayroll();
-    _fetchExternalControllerData();
+    _bindLocalStreams();
+    _bindDebtorPayableStream(); // Dedicated stream for purchase liability
+    refreshExternalData();
   }
 
-  // --- FIRESTORE LISTENERS ---
-
-  void _bindFixedAssets() {
-    _db.collection('company_assets').snapshots().listen((snapshot) {
+  // Bind Manual Assets & Payroll
+  void _bindLocalStreams() {
+    _db.collection('company_assets').snapshots().listen((snap) {
       fixedAssets.value =
-          snapshot.docs.map((e) => FixedAssetModel.fromSnapshot(e)).toList();
-      totalFixedAssets.value = fixedAssets.fold(
-        0,
-        (sum, item) => sum + item.value,
-      );
+          snap.docs.map((e) => FixedAssetModel.fromSnapshot(e)).toList();
+    });
+    _db.collection('company_payroll_setup').snapshots().listen((snap) {
+      recurringExpenses.value =
+          snap.docs.map((e) => RecurringExpenseModel.fromSnapshot(e)).toList();
     });
   }
 
-  void _bindPayroll() {
-    _db.collection('company_payroll').snapshots().listen((snapshot) {
-      payrollItems.value =
-          snapshot.docs.map((e) => PayrollItemModel.fromSnapshot(e)).toList();
-      totalMonthlyPayroll.value = payrollItems.fold(
-        0,
-        (sum, item) => sum + item.monthlyAmount,
-      );
+  // Bind Global Debtor Payable (Aggregation)
+  void _bindDebtorPayableStream() {
+    // We listen to all debtors. If they have a 'purchaseDue' field, we sum it up.
+    // Ensure your DebtorPurchaseController updates this field on the main doc!
+    _db.collection('debatorbody').snapshots().listen((snap) {
+      double total = 0.0;
+      for (var doc in snap.docs) {
+        final data = doc.data();
+        // Look for purchaseDue, payableBalance, or similar
+        double due =
+            double.tryParse((data['purchaseDue'] ?? 0).toString()) ?? 0.0;
+        total += due;
+      }
+      globalDebtorPurchasePayable.value = total;
     });
   }
 
-  // --- EXTERNAL DATA INTEGRATION (MOCK) ---
-  // Call this method to update values from your other controllers
-  void _fetchExternalControllerData() {
-    // TODO: Connect your existing controllers here later
-    // Example: cashInHand.value = Get.find<CashController>().balance.value;
-
-    // Mock Data for UI visualization
-    cashInHand.value = 50000;
-    cashInBank.value = 120000;
-    cashInBkash.value = 15000;
-    cashInNagad.value = 8000;
-
-    totalVendorDue.value = 45000; // Liability
-    totalDebtorReceivable.value = 32000; // Asset
+  Future<void> refreshExternalData() async {
+    try {
+      if (Get.isRegistered<CashDrawerController>()) await _cashCtrl.fetchData();
+      if (Get.isRegistered<DebatorController>()) await _debtorCtrl.loadBodies();
+      if (Get.isRegistered<ProductController>()) {
+        await _stockCtrl.fetchProducts();
+      }
+      if (Get.isRegistered<StaffController>()) await _staffCtrl.loadStaff();
+      if (Get.isRegistered<VendorController>()) _vendorCtrl.bindVendors();
+    } catch (e) {
+      debugPrint("Sync Error: $e");
+    }
   }
 
-  // --- CRUD OPERATIONS: ASSETS ---
+  // =========================================================
+  // 7. CRUD OPERATIONS
+  // =========================================================
 
   Future<void> addAsset(String name, double value, String category) async {
     await _db.collection('company_assets').add({
@@ -102,38 +184,297 @@ class FinancialController extends GetxController {
       'date': Timestamp.now(),
     });
     Get.back();
-    Get.snackbar(
-      "Success",
-      "Asset Added",
-      backgroundColor: Colors.green.withOpacity(0.2),
-    );
   }
 
-  Future<void> deleteAsset(String id) async {
-    await _db.collection('company_assets').doc(id).delete();
-  }
+  Future<void> deleteAsset(String id) async =>
+      await _db.collection('company_assets').doc(id).delete();
 
-  Future<void> updateAsset(String id, double newValue) async {
-    await _db.collection('company_assets').doc(id).update({'value': newValue});
-  }
-
-  // --- CRUD OPERATIONS: PAYROLL ---
-
-  Future<void> addPayrollItem(String title, double amount, String type) async {
-    await _db.collection('company_payroll').add({
+  Future<void> addRecurringExpense(
+    String title,
+    double amount,
+    String type,
+  ) async {
+    await _db.collection('company_payroll_setup').add({
       'title': title,
       'monthlyAmount': amount,
       'type': type,
     });
     Get.back();
-    Get.snackbar(
-      "Success",
-      "Payroll Item Added",
-      backgroundColor: Colors.green.withOpacity(0.2),
+  }
+
+  Future<void> deleteRecurringExpense(String id) async =>
+      await _db.collection('company_payroll_setup').doc(id).delete();
+
+  // =========================================================
+  // 8. PDF REPORT GENERATOR (MULTI-PAGE)
+  // =========================================================
+  Future<void> generateAndPrintPDF() async {
+    final pdf = pw.Document();
+    final font = await PdfGoogleFonts.nunitoRegular();
+    final fontBold = await PdfGoogleFonts.nunitoBold();
+    final currencyFmt = NumberFormat.currency(
+      locale: 'en_BD',
+      symbol: '',
+      decimalDigits: 0,
+    );
+    final date = DateFormat('dd MMM yyyy, hh:mm a').format(DateTime.now());
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(32),
+        build:
+            (context) => [
+              // HEADER
+              pw.Header(
+                level: 0,
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Text(
+                          "COMPANY FINANCIAL STATEMENT",
+                          style: pw.TextStyle(font: fontBold, fontSize: 20),
+                        ),
+                        pw.Text(
+                          "Official Financial Position",
+                          style: pw.TextStyle(
+                            font: font,
+                            fontSize: 10,
+                            color: PdfColors.grey700,
+                          ),
+                        ),
+                      ],
+                    ),
+                    pw.Text(
+                      date,
+                      style: pw.TextStyle(font: font, fontSize: 10),
+                    ),
+                  ],
+                ),
+              ),
+              pw.SizedBox(height: 20),
+
+              // SUMMARY BOX
+              pw.Container(
+                padding: const pw.EdgeInsets.all(15),
+                decoration: pw.BoxDecoration(
+                  border: pw.Border.all(color: PdfColors.grey300),
+                  color: PdfColors.grey50,
+                ),
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    _pdfSummaryItem(
+                      "Total Assets",
+                      grandTotalAssets,
+                      fontBold,
+                      PdfColors.green800,
+                      currencyFmt,
+                    ),
+                    _pdfSummaryItem(
+                      "Total Liabilities",
+                      grandTotalLiabilities,
+                      fontBold,
+                      PdfColors.red800,
+                      currencyFmt,
+                    ),
+                    _pdfSummaryItem(
+                      "NET WORTH",
+                      netWorth,
+                      fontBold,
+                      PdfColors.blue900,
+                      currencyFmt,
+                    ),
+                  ],
+                ),
+              ),
+              pw.SizedBox(height: 30),
+
+              // 1. ASSETS DETAILED TABLE
+              pw.Text(
+                "ASSETS BREAKDOWN",
+                style: pw.TextStyle(font: fontBold, fontSize: 12),
+              ),
+              pw.Divider(thickness: 0.5),
+              pw.Table.fromTextArray(
+                headers: ['Category', 'Description', 'Valuation (BDT)'],
+                data: [
+                  [
+                    'Liquid Cash',
+                    'Cash, Bank, Mobile Wallets',
+                    currencyFmt.format(totalCash),
+                  ],
+                  [
+                    'Inventory',
+                    'Stock at Warehouse',
+                    currencyFmt.format(totalStockValuation),
+                  ],
+                  [
+                    'Shipments',
+                    'Inventory On-The-Way',
+                    currencyFmt.format(totalShipmentValuation),
+                  ],
+                  [
+                    'Receivables',
+                    'Debtor Sales Dues',
+                    currencyFmt.format(totalDebtorReceivables),
+                  ],
+                  [
+                    'Staff Loans',
+                    'Employee Advances',
+                    currencyFmt.format(totalEmployeeDebt),
+                  ],
+                  [
+                    'Fixed Assets',
+                    'Manual Assets (Equipment)',
+                    currencyFmt.format(totalFixedAssets),
+                  ],
+                ],
+                headerStyle: pw.TextStyle(
+                  font: fontBold,
+                  color: PdfColors.white,
+                  fontSize: 10,
+                ),
+                headerDecoration: const pw.BoxDecoration(
+                  color: PdfColors.blueGrey800,
+                ),
+                cellStyle: pw.TextStyle(font: font, fontSize: 10),
+                cellAlignments: {
+                  0: pw.Alignment.centerLeft,
+                  1: pw.Alignment.centerLeft,
+                  2: pw.Alignment.centerRight,
+                },
+              ),
+
+              pw.SizedBox(height: 20),
+
+              // 2. LIABILITIES DETAILED TABLE
+              pw.Text(
+                "LIABILITIES BREAKDOWN",
+                style: pw.TextStyle(font: fontBold, fontSize: 12),
+              ),
+              pw.Divider(thickness: 0.5),
+              pw.Table.fromTextArray(
+                headers: ['Category', 'Description', 'Amount (BDT)'],
+                data: [
+                  [
+                    'Vendor Payables',
+                    'Due to Suppliers',
+                    currencyFmt.format(totalVendorDue),
+                  ],
+                  [
+                    'Debtor Payables',
+                    'Purchase Dues / Returns',
+                    currencyFmt.format(totalDebtorPayable),
+                  ],
+                  [
+                    'Monthly Payroll',
+                    'Salaries & OpEx',
+                    currencyFmt.format(totalMonthlyPayroll),
+                  ],
+                ],
+                headerStyle: pw.TextStyle(
+                  font: fontBold,
+                  color: PdfColors.white,
+                  fontSize: 10,
+                ),
+                headerDecoration: const pw.BoxDecoration(
+                  color: PdfColors.red800,
+                ),
+                cellStyle: pw.TextStyle(font: font, fontSize: 10),
+                cellAlignments: {
+                  0: pw.Alignment.centerLeft,
+                  1: pw.Alignment.centerLeft,
+                  2: pw.Alignment.centerRight,
+                },
+              ),
+
+              pw.SizedBox(height: 30),
+
+              // 3. FIXED ASSETS LIST (If any)
+              if (fixedAssets.isNotEmpty) ...[
+                pw.Text(
+                  "FIXED ASSETS DETAIL",
+                  style: pw.TextStyle(font: fontBold, fontSize: 12),
+                ),
+                pw.Divider(thickness: 0.5),
+                pw.Table.fromTextArray(
+                  headers: ['Asset Name', 'Category', 'Value'],
+                  data:
+                      fixedAssets
+                          .map(
+                            (e) => [
+                              e.name,
+                              e.category,
+                              currencyFmt.format(e.value),
+                            ],
+                          )
+                          .toList(),
+                  headerStyle: pw.TextStyle(
+                    font: fontBold,
+                    color: PdfColors.black,
+                    fontSize: 9,
+                  ),
+                  cellStyle: pw.TextStyle(font: font, fontSize: 9),
+                ),
+                pw.SizedBox(height: 20),
+              ],
+
+              pw.Spacer(),
+              pw.Divider(),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(
+                    "System Generated Report",
+                    style: pw.TextStyle(
+                      font: font,
+                      fontSize: 8,
+                      color: PdfColors.grey,
+                    ),
+                  ),
+                  pw.Text(
+                    "Page 1",
+                    style: pw.TextStyle(font: font, fontSize: 8),
+                  ),
+                ],
+              ),
+            ],
+      ),
+    );
+
+    await Printing.layoutPdf(
+      onLayout: (format) => pdf.save(),
+      name: 'Financial_Report_${DateFormat('yyyyMMdd').format(DateTime.now())}',
     );
   }
 
-  Future<void> deletePayroll(String id) async {
-    await _db.collection('company_payroll').doc(id).delete();
+  pw.Widget _pdfSummaryItem(
+    String title,
+    double amount,
+    pw.Font font,
+    PdfColor color,
+    NumberFormat fmt,
+  ) {
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.center,
+      children: [
+        pw.Text(
+          title,
+          style: pw.TextStyle(
+            font: font,
+            fontSize: 10,
+            color: PdfColors.grey700,
+          ),
+        ),
+        pw.Text(
+          fmt.format(amount),
+          style: pw.TextStyle(font: font, fontSize: 16, color: color),
+        ),
+      ],
+    );
   }
 }

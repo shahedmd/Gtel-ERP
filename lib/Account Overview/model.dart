@@ -1,12 +1,11 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-// Model for Fixed Assets (Laptops, Decoration, Shop Advance)
 class FixedAssetModel {
   String? id;
-  final String name;
-  final double value;
-  final String category; // e.g., 'Equipment', 'Security Deposit', 'Furniture'
-  final DateTime date;
+  String name;
+  double value;
+  String category;
+  DateTime date;
 
   FixedAssetModel({
     this.id,
@@ -16,52 +15,41 @@ class FixedAssetModel {
     required this.date,
   });
 
-  Map<String, dynamic> toMap() {
-    return {
-      'name': name,
-      'value': value,
-      'category': category,
-      'date': Timestamp.fromDate(date),
-    };
-  }
-
   factory FixedAssetModel.fromSnapshot(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
     return FixedAssetModel(
       id: doc.id,
       name: data['name'] ?? '',
-      value: (data['value'] ?? 0.0).toDouble(),
+      value: double.tryParse(data['value'].toString()) ?? 0.0,
       category: data['category'] ?? 'General',
-      date: (data['date'] as Timestamp).toDate(),
+      date:
+          data['date'] != null
+              ? (data['date'] as Timestamp).toDate()
+              : DateTime.now(),
     );
   }
 }
 
-// Model for Recurring Payroll/Expenses (Rent, Salaries)
-class PayrollItemModel {
+class RecurringExpenseModel {
   String? id;
-  final String title;
-  final double monthlyAmount;
-  final String type; // 'Salary', 'Rent', 'Maintenance'
+  String title;
+  double monthlyAmount;
+  String type; // 'Salary', 'Rent', 'Bill'
 
-  PayrollItemModel({
+  RecurringExpenseModel({
     this.id,
     required this.title,
     required this.monthlyAmount,
     required this.type,
   });
 
-  Map<String, dynamic> toMap() {
-    return {'title': title, 'monthlyAmount': monthlyAmount, 'type': type};
-  }
-
-  factory PayrollItemModel.fromSnapshot(DocumentSnapshot doc) {
+  factory RecurringExpenseModel.fromSnapshot(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
-    return PayrollItemModel(
+    return RecurringExpenseModel(
       id: doc.id,
       title: data['title'] ?? '',
-      monthlyAmount: (data['monthlyAmount'] ?? 0.0).toDouble(),
-      type: data['type'] ?? 'General',
+      monthlyAmount: double.tryParse(data['monthlyAmount'].toString()) ?? 0.0,
+      type: data['type'] ?? 'Expense',
     );
   }
 }

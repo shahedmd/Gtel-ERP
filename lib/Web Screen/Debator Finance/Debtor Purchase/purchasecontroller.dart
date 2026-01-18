@@ -2,7 +2,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:gtel_erp/Stock/controller.dart'; // Your API-based Product Controller
+import 'package:gtel_erp/Stock/controller.dart';
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/debatorcontroller.dart';
 import 'package:gtel_erp/Web%20Screen/Expenses/dailycontroller.dart';
 
@@ -30,12 +30,13 @@ class DebtorPurchaseController extends GetxController {
   // Computed Getter
   double get currentPayable => totalPurchased.value - totalPaid.value;
 
-    final DailyExpensesController dailyExpenseCtrl = Get.isRegistered<DailyExpensesController>() 
-      ? Get.find<DailyExpensesController>() 
-      : Get.put(DailyExpensesController());
+  final DailyExpensesController dailyExpenseCtrl =
+      Get.isRegistered<DailyExpensesController>()
+          ? Get.find<DailyExpensesController>()
+          : Get.put(DailyExpensesController());
 
   // ----------------------------------------------------------------
-  // 1. DATA LOADING
+  // 1. DATA LOADING & AUTO-SYNC
   // ----------------------------------------------------------------
 
   // Load Purchase History (From Firestore - Debtor Record)
@@ -57,7 +58,10 @@ class DebtorPurchaseController extends GetxController {
             return data;
           }).toList();
 
-      _calculateStats();
+      // Calculate Stats
+      await _calculateStatsAndSync(
+        debtorId,
+      ); // <--- UPDATED: Syncs to parent doc
     } catch (e) {
       Get.snackbar("Error", "Could not load purchases: $e");
     } finally {
@@ -65,36 +69,13 @@ class DebtorPurchaseController extends GetxController {
     }
   }
 
-  // Load Products (From ProductController / API)
-  Future<void> loadProductsForSearch() async {
-    try {
-      // 1. Ensure products are loaded from the API
-      if (stockCtrl.allProducts.isEmpty) {
-        await stockCtrl.fetchProducts();
-      }
-
-      // 2. Map the API Product objects to the Map format required by the UI
-      productSearchList.value =
-          stockCtrl.allProducts.map((product) {
-            return {
-              'id': product.id, // Keep ID as int (from API)
-              'name': product.name,
-              'model': product.model,
-              // Use avgPurchasePrice as the default 'buyingPrice'
-              'buyingPrice': product.avgPurchasePrice,
-            };
-          }).toList();
-    } catch (e) {
-      print("Error loading products for search: $e");
-    }
-  }
-
-  void _calculateStats() {
+  // Calculate stats locally AND update the Main Firestore Document
+  // This ensures the Financial Controller sees the correct liability.
+  Future<void> _calculateStatsAndSync(String debtorId) async {
     double purchased = 0.0;
     double paid = 0.0;
 
     for (var p in purchases) {
-      // Safe parsing using extension
       double amt = (p['totalAmount'] ?? p['amount'] ?? 0).toString().toDouble();
 
       if (p['type'] == 'invoice') {
@@ -103,12 +84,45 @@ class DebtorPurchaseController extends GetxController {
         paid += amt;
       }
     }
+
+    // Update Local State
     totalPurchased.value = purchased;
     totalPaid.value = paid;
+    double due = purchased - paid;
+
+    // --- THE FIX: Write this value to the parent document ---
+    try {
+      await _db.collection('debatorbody').doc(debtorId).update({
+        'purchaseDue': due, // Financial Controller listens to this field
+        'lastPurchaseUpdate': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      print("Sync Error: Could not update parent debtor doc: $e");
+    }
+  }
+
+  // Load Products (From ProductController / API)
+  Future<void> loadProductsForSearch() async {
+    try {
+      if (stockCtrl.allProducts.isEmpty) {
+        await stockCtrl.fetchProducts();
+      }
+      productSearchList.value =
+          stockCtrl.allProducts.map((product) {
+            return {
+              'id': product.id,
+              'name': product.name,
+              'model': product.model,
+              'buyingPrice': product.avgPurchasePrice,
+            };
+          }).toList();
+    } catch (e) {
+      print("Error loading products for search: $e");
+    }
   }
 
   // ----------------------------------------------------------------
-  // 2. PURCHASE LOGIC
+  // 2. PURCHASE LOGIC (UPDATED)
   // ----------------------------------------------------------------
   void addToCart(
     Map<String, dynamic> product,
@@ -152,7 +166,7 @@ class DebtorPurchaseController extends GetxController {
 
       WriteBatch batch = _db.batch();
 
-      // A. Create Purchase Record in Firestore (Financial Record)
+      // A. Create Purchase Record
       DocumentReference purchaseRef =
           _db
               .collection('debatorbody')
@@ -169,20 +183,23 @@ class DebtorPurchaseController extends GetxController {
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      // Commit Firestore Batch (Financials)
+      // B. --- THE FIX: Increment Global Liability on Parent Doc ---
+      DocumentReference debtorRef = _db.collection('debatorbody').doc(debtorId);
+      batch.update(debtorRef, {
+        'purchaseDue': FieldValue.increment(grandTotal),
+      });
+
+      // Commit Financials
       await batch.commit();
 
-      // B. Stock Update (API Calls to Server)
-      // We execute these in parallel for speed
+      // C. Stock Update (API Calls)
       List<Future> stockUpdates = [];
-
       for (var item in cartItems) {
         int pid = int.tryParse(item['productId'].toString()) ?? 0;
         String loc = item['location'];
         int qty = item['qty'];
         double cost = item['cost'];
 
-        // Call the API via ProductController
         stockUpdates.add(
           stockCtrl.addMixedStock(
             productId: pid,
@@ -193,18 +210,15 @@ class DebtorPurchaseController extends GetxController {
           ),
         );
       }
-
-      // Wait for all API calls to finish
       await Future.wait(stockUpdates);
 
-      // Cleanup
       cartItems.clear();
-      await loadPurchases(debtorId);
+      await loadPurchases(debtorId); // Will re-sync exact value
 
       Get.back();
       Get.snackbar(
         "Success",
-        "Purchase Recorded & Stock Added to Server",
+        "Purchase Recorded. Payable Updated.",
         backgroundColor: Colors.green,
         colorText: Colors.white,
       );
@@ -216,11 +230,11 @@ class DebtorPurchaseController extends GetxController {
   }
 
   // ----------------------------------------------------------------
-  // 3. NORMAL PAYMENT (CASH/BANK OUT)
+  // 3. NORMAL PAYMENT (UPDATED)
   // ----------------------------------------------------------------
   Future<void> makePayment({
     required String debtorId,
-    required String debtorName, // ADDED THIS to log clear expense name
+    required String debtorName,
     required double amount,
     required String method,
     String? note,
@@ -229,39 +243,48 @@ class DebtorPurchaseController extends GetxController {
 
     isLoading.value = true;
     try {
-      // 1. Record in Firestore (Debtor Purchase History)
-      await _db
-          .collection('debatorbody')
-          .doc(debtorId)
-          .collection('purchases')
-          .add({
-            'date': FieldValue.serverTimestamp(),
-            'type': 'payment',
-            'amount': amount,
-            'method': method,
-            'note': note,
-            'isAdjustment': false,
-          });
+      WriteBatch batch = _db.batch();
 
-      // 2. AUTOMATIC EXPENSE ENTRY
-      // Since money is leaving cash, we add it to Daily Expenses
+      // 1. Record in Purchase History
+      DocumentReference histRef =
+          _db
+              .collection('debatorbody')
+              .doc(debtorId)
+              .collection('purchases')
+              .doc();
+
+      batch.set(histRef, {
+        'date': FieldValue.serverTimestamp(),
+        'type': 'payment',
+        'amount': amount,
+        'method': method,
+        'note': note,
+        'isAdjustment': false,
+      });
+
+      // 2. --- THE FIX: Decrement Liability on Parent Doc ---
+      DocumentReference debtorRef = _db.collection('debatorbody').doc(debtorId);
+      batch.update(debtorRef, {'purchaseDue': FieldValue.increment(-amount)});
+
+      await batch.commit();
+
+      // 3. Auto Expense Entry
       try {
         await dailyExpenseCtrl.addDailyExpense(
-          "Payment to $debtorName", // Name: "Payment to Shop X"
-          amount.toInt(), // Expense Controller expects int
+          "Payment to $debtorName",
+          amount.toInt(),
           note: "Debtor Payment. Method: $method. ${note ?? ''}",
           date: DateTime.now(),
         );
       } catch (e) {
         print("Failed to auto-add expense: $e");
-        // We don't stop the flow here, just log error
       }
 
       await loadPurchases(debtorId);
-      Get.back(); // Close Dialog
+      Get.back();
       Get.snackbar(
         "Payment Successful",
-        "Recorded in Ledger & Added to Daily Expenses",
+        "Liability Reduced & Expense Recorded",
         backgroundColor: Colors.green,
         colorText: Colors.white,
         duration: const Duration(seconds: 3),
@@ -274,7 +297,7 @@ class DebtorPurchaseController extends GetxController {
   }
 
   // ----------------------------------------------------------------
-  // 4. CONTRA ADJUSTMENT (PAYABLE OFF-SETTING)
+  // 4. CONTRA ADJUSTMENT (UPDATED)
   // ----------------------------------------------------------------
   Future<void> processContraAdjustment({
     required String debtorId,
@@ -285,7 +308,7 @@ class DebtorPurchaseController extends GetxController {
     WriteBatch batch = _db.batch();
 
     try {
-      // Step A: Record Adjustment in Purchase History (Reduces Payable)
+      // Step A: Record Adjustment in Purchase History (Reduces Purchase Payable)
       DocumentReference purchaseAdjRef =
           _db
               .collection('debatorbody')
@@ -302,7 +325,11 @@ class DebtorPurchaseController extends GetxController {
         'isAdjustment': true,
       });
 
-      // Step B: Reduce Debtor's Sales Debt (Add a 'debit' entry in transactions)
+      // --- THE FIX: Decrement Purchase Liability on Parent Doc ---
+      DocumentReference debtorRef = _db.collection('debatorbody').doc(debtorId);
+      batch.update(debtorRef, {'purchaseDue': FieldValue.increment(-amount)});
+
+      // Step B: Reduce Debtor's Sales Debt (Add a 'debit' entry in sales transactions)
       DocumentReference ledgerRef =
           _db
               .collection('debatorbody')
@@ -313,23 +340,30 @@ class DebtorPurchaseController extends GetxController {
       batch.set(ledgerRef, {
         'transactionId': ledgerRef.id,
         'amount': amount,
-        'type': 'debit', // 'Debit' reduces the customer balance
+        'type': 'debit',
         'date': FieldValue.serverTimestamp(),
         'note': 'Contra Adjustment (Ref Purchase)',
         'paymentMethod': {'type': 'Contra'},
         'createdAt': FieldValue.serverTimestamp(),
       });
 
+      // Update Sales Balance (Handled by DebatorController Usually, but safe to force recalculate)
+      // Note: DebatorController usually recalculates balance on load, so strictly updating transaction is enough for logic,
+      // but 'balance' field on parent doc should also be updated ideally.
+      // Since DebatorController handles sales balance, we let it handle that part via transaction stream.
+      batch.update(debtorRef, {
+        'balance': FieldValue.increment(-amount), // Reducing Sales Debt
+      });
+
       await batch.commit();
 
-      // Refresh both UI Lists
       await loadPurchases(debtorId);
       debtorCtrl.loadDebtorTransactions(debtorId);
 
-      Get.back(); // Close dialog
+      Get.back();
       Get.snackbar(
         "Adjustment Successful",
-        "Payable reduced by $amount & Debtor Balance reduced by $amount",
+        "Payable & Receivable both reduced by $amount",
         backgroundColor: Colors.blueAccent,
         colorText: Colors.white,
         duration: const Duration(seconds: 4),
