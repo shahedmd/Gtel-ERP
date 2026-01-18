@@ -49,6 +49,48 @@ class ProductController extends GetxController {
     _debounce?.cancel();
     super.onClose();
   }
+  // Add this inside ProductController class in model.dart
+
+  // =========================================================
+  // LIVE SERVER SEARCH (For Autocomplete Dropdowns)
+  // =========================================================
+  Future<List<Map<String, dynamic>>> searchProductsForDropdown(
+    String query,
+  ) async {
+    if (query.isEmpty) return [];
+
+    try {
+      // 1. Prepare Query Params (Same as Stock Page)
+      // We ask for 20 results that match the search term
+      final queryParams = {'page': '1', 'limit': '20', 'search': query};
+
+      // 2. Send Request
+      final uri = Uri.parse(
+        '$baseUrl/products',
+      ).replace(queryParameters: queryParams);
+      final res = await http.get(uri);
+
+      // 3. Process Result
+      if (res.statusCode == 200) {
+        final Map<String, dynamic> data = jsonDecode(res.body);
+        final List<dynamic> productsJson = data['products'] ?? [];
+
+        // Convert to simple Map for the Dialog
+        return productsJson.map((e) {
+          final p = Product.fromJson(e); // Parse using your existing model
+          return {
+            'id': p.id,
+            'name': p.name,
+            'model': p.model,
+            'buyingPrice': p.avgPurchasePrice, // Or whatever price you need
+          };
+        }).toList();
+      }
+    } catch (e) {
+      print("Dropdown Search Error: $e");
+    }
+    return [];
+  }
 
   // ==========================================
   // 1. FETCH PRODUCTS (READ & VALUATION)
@@ -484,5 +526,6 @@ class ProductController extends GetxController {
           (Match m) => '${m[1]},',
         );
   }
-  print(formattedTotalValuation){}
+
+  print(formattedTotalValuation) {}
 }

@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Live%20order/salemodel.dart'; // Ensure this matches your path
 import '../Stock/model.dart';
-import '../Stock/controller.dart'; // Make sure to import the controller properly
 
 class LiveOrderSalesPage extends StatelessWidget {
   const LiveOrderSalesPage({super.key});

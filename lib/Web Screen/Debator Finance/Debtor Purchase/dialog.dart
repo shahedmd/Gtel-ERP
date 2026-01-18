@@ -1,30 +1,22 @@
 // ignore_for_file: deprecated_member_use, avoid_print
-
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/Debtor%20Purchase/purchasecontroller.dart';
 
 void showPurchaseDialog(BuildContext context, String debtorId) {
-  // 1. Initialize or Find Controller
   final controller =
       Get.isRegistered<DebtorPurchaseController>()
           ? Get.find<DebtorPurchaseController>()
           : Get.put(DebtorPurchaseController());
 
-  // 2. Trigger data load if list is empty
-  if (controller.productSearchList.isEmpty) {
-    controller.loadProductsForSearch();
-  }
-
-  // 3. Local Controllers
+  // Local Controllers
   final qtyC = TextEditingController();
   final costC = TextEditingController();
 
-  // 4. Reactive State for Dialog
+  // Reactive State
   Rxn<Map<String, dynamic>> selectedProduct = Rxn<Map<String, dynamic>>();
   RxString selectedLocation = "Sea".obs;
 
-  // 5. Theme Colors
   const Color activeAccent = Color(0xFF3B82F6);
   const Color darkSlate = Color(0xFF111827);
 
@@ -63,76 +55,101 @@ void showPurchaseDialog(BuildContext context, String debtorId) {
               const Divider(),
               const SizedBox(height: 15),
 
-              // --- 1. SEARCH SECTION (Autocomplete) ---
-              Obx(() {
-                // Loading State
-                if (controller.productSearchList.isEmpty) {
-                  return const Column(
-                    children: [
-                      LinearProgressIndicator(color: activeAccent),
-                      SizedBox(height: 5),
-                      Text(
-                        "Loading Products from Server...",
-                        style: TextStyle(fontSize: 12, color: Colors.grey),
-                      ),
-                    ],
-                  );
-                }
+              // --- 1. SERVER-SIDE AUTOCOMPLETE ---
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  // We use Autocomplete with an async optionsBuilder
+                  return Autocomplete<Map<String, dynamic>>(
+                    // A. THE SEARCH LOGIC (HITS SERVER)
+                    optionsBuilder: (TextEditingValue textEditingValue) async {
+                      if (textEditingValue.text.isEmpty) {
+                        return const Iterable<Map<String, dynamic>>.empty();
+                      }
+                      // This calls the API directly, just like your Stock Page
+                      return await controller.stockCtrl
+                          .searchProductsForDropdown(textEditingValue.text);
+                    },
 
-                // Search Field
-                return Autocomplete<Map<String, dynamic>>(
-                  optionsBuilder: (TextEditingValue textEditingValue) {
-                    if (textEditingValue.text.isEmpty) {
-                      return const Iterable<Map<String, dynamic>>.empty();
-                    }
-                    return controller.productSearchList.where((product) {
-                      final name = product['name'].toString().toLowerCase();
-                      final model = product['model'].toString().toLowerCase();
-                      final query = textEditingValue.text.toLowerCase();
-                      // Match by Name OR Model
-                      return name.contains(query) || model.contains(query);
-                    });
-                  },
-                  // What shows in the list
-                  displayStringForOption:
-                      (option) => "${option['name']} - ${option['model']}",
+                    // B. DISPLAY STRING (What shows in the box after clicking)
+                    displayStringForOption:
+                        (option) => "${option['name']} - ${option['model']}",
 
-                  // Action on Selection
-                  onSelected: (selection) {
-                    selectedProduct.value = selection;
-                    // Auto-fill cost from controller's mapped data
-                    costC.text = selection['buyingPrice']?.toString() ?? "0";
-                    qtyC.text = "1";
-                  },
+                    // C. SELECTION LOGIC
+                    onSelected: (selection) {
+                      selectedProduct.value = selection;
+                      costC.text = selection['buyingPrice']?.toString() ?? "0";
+                      qtyC.text = "1";
+                    },
 
-                  // Custom Input Decoration
-                  fieldViewBuilder: (
-                    context,
-                    textController,
-                    focusNode,
-                    onEditingComplete,
-                  ) {
-                    return TextField(
-                      controller: textController,
-                      focusNode: focusNode,
-                      onEditingComplete: onEditingComplete,
-                      decoration: InputDecoration(
-                        labelText: "Scan or Search (Name / Model)",
-                        prefixIcon: const Icon(Icons.search),
-                        border: OutlineInputBorder(
+                    // D. CUSTOM LIST VIEW (Shows Model clearly)
+                    optionsViewBuilder: (context, onSelected, options) {
+                      return Align(
+                        alignment: Alignment.topLeft,
+                        child: Material(
+                          elevation: 4.0,
                           borderRadius: BorderRadius.circular(8),
+                          child: Container(
+                            width: constraints.maxWidth,
+                            height: 300,
+                            color: Colors.white,
+                            child: ListView.separated(
+                              padding: EdgeInsets.zero,
+                              itemCount: options.length,
+                              separatorBuilder:
+                                  (context, index) => const Divider(height: 1),
+                              itemBuilder: (BuildContext context, int index) {
+                                final Map<String, dynamic> option = options
+                                    .elementAt(index);
+                                return ListTile(
+                                  title: Text(
+                                    option['name'],
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  subtitle: Text(
+                                    "Model: ${option['model'] ?? 'N/A'}",
+                                    style: const TextStyle(color: activeAccent),
+                                  ),
+                                  onTap: () => onSelected(option),
+                                );
+                              },
+                            ),
+                          ),
                         ),
-                        filled: true,
-                        fillColor: const Color(0xFFF9FAFB),
-                      ),
-                    );
-                  },
-                );
-              }),
+                      );
+                    },
+
+                    // E. INPUT FIELD
+                    fieldViewBuilder: (
+                      context,
+                      textController,
+                      focusNode,
+                      onEditingComplete,
+                    ) {
+                      return TextField(
+                        controller: textController,
+                        focusNode: focusNode,
+                        onEditingComplete: onEditingComplete,
+                        decoration: InputDecoration(
+                          labelText: "Search Server (Model or Name)",
+                          hintText: "Type model number...",
+                          prefixIcon:  Icon(Icons.search),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          filled: true,
+                          fillColor: const Color(0xFFF9FAFB),
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
 
               const SizedBox(height: 15),
 
-              // --- 2. INPUTS ROW (Qty, Cost, Location, Add Button) ---
+              // --- 2. INPUTS (Qty, Cost, Location) ---
               Row(
                 children: [
                   Expanded(child: _inputField(qtyC, "Quantity", Icons.numbers)),
@@ -186,7 +203,6 @@ void showPurchaseDialog(BuildContext context, String debtorId) {
                           return;
                         }
 
-                        // Add to Controller Cart
                         controller.addToCart(
                           selectedProduct.value!,
                           int.tryParse(qtyC.text) ?? 0,
@@ -194,11 +210,9 @@ void showPurchaseDialog(BuildContext context, String debtorId) {
                           selectedLocation.value,
                         );
 
-                        // Clear inputs for next entry
                         selectedProduct.value = null;
                         qtyC.clear();
                         costC.clear();
-                        // Note: Autocomplete text remains visually, user types over it.
                       },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: activeAccent,
@@ -214,7 +228,7 @@ void showPurchaseDialog(BuildContext context, String debtorId) {
 
               const SizedBox(height: 15),
 
-              // --- 3. CART LIST SECTION ---
+              // --- 3. CART LIST ---
               Expanded(
                 child: Container(
                   decoration: BoxDecoration(
@@ -240,9 +254,7 @@ void showPurchaseDialog(BuildContext context, String debtorId) {
                         return ListTile(
                           dense: true,
                           leading: CircleAvatar(
-                            backgroundColor: const Color(
-                              0xFFEFF6FF,
-                            ), // Light Blue
+                            backgroundColor: const Color(0xFFEFF6FF),
                             child: Text(
                               "${i + 1}",
                               style: const TextStyle(
@@ -257,7 +269,7 @@ void showPurchaseDialog(BuildContext context, String debtorId) {
                             style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
                           subtitle: Text(
-                            "${item['location']} Stock | Qty: ${item['qty']} @ ${item['cost']}",
+                            "Model: ${item['model']} | ${item['location']} | Qty: ${item['qty']} @ ${item['cost']}",
                           ),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
@@ -288,7 +300,7 @@ void showPurchaseDialog(BuildContext context, String debtorId) {
                 ),
               ),
 
-              // --- 4. FOOTER (Total & Finalize) ---
+              // --- 4. FINAL ACTIONS ---
               const SizedBox(height: 20),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -346,7 +358,6 @@ void showPurchaseDialog(BuildContext context, String debtorId) {
   );
 }
 
-// Helper Widget for Input Fields
 Widget _inputField(TextEditingController c, String label, IconData icon) {
   return TextField(
     controller: c,
