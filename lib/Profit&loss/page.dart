@@ -3,7 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
-import 'controller.dart';
+import 'controller.dart'; // Ensure this imports your updated ProfitController
 
 class ProfitView extends StatelessWidget {
   final ProfitController controller = Get.put(ProfitController());
@@ -13,7 +13,7 @@ class ProfitView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F7FE), // Soft modern background
+      backgroundColor: const Color(0xFFF4F7FE),
       appBar: AppBar(
         title: const Text(
           "Financial Performance",
@@ -25,19 +25,16 @@ class ProfitView extends StatelessWidget {
         backgroundColor: Colors.white,
         elevation: 0,
         actions: [
-          // 1. PDF DOWNLOAD BUTTON (NEW)
           IconButton(
             icon: const Icon(
               Icons.picture_as_pdf_outlined,
               color: Colors.redAccent,
             ),
-            tooltip: "Download P&L Report",
+            tooltip: "Download Report",
             onPressed: controller.generateProfitLossPDF,
           ),
-          // 2. REFRESH BUTTON
           IconButton(
             icon: const Icon(Icons.refresh, color: Color(0xFF4318FF)),
-            tooltip: "Refresh Data",
             onPressed: controller.refreshData,
           ),
           const SizedBox(width: 10),
@@ -54,194 +51,114 @@ class ProfitView extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 1. Filter Section
+              // ------------------------------------------------
+              // FILTERS & CHART
+              // ------------------------------------------------
               _buildFilterChips(),
               const SizedBox(height: 25),
 
-              // 2. YEARLY CHART (Conditional)
               if (controller.selectedFilterLabel.value == 'This Year') ...[
                 _buildYearlyChart(),
                 const SizedBox(height: 25),
               ],
 
               // ============================================================
-              // 3. NET PROFIT CARD (NEW - The Bottom Line)
+              // SECTION 1: SALES OVERVIEW (INVOICED)
               // ============================================================
-              const Text(
-                "NET BUSINESS PROFIT",
-                style: TextStyle(
-                  color: Colors.grey,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1.5,
-                ),
-              ),
+              _buildSectionHeader("1. SALES OVERVIEW", "Invoiced Amount"),
               const SizedBox(height: 10),
-              Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF1B2559), Color(0xFF2B3674)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFF1B2559).withOpacity(0.3),
-                      blurRadius: 15,
-                      offset: const Offset(0, 8),
-                    ),
-                  ],
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          "Net Profit (Accrual)",
-                          style: TextStyle(
-                            color: Colors.white70,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          "Tk ${NumberFormat('#,##0').format(controller.netProfitAccrual.value)}",
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 28,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        const Text(
-                          "(Gross Profit - Expenses)",
-                          style: TextStyle(color: Colors.white38, fontSize: 10),
-                        ),
-                      ],
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 15,
-                        vertical: 10,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: Colors.white.withOpacity(0.2),
-                        ),
-                      ),
-                      child: Column(
-                        children: [
-                          const Text(
-                            "Total Expenses",
-                            style: TextStyle(
-                              color: Colors.redAccent,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            "-${CompactNumberFormat(controller.totalOperatingExpenses.value)}",
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 30),
 
-              // 4. MAIN KPI CARDS (Realized Profit)
-              const Text(
-                "REALIZED PROFIT (Cash In Hand)",
-                style: TextStyle(
-                  color: Colors.grey,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1.5,
-                ),
-              ),
-              const SizedBox(height: 10),
+              // A. The 3 Breakdown Items
               Row(
                 children: [
                   Expanded(
-                    child: _buildMetricCard(
-                      "Net Realized Profit",
-                      controller.realizedProfitTotal.value,
-                      icon: Icons.account_balance_wallet,
-                      color: const Color(0xFF05CD99), // Green
-                      isCurrency: true,
+                    child: _buildMiniStat(
+                      "Daily Customer",
+                      controller.saleDailyCustomer.value,
+                      Colors.blueGrey,
+                      Icons.storefront,
                     ),
                   ),
-                  const SizedBox(width: 15),
+                  const SizedBox(width: 10),
                   Expanded(
-                    child: _buildMetricCard(
-                      "Total Collected",
-                      controller.totalCashCollected.value,
-                      icon: Icons.savings,
-                      color: const Color(0xFF4318FF), // Blue
-                      isCurrency: true,
+                    child: _buildMiniStat(
+                      "Debtor Sales",
+                      controller.saleDebtor.value,
+                      Colors.orange,
+                      Icons.person,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _buildMiniStat(
+                      "Condition Sales",
+                      controller.saleCondition.value,
+                      Colors.purple,
+                      Icons.local_shipping,
                     ),
                   ),
                 ],
               ),
               const SizedBox(height: 15),
-              // Cash Flow Breakdown Row
-              Row(
-                children: [
-                  Expanded(
-                    child: _buildMiniStat(
-                      "Cash Sales",
-                      controller.cashSales.value,
-                      Colors.blueGrey,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _buildMiniStat(
-                      "Debtor Recv.",
-                      controller.debtorCollections.value,
-                      Colors.orange,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _buildMiniStat(
-                      "Courier Recv.",
-                      controller.courierCollections.value,
-                      Colors.purple,
-                    ),
-                  ),
-                ],
+
+              // B. Total Revenue Tile
+              _buildHighlightTile(
+                "TOTAL REVENUE",
+                controller.totalRevenue.value,
+                const Color(0xFF4318FF), // Brand Blue
+                Icons.bar_chart,
               ),
 
               const SizedBox(height: 30),
 
-              // 5. SECONDARY METRICS (Invoiced/Accrual)
-              const Text(
-                "SALES PERFORMANCE (Invoiced)",
-                style: TextStyle(
-                  color: Colors.grey,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1.5,
-                ),
+              // ============================================================
+              // SECTION 2: COLLECTIONS OVERVIEW (CASH IN)
+              // ============================================================
+              _buildSectionHeader(
+                "2. COLLECTIONS & CASHFLOW",
+                "Actual Cash Received",
               ),
               const SizedBox(height: 10),
+
+              // A. The 3 Breakdown Items
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildMiniStat(
+                      "Cash Coll.",
+                      controller.collectionCustomer.value,
+                      Colors.blue[700]!,
+                      Icons.money,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _buildMiniStat(
+                      "Debtor Coll.",
+                      controller.collectionDebtor.value,
+                      Colors.orange[700]!,
+                      Icons.account_balance_wallet,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _buildMiniStat(
+                      "Courier Coll.",
+                      controller.collectionCondition.value,
+                      Colors.purple[700]!,
+                      Icons.assignment_turned_in,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 15),
+
+              // B. Breakdown: Revenue vs Collected vs Pending
               Container(
-                padding: const EdgeInsets.all(15),
+                padding: const EdgeInsets.symmetric(
+                  vertical: 20,
+                  horizontal: 15,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(16),
@@ -257,20 +174,21 @@ class ProfitView extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     _buildTextStat(
-                      "Revenue",
-                      controller.totalInvoiceRevenue.value,
+                      "Total Revenue",
+                      controller.totalRevenue.value,
+                      Colors.black87,
                     ),
-                    Container(width: 1, height: 40, color: Colors.grey[200]),
+                    Container(width: 1, height: 40, color: Colors.grey[300]),
                     _buildTextStat(
-                      "COGS (Cost)",
-                      controller.totalInvoiceCost.value,
-                      color: Colors.redAccent,
+                      "Total Collected",
+                      controller.totalCollected.value,
+                      const Color(0xFF05CD99), // Green
                     ),
-                    Container(width: 1, height: 40, color: Colors.grey[200]),
+                    Container(width: 1, height: 40, color: Colors.grey[300]),
                     _buildTextStat(
-                      "Gross Profit",
-                      controller.totalGrossProfit.value,
-                      color: Colors.blue[800],
+                      "Pending (Due)",
+                      controller.totalPendingGenerated.value,
+                      Colors.redAccent,
                     ),
                   ],
                 ),
@@ -278,16 +196,160 @@ class ProfitView extends StatelessWidget {
 
               const SizedBox(height: 30),
 
-              // 6. TRANSACTION HISTORY
-              const Text(
-                "RECENT COLLECTIONS",
-                style: TextStyle(
-                  color: Colors.grey,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1.5,
+              // ============================================================
+              // SECTION 3: PROFIT & LOSS ANALYSIS
+              // ============================================================
+              _buildSectionHeader("3. PROFITABILITY", "Net Results"),
+              const SizedBox(height: 10),
+
+              Row(
+                children: [
+                  // 1. Profit on Revenue (Paper Profit)
+                  Expanded(
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: const Color(0xFF4318FF).withOpacity(0.1),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            "Profit on Revenue",
+                            style: TextStyle(
+                              color: Colors.grey,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 5),
+                          FittedBox(
+                            child: Text(
+                              NumberFormat.compact().format(
+                                controller.profitOnRevenue.value,
+                              ),
+                              style: const TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF4318FF),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 5),
+                          const Text(
+                            "(Rev - COGS)",
+                            style: TextStyle(color: Colors.grey, fontSize: 10),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 15),
+
+                  // 2. Net Realized Profit (Actual Cash Profit)
+                  Expanded(
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF05CD99), Color(0xFF02A378)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF05CD99).withOpacity(0.3),
+                            blurRadius: 10,
+                            offset: const Offset(0, 5),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            "NET REALIZED PROFIT",
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 5),
+                          FittedBox(
+                            child: Text(
+                              NumberFormat.compact().format(
+                                controller.netRealizedProfit.value,
+                              ),
+                              style: const TextStyle(
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 5),
+                          const Text(
+                            "(Cash Profit - Exp)",
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 10,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 15),
+
+              // Expenses Indicator
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  vertical: 10,
+                  horizontal: 15,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.red[50],
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.red.shade100),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      "Operating Expenses Deducted:",
+                      style: TextStyle(
+                        color: Colors.red,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text(
+                      "- Tk ${NumberFormat('#,##0').format(controller.totalOperatingExpenses.value)}",
+                      style: const TextStyle(
+                        color: Colors.red,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
                 ),
               ),
+
+              const SizedBox(height: 30),
+
+              // ============================================================
+              // SECTION 4: RECENT HISTORY
+              // ============================================================
+              _buildSectionHeader("RECENT TRANSACTIONS", "Last Inflow"),
               const SizedBox(height: 10),
               _buildTransactionList(),
             ],
@@ -297,7 +359,152 @@ class ProfitView extends StatelessWidget {
     );
   }
 
-  // --- WIDGETS ---
+  // --------------------------------------------------------------------------
+  // WIDGET HELPERS
+  // --------------------------------------------------------------------------
+
+  Widget _buildSectionHeader(String title, String subtitle) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            color: Colors.grey,
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 1.2,
+          ),
+        ),
+        Text(
+          subtitle,
+          style: const TextStyle(
+            color: Color(0xFF1B2559),
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildHighlightTile(
+    String title,
+    double value,
+    Color color,
+    IconData icon,
+  ) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: color.withOpacity(0.3),
+            blurRadius: 15,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 5),
+              Text(
+                "Tk ${NumberFormat('#,##0').format(value)}",
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 26,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: Colors.white, size: 24),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMiniStat(
+    String label,
+    double value,
+    Color color,
+    IconData icon,
+  ) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.05),
+            blurRadius: 5,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(height: 8),
+          Text(
+            label,
+            style: const TextStyle(fontSize: 10, color: Colors.grey),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 4),
+          FittedBox(
+            child: Text(
+              NumberFormat.compact().format(value),
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTextStat(String label, double value, Color valueColor) {
+    return Column(
+      children: [
+        Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+        const SizedBox(height: 4),
+        Text(
+          NumberFormat.compact().format(value),
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: valueColor,
+          ),
+        ),
+      ],
+    );
+  }
 
   Widget _buildFilterChips() {
     List<String> filters = ['Today', 'This Month', 'Last 30 Days', 'This Year'];
@@ -328,6 +535,7 @@ class ProfitView extends StatelessWidget {
   }
 
   Widget _buildYearlyChart() {
+    // Basic Bar Chart Visualizer based on controller.monthlyStats
     double maxProfit = 0;
     if (controller.monthlyStats.isNotEmpty) {
       maxProfit = controller.monthlyStats
@@ -339,24 +547,19 @@ class ProfitView extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFF1B2559), // Dark Blue Theme
+        color: const Color(0xFF1B2559),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            "Yearly Profit Trends",
+            "Yearly Trend",
             style: TextStyle(
               color: Colors.white,
-              fontSize: 16,
+              fontSize: 14,
               fontWeight: FontWeight.bold,
             ),
-          ),
-          const SizedBox(height: 5),
-          const Text(
-            "Net Realized Profit by Month",
-            style: TextStyle(color: Colors.white70, fontSize: 12),
           ),
           const SizedBox(height: 20),
           Row(
@@ -366,22 +569,13 @@ class ProfitView extends StatelessWidget {
                 controller.monthlyStats.map((stat) {
                   double heightPct = (stat['profit'] as double) / maxProfit;
                   if (heightPct < 0.05 && (stat['profit'] as double) > 0) {
-                    heightPct = 0.05; // min height
+                    heightPct = 0.05;
                   }
-
                   return Column(
                     children: [
-                      Text(
-                        CompactNumberFormat(stat['profit']),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 9,
-                        ),
-                      ),
-                      const SizedBox(height: 5),
                       Container(
-                        width: 12,
-                        height: 100 * heightPct,
+                        width: 10,
+                        height: 80 * heightPct,
                         decoration: BoxDecoration(
                           color: const Color(0xFF05CD99),
                           borderRadius: BorderRadius.circular(4),
@@ -392,7 +586,7 @@ class ProfitView extends StatelessWidget {
                         stat['month'],
                         style: const TextStyle(
                           color: Colors.white70,
-                          fontSize: 10,
+                          fontSize: 9,
                         ),
                       ),
                     ],
@@ -401,105 +595,6 @@ class ProfitView extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildMetricCard(
-    String title,
-    double value, {
-    required IconData icon,
-    required Color color,
-    bool isCurrency = false,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withOpacity(0.05),
-            blurRadius: 15,
-            offset: const Offset(0, 5),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          CircleAvatar(
-            backgroundColor: color.withOpacity(0.1),
-            radius: 20,
-            child: Icon(icon, color: color, size: 20),
-          ),
-          const SizedBox(height: 15),
-          Text(
-            title,
-            style: TextStyle(
-              color: Colors.grey[500],
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 5),
-          FittedBox(
-            child: Text(
-              isCurrency
-                  ? "Tk ${NumberFormat('#,##0').format(value)}"
-                  : value.toString(),
-              style: TextStyle(
-                color: const Color(0xFF1B2559),
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMiniStat(String label, double value, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade200),
-      ),
-      child: Column(
-        children: [
-          Text(label, style: const TextStyle(fontSize: 10, color: Colors.grey)),
-          const SizedBox(height: 4),
-          FittedBox(
-            child: Text(
-              NumberFormat.compact().format(value),
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-                color: color,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTextStat(String label, double value, {Color? color}) {
-    return Column(
-      children: [
-        Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey)),
-        const SizedBox(height: 4),
-        Text(
-          NumberFormat.compact().format(value),
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-            color: color ?? Colors.black87,
-          ),
-        ),
-      ],
     );
   }
 
@@ -513,11 +608,12 @@ class ProfitView extends StatelessWidget {
       child: ListView.separated(
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
-        itemCount: controller.collectionBreakdown.take(8).length,
+        itemCount: controller.collectionBreakdown.take(5).length,
         separatorBuilder: (_, __) => const Divider(height: 1),
         itemBuilder: (context, index) {
           var item = controller.collectionBreakdown[index];
           return ListTile(
+            dense: true,
             leading: CircleAvatar(
               backgroundColor: const Color(0xFFF4F7FE),
               child: Icon(
@@ -525,43 +621,30 @@ class ProfitView extends StatelessWidget {
                     ? Icons.local_shipping
                     : (item['type'] == 'Debtor' ? Icons.person : Icons.store),
                 color: const Color(0xFF4318FF),
-                size: 18,
+                size: 16,
               ),
             ),
             title: Text(
               item['name'] ?? 'Unknown',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
             subtitle: Text(
-              DateFormat('dd MMM - hh:mm a').format(item['date']),
-              style: const TextStyle(fontSize: 11),
+              DateFormat('dd MMM hh:mm a').format(item['date']),
+              style: const TextStyle(fontSize: 10),
             ),
-            trailing: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  "+${NumberFormat('#,##0').format(item['amount'])}",
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF05CD99),
-                  ),
-                ),
-                Text(
-                  "Profit: ${NumberFormat('#,##0').format(item['profit'])}",
-                  style: const TextStyle(fontSize: 10, color: Colors.grey),
-                ),
-              ],
+            trailing: Text(
+              "+${NumberFormat('#,##0').format(item['amount'])}",
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF05CD99),
+                fontSize: 13,
+              ),
             ),
           );
         },
       ),
     );
-  }
-
-  // Helper for small chart numbers
-  String CompactNumberFormat(double n) {
-    if (n >= 1000) return "${(n / 1000).toStringAsFixed(1)}k";
-    return n.toStringAsFixed(0);
   }
 }

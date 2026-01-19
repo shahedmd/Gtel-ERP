@@ -4,41 +4,236 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import 'controller.dart';
-import 'model.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
+
+import 'controller.dart'; // Ensure this points to your DailySalesController
+import 'package:gtel_erp/Web%20Screen/Sales/Condition/conditioncontroller.dart'; // Ensure this points to ConditionSalesController
+import 'model.dart'; // Ensure this points to SaleModel
 
 class DailySalesPage extends StatelessWidget {
-  // Dependency Injection
-  final DailySalesController ctrl = Get.put(DailySalesController());
+  final DailySalesController dailyCtrl = Get.put(DailySalesController());
+  final ConditionSalesController conditionCtrl = Get.put(
+    ConditionSalesController(),
+  );
 
-  // Modern Color Palette (Material 3 / Slate Style)
+  // Color Palette
   static const Color bgSlate = Color(0xFFF1F5F9);
   static const Color darkText = Color(0xFF0F172A);
-  static const Color primaryBlue = Color(0xFF2563EB);
-  static const Color successGreen = Color(0xFF16A34A);
+  static const Color primaryBlue = Color(0xFF2563EB); // Revenue Color
+  static const Color successGreen = Color(0xFF059669); // Collection Color
   static const Color alertRed = Color(0xFFDC2626);
-  static const Color warningOrange = Color(0xFFEA580C);
+  static const Color warningOrange = Color(0xFFD97706);
+  static const Color purpleDebtor = Color(0xFF7C3AED);
 
   DailySalesPage({super.key});
 
   @override
   Widget build(BuildContext context) {
+    // 1. Ensure Condition Data is Loaded (for unpaid condition revenue)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (conditionCtrl.allOrders.isEmpty) {
+        conditionCtrl.loadConditionSales();
+      }
+    });
+
     return Scaffold(
       backgroundColor: bgSlate,
       body: Obx(() {
-        // Loading State
-        if (ctrl.isLoading.value && ctrl.salesList.isEmpty) {
+        if (dailyCtrl.isLoading.value) {
           return const Center(
             child: CircularProgressIndicator(color: primaryBlue),
           );
         }
 
+        // =================================================================
+        // 📊 1. DATA CALCULATIONS
+        // =================================================================
+        DateTime selectedDate = dailyCtrl.selectedDate.value;
+        final dailyList = dailyCtrl.salesList;
+
+        // --- A. CONDITION REVENUE (Unpaid/New Condition Sales) ---
+        final todayConditionOrders =
+            conditionCtrl.allOrders.where((order) {
+              return order.date.year == selectedDate.year &&
+                  order.date.month == selectedDate.month &&
+                  order.date.day == selectedDate.day;
+            }).toList();
+
+        double revenueCondition = 0;
+        for (var o in todayConditionOrders) {
+          revenueCondition += o.grandTotal;
+        }
+
+        // --- B. DAILY SALES & COLLECTIONS (From Daily Ledger) ---
+        double revenueNormal = 0;
+        double revenueDebtor = 0;
+
+        double collectedNormal = 0;
+        double collectedDebtor = 0;
+        double collectedCondition = 0;
+
+        for (var sale in dailyList) {
+          String type = (sale.customerType).toLowerCase();
+          String source = (sale.source).toLowerCase();
+
+          // Identify if this is a "Recovery" (Collection Only) or "New Sale"
+          bool isRecovery =
+              source.contains('condition') ||
+              source.contains('recovery') ||
+              type.contains('courier') ||
+              source.contains('payment');
+
+          // --- REVENUE LOGIC (Goods sold today) ---
+          if (!isRecovery) {
+            if (type.contains('debtor')) {
+              revenueDebtor += sale.amount;
+              collectedDebtor += sale.paid; // If paid partially/fully instantly
+            } else {
+              revenueNormal += sale.amount;
+              collectedNormal += sale.paid;
+            }
+          }
+
+          // --- COLLECTION LOGIC (Cash received today) ---
+          if (isRecovery) {
+            if (source.contains('condition') || type.contains('courier')) {
+              collectedCondition += sale.paid;
+            } else if (type.contains('debtor') || source.contains('payment')) {
+              collectedDebtor += sale.paid;
+            }
+          }
+        }
+
+        double totalRevenue = revenueNormal + revenueDebtor + revenueCondition;
+        double totalCollection =
+            collectedNormal + collectedDebtor + collectedCondition;
+
+        // =================================================================
+        // 🖥️ UI CONSTRUCTION
+        // =================================================================
+
         return Column(
           children: [
-            _buildHeader(context),
-            _buildMetricsGrid(),
-            _buildTableHead(),
-            Expanded(child: _buildMainContent(context)),
+            // HEADER
+            _buildHeader(
+              context,
+              revenueNormal,
+              revenueDebtor,
+              revenueCondition,
+              collectedNormal,
+              collectedDebtor,
+              collectedCondition,
+            ),
+
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  children: [
+                    // --- SECTION 1: REVENUE VS COLLECTION BLOCKS ---
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Revenue Block
+                        Expanded(
+                          child: _buildDetailedBlock(
+                            "REVENUE (INVOICED)",
+                            "Total value of goods sold today",
+                            totalRevenue,
+                            primaryBlue,
+                            Icons.receipt_long,
+                            [
+                              _detailRow("Normal Sales", revenueNormal),
+                              _detailRow("Debtor Sales", revenueDebtor),
+                              _detailRow("Condition Sales", revenueCondition),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 20),
+
+                        // Collection Block
+                        Expanded(
+                          child: _buildDetailedBlock(
+                            "CASH COLLECTION",
+                            "Actual money received today",
+                            totalCollection,
+                            successGreen,
+                            Icons.savings_outlined,
+                            [
+                              _detailRow("Cash Sales", collectedNormal),
+                              _detailRow("Debtor Recv.", collectedDebtor),
+                              _detailRow("Condition Recv.", collectedCondition),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 30),
+
+                    // --- SECTION 2: TRANSACTION LEDGER ---
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.grey.shade300),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.02),
+                            blurRadius: 10,
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.all(15),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text(
+                                  "TRANSACTION LEDGER",
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: darkText,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: bgSlate,
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    "${dailyList.length} Transactions",
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey.shade600,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Divider(height: 1),
+                          // Ledger Table Header & List
+                          _buildTableHead(),
+                          _buildTransactionList(dailyList),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ],
         );
       }),
@@ -46,9 +241,18 @@ class DailySalesPage extends StatelessWidget {
   }
 
   // ==========================================================
-  // 1. HEADER SECTION
+  // 🧱 WIDGET COMPONENTS
   // ==========================================================
-  Widget _buildHeader(BuildContext context) {
+
+  Widget _buildHeader(
+    BuildContext context,
+    double rN,
+    double rD,
+    double rC,
+    double cN,
+    double cD,
+    double cC,
+  ) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
       decoration: BoxDecoration(
@@ -86,112 +290,59 @@ class DailySalesPage extends StatelessWidget {
                   fontSize: 22,
                   fontWeight: FontWeight.w800,
                   color: darkText,
-                  letterSpacing: -0.5,
                 ),
               ),
-              const SizedBox(height: 4),
               Obx(
                 () => Text(
-                  "Viewing Data for: ${DateFormat('EEEE, dd MMMM yyyy').format(ctrl.selectedDate.value)}",
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: Colors.grey.shade600,
-                    fontWeight: FontWeight.w500,
-                  ),
+                  DateFormat(
+                    'EEEE, dd MMMM yyyy',
+                  ).format(dailyCtrl.selectedDate.value),
+                  style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
                 ),
               ),
             ],
           ),
           const Spacer(),
 
-          // --- Search Bar ---
-          Container(
-            width: 250,
-            height: 45,
-            decoration: BoxDecoration(
-              color: bgSlate,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.grey.shade300),
-            ),
-            child: TextField(
-              onChanged: (v) => ctrl.filterQuery.value = v,
-              textAlignVertical: TextAlignVertical.center,
-              decoration: InputDecoration(
-                hintText: "Search Invoice or Name...",
-                hintStyle: TextStyle(fontSize: 13, color: Colors.grey.shade500),
-                prefixIcon: Icon(
-                  Icons.search,
-                  size: 18,
-                  color: Colors.grey.shade600,
-                ),
-                border: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 10),
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-
-          // --- REFRESH BUTTON (NEW) ---
+          // Refresh
           IconButton(
-            onPressed: () => ctrl.loadDailySales(),
+            onPressed: () {
+              dailyCtrl.loadDailySales();
+              conditionCtrl.loadConditionSales();
+            },
             icon: const Icon(Icons.refresh, color: primaryBlue),
             tooltip: "Refresh Data",
-            style: IconButton.styleFrom(
-              backgroundColor: Colors.blue.shade50,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 8),
 
-          // --- Date Filter ---
+          // Date Picker
           OutlinedButton.icon(
             onPressed: () async {
               final p = await showDatePicker(
                 context: context,
-                initialDate: ctrl.selectedDate.value,
+                initialDate: dailyCtrl.selectedDate.value,
                 firstDate: DateTime(2020),
                 lastDate: DateTime.now(),
-                builder: (context, child) {
-                  return Theme(
-                    data: ThemeData.light().copyWith(
-                      colorScheme: const ColorScheme.light(
-                        primary: primaryBlue,
-                      ),
-                    ),
-                    child: child!,
-                  );
-                },
               );
-              if (p != null) ctrl.changeDate(p);
+              if (p != null) dailyCtrl.changeDate(p);
             },
-            icon: const Icon(Icons.calendar_today, size: 16),
+            icon: const Icon(Icons.calendar_month, size: 16),
             label: const Text("Select Date"),
             style: OutlinedButton.styleFrom(
-              foregroundColor: darkText,
-              side: BorderSide(color: Colors.grey.shade300),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
             ),
           ),
           const SizedBox(width: 12),
 
-          // --- Export PDF ---
+          // Daily Report PDF Button
           ElevatedButton.icon(
-            onPressed: () => ctrl.generateProfessionalPDF(),
-            icon: const Icon(Icons.picture_as_pdf, size: 18),
-            label: const Text("Export Report"),
+            onPressed: () => _generateDailyReportPDF(rN, rD, rC, cN, cD, cC),
+            icon: const Icon(Icons.print, size: 16),
+            label: const Text("Daily Report"),
             style: ElevatedButton.styleFrom(
-              backgroundColor: alertRed,
+              backgroundColor: darkText,
               foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
-              elevation: 2,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
             ),
           ),
         ],
@@ -199,148 +350,90 @@ class DailySalesPage extends StatelessWidget {
     );
   }
 
-  // ==========================================================
-  // 2. METRICS ROW
-  // ==========================================================
-  Widget _buildMetricsGrid() {
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Row(
-        children: [
-          Expanded(
-            child: _metricCard(
-              "Total Sales",
-              ctrl.totalSales.value,
-              FontAwesomeIcons.chartLine,
-              primaryBlue,
-            ),
-          ),
-          const SizedBox(width: 20),
-          Expanded(
-            child: _metricCard(
-              "Cash Collected",
-              ctrl.paidAmount.value,
-              FontAwesomeIcons.handHoldingDollar,
-              successGreen,
-            ),
-          ),
-          const SizedBox(width: 20),
-          Expanded(
-            child: _metricCard(
-              "Debtor Pending",
-              ctrl.debtorPending.value,
-              FontAwesomeIcons.fileInvoiceDollar,
-              warningOrange,
-            ),
-          ),
-          const SizedBox(width: 20),
-          // Transaction Count Card
-          Expanded(
-            child: Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: darkText,
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: darkText.withOpacity(0.3),
-                    blurRadius: 12,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: const FaIcon(
-                      FontAwesomeIcons.list,
-                      color: Colors.white,
-                      size: 18,
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        "TRANSACTIONS",
-                        style: TextStyle(
-                          color: Colors.white54,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        "${ctrl.salesList.length}",
-                        style: const TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _metricCard(String title, double value, IconData icon, Color color) {
+  Widget _buildDetailedBlock(
+    String title,
+    String subtitle,
+    double total,
+    Color color,
+    IconData icon,
+    List<Widget> details,
+  ) {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade200),
+        border: Border.all(color: color.withOpacity(0.15)),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.shade100,
-            blurRadius: 10,
-            offset: const Offset(0, 4),
+            color: color.withOpacity(0.05),
+            blurRadius: 15,
+            offset: const Offset(0, 5),
           ),
         ],
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: FaIcon(icon, size: 20, color: color),
-          ),
-          const SizedBox(width: 16),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          Row(
             children: [
-              Text(
-                title.toUpperCase(),
-                style: const TextStyle(
-                  color: Colors.grey,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.5,
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: color, size: 22),
+              ),
+              const SizedBox(width: 15),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        color: color,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 13,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        color: Colors.grey.shade500,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 6),
-              Text(
-                "৳ ${value.toStringAsFixed(0)}",
+            ],
+          ),
+          const SizedBox(height: 25),
+          ...details,
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 15),
+            child: Divider(height: 1),
+          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                "TOTAL",
                 style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
+                  fontWeight: FontWeight.w700,
                   color: darkText,
+                  fontSize: 14,
+                ),
+              ),
+              Text(
+                "৳ ${NumberFormat('#,##0').format(total)}",
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 20,
+                  color: color,
                 ),
               ),
             ],
@@ -350,285 +443,251 @@ class DailySalesPage extends StatelessWidget {
     );
   }
 
-  // ==========================================================
-  // 3. TABLE HEADER
-  // ==========================================================
-  Widget _buildTableHead() {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(24, 0, 24, 0),
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-      decoration: const BoxDecoration(
-        color: darkText,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
-      ),
+  Widget _detailRow(String label, double amount) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
       child: Row(
-        children: const [
-          Expanded(
-            flex: 3,
-            child: Text(
-              "CUSTOMER / INVOICE",
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-              ),
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              color: Color(0xFF64748B),
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
             ),
           ),
-          Expanded(
-            flex: 2,
-            child: Text(
-              "TYPE & STATUS",
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-              ),
+          Text(
+            "৳ ${NumberFormat('#,##0').format(amount)}",
+            style: const TextStyle(
+              fontWeight: FontWeight.w600,
+              color: darkText,
+              fontSize: 13,
             ),
           ),
-          Expanded(
-            flex: 2,
-            child: Text(
-              "PAYMENT METHOD",
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-          Expanded(
-            flex: 2,
-            child: Text(
-              "TOTAL AMOUNT",
-              textAlign: TextAlign.right,
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-          Expanded(
-            flex: 2,
-            child: Text(
-              "BALANCE DUE",
-              textAlign: TextAlign.right,
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-          SizedBox(width: 100), // Action button space
         ],
       ),
     );
   }
 
   // ==========================================================
-  // 4. MAIN SALES LIST
+  // 📋 LEDGER TABLE (With Print Button Only)
   // ==========================================================
-  Widget _buildMainContent(BuildContext context) {
-    // Controller logic is already filtering the sales list
-    final filtered = ctrl.filteredList;
 
-    if (filtered.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.receipt_long_outlined,
-              size: 64,
-              color: Colors.grey.shade300,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              "No transactions found for this date",
-              style: TextStyle(color: Colors.grey.shade500, fontSize: 16),
-            ),
-          ],
-        ),
-      );
-    }
-
+  Widget _buildTableHead() {
     return Container(
-      margin: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: Colors.grey.shade200),
-        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
-      ),
-      child: ListView.separated(
-        itemCount: filtered.length,
-        separatorBuilder: (_, __) => const Divider(height: 1, thickness: 0.5),
-        itemBuilder: (context, index) {
-          final sale = filtered[index];
-          return _buildSaleRow(context, sale);
-        },
+      color: const Color(0xFFF8FAFC),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      child: Row(
+        children: const [
+          Expanded(
+            flex: 3,
+            child: Text(
+              "DETAILS",
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF64748B),
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text(
+              "TYPE",
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF64748B),
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text(
+              "METHOD",
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF64748B),
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text(
+              "AMOUNT",
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF64748B),
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text(
+              "PAID",
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF64748B),
+              ),
+            ),
+          ),
+          // The Print Column Header
+          SizedBox(
+            width: 50,
+            child: Center(
+              child: Text(
+                "PRINT",
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF64748B),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildSaleRow(BuildContext context, SaleModel sale) {
-    bool isDebtor = sale.customerType.toLowerCase().contains("debtor");
+  Widget _buildTransactionList(List<SaleModel> list) {
+    if (list.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.all(30),
+        child: Center(child: Text("No transactions recorded for this date.")),
+      );
+    }
 
-    return InkWell(
-      onTap: () {
-        // Only allow extra payment on Debtors who have Pending amount
-        if (sale.pending > 0 && isDebtor) _showPaymentDialog(context, sale);
-      },
-      hoverColor: Colors.blue.withOpacity(0.02),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-        child: Row(
-          children: [
-            // 1. Customer Info
-            Expanded(
-              flex: 3,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    sale.name,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 14,
-                      color: darkText,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: bgSlate,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          sale.transactionId ?? 'N/A',
-                          style: const TextStyle(
-                            fontSize: 10,
-                            fontFamily: 'monospace',
-                            color: Colors.blueGrey,
-                          ),
-                        ),
+    return ListView.separated(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: list.length,
+      separatorBuilder: (_, __) => const Divider(height: 1, thickness: 0.5),
+      itemBuilder: (context, index) {
+        final sale = list[index];
+        bool isDebtor = (sale.customerType).toLowerCase().contains(
+          "debtor",
+        );
+        String source = (sale.source).toLowerCase();
+
+        bool isRecovery =
+            source.contains("condition") ||
+            source.contains("payment") ||
+            source.contains("recovery");
+
+        String badgeText = "NORMAL";
+        Color badgeColor = primaryBlue;
+
+        if (isRecovery) {
+          badgeText = "COLLECTION";
+          badgeColor = successGreen;
+        } else if (isDebtor) {
+          badgeText = "DEBTOR SALE";
+          badgeColor = purpleDebtor;
+        }
+
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          child: Row(
+            children: [
+              // 1. Details
+              Expanded(
+                flex: 3,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      sale.name,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: darkText,
                       ),
-                      const SizedBox(width: 8),
+                    ),
+                    if (sale.transactionId != null)
                       Text(
-                        DateFormat('hh:mm a').format(sale.timestamp),
+                        sale.transactionId!,
                         style: TextStyle(
-                          fontSize: 11,
+                          fontSize: 10,
                           color: Colors.grey.shade500,
                         ),
                       ),
-                    ],
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-
-            // 2. Type & Status
-            Expanded(
-              flex: 2,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Type Badge
-                  Container(
+              // 2. Type Badge
+              Expanded(
+                flex: 2,
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 8,
-                      vertical: 2,
+                      vertical: 3,
                     ),
                     decoration: BoxDecoration(
-                      color:
-                          isDebtor
-                              ? Colors.purple.shade50
-                              : Colors.blue.shade50,
+                      color: badgeColor.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(4),
-                      border: Border.all(
-                        color:
-                            isDebtor
-                                ? Colors.purple.shade100
-                                : Colors.blue.shade100,
-                      ),
                     ),
                     child: Text(
-                      isDebtor ? "DEBTOR" : "RETAILER",
+                      badgeText,
                       style: TextStyle(
-                        fontSize: 9,
+                        fontSize: 10,
                         fontWeight: FontWeight.bold,
-                        color: isDebtor ? Colors.purple : Colors.blue,
+                        color: badgeColor,
                       ),
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  // Payment Status
-                  Text(
-                    sale.pending > 0 ? "PARTIAL / DUE" : "FULLY PAID",
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      color: sale.pending > 0 ? warningOrange : successGreen,
-                    ),
+                ),
+              ),
+              // 3. Method
+              Expanded(
+                flex: 2,
+                child: Text(
+                  dailyCtrl.formatPaymentMethod(sale.paymentMethod),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF475569),
                   ),
-                ],
-              ),
-            ),
-
-            // 3. Payment Method
-            Expanded(
-              flex: 2,
-              child: Text(
-                ctrl.formatPaymentMethod(sale.paymentMethod),
-                maxLines: 2, // Allow multiline for details
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF475569),
                 ),
               ),
-            ),
-
-            // 4. Amount
-            Expanded(
-              flex: 2,
-              child: Text(
-                "৳ ${sale.amount.toStringAsFixed(2)}",
-                textAlign: TextAlign.right,
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: darkText,
+              // 4. Amount
+              Expanded(
+                flex: 2,
+                child: Text(
+                  "৳${NumberFormat('#,##0').format(sale.amount)}",
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    color: darkText,
+                  ),
                 ),
               ),
-            ),
-
-            // 5. Balance Due
-            Expanded(
-              flex: 2,
-              child: Text(
-                sale.pending > 0 ? "৳ ${sale.pending.toStringAsFixed(2)}" : "-",
-                textAlign: TextAlign.right,
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: sale.pending > 0 ? alertRed : Colors.grey.shade300,
+              // 5. Paid
+              Expanded(
+                flex: 2,
+                child: Text(
+                  "৳${NumberFormat('#,##0').format(sale.paid)}",
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: successGreen,
+                    fontSize: 13,
+                  ),
                 ),
               ),
-            ),
-
-            // 6. Actions
-            SizedBox(
-              width: 100,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  IconButton(
+              // 6. PRINT BUTTON (Delete button removed)
+              SizedBox(
+                width: 50,
+                child: Center(
+                  child: IconButton(
                     icon: const Icon(
                       Icons.print_outlined,
                       size: 20,
@@ -636,246 +695,239 @@ class DailySalesPage extends StatelessWidget {
                     ),
                     tooltip: "Reprint Invoice",
                     onPressed:
-                        () => ctrl.reprintInvoice(sale.transactionId ?? ""),
+                        () =>
+                            dailyCtrl.reprintInvoice(sale.transactionId ?? ""),
                   ),
-                  IconButton(
-                    icon: Icon(
-                      Icons.delete_outline,
-                      size: 20,
-                      color: isDebtor ? Colors.grey.shade300 : alertRed,
-                    ),
-                    tooltip:
-                        isDebtor
-                            ? "Manage in Ledger"
-                            : "Delete & Restore Stock",
-                    onPressed: () {
-                      if (isDebtor) {
-                        Get.snackbar(
-                          "Restricted",
-                          "Debtor sales must be managed in the Debtor Ledger.",
-                          backgroundColor: Colors.orange,
-                          colorText: Colors.white,
-                        );
-                      } else {
-                        _confirmDelete(sale);
-                      }
-                    },
-                  ),
-                ],
+                ),
               ),
-            ),
-          ],
-        ),
-      ),
+            ],
+          ),
+        );
+      },
     );
   }
 
-  // ==========================================================
-  // 5. DIALOGS & UTILS
-  // ==========================================================
+  // =================================================================
+  // 🖨️ PDF GENERATION (Daily Report)
+  // =================================================================
+  Future<void> _generateDailyReportPDF(
+    double rN,
+    double rD,
+    double rC,
+    double cN,
+    double cD,
+    double cC,
+  ) async {
+    final pdf = pw.Document();
+    final fontBold = await PdfGoogleFonts.nunitoBold();
+    final fontRegular = await PdfGoogleFonts.nunitoRegular();
+    final dateStr = DateFormat(
+      'dd MMMM yyyy',
+    ).format(dailyCtrl.selectedDate.value);
 
-  /// Shows dialog to collect due payment with details (Number/Bank)
-  void _showPaymentDialog(BuildContext context, SaleModel sale) {
-    final amountC = TextEditingController(text: sale.pending.toString());
-    final detailsC = TextEditingController(); // For Number or Bank Name
-    final RxString method = "cash".obs;
+    double totalRev = rN + rD + rC;
+    double totalCol = cN + cD + cC;
 
-    Get.dialog(
-      Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: Container(
-          width: 450,
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+    pdf.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(40),
+        build: (context) {
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
-              const Text(
-                "Collect Due Payment",
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: bgSlate,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      "Customer: ${sale.name}",
-                      style: const TextStyle(fontSize: 13),
+              // Header
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(
+                    "DAILY SALES & COLLECTION REPORT",
+                    style: pw.TextStyle(
+                      font: fontBold,
+                      fontSize: 18,
+                      color: PdfColors.blue900,
                     ),
-                    Text(
-                      "Due: ৳${sale.pending}",
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.bold,
-                        color: alertRed,
-                      ),
+                  ),
+                  pw.Text(
+                    dateStr,
+                    style: pw.TextStyle(font: fontRegular, fontSize: 12),
+                  ),
+                ],
+              ),
+              pw.Divider(color: PdfColors.blue900),
+              pw.SizedBox(height: 20),
+
+              // Summary Box
+              pw.Container(
+                padding: const pw.EdgeInsets.all(15),
+                decoration: pw.BoxDecoration(
+                  border: pw.Border.all(color: PdfColors.grey300),
+                  borderRadius: const pw.BorderRadius.all(
+                    pw.Radius.circular(8),
+                  ),
+                  color: PdfColors.grey50,
+                ),
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
+                  children: [
+                    _pdfSummaryItem(
+                      "TOTAL REVENUE",
+                      totalRev,
+                      PdfColors.blue900,
+                      fontBold,
+                    ),
+                    pw.Container(
+                      width: 1,
+                      height: 40,
+                      color: PdfColors.grey300,
+                    ),
+                    _pdfSummaryItem(
+                      "TOTAL COLLECTION",
+                      totalCol,
+                      PdfColors.green800,
+                      fontBold,
                     ),
                   ],
                 ),
               ),
-              const SizedBox(height: 20),
+              pw.SizedBox(height: 30),
 
-              // Inputs
-              TextField(
-                controller: amountC,
-                keyboardType: TextInputType.number,
-                decoration: InputDecoration(
-                  labelText: "Amount Received",
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  prefixText: "৳ ",
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              // Method Selection
-              Obx(
-                () => DropdownButtonFormField<String>(
-                  value: method.value,
-                  decoration: InputDecoration(
-                    labelText: "Payment Method",
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                  items:
-                      ["cash", "bkash", "nagad", "bank"]
-                          .map(
-                            (e) => DropdownMenuItem(
-                              value: e,
-                              child: Text(e.toUpperCase()),
-                            ),
-                          )
-                          .toList(),
-                  onChanged: (v) => method.value = v!,
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              // Dynamic Detail Input based on Method
-              Obx(() {
-                if (method.value == 'cash') return const SizedBox.shrink();
-
-                String label = "Details";
-                IconData icon = Icons.info;
-
-                if (method.value == 'bkash' || method.value == 'nagad') {
-                  label = "${method.value.toUpperCase()} Number";
-                  icon = Icons.phone_android;
-                } else if (method.value == 'bank') {
-                  label = "Bank Name & Account No";
-                  icon = Icons.account_balance;
-                }
-
-                return TextField(
-                  controller: detailsC,
-                  decoration: InputDecoration(
-                    labelText: label,
-                    prefixIcon: Icon(icon, size: 18),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                );
-              }),
-              const SizedBox(height: 24),
-
-              // Buttons
-              Row(
+              // Details Sections
+              pw.Row(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => Get.back(),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
+                  // Revenue Column
+                  pw.Expanded(
+                    child: pw.Container(
+                      padding: const pw.EdgeInsets.all(10),
+                      decoration: pw.BoxDecoration(
+                        border: pw.Border.all(color: PdfColors.blue100),
+                        borderRadius: const pw.BorderRadius.all(
+                          pw.Radius.circular(8),
+                        ),
                       ),
-                      child: const Text("Cancel"),
+                      child: pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text(
+                            "REVENUE BREAKDOWN",
+                            style: pw.TextStyle(
+                              font: fontBold,
+                              fontSize: 12,
+                              color: PdfColors.blue900,
+                            ),
+                          ),
+                          pw.SizedBox(height: 10),
+                          _pdfRow("Normal Sales", rN, fontRegular),
+                          _pdfRow("Debtor Sales", rD, fontRegular),
+                          _pdfRow("Condition Sales", rC, fontRegular),
+                          pw.Divider(),
+                          _pdfRow("TOTAL", totalRev, fontBold),
+                        ],
+                      ),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: () async {
-                        final double amt = double.tryParse(amountC.text) ?? 0.0;
-                        if (amt <= 0) return;
+                  pw.SizedBox(width: 20),
 
-                        // Construct Payment Method Map
-                        Map<String, dynamic> payMethodMap = {
-                          "type": method.value,
-                        };
-
-                        if (method.value == 'bkash' ||
-                            method.value == 'nagad') {
-                          payMethodMap['number'] = detailsC.text;
-                        } else if (method.value == 'bank') {
-                          payMethodMap['bankName'] = detailsC.text;
-                        }
-
-                        await ctrl.applyDebtorPayment(
-                          sale.name,
-                          amt,
-                          payMethodMap,
-                          date: DateTime.now(),
-                          transactionId: null, // Optional Ref
-                        );
-                        Get.back();
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: primaryBlue,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
+                  // Collection Column
+                  pw.Expanded(
+                    child: pw.Container(
+                      padding: const pw.EdgeInsets.all(10),
+                      decoration: pw.BoxDecoration(
+                        border: pw.Border.all(color: PdfColors.green100),
+                        borderRadius: const pw.BorderRadius.all(
+                          pw.Radius.circular(8),
+                        ),
                       ),
-                      child: const Text(
-                        "Confirm Payment",
-                        style: TextStyle(color: Colors.white),
+                      child: pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text(
+                            "COLLECTION BREAKDOWN",
+                            style: pw.TextStyle(
+                              font: fontBold,
+                              fontSize: 12,
+                              color: PdfColors.green900,
+                            ),
+                          ),
+                          pw.SizedBox(height: 10),
+                          _pdfRow("Cash Sales", cN, fontRegular),
+                          _pdfRow("Debtor Recv.", cD, fontRegular),
+                          _pdfRow("Condition Recv.", cC, fontRegular),
+                          pw.Divider(),
+                          _pdfRow("TOTAL", totalCol, fontBold),
+                        ],
                       ),
+                    ),
+                  ),
+                ],
+              ),
+
+              pw.Spacer(),
+              pw.Divider(),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(
+                    "Generated by G-TEL ERP",
+                    style: pw.TextStyle(
+                      font: fontRegular,
+                      fontSize: 10,
+                      color: PdfColors.grey500,
+                    ),
+                  ),
+                  pw.Text(
+                    "Page 1 of 1",
+                    style: pw.TextStyle(
+                      font: fontRegular,
+                      fontSize: 10,
+                      color: PdfColors.grey500,
                     ),
                   ),
                 ],
               ),
             ],
-          ),
-        ),
+          );
+        },
       ),
+    );
+
+    await Printing.layoutPdf(onLayout: (f) => pdf.save());
+  }
+
+  pw.Widget _pdfSummaryItem(
+    String label,
+    double val,
+    PdfColor color,
+    pw.Font font,
+  ) {
+    return pw.Column(
+      children: [
+        pw.Text(
+          label,
+          style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
+        ),
+        pw.Text(
+          "Tk ${val.toStringAsFixed(0)}",
+          style: pw.TextStyle(fontSize: 18, font: font, color: color),
+        ),
+      ],
     );
   }
 
-  void _confirmDelete(SaleModel sale) {
-    Get.defaultDialog(
-      title: "Delete Sale?",
-      titleStyle: const TextStyle(fontWeight: FontWeight.bold, color: alertRed),
-      content: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        child: Column(
-          children: const [
-            Text(
-              "This action is irreversible.",
-              textAlign: TextAlign.center,
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            SizedBox(height: 10),
-            Text(
-              "1. Daily Sales entry will be removed.\n2. Sales Invoice will be deleted.\n3. Customer History will be updated.\n4. STOCK WILL BE RESTORED.",
-              style: TextStyle(fontSize: 12, color: Color(0xFF475569)),
-            ),
-          ],
-        ),
+  pw.Widget _pdfRow(String label, double val, pw.Font font) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(vertical: 3),
+      child: pw.Row(
+        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        children: [
+          pw.Text(label, style: pw.TextStyle(font: font, fontSize: 11)),
+          pw.Text(
+            val.toStringAsFixed(0),
+            style: pw.TextStyle(font: font, fontSize: 11),
+          ),
+        ],
       ),
-      textConfirm: "Confirm Delete",
-      textCancel: "Cancel",
-      confirmTextColor: Colors.white,
-      buttonColor: alertRed,
-      cancelTextColor: Colors.black87,
-      onConfirm: () {
-        ctrl.deleteSale(sale.id);
-        Get.back();
-      },
     );
   }
 }

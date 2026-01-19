@@ -1,9 +1,10 @@
 // ignore_for_file: deprecated_member_use
+
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
-import 'salescontroller.dart';
+import 'salescontroller.dart'; // Ensure correct path for GeneratePDF
 
 class MonthlySalesDetailPage extends StatelessWidget {
   final String monthKey;
@@ -15,11 +16,14 @@ class MonthlySalesDetailPage extends StatelessWidget {
     required this.summary,
   });
 
-  // ERP Theme Colors (Matching your Sidebar and other pages)
+  // ERP Theme Colors
   static const Color darkSlate = Color(0xFF111827);
   static const Color activeAccent = Color(0xFF3B82F6);
   static const Color bgGrey = Color(0xFFF9FAFB);
   static const Color textMuted = Color(0xFF6B7280);
+  static const Color successGreen = Color(0xFF059669);
+  static const Color warningOrange = Color(0xFFD97706);
+  static const Color alertRed = Color(0xFFDC2626);
 
   @override
   Widget build(BuildContext context) {
@@ -61,14 +65,11 @@ class MonthlySalesDetailPage extends StatelessWidget {
               icon: const FaIcon(
                 FontAwesomeIcons.filePdf,
                 size: 16,
-                color: Colors.redAccent,
+                color: alertRed,
               ),
               label: const Text(
                 "Export PDF",
-                style: TextStyle(
-                  color: Colors.redAccent,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(color: alertRed, fontWeight: FontWeight.bold),
               ),
             ),
           ),
@@ -79,8 +80,8 @@ class MonthlySalesDetailPage extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // --- 1. MONTHLY STATS GRID ---
-            _buildMonthlyStats(),
+            // --- 1. REVENUE VS COLLECTION STATS ---
+            _buildDetailedStatsBlock(),
 
             const SizedBox(height: 32),
 
@@ -102,70 +103,152 @@ class MonthlySalesDetailPage extends StatelessWidget {
     );
   }
 
-  // --- TOP DASHBOARD STATS ---
-  Widget _buildMonthlyStats() {
+  // --- REVENUE VS COLLECTION STATS BLOCK ---
+  Widget _buildDetailedStatsBlock() {
     return Row(
       children: [
-        _statCard(
-          "Total Sales",
-          summary.total,
-          FontAwesomeIcons.sackDollar,
-          activeAccent,
-        ),
-        const SizedBox(width: 16),
-        _statCard(
-          "Total Collected",
-          summary.paid,
-          FontAwesomeIcons.circleCheck,
-          Colors.green,
-        ),
-        const SizedBox(width: 16),
-        _statCard(
-          "Total Outstanding",
-          summary.pending,
-          FontAwesomeIcons.clock,
-          Colors.orange,
-        ),
-      ],
-    );
-  }
-
-  Widget _statCard(String label, double value, IconData icon, Color color) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.black.withOpacity(0.05)),
-        ),
-        child: Row(
-          children: [
-            CircleAvatar(
-              backgroundColor: color.withOpacity(0.1),
-              child: FaIcon(icon, size: 16, color: color),
+        // REVENUE BLOCK
+        Expanded(
+          child: Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: activeAccent.withOpacity(0.2)),
+              boxShadow: [
+                BoxShadow(
+                  color: activeAccent.withOpacity(0.05),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
             ),
-            const SizedBox(width: 16),
-            Column(
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  label,
-                  style: const TextStyle(color: textMuted, fontSize: 12),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: activeAccent.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(
+                        Icons.receipt_long,
+                        color: activeAccent,
+                        size: 20,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          "REVENUE",
+                          style: TextStyle(
+                            color: activeAccent,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
+                        Text(
+                          "Invoiced this month",
+                          style: TextStyle(
+                            color: Colors.grey.shade500,
+                            fontSize: 10,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
+                const SizedBox(height: 20),
                 Text(
-                  "৳ ${value.toStringAsFixed(2)}",
-                  style: TextStyle(
-                    fontSize: 18,
+                  "৳ ${NumberFormat('#,##0').format(summary.total)}",
+                  style: const TextStyle(
+                    fontSize: 24,
                     fontWeight: FontWeight.bold,
                     color: darkSlate,
                   ),
                 ),
               ],
             ),
-          ],
+          ),
         ),
-      ),
+        const SizedBox(width: 20),
+
+        // COLLECTION BLOCK
+        Expanded(
+          child: Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: successGreen.withOpacity(0.2)),
+              boxShadow: [
+                BoxShadow(
+                  color: successGreen.withOpacity(0.05),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: successGreen.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(
+                        Icons.savings_outlined,
+                        color: successGreen,
+                        size: 20,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          "COLLECTED",
+                          style: TextStyle(
+                            color: successGreen,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
+                        Text(
+                          "Received this month",
+                          style: TextStyle(
+                            color: Colors.grey.shade500,
+                            fontSize: 10,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  "৳ ${NumberFormat('#,##0').format(summary.paid)}",
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color:
+                        darkSlate, // Keeping amount text dark for readability
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -225,7 +308,7 @@ class MonthlySalesDetailPage extends StatelessWidget {
                 Expanded(
                   flex: 2,
                   child: Text(
-                    "Day Total",
+                    "Revenue",
                     style: TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
@@ -272,6 +355,7 @@ class MonthlySalesDetailPage extends StatelessWidget {
                   style: const TextStyle(
                     fontWeight: FontWeight.w600,
                     color: darkSlate,
+                    fontSize: 13,
                   ),
                 ),
               ],
@@ -280,25 +364,25 @@ class MonthlySalesDetailPage extends StatelessWidget {
           // Status Badge
           Expanded(
             flex: 2,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color:
-                    isPending
-                        ? Colors.orange.withOpacity(0.1)
-                        : Colors.green.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Text(
-                isPending ? "DUE RECORDED" : "FULLY PAID",
-                textAlign: TextAlign.center,
-                style: TextStyle(
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
                   color:
                       isPending
-                          ? Colors.orange.shade800
-                          : Colors.green.shade800,
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
+                          ? warningOrange.withOpacity(0.1)
+                          : successGreen.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  isPending ? "DUE RECORDED" : "FULLY PAID",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: isPending ? warningOrange : successGreen,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
             ),
@@ -307,11 +391,11 @@ class MonthlySalesDetailPage extends StatelessWidget {
           Expanded(
             flex: 2,
             child: Text(
-              "৳ ${data.paid.toStringAsFixed(2)}",
+              "৳ ${NumberFormat('#,##0').format(data.paid)}",
               textAlign: TextAlign.right,
               style: const TextStyle(
-                color: Colors.green,
-                fontWeight: FontWeight.w500,
+                color: successGreen,
+                fontWeight: FontWeight.w600,
               ),
             ),
           ),
@@ -319,7 +403,7 @@ class MonthlySalesDetailPage extends StatelessWidget {
           Expanded(
             flex: 2,
             child: Text(
-              "৳ ${data.total.toStringAsFixed(2)}",
+              "৳ ${NumberFormat('#,##0').format(data.total)}",
               textAlign: TextAlign.right,
               style: const TextStyle(
                 fontWeight: FontWeight.bold,
@@ -346,7 +430,7 @@ class MonthlySalesDetailPage extends StatelessWidget {
   String _formatDayKey(String key) {
     try {
       DateTime date = DateTime.parse(key);
-      return DateFormat('dd MMM yyyy (EEEE)').format(date);
+      return DateFormat('dd MMM (EEE)').format(date);
     } catch (e) {
       return key;
     }

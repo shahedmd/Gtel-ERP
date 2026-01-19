@@ -1,5 +1,4 @@
 // ignore_for_file: deprecated_member_use
-
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -20,7 +19,7 @@ class ShipmentController extends GetxController {
 
   // --- STATE ---
   final RxList<ShipmentModel> shipments = <ShipmentModel>[].obs;
-  final RxBool isLoading = false.obs;
+  final RxBool isLoading = false.obs; 
   StreamSubscription? _shipmentSubscription;
 
   // --- MANIFEST INPUTS ---
@@ -280,7 +279,6 @@ class ShipmentController extends GetxController {
         margin: const EdgeInsets.all(10),
       );
     } catch (e) {
-      print("Error: $e");
 
       // Close Dialog if error occurred
       if (Get.isDialogOpen == true) Get.back();
