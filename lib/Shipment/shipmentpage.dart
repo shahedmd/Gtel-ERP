@@ -915,13 +915,22 @@ class _ShipmentCard extends StatelessWidget {
                         backgroundColor: kDarkSlate,
                         foregroundColor: Colors.white,
                       ),
-                      onPressed: () {
+                      onPressed: () async {
+                        // 1. Force close keyboard immediately
+                        FocusScope.of(context).unfocus();
+
+                        // 2. Close the Selection Dialog
                         Get.back();
-                        // Call receive with Vendor ID
+
+                        // 3. CRITICAL: Wait for the dialog close animation to finish.
+                        // This prevents the "Loading Dialog" from colliding with the "Selection Dialog".
+                        await Future.delayed(const Duration(milliseconds: 350));
+
+                        // 4. Now safe to call the controller
                         controller.receiveShipmentFast(
                           item,
                           selectedDate.value,
-                          selectedVendorId: selectedVendorId.value, // Pass ID
+                          selectedVendorId: selectedVendorId.value,
                         );
                       },
                       child: const Text("CONFIRM"),

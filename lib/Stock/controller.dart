@@ -409,6 +409,38 @@ class ProductController extends GetxController {
     }
   }
 
+  // Inside ProductController class
+
+  // ==========================================
+  // NEW: BULK ADD STOCK (WITH WAC CALCULATION)
+  // ==========================================
+  Future<bool> addBulkStockWithValuation(
+    List<Map<String, dynamic>> items,
+  ) async {
+    isActionLoading.value = true;
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/products/bulk-add-stock'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(items),
+      );
+
+      if (res.statusCode == 200) {
+        // Success! Refresh the list to show new prices/qty
+        await fetchProducts();
+        return true;
+      } else {
+        _showError("Bulk Add Failed: ${res.body}");
+        return false;
+      }
+    } catch (e) {
+      _showError("Network Error: $e");
+      return false;
+    } finally {
+      isActionLoading.value = false;
+    }
+  }
+
   /// Return product from Service (Restores stock to Local)
   /// Updated to support Partial Quantity
   Future<void> returnFromService(int logId, int qty) async {

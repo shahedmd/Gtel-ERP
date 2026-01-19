@@ -84,14 +84,10 @@ class ShipmentController extends GetxController {
         .orderBy('createdDate', descending: true)
         .limit(50)
         .snapshots()
-        .listen(
-          (event) {
-            shipments.value =
-                event.docs.map((e) => ShipmentModel.fromSnapshot(e)).toList();
-          },
-          onError: (e) {
-          },
-        );
+        .listen((event) {
+          shipments.value =
+              event.docs.map((e) => ShipmentModel.fromSnapshot(e)).toList();
+        }, onError: (e) {});
   }
 
   void onSearchChanged(String val) => productController.search(val);
@@ -213,57 +209,82 @@ class ShipmentController extends GetxController {
   Future<void> receiveShipmentFast(
     ShipmentModel shipment,
     DateTime arrivalDate, {
-    String? selectedVendorId, // OPTIONAL: If null, no credit entry is made
+    String? selectedVendorId,
   }) async {
     // 1. Show Blocking Dialog
     _showLoadingDialog(shipment.items.length);
 
     try {
-      // 2. Process Items (Parallel)
-      List<Future> tasks = [];
-      for (var item in shipment.items) {
-        tasks.add(_processReceiveItem(item, arrivalDate));
-      }
+      // Format Date for API
+      final String dateString = DateFormat('yyyy-MM-dd').format(arrivalDate);
 
-      // 3. Process Vendor Credit (Parallel or Sequential)
+      // --- A. PREPARE BULK DATA ---
+      List<Map<String, dynamic>> bulkItems =
+          shipment.items.map((item) {
+            return {
+              'id': item.productId,
+              'sea_qty': item.seaQty,
+              'air_qty': item.airQty,
+              'local_qty': 0,
+              'local_price': 0.0,
+              'shipmentdate': dateString, // Pass date to server
+            };
+          }).toList();
+
+      // --- B. CALL NEW API ---
+      bool success = await productController.addBulkStockWithValuation(
+        bulkItems,
+      );
+      if (!success) throw "Server rejected bulk update";
+
+      // --- C. VENDOR CREDIT ---
       if (selectedVendorId != null && selectedVendorId.isNotEmpty) {
-        // Add task to create credit entry
-        tasks.add(
-          vendorController.addAutomatedShipmentCredit(
-            vendorId: selectedVendorId,
-            amount: shipment.totalAmount, // Total shipment value
-            shipmentName: shipment.shipmentName,
-            date: arrivalDate,
-          ),
+        await vendorController.addAutomatedShipmentCredit(
+          vendorId: selectedVendorId,
+          amount: shipment.totalAmount,
+          shipmentName: shipment.shipmentName,
+          date: arrivalDate,
         );
       }
 
-      // Execute all tasks (Stock Update + Vendor Credit)
-      await Future.wait(tasks);
-
-      // 4. Update Firestore Shipment Status
+      // --- D. UPDATE SHIPMENT STATUS ---
       await _firestore.collection('shipments').doc(shipment.docId).update({
         'isReceived': true,
         'arrivalDate': Timestamp.fromDate(arrivalDate),
-        'vendorId': selectedVendorId, // Optional: store who supplied it
+        'vendorId': selectedVendorId,
       });
 
-      // 5. Force Close Loading
-      Get.back();
+      // ==============================================================
+      // FIX IS HERE: CLOSE DIALOG *BEFORE* SNACKBAR
+      // ==============================================================
 
-      // 6. Refresh Data
-      await productController.fetchProducts();
+      // 1. Force Close Keyboard
+      FocusManager.instance.primaryFocus?.unfocus();
 
+      // 2. Close the Loading Dialog explicitly
+      if (Get.isDialogOpen == true) {
+        Get.back();
+      }
+
+      // 3. Small delay to let the dialog animation finish
+      await Future.delayed(const Duration(milliseconds: 200));
+
+      // 4. NOW Show Success Snackbar (It stays visible now)
       Get.snackbar(
         "Complete",
-        "Stock Received & Vendor Credited",
+        "Stock, Prices & Dates Updated",
         backgroundColor: Colors.green,
         colorText: Colors.white,
-        icon: const Icon(Icons.check_circle, color: Colors.white),
         duration: const Duration(seconds: 3),
+        snackPosition: SnackPosition.BOTTOM,
+        margin: const EdgeInsets.all(10),
       );
     } catch (e) {
-      Get.back(); // Close loading on error
+      print("Error: $e");
+
+      // Close Dialog if error occurred
+      if (Get.isDialogOpen == true) Get.back();
+
       Get.snackbar(
         "Error",
         "Process Failed: $e",
@@ -272,6 +293,7 @@ class ShipmentController extends GetxController {
         duration: const Duration(seconds: 5),
       );
     }
+    // Remove the 'finally' block to avoid double-closing
   }
 
   // HELPER: MODERN LOADING DIALOG
@@ -322,61 +344,6 @@ class ShipmentController extends GetxController {
         ),
       ),
       barrierDismissible: false,
-    );
-  }
-
-  // --- ITEM PROCESSOR ---
-  Future<void> _processReceiveItem(
-    ShipmentItem item,
-    DateTime arrivalDate,
-  ) async {
-    // Find the product in local state
-    Product? localP = productController.allProducts.firstWhereOrNull(
-      (p) => p.id == item.productId,
-    );
-
-    // If product exists in DB
-    if (localP != null) {
-      // Step A: Update the Last Shipment Date
-      // We must send the whole object back to prevent overwriting other fields with null
-      final Map<String, dynamic> dateUpdateBody = {
-        'id': localP.id,
-        'name': localP.name,
-        'category': localP.category,
-        'brand': localP.brand,
-        'model': localP.model,
-        'weight': localP.weight,
-        'yuan': localP.yuan,
-        'currency': localP.currency,
-        'sea': localP.sea,
-        'air': localP.air,
-        'shipmenttax': localP.shipmentTax,
-        'shipmenttaxair': localP.shipmentTaxAir,
-        'agent': localP.agent,
-        'wholesale': localP.wholesale,
-        'shipmentno': localP.shipmentNo,
-
-        // THE CHANGE: Update Date
-        'shipmentdate': DateFormat('yyyy-MM-dd').format(arrivalDate),
-
-        // CRITICAL: Send current stock so updateProduct doesn't reset it to 0
-        'stock_qty': localP.stockQty,
-        'avg_purchase_price': localP.avgPurchasePrice,
-        'sea_stock_qty': localP.seaStockQty,
-        'air_stock_qty': localP.airStockQty,
-        'local_qty': localP.localQty,
-      };
-
-      await productController.updateProduct(localP.id, dateUpdateBody);
-    }
-
-    // Step B: Add the incoming stock
-    // This calls the server endpoint that handles weighted average cost calculation
-    await productController.addMixedStock(
-      productId: item.productId,
-      seaQty: item.seaQty,
-      airQty: item.airQty,
-      localQty: 0,
     );
   }
 
