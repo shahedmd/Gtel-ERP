@@ -203,6 +203,9 @@ void showEditProductDialog(Product p, ProductController controller) {
             : '',
   );
 
+  // NEW: Alert Qty
+  final alertQtyC = TextEditingController(text: p.alertQty.toString());
+
   // Stock Fields - FULLY EDITABLE
   final stockC = TextEditingController(text: p.stockQty.toString());
   final avgPriceC = TextEditingController(text: p.avgPurchasePrice.toString());
@@ -264,6 +267,9 @@ void showEditProductDialog(Product p, ProductController controller) {
                 ? null
                 : shipmentDateC.text, // "yyyy-MM-dd"
         'currency': double.tryParse(currencyC.text) ?? p.currency,
+
+        // NEW: Alert Qty
+        'alert_qty': int.tryParse(alertQtyC.text) ?? 5,
 
         // Stock Overrides
         'stock_qty': int.tryParse(stockC.text) ?? p.stockQty,
@@ -362,7 +368,7 @@ void showEditProductDialog(Product p, ProductController controller) {
         ],
       ),
 
-      _sectionHeader('Logistics'),
+      _sectionHeader('Logistics & Inventory'),
       Row(
         children: [
           Expanded(
@@ -394,6 +400,13 @@ void showEditProductDialog(Product p, ProductController controller) {
             ),
           ),
         ],
+      ),
+      // NEW: Alert Field
+      _buildField(
+        alertQtyC,
+        'Low Stock Alert Qty (Default: 5)',
+        Icons.notification_important,
+        type: TextInputType.number,
       ),
 
       _sectionHeader('Sales Pricing'),
@@ -498,6 +511,7 @@ void showCreateProductDialog(ProductController controller) {
   final shipmentNoC = TextEditingController(text: '0');
   final shipmentDateC = TextEditingController(); // New Date Field
   final stockC = TextEditingController(text: '0');
+  final alertQtyC = TextEditingController(text: '5'); // NEW: Alert Qty
 
   // Logic to calculate costs based on inputs
   void calculatePrices() {
@@ -563,6 +577,9 @@ void showCreateProductDialog(ProductController controller) {
 
         'currency':
             double.tryParse(currencyC.text) ?? controller.currentCurrency.value,
+
+        // NEW: Alert Qty
+        'alert_qty': int.tryParse(alertQtyC.text) ?? 5,
 
         // Inventory
         'stock_qty': initialStock,
@@ -704,11 +721,26 @@ void showCreateProductDialog(ProductController controller) {
           ),
         ],
       ),
-      _buildField(
-        stockC,
-        'Initial Stock (Assigned to Sea)',
-        Icons.inventory_2,
-        type: TextInputType.number,
+      Row(
+        children: [
+          Expanded(
+            child: _buildField(
+              stockC,
+              'Initial Stock (Sea)',
+              Icons.inventory_2,
+              type: TextInputType.number,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _buildField(
+              alertQtyC,
+              'Low Stock Alert Qty',
+              Icons.notification_important,
+              type: TextInputType.number,
+            ),
+          ),
+        ],
       ),
 
       _sectionHeader('Sales Pricing'),

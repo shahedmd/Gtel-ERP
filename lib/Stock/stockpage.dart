@@ -4,9 +4,10 @@ import 'dart:ui'; // Required for PointerDeviceKind
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart'; // Added for Date Formatting
-import 'Service/servicepage.dart';
+import 'package:gtel_erp/Stock/shortlist.dart'; // Ensure path is correct
+import 'Service/servicepage.dart'; // Ensure path is correct
 import 'controller.dart';
-import 'edit.dart';
+import 'edit.dart'; // Ensure path is correct
 import 'model.dart';
 
 // THIS CLASS ENABLES MOUSE DRAGGING FOR HORIZONTAL SCROLL
@@ -21,684 +22,750 @@ class MyCustomScrollBehavior extends MaterialScrollBehavior {
 class ProductScreen extends StatelessWidget {
   ProductScreen({super.key});
 
-  // Main Controller (Handles Products + Service + Damage)
   final ProductController controller = Get.put(ProductController());
-
   final TextEditingController currencyInput = TextEditingController();
 
-  // Explicit ScrollControllers
+  // Explicit ScrollControllers for the table
   final ScrollController _verticalScrollController = ScrollController();
   final ScrollController _horizontalScrollController = ScrollController();
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[100],
-      appBar: AppBar(
-        title: const Text(
-          'Inventory & Service Manager',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-        ),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
-        elevation: 1,
-        actions: [
-          // New Service Page Button
-          TextButton.icon(
-            onPressed: () => Get.to(() => ServicePage()),
-            icon: const Icon(Icons.handyman, color: Colors.orange),
-            label: const Text(
-              "Service Center",
-              style: TextStyle(
-                color: Colors.orange,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () => controller.fetchProducts(),
-          ),
-        ],
-      ),
+      backgroundColor: const Color(
+        0xFFF3F4F6,
+      ), // Modern Light Grey ERP Background
+      appBar: _buildAppBar(),
       body: ScrollConfiguration(
         behavior: MyCustomScrollBehavior(),
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            children: [
-              // ==========================================
-              // CURRENCY MANAGEMENT CARD (Existing)
-              // ==========================================
-              Card(
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  side: BorderSide(color: Colors.blue[100]!),
-                ),
-                color: Colors.blue[50],
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Current Market Rate',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.blueGrey,
-                              ),
-                            ),
-                            Obx(
-                              () => Text(
-                                '1 CNY = ${controller.currentCurrency.value.toStringAsFixed(2)} BDT',
-                                style: const TextStyle(
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.blue,
-                                ),
-                              ),
-                            ),
-                            const Text(
-                              'Changing rate updates all Imported Stock values.',
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: Colors.blueGrey,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 20),
-                      SizedBox(
-                        width: 120,
-                        child: TextField(
-                          controller: currencyInput,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            hintText: 'New Rate',
-                            isDense: true,
-                            fillColor: Colors.white,
-                            filled: true,
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue[800],
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 20,
-                            vertical: 15,
-                          ),
-                        ),
-                        onPressed: () {
-                          final val = double.tryParse(currencyInput.text);
-                          if (val != null && val > 0) {
-                            Get.defaultDialog(
-                              title: 'Currency Revaluation',
-                              middleText:
-                                  'Update to ${val.toStringAsFixed(2)}? This changes your current debt and inventory value.',
-                              textConfirm: 'Update All',
-                              confirmTextColor: Colors.white,
-                              buttonColor: Colors.blue[800],
-                              onConfirm: () {
-                                controller.updateCurrencyAndRecalculate(val);
-                                currencyInput.clear();
-                                Get.back();
-                              },
-                              onCancel: () {},
-                            );
-                          } else {
-                            Get.snackbar(
-                              'Input Required',
-                              'Please enter a valid currency rate',
-                            );
-                          }
-                        },
-                        icon: const Icon(Icons.currency_exchange),
-                        label: const Text('Recalculate'),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
+        child: Column(
+          children: [
+            // 1. TOP STATS DASHBOARD
+            _buildStatsSection(context),
 
-              // ==========================================
-              // SEARCH & BRAND FILTER
-              // ==========================================
-              Row(
-                children: [
-                  Expanded(
-                    flex: 3,
-                    child: TextField(
-                      onChanged: (v) => controller.search(v),
-                      decoration: InputDecoration(
-                        hintText: 'Search by model, name or brand...',
-                        prefixIcon: const Icon(Icons.search),
-                        isDense: true,
-                        filled: true,
-                        fillColor: Colors.white,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    flex: 1,
-                    child: Obx(
-                      () => DropdownButtonFormField<String>(
-                        value: controller.selectedBrand.value,
-                        decoration: InputDecoration(
-                          labelText: 'Brand Filter',
-                          isDense: true,
-                          filled: true,
-                          fillColor: Colors.white,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        items:
-                            controller.brands
-                                .map(
-                                  (b) => DropdownMenuItem(
-                                    value: b,
-                                    child: Text(b),
-                                  ),
-                                )
-                                .toList(),
-                        onChanged: (v) {
-                          if (v != null) controller.selectBrand(v);
-                        },
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-
-              // ==========================================
-              // DATA TABLE (UPDATED WITH SHIPMENT DATE)
-              // ==========================================
-              Expanded(
-                child: Card(
-                  elevation: 1,
-                  margin: EdgeInsets.zero,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Obx(() {
-                    if (controller.isLoading.value) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-                    if (controller.allProducts.isEmpty) {
-                      return const Center(child: Text('No products found.'));
-                    }
-
-                    return LayoutBuilder(
-                      builder: (context, constraints) {
-                        return Scrollbar(
-                          controller: _verticalScrollController,
-                          thumbVisibility: true,
-                          trackVisibility: true,
-                          thickness: 10,
-                          child: SingleChildScrollView(
-                            controller: _verticalScrollController,
-                            scrollDirection: Axis.vertical,
-                            child: Scrollbar(
-                              controller: _horizontalScrollController,
-                              thumbVisibility: true,
-                              trackVisibility: true,
-                              thickness: 12,
-                              child: SingleChildScrollView(
-                                controller: _horizontalScrollController,
-                                scrollDirection: Axis.horizontal,
-                                child: ConstrainedBox(
-                                  constraints: BoxConstraints(
-                                    minWidth: constraints.maxWidth,
-                                  ),
-                                  child: DataTable(
-                                    columnSpacing: 24,
-                                    horizontalMargin: 20,
-                                    headingRowColor: WidgetStateProperty.all(
-                                      Colors.blueGrey[50],
-                                    ),
-                                    border: TableBorder(
-                                      verticalInside: BorderSide(
-                                        width: 1,
-                                        color: Colors.grey.shade200,
-                                      ),
-                                    ),
-                                    columns: const [
-                                      DataColumn(
-                                        label: Text(
-                                          'Model',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                      DataColumn(
-                                        label: Text(
-                                          'Brand',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                      // --- NEW COLUMNS ---
-                                      DataColumn(
-                                        label: Text(
-                                          'Yuan (¥)',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                      DataColumn(
-                                        label: Text(
-                                          'Rate',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                      DataColumn(
-                                        label: Text(
-                                          'Weight',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                      // --- NEW: SHIPMENT DATE COLUMN ---
-                                      DataColumn(
-                                        label: Text(
-                                          'Shipment Date',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.indigo,
-                                          ),
-                                        ),
-                                      ),
-                                      // -------------------
-                                      DataColumn(
-                                        label: Text(
-                                          'Avg Purchase',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                      DataColumn(
-                                        label: Text(
-                                          'Total Stock',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                      DataColumn(
-                                        label: Text(
-                                          'Sea Qty',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                      DataColumn(
-                                        label: Text(
-                                          'Air Qty',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                      DataColumn(
-                                        label: Text(
-                                          'Local Qty',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                      // --- ADDED PRICE COLUMNS ---
-                                      DataColumn(
-                                        label: Text(
-                                          'Sea Price',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                      DataColumn(
-                                        label: Text(
-                                          'Air Price',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                      // ---------------------------
-                                      DataColumn(
-                                        label: Text(
-                                          'Agent',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                      DataColumn(
-                                        label: Text(
-                                          'Wholesale',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                      DataColumn(
-                                        label: Text(
-                                          'Actions',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                    rows:
-                                        controller.allProducts.map((p) {
-                                          return DataRow(
-                                            cells: [
-                                              DataCell(
-                                                Text(
-                                                  p.model,
-                                                  style: const TextStyle(
-                                                    fontWeight: FontWeight.w600,
-                                                  ),
-                                                ),
-                                              ),
-
-                                              DataCell(
-                                                Text(
-                                                  p.brand,
-                                                  style: const TextStyle(
-                                                    fontWeight: FontWeight.w600,
-                                                  ),
-                                                ),
-                                              ),
-                                              // --- MAPPED COLUMNS ---
-                                              DataCell(
-                                                Text(p.yuan.toStringAsFixed(2)),
-                                              ),
-                                              DataCell(
-                                                Text(
-                                                  p.currency.toStringAsFixed(2),
-                                                ),
-                                              ),
-                                              DataCell(
-                                                Text(
-                                                  p.weight.toStringAsFixed(2),
-                                                ),
-                                              ),
-
-                                              // --- NEW: SHIPMENT DATE CELL ---
-                                              DataCell(
-                                                Text(
-                                                  p.shipmentDate != null
-                                                      ? DateFormat(
-                                                        'yyyy-MM-dd',
-                                                      ).format(p.shipmentDate!)
-                                                      : '-',
-                                                  style: TextStyle(
-                                                    fontSize: 12,
-                                                    color:
-                                                        p.shipmentDate != null
-                                                            ? Colors.black87
-                                                            : Colors.grey[400],
-                                                    fontWeight:
-                                                        p.shipmentDate != null
-                                                            ? FontWeight.w500
-                                                            : FontWeight.normal,
-                                                  ),
-                                                ),
-                                              ),
-
-                                              // -------------------------
-                                              DataCell(
-                                                Container(
-                                                  padding:
-                                                      const EdgeInsets.symmetric(
-                                                        horizontal: 8,
-                                                        vertical: 4,
-                                                      ),
-                                                  decoration: BoxDecoration(
-                                                    color: Colors.green[50],
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          4,
-                                                        ),
-                                                  ),
-                                                  child: Text(
-                                                    p.avgPurchasePrice
-                                                        .toStringAsFixed(2),
-                                                    style: const TextStyle(
-                                                      color: Colors.green,
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                    ),
-                                                  ),
-                                                ),
-                                              ),
-                                              DataCell(
-                                                Text(
-                                                  p.stockQty.toString(),
-                                                  style: const TextStyle(
-                                                    fontWeight: FontWeight.bold,
-                                                  ),
-                                                ),
-                                              ),
-                                              DataCell(
-                                                Text(p.seaStockQty.toString()),
-                                              ),
-                                              DataCell(
-                                                Text(p.airStockQty.toString()),
-                                              ),
-                                              DataCell(
-                                                Text(p.localQty.toString()),
-                                              ),
-                                              // --- ADDED PRICE CELLS ---
-                                              DataCell(
-                                                Text(p.sea.toStringAsFixed(2)),
-                                              ),
-                                              DataCell(
-                                                Text(p.air.toStringAsFixed(2)),
-                                              ),
-                                              // ------------------------
-                                              DataCell(
-                                                Text(
-                                                  p.agent.toStringAsFixed(2),
-                                                ),
-                                              ),
-                                              DataCell(
-                                                Text(
-                                                  p.wholesale.toStringAsFixed(
-                                                    2,
-                                                  ),
-                                                ),
-                                              ),
-
-                                              // --- ACTIONS ROW ---
-                                              DataCell(
-                                                Row(
-                                                  mainAxisSize:
-                                                      MainAxisSize.min,
-                                                  children: [
-                                                    // 1. ADD STOCK
-                                                    IconButton(
-                                                      tooltip: 'Receive Stock',
-                                                      icon: const Icon(
-                                                        Icons.add_box,
-                                                        color: Colors.teal,
-                                                      ),
-                                                      onPressed:
-                                                          () =>
-                                                              _showAddStockDialog(
-                                                                p,
-                                                                controller,
-                                                              ),
-                                                    ),
-                                                    // 2. SEND TO SERVICE
-                                                    IconButton(
-                                                      tooltip:
-                                                          'Send to Service',
-                                                      icon: const Icon(
-                                                        Icons.build,
-                                                        color: Colors.orange,
-                                                      ),
-                                                      onPressed:
-                                                          () => _showQuantityDialog(
-                                                            context,
-                                                            "Service",
-                                                            p,
-                                                            (qty) {
-                                                              controller.addToService(
-                                                                productId: p.id,
-                                                                model: p.model,
-                                                                qty: qty,
-                                                                type: 'service',
-                                                                currentAvgPrice:
-                                                                    p.avgPurchasePrice,
-                                                              );
-                                                            },
-                                                          ),
-                                                    ),
-                                                    // 3. DAMAGE
-                                                    IconButton(
-                                                      tooltip: 'Mark Damage',
-                                                      icon: const Icon(
-                                                        Icons.broken_image,
-                                                        color: Colors.redAccent,
-                                                      ),
-                                                      onPressed:
-                                                          () => _showQuantityDialog(
-                                                            context,
-                                                            "Damage",
-                                                            p,
-                                                            (qty) {
-                                                              controller.addToService(
-                                                                productId: p.id,
-                                                                model: p.model,
-                                                                qty: qty,
-                                                                type: 'damage',
-                                                                currentAvgPrice:
-                                                                    p.avgPurchasePrice,
-                                                              );
-                                                            },
-                                                          ),
-                                                    ),
-                                                    // 4. EDIT
-                                                    IconButton(
-                                                      tooltip: 'Edit Product',
-                                                      icon: const Icon(
-                                                        Icons.edit,
-                                                        color: Colors.blue,
-                                                      ),
-                                                      onPressed:
-                                                          () =>
-                                                              showEditProductDialog(
-                                                                p,
-                                                                controller,
-                                                              ),
-                                                    ),
-                                                    // 5. DELETE
-                                                    IconButton(
-                                                      tooltip: 'Delete Product',
-                                                      icon: const Icon(
-                                                        Icons.delete,
-                                                        color: Colors.red,
-                                                      ),
-                                                      onPressed:
-                                                          () =>
-                                                              showDeleteConfirmDialog(
-                                                                p.id,
-                                                                controller,
-                                                              ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            ],
-                                          );
-                                        }).toList(),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        );
-                      },
-                    );
-                  }),
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.all(16),
+            // 2. MAIN CONTENT AREA (Search + Table)
+            Expanded(
+              child: Container(
+                margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                 decoration: BoxDecoration(
-                  color: Colors.blue.shade800,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      "Total Warehouse Value (BDT)",
-                      style: TextStyle(color: Colors.white70, fontSize: 14),
-                    ),
-                    const SizedBox(height: 8),
-                    // This Obx widget listens to changes in your controller
-                    Obx(
-                      () => Text(
-                        "৳ ${controller.formattedTotalValuation}",
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 26,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.05),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
                     ),
                   ],
                 ),
-              ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // A. CONTROL TOOLBAR (Search, Filter, Export)
+                    _buildControlToolbar(),
+                    const Divider(height: 1, color: Color(0xFFE5E7EB)),
 
-              _buildPagination(),
-            ],
-          ),
+                    // B. DATA TABLE
+                    Expanded(child: _buildDataTable()),
+
+                    // C. PAGINATION FOOTER
+                    const Divider(height: 1, color: Color(0xFFE5E7EB)),
+                    _buildPaginationFooter(),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => showCreateProductDialog(controller),
-        backgroundColor: Colors.blue[800],
+        backgroundColor: const Color(0xFF2563EB), // Royal Blue
+        elevation: 4,
         label: const Text(
-          'Add New Product',
-          style: TextStyle(color: Colors.white),
+          'Add Product',
+          style: TextStyle(fontWeight: FontWeight.w600, color: Colors.white),
         ),
         icon: const Icon(Icons.add, color: Colors.white),
+
+        heroTag:
+            FloatingActionButtonLocation.centerFloat, // Change location here
       ),
     );
   }
 
   // ==========================================
-  // HELPER: QUANTITY INPUT DIALOG (For Service/Damage)
+  // 1. APP BAR
   // ==========================================
+  PreferredSizeWidget _buildAppBar() {
+    return AppBar(
+      title: const Row(
+        children: [
+          Icon(Icons.inventory_2_outlined, color: Color(0xFF1E293B)),
+          SizedBox(width: 10),
+          Text(
+            'Inventory Management',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF1E293B), // Slate 800
+            ),
+          ),
+        ],
+      ),
+      backgroundColor: Colors.white,
+      elevation: 0,
+      bottom: PreferredSize(
+        preferredSize: const Size.fromHeight(1),
+        child: Container(color: const Color(0xFFE2E8F0), height: 1),
+      ),
+      actions: [
+        // Service Center Button
+        TextButton.icon(
+          onPressed: () => Get.to(() => ServicePage()),
+          style: TextButton.styleFrom(foregroundColor: Colors.orange[700]),
+          icon: const Icon(Icons.handyman_outlined, size: 20),
+          label: const Text("Service Center"),
+        ),
+        const SizedBox(width: 8),
+        // Low Stock Button
+        TextButton.icon(
+          onPressed: () => Get.to(() => ShortlistPage()),
+          style: TextButton.styleFrom(
+            backgroundColor: const Color(0xFFFEF2F2),
+            foregroundColor: const Color(0xFFDC2626),
+          ),
+          icon: const Icon(Icons.warning_amber_rounded, size: 20),
+          label: const Text("Low Stock Alerts"),
+        ),
+        const SizedBox(width: 16),
+        IconButton(
+          icon: const Icon(Icons.refresh, color: Color(0xFF64748B)),
+          tooltip: "Refresh Data",
+          onPressed: () => controller.fetchProducts(),
+        ),
+        const SizedBox(width: 16),
+      ],
+    );
+  }
+
+  // ==========================================
+  // 2. STATS DASHBOARD
+  // ==========================================
+  Widget _buildStatsSection(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Row(
+        children: [
+          // TOTAL VALUE CARD
+          Expanded(
+            flex: 2,
+            child: _buildStatCard(
+              title: "Total Warehouse Value",
+              content: Obx(
+                () => Text(
+                  "৳ ${controller.formattedTotalValuation}",
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF2563EB),
+                  ),
+                ),
+              ),
+              icon: Icons.monetization_on,
+              color: Colors.blue.shade50,
+              iconColor: Colors.blue,
+            ),
+          ),
+          const SizedBox(width: 16),
+
+          // CURRENCY CARD
+          Expanded(
+            flex: 3,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(
+                      Icons.currency_exchange,
+                      color: Colors.amber,
+                    ),
+                  ),
+                  const SizedBox(width: 15),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        "Exchange Rate (CNY to BDT)",
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                      Obx(
+                        () => Text(
+                          "1 ¥ = ${controller.currentCurrency.value.toStringAsFixed(2)} ৳",
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Spacer(),
+                  // Currency Edit
+                  SizedBox(
+                    width: 100,
+                    child: TextField(
+                      controller: currencyInput,
+                      keyboardType: TextInputType.number,
+                      style: const TextStyle(fontSize: 14),
+                      decoration: const InputDecoration(
+                        hintText: 'New Rate',
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 0,
+                        ),
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  ElevatedButton(
+                    onPressed: () => _handleCurrencyUpdate(),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF0F172A),
+                      foregroundColor: Colors.white,
+                    ),
+                    child: const Text("Update"),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatCard({
+    required String title,
+    required Widget content,
+    required IconData icon,
+    required Color color,
+    required Color iconColor,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, color: iconColor, size: 28),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(fontSize: 13, color: Colors.grey),
+                ),
+                const SizedBox(height: 4),
+                content,
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ==========================================
+  // 3. TOOLBAR (Search, Filter)
+  // ==========================================
+  Widget _buildControlToolbar() {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Row(
+        children: [
+          // Search Bar
+          Expanded(
+            flex: 3,
+            child: TextField(
+              onChanged: (v) => controller.search(v),
+              decoration: InputDecoration(
+                hintText: 'Search by model, name or brand...',
+                prefixIcon: const Icon(Icons.search, color: Colors.grey),
+                filled: true,
+                fillColor: const Color(0xFFF8FAFC),
+                contentPadding: const EdgeInsets.symmetric(vertical: 0),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(6),
+                  borderSide: BorderSide.none,
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(6),
+                  borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 16),
+
+          // Brand Filter
+          Expanded(
+            flex: 1,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: Obx(
+                () => DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: controller.selectedBrand.value,
+                    icon: const Icon(Icons.filter_list, color: Colors.grey),
+                    isExpanded: true,
+                    items:
+                        controller.brands
+                            .map(
+                              (b) => DropdownMenuItem(value: b, child: Text(b)),
+                            )
+                            .toList(),
+                    onChanged: (v) {
+                      if (v != null) controller.selectBrand(v);
+                    },
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ==========================================
+  // 4. DATA TABLE (Professional Grid)
+  // ==========================================
+  Widget _buildDataTable() {
+    return Obx(() {
+      if (controller.isLoading.value) {
+        return const Center(child: CircularProgressIndicator());
+      }
+      if (controller.allProducts.isEmpty) {
+        return _buildEmptyState();
+      }
+
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          return Scrollbar(
+            controller: _verticalScrollController,
+            thumbVisibility: true,
+            trackVisibility: true,
+            thickness: 10,
+            radius: const Radius.circular(5),
+            child: SingleChildScrollView(
+              controller: _verticalScrollController,
+              scrollDirection: Axis.vertical,
+              child: Scrollbar(
+                controller: _horizontalScrollController,
+                thumbVisibility: true,
+                trackVisibility: true,
+                thickness: 10,
+                radius: const Radius.circular(5),
+                child: SingleChildScrollView(
+                  controller: _horizontalScrollController,
+                  scrollDirection: Axis.horizontal,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                    child: Theme(
+                      data: Theme.of(
+                        context,
+                      ).copyWith(dividerColor: const Color(0xFFE2E8F0)),
+                      child: DataTable(
+                        headingRowColor: WidgetStateProperty.all(
+                          const Color(0xFFF1F5F9),
+                        ),
+                        dataRowMinHeight: 52,
+                        dataRowMaxHeight: 52,
+                        horizontalMargin: 20,
+                        columnSpacing: 24,
+                        dividerThickness: 1,
+                        columns: _getColumns(),
+                        rows: _getRows(context),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    });
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.inventory_2_outlined,
+            size: 64,
+            color: Colors.grey.shade300,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'No products found',
+            style: TextStyle(fontSize: 16, color: Colors.grey.shade500),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ------------------------------------
+  // COLUMNS DEFINITION
+  // ------------------------------------
+  List<DataColumn> _getColumns() {
+    // Helper for Styled Header Text
+    DataColumn col(String name, {bool isNumeric = false}) {
+      return DataColumn(
+        numeric: isNumeric,
+        label: Text(
+          name.toUpperCase(),
+          style: const TextStyle(
+            fontWeight: FontWeight.w700,
+            fontSize: 12,
+            color: Color(0xFF64748B), // Slate 500
+            letterSpacing: 0.5,
+          ),
+        ),
+      );
+    }
+
+    return [
+      col('Name'),
+      col('Model'),
+      col('Brand'),
+      col('Status'), // New Status Column
+      col('Stock', isNumeric: true),
+      col('Sea Qty', isNumeric: true),
+      col('Air Qty', isNumeric: true),
+      col('Avg Cost', isNumeric: true),
+      col('Ship Date'),
+      col('Agent', isNumeric: true),
+      col('Wholesale', isNumeric: true),
+      col('Actions'),
+    ];
+  }
+
+  // ------------------------------------
+  // ROWS DEFINITION
+  // ------------------------------------
+  List<DataRow> _getRows(BuildContext context) {
+    return controller.allProducts.map((p) {
+      return DataRow(
+        cells: [
+            DataCell(
+            Text(
+              p.name,
+              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+            ),
+          ),
+          // 1. Model
+          DataCell(
+            Text(
+              p.model,
+              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+            ),
+          ),
+          // 2. Brand
+          DataCell(Text(p.brand)),
+          // 3. Status Badge
+          DataCell(_buildStockBadge(p.stockQty, p.alertQty)),
+          // 4. Total Stock
+          DataCell(
+            Text(
+              p.stockQty.toString(),
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+          // 5. Sea
+          DataCell(Text(p.seaStockQty.toString())),
+          // 6. Air
+          DataCell(Text(p.airStockQty.toString())),
+          // 7. Avg Cost (Green)
+          DataCell(
+            Text(
+              p.avgPurchasePrice.toStringAsFixed(2),
+              style: TextStyle(
+                color: Colors.green[700],
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          // 8. Date
+          DataCell(
+            Text(
+              p.shipmentDate != null
+                  ? DateFormat('dd MMM yyyy').format(p.shipmentDate!)
+                  : '-',
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ),
+          // 9. Yuan
+          DataCell(Text(p.agent.toStringAsFixed(2))),
+          // 10. Weight
+          DataCell(Text(p.wholesale.toStringAsFixed(2))),
+          // 11. Actions
+          DataCell(_buildActions(context, p)),
+        ],
+      );
+    }).toList();
+  }
+
+  Widget _buildStockBadge(int stock, int alert) {
+    bool isLow = stock <= alert;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: isLow ? const Color(0xFFFEF2F2) : const Color(0xFFF0FDF4),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(
+          color: isLow ? const Color(0xFFFCA5A5) : const Color(0xFF86EFAC),
+        ),
+      ),
+      child: Text(
+        isLow ? 'LOW' : 'OK',
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+          color: isLow ? const Color(0xFFDC2626) : const Color(0xFF16A34A),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActions(BuildContext context, Product p) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _actionBtn(
+          icon: Icons.add_shopping_cart,
+          color: Colors.teal,
+          tooltip: 'Add Stock',
+          onTap: () => _showAddStockDialog(p, controller),
+        ),
+        const SizedBox(width: 4),
+        _actionBtn(
+          icon: Icons.edit_outlined,
+          color: Colors.blue,
+          tooltip: 'Edit',
+          onTap: () => showEditProductDialog(p, controller),
+        ),
+        const SizedBox(width: 4),
+        // More Menu
+        PopupMenuButton<String>(
+          icon: Icon(Icons.more_vert, size: 20, color: Colors.grey[600]),
+          onSelected: (val) {
+            if (val == 'service') {
+              _showQuantityDialog(
+                context,
+                "Service",
+                p,
+                (qty) => _handleService(p, qty, 'service'),
+              );
+            } else if (val == 'damage') {
+              _showQuantityDialog(
+                context,
+                "Damage",
+                p,
+                (qty) => _handleService(p, qty, 'damage'),
+              );
+            } else if (val == 'delete') {
+              showDeleteConfirmDialog(p.id, controller);
+            }
+          },
+          itemBuilder:
+              (context) => [
+                const PopupMenuItem(
+                  value: 'service',
+                  child: Row(
+                    children: [
+                      Icon(Icons.handyman, size: 18, color: Colors.orange),
+                      SizedBox(width: 8),
+                      Text('Send to Service'),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'damage',
+                  child: Row(
+                    children: [
+                      Icon(Icons.broken_image, size: 18, color: Colors.red),
+                      SizedBox(width: 8),
+                      Text('Mark as Damage'),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'delete',
+                  child: Row(
+                    children: [
+                      Icon(Icons.delete, size: 18, color: Colors.grey),
+                      SizedBox(width: 8),
+                      Text('Delete Product'),
+                    ],
+                  ),
+                ),
+              ],
+        ),
+      ],
+    );
+  }
+
+  Widget _actionBtn({
+    required IconData icon,
+    required Color color,
+    required String tooltip,
+    required VoidCallback onTap,
+  }) {
+    return IconButton(
+      icon: Icon(icon, color: color, size: 20),
+      tooltip: tooltip,
+      splashRadius: 20,
+      constraints: const BoxConstraints(),
+      padding: const EdgeInsets.all(4),
+      onPressed: onTap,
+    );
+  }
+
+  // ==========================================
+  // 5. PAGINATION FOOTER
+  // ==========================================
+  Widget _buildPaginationFooter() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      color: Colors.white,
+      child: Obx(() {
+        final int total = controller.totalProducts.value;
+        final int current = controller.currentPage.value;
+        final int size = controller.pageSize.value;
+        final int totalPages = (total / size).ceil();
+        final int start = ((current - 1) * size) + 1;
+        final int end = (current * size) > total ? total : (current * size);
+
+        // Safe display if total is 0
+        if (total == 0) return const SizedBox();
+
+        return Row(
+          children: [
+            Text(
+              "Showing $start to $end of $total results",
+              style: const TextStyle(fontSize: 13, color: Colors.grey),
+            ),
+            Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.chevron_left, color: Colors.black,),
+                  onPressed:
+                      current > 1 ? () => controller.previousPage() : null,
+                  tooltip: "Previous Page",
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    "Page $current",
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.chevron_right, color: Colors.black,),
+                  onPressed:
+                      current < totalPages ? () => controller.nextPage() : null,
+                  tooltip: "Next Page",
+                ),
+              ],
+            ),
+          ],
+        );
+      }),
+    );
+  }
+
+  // ==========================================
+  // HELPER FUNCTIONS & DIALOGS
+  // ==========================================
+
+  void _handleCurrencyUpdate() {
+    final val = double.tryParse(currencyInput.text);
+    if (val != null && val > 0) {
+      Get.defaultDialog(
+        title: 'Confirm Revaluation',
+        middleText:
+            'Update Rate to ${val.toStringAsFixed(2)}? This affects inventory value.',
+        textConfirm: 'Update',
+        confirmTextColor: Colors.white,
+        buttonColor: const Color(0xFF0F172A),
+        onConfirm: () {
+          controller.updateCurrencyAndRecalculate(val);
+          currencyInput.clear();
+          Get.back();
+        },
+      );
+    } else {
+      Get.snackbar('Error', 'Invalid Rate');
+    }
+  }
+
+  void _handleService(Product p, int qty, String type) {
+    controller.addToService(
+      productId: p.id,
+      model: p.model,
+      qty: qty,
+      type: type,
+      currentAvgPrice: p.avgPurchasePrice,
+    );
+  }
+
   void _showQuantityDialog(
     BuildContext context,
     String actionType,
@@ -707,23 +774,22 @@ class ProductScreen extends StatelessWidget {
   ) {
     final qtyController = TextEditingController();
     Get.defaultDialog(
-      title: "$actionType: ${p.model}",
+      title: "$actionType Item",
+      contentPadding: const EdgeInsets.all(16),
       content: Column(
         children: [
           Text(
-            "Current Stock: ${p.stockQty}",
-            style: TextStyle(color: Colors.grey[600], fontSize: 12),
+            "${p.model} (Stock: ${p.stockQty})",
+            style: const TextStyle(fontWeight: FontWeight.bold),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 16),
           TextField(
             controller: qtyController,
             keyboardType: TextInputType.number,
-            decoration: InputDecoration(
-              labelText: "Enter Quantity to Remove",
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-              isDense: true,
+            autofocus: true,
+            decoration: const InputDecoration(
+              labelText: "Quantity",
+              border: OutlineInputBorder(),
             ),
           ),
         ],
@@ -738,20 +804,12 @@ class ProductScreen extends StatelessWidget {
           onConfirm(qty);
           Get.back();
         } else {
-          Get.snackbar(
-            "Invalid Quantity",
-            "Amount must be > 0 and <= Current Stock",
-            backgroundColor: Colors.red,
-            colorText: Colors.white,
-          );
+          Get.snackbar("Error", "Invalid Quantity");
         }
       },
     );
   }
 
-  // ==========================================
-  // ADD MIXED STOCK DIALOG
-  // ==========================================
   void _showAddStockDialog(Product p, ProductController controller) {
     final seaQtyC = TextEditingController(text: '0');
     final airQtyC = TextEditingController(text: '0');
@@ -770,82 +828,89 @@ class ProductScreen extends StatelessWidget {
 
     Get.dialog(
       AlertDialog(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Receive Inventory: ${p.model}',
-              style: const TextStyle(fontSize: 18),
-            ),
-            const SizedBox(height: 4),
-            Obx(
-              () => Text(
-                "New Avg Cost will be: ${predictedAvg.value.toStringAsFixed(2)}",
-                style: const TextStyle(fontSize: 12, color: Colors.blue),
-              ),
-            ),
-          ],
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: Text(
+          "Receive Stock: ${p.model}",
+          style: const TextStyle(fontWeight: FontWeight.bold),
         ),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'Enter quantities to add to current stock.',
-                style: TextStyle(fontSize: 12, color: Colors.grey),
-              ),
-              const Divider(),
-              TextField(
-                controller: seaQtyC,
-                decoration: const InputDecoration(
-                  labelText: 'Sea Shipment Qty',
-                  prefixIcon: Icon(Icons.waves),
+        content: SizedBox(
+          width: 400,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  color: Colors.blue.shade50,
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.info_outline,
+                        size: 16,
+                        color: Colors.blue,
+                      ),
+                      const SizedBox(width: 8),
+                      Obx(
+                        () => Text(
+                          "New Avg Cost: ${predictedAvg.value.toStringAsFixed(2)}",
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                keyboardType: TextInputType.number,
-                onChanged: (_) => calculatePrediction(),
-              ),
-              TextField(
-                controller: airQtyC,
-                decoration: const InputDecoration(
-                  labelText: 'Air Shipment Qty',
-                  prefixIcon: Icon(Icons.airplanemode_active),
+                const SizedBox(height: 16),
+                _inputField(
+                  "Sea Qty",
+                  seaQtyC,
+                  Icons.waves,
+                  calculatePrediction,
                 ),
-                keyboardType: TextInputType.number,
-                onChanged: (_) => calculatePrediction(),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'OR Local Purchase',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-              ),
-              TextField(
-                controller: localQtyC,
-                decoration: const InputDecoration(
-                  labelText: 'Local Quantity',
-                  prefixIcon: Icon(Icons.shopping_cart),
+                const SizedBox(height: 10),
+                _inputField(
+                  "Air Qty",
+                  airQtyC,
+                  Icons.airplanemode_active,
+                  calculatePrediction,
                 ),
-                keyboardType: TextInputType.number,
-                onChanged: (_) => calculatePrediction(),
-              ),
-              TextField(
-                controller: localPriceC,
-                decoration: const InputDecoration(
-                  labelText: 'Local Unit Cost (BDT)',
-                  prefixIcon: Icon(Icons.payments),
+                const Divider(height: 30),
+                const Text(
+                  "Local Purchase",
+                  style: TextStyle(fontWeight: FontWeight.bold),
                 ),
-                keyboardType: TextInputType.number,
-                onChanged: (_) => calculatePrediction(),
-              ),
-            ],
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _inputField(
+                        "Qty",
+                        localQtyC,
+                        Icons.inventory,
+                        calculatePrediction,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _inputField(
+                        "Unit Price (BDT)",
+                        localPriceC,
+                        Icons.price_change,
+                        calculatePrediction,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
         actions: [
           TextButton(onPressed: () => Get.back(), child: const Text('Cancel')),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.teal,
-              foregroundColor: Colors.white,
-            ),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
             onPressed: () {
               controller.addMixedStock(
                 productId: p.id,
@@ -856,49 +921,32 @@ class ProductScreen extends StatelessWidget {
               );
               Get.back();
             },
-            child: const Text('Update Stock'),
+            child: const Text(
+              'Confirm Receive',
+              style: TextStyle(color: Colors.white),
+            ),
           ),
         ],
       ),
     );
   }
 
-  // ==========================================
-  // PAGINATION CONTROLS UI
-  // ==========================================
-  Widget _buildPagination() {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Obx(() {
-        final totalPages =
-            (controller.totalProducts.value / controller.pageSize.value).ceil();
-        final currentPage = controller.currentPage.value;
-        final safePages = totalPages < 1 ? 1 : totalPages;
-        return Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            IconButton(
-              icon: const Icon(Icons.arrow_back_ios, size: 16),
-              onPressed:
-                  currentPage > 1 ? () => controller.previousPage() : null,
-            ),
-            Text(
-              'Page $currentPage of $safePages',
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-            IconButton(
-              icon: const Icon(Icons.arrow_forward_ios, size: 16),
-              onPressed:
-                  currentPage < safePages ? () => controller.nextPage() : null,
-            ),
-            const SizedBox(width: 20),
-            Text(
-              'Total Items: ${controller.totalProducts.value}',
-              style: const TextStyle(color: Colors.blueGrey, fontSize: 12),
-            ),
-          ],
-        );
-      }),
+  Widget _inputField(
+    String label,
+    TextEditingController ctrl,
+    IconData icon,
+    Function() onChange,
+  ) {
+    return TextField(
+      controller: ctrl,
+      keyboardType: TextInputType.number,
+      onChanged: (_) => onChange(),
+      decoration: InputDecoration(
+        labelText: label,
+        prefixIcon: Icon(icon, size: 18, color: Colors.grey),
+        border: const OutlineInputBorder(),
+        isDense: true,
+      ),
     );
   }
 }

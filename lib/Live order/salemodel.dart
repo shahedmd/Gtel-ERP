@@ -13,7 +13,6 @@ import '../Web Screen/Debator Finance/debatorcontroller.dart';
 import '../Web Screen/Debator Finance/model.dart';
 import '../Web Screen/Sales/controller.dart';
 
-// --- CART ITEM MODEL ---
 class SalesCartItem {
   final Product product;
   RxInt quantity;
@@ -224,7 +223,7 @@ class LiveSalesController extends GetxController {
   }
 
   // ==================================================================
-  // 🔥 FINALIZATION LOGIC (UPDATED WITH FIXES)
+  // 🔥 FINALIZATION LOGIC
   // ==================================================================
   Future<void> finalizeSale() async {
     if (cart.isEmpty) {
@@ -358,7 +357,7 @@ class LiveSalesController extends GetxController {
         "shopName": shopC.text,
         "isCondition": isConditionSale.value,
         "deliveryAddress": addressC.text,
-        "challanNo": finalChallan, // Use the finalized challan
+        "challanNo": finalChallan,
         "cartons": isConditionSale.value ? cartonsInt : 0,
         "courierName": isConditionSale.value ? selectedCourier.value : null,
         "courierDue": isConditionSale.value ? dueOrConditionAmount : 0,
@@ -420,14 +419,12 @@ class LiveSalesController extends GetxController {
           }, SetOptions(merge: true));
         }
 
-        // --- FIX: CREATE DAILY SALE FOR ADVANCE/FULL PAYMENT ---
-        // If customer paid anything upfront (partial or full)
         if (actualReceived > 0) {
           DocumentReference dailyRef = _db.collection('daily_sales').doc();
           batch.set(dailyRef, {
             "name": "$fName (Condition Sales)",
-            "amount": grandTotal, // The full invoice amount
-            "paid": actualReceived, // The cash actually received now
+            "amount": grandTotal,
+            "paid": actualReceived,
             "pending": dueOrConditionAmount,
             "customerType": "condition_advance",
             "timestamp": Timestamp.fromDate(saleDate),
@@ -554,6 +551,7 @@ class LiveSalesController extends GetxController {
         address: addressC.text,
         courier: selectedCourier.value,
         cartons: cartonsInt,
+        shopName: shopC.text,
       );
 
       _resetAll();
@@ -626,7 +624,7 @@ class LiveSalesController extends GetxController {
   }
 
   // ==========================================
-  // PDF GENERATION
+  // PDF GENERATION (Multi-Page Supported)
   // ==========================================
   Future<void> _generatePdf(
     String invId,
@@ -639,73 +637,289 @@ class LiveSalesController extends GetxController {
     String address = "",
     String? courier,
     int? cartons,
+    String shopName = "",
   }) async {
     final pdf = pw.Document();
     final boldFont = await PdfGoogleFonts.nunitoBold();
     final regularFont = await PdfGoogleFonts.nunitoRegular();
 
+    // --- 1. INVOICE PDF (MultiPage) ---
     pdf.addPage(
-      pw.Page(
+      pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(32),
+        // Footer appears on every page at the bottom
+        footer: (context) => _buildFooter(regularFont),
         build: (context) {
-          return _buildInvoiceLayout(
-            context,
-            boldFont,
-            regularFont,
-            invId,
-            name,
-            phone,
-            payMap,
-            items,
-            isCondition,
-            address,
-            courier,
-            cartons,
-          );
-        },
-      ),
-    );
+          return [
+            // Header (Company Info)
+            _buildCompanyHeader(boldFont, regularFont),
+            pw.SizedBox(height: 10),
 
-    if (isCondition) {
-      pdf.addPage(
-        pw.Page(
-          pageFormat: PdfPageFormat.a4,
-          build: (context) {
-            return _buildChallanLayout(
-              context,
+            // Invoice Details (Bill To, etc.)
+            _buildInvoiceInfo(
               boldFont,
               regularFont,
               invId,
               name,
               phone,
-              challan,
+              isCondition,
               address,
-              payMap,
-              items,
               courier,
-              cartons,
-            );
+              shopName,
+            ),
+            pw.SizedBox(height: 15),
+
+            // Items Table (Will split across pages automatically)
+            _buildItemTable(boldFont, regularFont, items),
+            pw.SizedBox(height: 15),
+
+            // Totals & Payment Section
+            pw.Wrap(
+              children: [
+                _buildInvoiceTotalSection(
+                  boldFont,
+                  regularFont,
+                  payMap,
+                  isCondition,
+                  cartons,
+                ),
+              ],
+            ),
+          ];
+        },
+      ),
+    );
+
+    // --- 2. CHALLAN PDF (MultiPage) ---
+    if (isCondition) {
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(32),
+          footer: (context) => _buildFooter(regularFont),
+          build: (context) {
+            return [
+              _buildCompanyHeader(boldFont, regularFont),
+              pw.SizedBox(height: 10),
+
+              // Title
+              pw.Center(
+                child: pw.Container(
+                  padding: const pw.EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 5,
+                  ),
+                  decoration: pw.BoxDecoration(
+                    border: pw.Border.all(),
+                    borderRadius: const pw.BorderRadius.all(
+                      pw.Radius.circular(20),
+                    ),
+                  ),
+                  child: pw.Text(
+                    "DELIVERY CHALLAN",
+                    style: pw.TextStyle(font: boldFont, fontSize: 16),
+                  ),
+                ),
+              ),
+              pw.SizedBox(height: 20),
+
+              // Receiver & Courier Info
+              _buildChallanInfo(
+                boldFont,
+                regularFont,
+                invId,
+                name,
+                phone,
+                challan,
+                address,
+                courier,
+                cartons,
+                shopName,
+              ),
+              pw.SizedBox(height: 20),
+
+              pw.Text("Package Contents:", style: pw.TextStyle(font: boldFont)),
+
+              // Table
+              _buildChallanTable(boldFont, regularFont, items),
+              pw.SizedBox(height: 30),
+
+              // Condition Box & Signatures
+              pw.Wrap(
+                children: [
+                  _buildConditionBox(boldFont, regularFont, payMap),
+                  pw.SizedBox(height: 60),
+                  _buildSignatures(regularFont),
+                ],
+              ),
+            ];
           },
         ),
       );
     }
+
     await Printing.layoutPdf(onLayout: (f) => pdf.save());
   }
 
-  pw.Widget _buildInvoiceLayout(
-    pw.Context context,
+  // --- WIDGET BUILDERS ---
+
+  pw.Widget _buildCompanyHeader(pw.Font bold, pw.Font reg) {
+    return pw.Column(
+      children: [
+        pw.Text(
+          "G TEL JOY EXPRESS",
+          style: pw.TextStyle(
+            font: bold,
+            fontSize: 26,
+            color: PdfColors.blue900,
+          ),
+        ),
+        pw.Text(
+          "MOBILE PART WHOLESALER",
+          style: pw.TextStyle(
+            font: reg,
+            fontSize: 12,
+            letterSpacing: 2,
+            color: PdfColors.grey700,
+          ),
+        ),
+        pw.SizedBox(height: 6),
+        pw.Text(
+          "Mobile: 01720677206, 01911026222, 01911026033",
+          style: pw.TextStyle(font: bold, fontSize: 10),
+        ),
+        pw.SizedBox(height: 2),
+        pw.Text(
+          "Showroom 1: 4/119 (5th floor) lift-4  |  Showroom 2: 6/24A (7th floor) lift-6",
+          style: pw.TextStyle(font: reg, fontSize: 9),
+        ),
+        pw.Text(
+          "Gulistan Shopping Complex (Hall Market), 2 Bangabandu Avenue, Dhaka 1000",
+          style: pw.TextStyle(font: reg, fontSize: 9),
+        ),
+        pw.SizedBox(height: 2),
+        pw.Text(
+          "Web: www.gtelbd.com  |  Email: gtel01720677206@gmail.com",
+          style: pw.TextStyle(font: reg, fontSize: 9, color: PdfColors.blue800),
+        ),
+        pw.Divider(color: PdfColors.grey400, thickness: 1),
+      ],
+    );
+  }
+
+  pw.Widget _buildInvoiceInfo(
     pw.Font bold,
     pw.Font reg,
     String invId,
     String name,
     String phone,
-    Map payMap,
-    List items,
     bool isCond,
     String addr,
     String? courier,
+    String shopName,
+  ) {
+    return pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+      children: [
+        pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Text(
+              isCond ? "CONDITION INVOICE" : "SALES INVOICE",
+              style: pw.TextStyle(
+                font: bold,
+                fontSize: 16,
+                color: isCond ? PdfColors.orange800 : PdfColors.black,
+              ),
+            ),
+            pw.SizedBox(height: 4),
+            pw.Text("Invoice #: $invId", style: pw.TextStyle(font: bold)),
+            pw.Text(
+              "Date: ${DateFormat('dd-MMM-yyyy h:mm a').format(DateTime.now())}",
+              style: pw.TextStyle(font: reg, fontSize: 10),
+            ),
+            if (isCond && courier != null)
+              pw.Text(
+                "Via: $courier",
+                style: pw.TextStyle(font: bold, fontSize: 10),
+              ),
+          ],
+        ),
+        pw.Container(
+          padding: const pw.EdgeInsets.all(8),
+          decoration: pw.BoxDecoration(
+            border: pw.Border.all(color: PdfColors.grey300),
+            borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4)),
+            color: PdfColors.grey100,
+          ),
+          width: 220,
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text("BILL TO:", style: pw.TextStyle(font: bold, fontSize: 8)),
+              pw.Text(name, style: pw.TextStyle(font: bold, fontSize: 12)),
+              if (shopName.isNotEmpty)
+                pw.Text(shopName, style: pw.TextStyle(font: reg)),
+              pw.Text(phone, style: pw.TextStyle(font: reg)),
+              if (addr.isNotEmpty)
+                pw.Text(
+                  addr,
+                  style: pw.TextStyle(font: reg, fontSize: 9),
+                  maxLines: 2,
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  pw.Widget _buildItemTable(
+    pw.Font bold,
+    pw.Font reg,
+    List<Map<String, dynamic>> items,
+  ) {
+    return pw.TableHelper.fromTextArray(
+      border: pw.TableBorder.all(color: PdfColors.grey300),
+      headerStyle: pw.TextStyle(
+        font: bold,
+        color: PdfColors.white,
+        fontSize: 10,
+      ),
+      headerDecoration: const pw.BoxDecoration(color: PdfColors.blueGrey800),
+      cellStyle: pw.TextStyle(font: reg, fontSize: 10),
+      cellPadding: const pw.EdgeInsets.all(5),
+      headers: ['SL', 'Item Description', 'Rate', 'Qty', 'Total'],
+      columnWidths: {
+        0: const pw.FixedColumnWidth(30),
+        1: const pw.FlexColumnWidth(),
+        2: const pw.FixedColumnWidth(60),
+        3: const pw.FixedColumnWidth(40),
+        4: const pw.FixedColumnWidth(70),
+      },
+      data: List.generate(items.length, (index) {
+        final item = items[index];
+        return [
+          (index + 1).toString(),
+          "${item['model']} - ${item['name']}",
+          double.parse(item['saleRate'].toString()).toStringAsFixed(2),
+          item['qty'].toString(),
+          double.parse(item['subtotal'].toString()).toStringAsFixed(2),
+        ];
+      }),
+    );
+  }
+
+  pw.Widget _buildInvoiceTotalSection(
+    pw.Font bold,
+    pw.Font reg,
+    Map payMap,
+    bool isCond,
     int? cartons,
   ) {
+    // --- UPDATED PAYMENT DETAILS LOGIC ---
     List<String> getPaymentLines() {
       List<String> lines = [];
       double cash = double.tryParse(payMap['cash'].toString()) ?? 0;
@@ -713,198 +927,131 @@ class LiveSalesController extends GetxController {
       double nagad = double.tryParse(payMap['nagad'].toString()) ?? 0;
       double bank = double.tryParse(payMap['bank'].toString()) ?? 0;
 
-      if (cash > 0) lines.add("Cash: ${cash.toStringAsFixed(0)}");
+      // Cash
+      if (cash > 0) {
+        lines.add("Cash: ${cash.toStringAsFixed(0)}");
+      }
 
+      // Bkash with Number
       if (bkash > 0) {
-        String n = payMap['bkashNumber'] ?? "";
-        lines.add(
-          n.isEmpty
-              ? "Bkash: ${bkash.toStringAsFixed(0)}"
-              : "Bkash ($n): ${bkash.toStringAsFixed(0)}",
-        );
+        String num = payMap['bkashNumber'] ?? "";
+        String detail = num.isNotEmpty ? " ($num)" : "";
+        lines.add("Bkash$detail: ${bkash.toStringAsFixed(0)}");
       }
 
+      // Nagad with Number
       if (nagad > 0) {
-        String n = payMap['nagadNumber'] ?? "";
-        lines.add(
-          n.isEmpty
-              ? "Nagad: ${nagad.toStringAsFixed(0)}"
-              : "Nagad ($n): ${nagad.toStringAsFixed(0)}",
-        );
+        String num = payMap['nagadNumber'] ?? "";
+        String detail = num.isNotEmpty ? " ($num)" : "";
+        lines.add("Nagad$detail: ${nagad.toStringAsFixed(0)}");
       }
 
+      // Bank with Name + Account
       if (bank > 0) {
         String bName = payMap['bankName'] ?? "Bank";
-        lines.add("$bName: ${bank.toStringAsFixed(0)}");
+        String bAcc = payMap['accountNumber'] ?? "";
+        String detail = bAcc.isNotEmpty ? " ($bName - $bAcc)" : " ($bName)";
+        lines.add("Bank$detail: ${bank.toStringAsFixed(0)}");
       }
+
       return lines;
     }
 
-    return pw.Column(
+    return pw.Row(
+      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        pw.Header(
-          level: 0,
-          child: pw.Row(
-            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-            children: [
-              pw.Text(
-                "G-TEL",
-                style: pw.TextStyle(
-                  font: bold,
-                  fontSize: 24,
-                  color: PdfColors.blue900,
-                ),
-              ),
-              pw.Text(
-                isCond ? "CONDITION MEMO" : "INVOICE",
-                style: pw.TextStyle(
-                  font: bold,
-                  fontSize: 20,
-                  color: isCond ? PdfColors.orange800 : PdfColors.black,
-                ),
-              ),
-            ],
-          ),
-        ),
-        pw.Row(
-          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-          children: [
-            pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                pw.Text("Inv: $invId", style: pw.TextStyle(font: reg)),
-                pw.Text(
-                  "Date: ${DateFormat('dd-MMM-yyyy').format(DateTime.now())}",
-                  style: pw.TextStyle(font: reg),
-                ),
-                if (isCond && courier != null)
-                  pw.Text(
-                    "Via: $courier",
-                    style: pw.TextStyle(
-                      font: bold,
-                      color: PdfColors.blueGrey800,
-                    ),
-                  ),
-              ],
-            ),
-            pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.end,
-              children: [
-                pw.Text("Bill To: $name", style: pw.TextStyle(font: bold)),
-                pw.Text(phone, style: pw.TextStyle(font: reg)),
-                if (addr.isNotEmpty)
-                  pw.Text(addr, style: pw.TextStyle(font: reg, fontSize: 10)),
-              ],
-            ),
-          ],
-        ),
-        pw.SizedBox(height: 20),
-
-        pw.TableHelper.fromTextArray(
-          border: pw.TableBorder.all(color: PdfColors.grey300),
-          headerStyle: pw.TextStyle(font: bold, color: PdfColors.white),
-          headerDecoration: const pw.BoxDecoration(
-            color: PdfColors.blueGrey800,
-          ),
-          cellStyle: pw.TextStyle(font: reg),
-          headers: ['Item', 'Rate', 'Qty', 'Total'],
-          data:
-              items
-                  .map(
-                    (e) => [
-                      e['model'] ?? e['name'],
-                      double.parse(e['saleRate'].toString()).toStringAsFixed(2),
-                      e['qty'].toString(),
-                      double.parse(e['subtotal'].toString()).toStringAsFixed(2),
-                    ],
-                  )
-                  .toList(),
-        ),
-
-        pw.SizedBox(height: 10),
-
-        pw.Row(
-          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
+            pw.Text(
+              "Payment Details:",
+              style: pw.TextStyle(font: bold, fontSize: 10),
+            ),
+            pw.SizedBox(height: 4),
             pw.Container(
               width: 200,
-              padding: const pw.EdgeInsets.all(5),
-              decoration: pw.BoxDecoration(
-                border: pw.Border.all(color: PdfColors.grey300),
-                borderRadius: const pw.BorderRadius.all(pw.Radius.circular(5)),
-              ),
               child: pw.Column(
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: [
-                  pw.Text(
-                    "Payment Details:",
-                    style: pw.TextStyle(
-                      font: bold,
-                      fontSize: 10,
-                      decoration: pw.TextDecoration.underline,
-                    ),
-                  ),
-                  ...getPaymentLines().map(
-                    (l) =>
-                        pw.Text(l, style: pw.TextStyle(font: reg, fontSize: 9)),
-                  ),
-                ],
-              ),
-            ),
-
-            pw.Container(
-              width: 200,
-              child: pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.end,
-                children: [
-                  _pdfRow(
-                    "Grand Total",
-                    grandTotal.toStringAsFixed(2),
-                    bold,
-                    14,
-                  ),
-                  pw.Divider(),
-                  _pdfRow(
-                    isCond ? "Advance Paid" : "Paid Amount",
-                    double.parse(
-                      payMap['actualReceived'].toString(),
-                    ).toStringAsFixed(2),
-                    reg,
-                    12,
-                  ),
-
-                  if (isCond) ...[
-                    _pdfRow(
-                      "Courier Collect",
-                      double.parse(payMap['due'].toString()).toStringAsFixed(2),
-                      bold,
-                      12,
-                      color: PdfColors.red,
-                    ),
-                    if (cartons != null && cartons > 0)
-                      _pdfRow("Total Cartons", cartons.toString(), reg, 10),
-                  ],
-                  if (!isCond && double.parse(payMap['due'].toString()) > 0)
-                    _pdfRow(
-                      "Due Amount",
-                      double.parse(payMap['due'].toString()).toStringAsFixed(2),
-                      bold,
-                      12,
-                      color: PdfColors.red,
-                    ),
-                ],
+                children:
+                    getPaymentLines()
+                        .map(
+                          (l) => pw.Text(
+                            l,
+                            style: pw.TextStyle(
+                              font: reg,
+                              fontSize: 9,
+                              color: PdfColors.grey800,
+                            ),
+                          ),
+                        )
+                        .toList(),
               ),
             ),
           ],
+        ),
+        pw.Container(
+          width: 220,
+          child: pw.Column(
+            children: [
+              _pdfRow("Subtotal", subtotalAmount.toStringAsFixed(2), reg, 10),
+              _pdfRow(
+                "Discount",
+                "-${discountVal.value.toStringAsFixed(2)}",
+                reg,
+                10,
+              ),
+              pw.Divider(),
+              _pdfRow(
+                "Grand Total",
+                grandTotal.toStringAsFixed(2),
+                bold,
+                14,
+                color: PdfColors.blue900,
+              ),
+              pw.SizedBox(height: 5),
+              _pdfRow(
+                isCond ? "Advance Paid" : "Paid Amount",
+                double.parse(
+                  payMap['actualReceived'].toString(),
+                ).toStringAsFixed(2),
+                reg,
+                11,
+              ),
+              if (isCond) ...[
+                pw.SizedBox(height: 5),
+                pw.Container(
+                  color: PdfColors.red50,
+                  padding: const pw.EdgeInsets.all(3),
+                  child: _pdfRow(
+                    "Courier Collect",
+                    double.parse(payMap['due'].toString()).toStringAsFixed(2),
+                    bold,
+                    12,
+                    color: PdfColors.red900,
+                  ),
+                ),
+                if (cartons != null && cartons > 0)
+                  _pdfRow("Cartons", cartons.toString(), reg, 10),
+              ],
+              if (!isCond && double.parse(payMap['due'].toString()) > 0)
+                _pdfRow(
+                  "Due Amount",
+                  double.parse(payMap['due'].toString()).toStringAsFixed(2),
+                  bold,
+                  12,
+                  color: PdfColors.red,
+                ),
+            ],
+          ),
         ),
       ],
     );
   }
 
-  pw.Widget _buildChallanLayout(
-    pw.Context context,
+  // --- CHALLAN SPECIFIC WIDGETS ---
+
+  pw.Widget _buildChallanInfo(
     pw.Font bold,
     pw.Font reg,
     String invId,
@@ -912,142 +1059,172 @@ class LiveSalesController extends GetxController {
     String phone,
     String challan,
     String addr,
-    Map payMap,
-    List items,
     String? courier,
     int? cartons,
+    String shopName,
   ) {
-    return pw.Column(
+    return pw.Row(
+      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        pw.Center(
-          child: pw.Text(
-            "DELIVERY CHALLAN",
-            style: pw.TextStyle(
-              font: bold,
-              fontSize: 22,
-              decoration: pw.TextDecoration.underline,
-            ),
-          ),
-        ),
-        pw.SizedBox(height: 20),
+        // Left: Courier Info
         pw.Container(
-          padding: const pw.EdgeInsets.all(10),
+          width: 220,
+          padding: const pw.EdgeInsets.all(8),
           decoration: pw.BoxDecoration(
-            border: pw.Border.all(),
-            borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4)),
-          ),
-          child: pw.Row(
-            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-            children: [
-              pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: [
-                  pw.Text(
-                    "Challan No: $challan",
-                    style: pw.TextStyle(font: bold, fontSize: 14),
-                  ),
-                  pw.Text(
-                    "Ref Invoice: $invId",
-                    style: pw.TextStyle(font: reg, fontSize: 10),
-                  ),
-                  pw.Text(
-                    "Date: ${DateFormat('dd-MMM-yyyy').format(DateTime.now())}",
-                    style: pw.TextStyle(font: reg),
-                  ),
-                  if (courier != null)
-                    pw.Text(
-                      "Service: $courier",
-                      style: pw.TextStyle(font: bold, fontSize: 12),
-                    ),
-                  if (cartons != null && cartons > 0)
-                    pw.Text(
-                      "No. of Cartons: $cartons",
-                      style: pw.TextStyle(font: bold, fontSize: 12),
-                    ),
-                ],
-              ),
-              pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.end,
-                children: [
-                  pw.Text(
-                    "Receiver Details:",
-                    style: pw.TextStyle(
-                      font: bold,
-                      decoration: pw.TextDecoration.underline,
-                    ),
-                  ),
-                  pw.Text(name, style: pw.TextStyle(font: bold)),
-                  pw.Text(phone, style: pw.TextStyle(font: reg)),
-                  pw.Container(
-                    width: 150,
-                    child: pw.Text(
-                      addr,
-                      style: pw.TextStyle(font: reg),
-                      textAlign: pw.TextAlign.right,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-        pw.SizedBox(height: 20),
-        pw.Text("Package Contents:", style: pw.TextStyle(font: bold)),
-        pw.TableHelper.fromTextArray(
-          border: pw.TableBorder.all(color: PdfColors.grey300),
-          headerStyle: pw.TextStyle(font: bold, color: PdfColors.white),
-          headerDecoration: const pw.BoxDecoration(color: PdfColors.grey700),
-          headers: ['SL', 'Item Description', 'Qty'],
-          data: List.generate(items.length, (index) {
-            final item = items[index];
-            return [
-              (index + 1).toString(),
-              "${item['model']} - ${item['name']}",
-              item['qty'].toString(),
-            ];
-          }),
-        ),
-        pw.Spacer(),
-        pw.Container(
-          padding: const pw.EdgeInsets.all(10),
-          decoration: pw.BoxDecoration(
-            color: PdfColors.grey200,
             border: pw.Border.all(color: PdfColors.grey400),
           ),
-          child: pw.Row(
-            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
               pw.Text(
-                "CONDITION AMOUNT TO COLLECT:",
-                style: pw.TextStyle(font: bold, fontSize: 14),
+                "SHIPPING DETAILS",
+                style: pw.TextStyle(
+                  font: bold,
+                  fontSize: 9,
+                  decoration: pw.TextDecoration.underline,
+                ),
               ),
+              pw.SizedBox(height: 4),
+              pw.Text("Courier: $courier", style: pw.TextStyle(font: bold)),
+              pw.Text("Challan No: $challan", style: pw.TextStyle(font: bold)),
+              if (cartons != null && cartons > 0)
+                pw.Text(
+                  "No. of Cartons: $cartons",
+                  style: pw.TextStyle(font: bold),
+                ),
+              pw.SizedBox(height: 4),
+              pw.Text("Ref Inv: $invId", style: pw.TextStyle(font: reg)),
               pw.Text(
-                "Tk ${double.parse(payMap['due'].toString()).toStringAsFixed(2)}",
-                style: pw.TextStyle(font: bold, fontSize: 18),
+                "Date: ${DateFormat('dd-MM-yyyy').format(DateTime.now())}",
+                style: pw.TextStyle(font: reg),
               ),
             ],
           ),
         ),
-        pw.SizedBox(height: 50),
-        pw.Row(
-          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+
+        // Right: Receiver Info
+        pw.Container(
+          width: 250,
+          padding: const pw.EdgeInsets.all(8),
+          decoration: pw.BoxDecoration(
+            border: pw.Border.all(color: PdfColors.grey400),
+          ),
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text(
+                "RECEIVER / CUSTOMER",
+                style: pw.TextStyle(
+                  font: bold,
+                  fontSize: 9,
+                  decoration: pw.TextDecoration.underline,
+                ),
+              ),
+              pw.SizedBox(height: 4),
+              pw.Text(name, style: pw.TextStyle(font: bold, fontSize: 12)),
+              if (shopName.isNotEmpty)
+                pw.Text(shopName, style: pw.TextStyle(font: bold)),
+              pw.Text(phone, style: pw.TextStyle(font: bold)),
+              pw.Text(addr, style: pw.TextStyle(font: reg)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  pw.Widget _buildChallanTable(pw.Font bold, pw.Font reg, List items) {
+    return pw.TableHelper.fromTextArray(
+      border: pw.TableBorder.all(color: PdfColors.grey300),
+      headerStyle: pw.TextStyle(font: bold, color: PdfColors.black),
+      headerDecoration: const pw.BoxDecoration(color: PdfColors.grey200),
+      headers: ['SL', 'Item Description', 'Qty'],
+      columnWidths: {
+        0: const pw.FixedColumnWidth(40),
+        1: const pw.FlexColumnWidth(),
+        2: const pw.FixedColumnWidth(60),
+      },
+      data: List.generate(items.length, (index) {
+        final item = items[index];
+        return [
+          (index + 1).toString(),
+          "${item['model']} - ${item['name']}",
+          item['qty'].toString(),
+        ];
+      }),
+    );
+  }
+
+  pw.Widget _buildConditionBox(pw.Font bold, pw.Font reg, Map payMap) {
+    double conditionAmount = double.parse(payMap['due'].toString());
+    bool hasCondition = conditionAmount > 0;
+
+    return pw.Container(
+      width: double.infinity,
+      padding: const pw.EdgeInsets.all(15),
+      decoration: pw.BoxDecoration(
+        border: pw.Border.all(width: 2),
+        color: hasCondition ? PdfColors.white : PdfColors.green50,
+      ),
+      child: pw.Column(
+        children: [
+          pw.Text(
+            hasCondition ? "CONDITION AMOUNT + CHARGES:" : "PAYMENT STATUS:",
+            style: pw.TextStyle(font: bold, fontSize: 14),
+          ),
+          pw.SizedBox(height: 5),
+          pw.Text(
+            hasCondition
+                ? "Tk ${conditionAmount.toStringAsFixed(0)} /="
+                : "NO CONDITION / PREPAID",
+            style: pw.TextStyle(
+              font: bold,
+              fontSize: 24,
+              color: hasCondition ? PdfColors.red900 : PdfColors.green900,
+            ),
+          ),
+          if (hasCondition)
+            pw.Text(
+              "(Please collect this amount from receiver)",
+              style: pw.TextStyle(font: reg, fontSize: 10),
+            ),
+        ],
+      ),
+    );
+  }
+
+  pw.Widget _buildSignatures(pw.Font reg) {
+    return pw.Row(
+      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+      children: [
+        pw.Column(
           children: [
-            pw.Column(
-              children: [
-                pw.Container(width: 100, height: 1, color: PdfColors.black),
-                pw.SizedBox(height: 4),
-                pw.Text("Authorized Signature"),
-              ],
-            ),
-            pw.Column(
-              children: [
-                pw.Container(width: 100, height: 1, color: PdfColors.black),
-                pw.SizedBox(height: 4),
-                pw.Text("Receiver Signature"),
-              ],
-            ),
+            pw.Container(width: 120, height: 1, color: PdfColors.black),
+            pw.SizedBox(height: 4),
+            pw.Text("Authorized Signature", style: pw.TextStyle(font: reg)),
           ],
+        ),
+        pw.Column(
+          children: [
+            pw.Container(width: 120, height: 1, color: PdfColors.black),
+            pw.SizedBox(height: 4),
+            pw.Text("Receiver Signature", style: pw.TextStyle(font: reg)),
+          ],
+        ),
+      ],
+    );
+  }
+
+  pw.Widget _buildFooter(pw.Font reg) {
+    return pw.Column(
+      children: [
+        pw.Divider(color: PdfColors.grey400),
+        pw.Center(
+          child: pw.Text(
+            "Software by G-TEL ERP",
+            style: pw.TextStyle(font: reg, fontSize: 8, color: PdfColors.grey),
+          ),
         ),
       ],
     );
@@ -1060,18 +1237,21 @@ class LiveSalesController extends GetxController {
     double size, {
     PdfColor color = PdfColors.black,
   }) {
-    return pw.Row(
-      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-      children: [
-        pw.Text(
-          label,
-          style: pw.TextStyle(font: font, fontSize: size, color: color),
-        ),
-        pw.Text(
-          value,
-          style: pw.TextStyle(font: font, fontSize: size, color: color),
-        ),
-      ],
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(vertical: 2),
+      child: pw.Row(
+        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        children: [
+          pw.Text(
+            label,
+            style: pw.TextStyle(font: font, fontSize: size, color: color),
+          ),
+          pw.Text(
+            value,
+            style: pw.TextStyle(font: font, fontSize: size, color: color),
+          ),
+        ],
+      ),
     );
   }
 }

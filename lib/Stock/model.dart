@@ -18,6 +18,7 @@ class Product {
   // --- New Fields (Updated) ---
   final double shipmentTaxAir; // Maps to 'shipmenttaxair'
   final DateTime? shipmentDate; // Maps to 'shipmentdate'
+  final int alertQty; // <--- NEW: Maps to 'alert_qty' (Low Stock Limit)
 
   // --- Inventory Breakdown Fields ---
   final double avgPurchasePrice;
@@ -45,6 +46,7 @@ class Product {
     // Updated Constructor
     this.shipmentTaxAir = 0.0,
     this.shipmentDate,
+    this.alertQty = 5, // <--- Default to 5
 
     required this.avgPurchasePrice,
     required this.seaStockQty,
@@ -104,6 +106,9 @@ class Product {
       ),
       shipmentDate: parseDate(json['shipmentdate'] ?? json['shipmentDate']),
 
+      // If alert_qty is missing, default to 5
+      alertQty: json['alert_qty'] != null ? parseInt(json['alert_qty']) : 5,
+
       // --- Inventory Breakdown ---
       avgPurchasePrice: parseDouble(json['avg_purchase_price']),
       seaStockQty: parseInt(json['sea_stock_qty']),
@@ -132,7 +137,8 @@ class Product {
 
       // --- New Fields ---
       'shipmenttaxair': shipmentTaxAir,
-      'shipmentdate': shipmentDate?.toIso8601String(), // Send as ISO String
+      'shipmentdate': shipmentDate?.toIso8601String(),
+      'alert_qty': alertQty, // <--- Added to JSON
 
       'avg_purchase_price': avgPurchasePrice,
       'sea_stock_qty': seaStockQty,
@@ -140,4 +146,7 @@ class Product {
       'local_qty': localQty,
     };
   }
+
+  // Optional Helper: Check if this specific product is low stock
+  bool get isLowStock => stockQty <= alertQty;
 }

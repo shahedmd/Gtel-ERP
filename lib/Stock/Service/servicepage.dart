@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:gtel_erp/Stock/model.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -693,6 +694,181 @@ class _ServicePageState extends State<ServicePage> {
           Text(sub, style: TextStyle(color: Colors.grey[400])),
         ],
       ),
+    );
+  }
+}
+
+class PdfService {
+  static Future<void> generateShortlistPdf(List<Product> products) async {
+    try {
+      final doc = pw.Document();
+
+      // 1. LOAD A UNICODE FONT (Fixes "Helvetica has no Unicode support")
+      // We use NotoSans because it supports many symbols including Taka sign.
+      final font = await PdfGoogleFonts.notoSansRegular();
+      final fontBold = await PdfGoogleFonts.notoSansBold();
+
+      doc.addPage(
+        pw.MultiPage(
+          // 2. INCREASE PAGE LIMIT (Fixes "TooManyPagesException")
+          maxPages: 200,
+
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(30),
+
+          // Apply the font to the whole page theme
+          theme: pw.ThemeData.withFont(base: font, bold: fontBold),
+
+          header: (context) => _buildHeader(),
+          footer: (context) => _buildFooter(context),
+
+          build:
+              (context) => [
+                _buildSummary(products),
+                pw.SizedBox(height: 15),
+                _buildProductTable(products),
+              ],
+        ),
+      );
+
+      final String filename =
+          'Reorder_Report_${DateFormat('yyyyMMdd_HHmm').format(DateTime.now())}.pdf';
+
+      await Printing.sharePdf(bytes: await doc.save(), filename: filename);
+    } catch (e) {
+      print("PDF Generation Error: $e");
+      rethrow;
+    }
+  }
+
+  // --- HEADER ---
+  static pw.Widget _buildHeader() {
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text(
+              'INVENTORY REORDER REPORT',
+              style: pw.TextStyle(
+                fontSize: 18,
+                fontWeight: pw.FontWeight.bold,
+                color: PdfColors.blueGrey800,
+              ),
+            ),
+            pw.Text(
+              DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now()),
+              style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey600),
+            ),
+          ],
+        ),
+        pw.Divider(color: PdfColors.grey300),
+        pw.SizedBox(height: 10),
+      ],
+    );
+  }
+
+  // --- FOOTER ---
+  static pw.Widget _buildFooter(pw.Context context) {
+    return pw.Container(
+      alignment: pw.Alignment.centerRight,
+      margin: const pw.EdgeInsets.only(top: 10),
+      child: pw.Text(
+        'Page ${context.pageNumber} of ${context.pagesCount}',
+        style: const pw.TextStyle(color: PdfColors.grey, fontSize: 10),
+      ),
+    );
+  }
+
+  // --- SUMMARY BOX ---
+  static pw.Widget _buildSummary(List<Product> products) {
+    int critical = 0;
+    for (var p in products) {
+      if (p.stockQty == 0) critical++;
+    }
+
+    return pw.Container(
+      padding: const pw.EdgeInsets.all(10),
+      decoration: pw.BoxDecoration(
+        color: PdfColors.grey100,
+        border: pw.Border.all(color: PdfColors.grey300),
+      ),
+      child: pw.Row(
+        mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
+        children: [
+          pw.Column(
+            children: [
+              pw.Text("Total Items", style: const pw.TextStyle(fontSize: 10)),
+              pw.Text(
+                "${products.length}",
+                style: pw.TextStyle(
+                  fontSize: 14,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          pw.Column(
+            children: [
+              pw.Text(
+                "Critical (0 Stock)",
+                style: const pw.TextStyle(fontSize: 10),
+              ),
+              pw.Text(
+                "$critical",
+                style: pw.TextStyle(
+                  fontSize: 14,
+                  fontWeight: pw.FontWeight.bold,
+                  color: PdfColors.red,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- TABLE ---
+  static pw.Widget _buildProductTable(List<Product> products) {
+    // Preparing data as simple strings to be lightweight
+    final data =
+        products.map((p) {
+          final shortage = p.alertQty - p.stockQty;
+          return [
+            p.model,
+            // Sanitize name: remove newlines/tabs that might break PDF layout
+            (p.name.length > 30 ? '${p.name.substring(0, 30)}...' : p.name)
+                .replaceAll('\n', ' '),
+            p.stockQty.toString(),
+            p.alertQty.toString(),
+            '+$shortage',
+            p.stockQty == 0 ? 'CRITICAL' : 'LOW',
+          ];
+        }).toList();
+
+    return pw.TableHelper.fromTextArray(
+      headers: ['Model', 'Name', 'Stock', 'Alert', 'Shortage', 'Status'],
+      data: data,
+      // Font sizes adjusted for A4 width
+      headerStyle: pw.TextStyle(
+        fontWeight: pw.FontWeight.bold,
+        fontSize: 9,
+        color: PdfColors.white,
+      ),
+      headerDecoration: const pw.BoxDecoration(color: PdfColors.blueGrey700),
+      cellStyle: const pw.TextStyle(fontSize: 9),
+      cellHeight: 18,
+      cellAlignments: {
+        0: pw.Alignment.centerLeft,
+        1: pw.Alignment.centerLeft,
+        2: pw.Alignment.centerRight,
+        3: pw.Alignment.centerRight,
+        4: pw.Alignment.centerRight,
+        5: pw.Alignment.center,
+      },
+      oddRowDecoration: const pw.BoxDecoration(color: PdfColors.grey50),
     );
   }
 }

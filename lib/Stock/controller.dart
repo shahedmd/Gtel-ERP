@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
-import 'model.dart'; // Ensure this model supports local_qty, sea_stock_qty, air_stock_qty, shipmentTaxAir
+import 'model.dart';
 
 class ProductController extends GetxController {
   // ==========================================
@@ -17,6 +17,9 @@ class ProductController extends GetxController {
   // State for Service/Damage Logs
   final RxList<Map<String, dynamic>> serviceLogs = <Map<String, dynamic>>[].obs;
 
+  // NEW: State for Short List (Low Stock)
+  final RxList<Product> shortListProducts = <Product>[].obs;
+
   // Filters
   final RxString selectedBrand = 'All'.obs;
   final RxString searchText = ''.obs;
@@ -25,14 +28,20 @@ class ProductController extends GetxController {
   final RxBool isLoading = false.obs;
   final RxBool isActionLoading =
       false.obs; // Unified loading for Create/Update/Stock/Service
+  final RxBool isShortListLoading = false.obs; // Specific loading for shortlist
 
   // Global Settings
   final RxDouble currentCurrency = 17.85.obs; // BDT to CNY Rate
 
-  // Pagination
+  // Pagination - Stock
   final RxInt currentPage = 1.obs;
   final RxInt pageSize = 20.obs;
   final RxInt totalProducts = 0.obs;
+
+  // Pagination - Shortlist
+  final RxInt shortlistPage = 1.obs;
+  final RxInt shortlistTotal = 0.obs;
+  final RxInt shortlistLimit = 20.obs;
 
   // Configuration
   static const baseUrl = 'https://dart-server-1zun.onrender.com';
@@ -49,7 +58,6 @@ class ProductController extends GetxController {
     _debounce?.cancel();
     super.onClose();
   }
-  // Add this inside ProductController class in model.dart
 
   // =========================================================
   // LIVE SERVER SEARCH (For Autocomplete Dropdowns)
@@ -60,29 +68,23 @@ class ProductController extends GetxController {
     if (query.isEmpty) return [];
 
     try {
-      // 1. Prepare Query Params (Same as Stock Page)
-      // We ask for 20 results that match the search term
       final queryParams = {'page': '1', 'limit': '20', 'search': query};
-
-      // 2. Send Request
       final uri = Uri.parse(
         '$baseUrl/products',
       ).replace(queryParameters: queryParams);
       final res = await http.get(uri);
 
-      // 3. Process Result
       if (res.statusCode == 200) {
         final Map<String, dynamic> data = jsonDecode(res.body);
         final List<dynamic> productsJson = data['products'] ?? [];
 
-        // Convert to simple Map for the Dialog
         return productsJson.map((e) {
-          final p = Product.fromJson(e); // Parse using your existing model
+          final p = Product.fromJson(e);
           return {
             'id': p.id,
             'name': p.name,
             'model': p.model,
-            'buyingPrice': p.avgPurchasePrice, // Or whatever price you need
+            'buyingPrice': p.avgPurchasePrice,
           };
         }).toList();
       }
@@ -118,7 +120,6 @@ class ProductController extends GetxController {
         final Map<String, dynamic> data = jsonDecode(res.body);
         final List<dynamic> productsJson = data['products'] ?? [];
 
-        // Parse using the updated Model
         final List<Product> loadedProducts =
             productsJson.map<Product>((e) => Product.fromJson(e)).toList();
 
@@ -139,6 +140,124 @@ class ProductController extends GetxController {
     } finally {
       isLoading.value = false;
     }
+  }
+
+  // ==========================================
+  // 1.5 FETCH SHORTLIST (FIXED PAGINATION)
+  // ==========================================
+  Future<void> fetchShortList({int page = 1}) async {
+    isShortListLoading.value = true;
+    try {
+      shortlistPage.value = page;
+
+      final queryParams = {
+        'page': page.toString(),
+        'limit': shortlistLimit.value.toString(),
+      };
+
+      final uri = Uri.parse(
+        '$baseUrl/products/shortlist',
+      ).replace(queryParameters: queryParams);
+      final res = await http.get(uri);
+
+      if (res.statusCode == 200) {
+        final dynamic decoded = jsonDecode(res.body);
+
+        // Expecting Map now because server returns { products: [], total: x }
+        if (decoded is Map<String, dynamic>) {
+          final List<dynamic> list = decoded['products'] ?? [];
+          // Update total so "Next" button works
+          shortlistTotal.value = int.tryParse(decoded['total'].toString()) ?? 0;
+
+          final loaded = list.map((e) => Product.fromJson(e)).toList();
+          shortListProducts.assignAll(loaded);
+        } else if (decoded is List) {
+          // Fallback if server runs old code
+          final List<Product> loaded =
+              decoded.map((e) => Product.fromJson(e)).toList();
+          shortListProducts.assignAll(loaded);
+          shortlistTotal.value = loaded.length;
+        }
+      } else {
+        _showError('Server Error: ${res.statusCode}');
+      }
+    } catch (e) {
+      print(e);
+      _showError('Shortlist Load Error: $e');
+    } finally {
+      isShortListLoading.value = false;
+    }
+  }
+
+  // ==========================================
+  // 2. FETCH ALL FOR PDF EXPORT
+  // ==========================================
+  Future<List<Product>> fetchAllShortListForExport() async {
+    try {
+      print("Starting Export Fetch...");
+      // We send 'all=true' to skip pagination on server
+      final uri = Uri.parse('$baseUrl/products/shortlist?all=true');
+
+      // FIX: Increase timeout to 60 seconds for large datasets
+      final res = await http
+          .get(uri)
+          .timeout(
+            const Duration(seconds: 60),
+            onTimeout: () {
+              throw TimeoutException(
+                "Connection timed out. Data is too large.",
+              );
+            },
+          );
+
+      print("Response Status: ${res.statusCode}");
+      // print("Response Body Length: ${res.body.length}"); // Debugging
+
+      if (res.statusCode == 200) {
+        final List<dynamic> data = jsonDecode(res.body);
+        print("Parsed ${data.length} items.");
+        return data.map((e) => Product.fromJson(e)).toList();
+      } else {
+        _showError("Server Error: ${res.statusCode}");
+      }
+    } catch (e) {
+      print("Export Fetch Error: $e");
+      _showError('Export Failed: ${e.toString()}');
+    }
+    return [];
+  }
+
+  // ==========================================
+  // SHORTLIST PAGINATION LOGIC
+  // ==========================================
+  void nextShortlistPage() {
+    // Check if we have more items
+    if ((shortlistPage.value * shortlistLimit.value) < shortlistTotal.value) {
+      fetchShortList(page: shortlistPage.value + 1);
+    }
+  }
+
+  void prevShortlistPage() {
+    if (shortlistPage.value > 1) {
+      fetchShortList(page: shortlistPage.value - 1);
+    }
+  }
+
+  // Helper: Prepare Data for PDF Package (UI Use)
+  List<List<String>> formatForPdf(List<Product> products) {
+    List<List<String>> rows = [
+      ['Product Name', 'Model', 'Stock', 'Alert Limit', 'Shortage'],
+    ];
+    for (var p in products) {
+      rows.add([
+        p.name,
+        p.model,
+        p.stockQty.toString(),
+        p.alertQty.toString(),
+        (p.alertQty - p.stockQty).toString(), // Shortage amount
+      ]);
+    }
+    return rows;
   }
 
   // ==========================================
@@ -166,7 +285,6 @@ class ProductController extends GetxController {
   // 3. STOCK MANAGEMENT (ADD STOCK)
   // ==========================================
 
-  /// Adds stock (Sea/Air/Local) and refreshes WAC from server.
   Future<void> addMixedStock({
     required int productId,
     int seaQty = 0,
@@ -215,9 +333,6 @@ class ProductController extends GetxController {
   }
 
   /// CLIENT-SIDE PREDICTION HELPER
-  /// Matches Server Logic:
-  /// Sea = Tax from DB Column (shipmentTax)
-  /// Air = Tax Air from DB Column (shipmentTaxAir)
   double predictNewWAC(
     Product product,
     int addSea,
@@ -225,16 +340,12 @@ class ProductController extends GetxController {
     int addLocal,
     double localPrice,
   ) {
-    // 1. Current Value
     double oldValue = product.stockQty * product.avgPurchasePrice;
 
-    // 2. Incoming Value Calculation
-    // Sea Cost: (Yuan * Curr) + (Weight * ShipmentTax)
     double seaUnitCost =
         (product.yuan * product.currency) +
         (product.weight * product.shipmentTax);
 
-    // [UPDATED] Air Cost: Now uses shipmentTaxAir from DB (dynamic)
     double airUnitCost =
         (product.yuan * product.currency) +
         (product.weight * product.shipmentTaxAir);
@@ -244,7 +355,6 @@ class ProductController extends GetxController {
         (addAir * airUnitCost) +
         (addLocal * localPrice);
 
-    // 3. Average
     int totalNewQty = product.stockQty + addSea + addAir + addLocal;
     if (totalNewQty == 0) return 0.0;
 
@@ -293,7 +403,7 @@ class ProductController extends GetxController {
       if (res.statusCode == 200) {
         currentCurrency.value = newCurrency;
         currentPage.value = 1;
-        await fetchProducts(); // Fetch fresh data
+        await fetchProducts();
 
         Get.snackbar(
           'Success',
@@ -346,8 +456,6 @@ class ProductController extends GetxController {
   // ==========================================
   // 7. SERVICE & DAMAGE MANAGEMENT
   // ==========================================
-
-  /// Fetch Service Logs
   Future<void> fetchServiceLogs() async {
     isActionLoading.value = true;
     try {
@@ -365,8 +473,6 @@ class ProductController extends GetxController {
     }
   }
 
-  /// Add product to Service or Damage
-  /// [type] should be 'service' or 'damage'
   Future<void> addToService({
     required int productId,
     required String model,
@@ -391,8 +497,8 @@ class ProductController extends GetxController {
       );
 
       if (res.statusCode == 200) {
-        await fetchProducts(); // Stock decreased on server
-        await fetchServiceLogs(); // Update log list
+        await fetchProducts();
+        await fetchServiceLogs();
         Get.snackbar(
           'Success',
           'Item added to $type list',
@@ -409,10 +515,8 @@ class ProductController extends GetxController {
     }
   }
 
-  // Inside ProductController class
-
   // ==========================================
-  // NEW: BULK ADD STOCK (WITH WAC CALCULATION)
+  // BULK ADD STOCK (WITH WAC CALCULATION)
   // ==========================================
   Future<bool> addBulkStockWithValuation(
     List<Map<String, dynamic>> items,
@@ -426,7 +530,6 @@ class ProductController extends GetxController {
       );
 
       if (res.statusCode == 200) {
-        // Success! Refresh the list to show new prices/qty
         await fetchProducts();
         return true;
       } else {
@@ -441,23 +544,18 @@ class ProductController extends GetxController {
     }
   }
 
-  /// Return product from Service (Restores stock to Local)
-  /// Updated to support Partial Quantity
   Future<void> returnFromService(int logId, int qty) async {
     isActionLoading.value = true;
     try {
       final res = await http.post(
         Uri.parse('$baseUrl/service/return'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'log_id': logId,
-          'qty': qty, // <--- Sent the specific quantity to return
-        }),
+        body: jsonEncode({'log_id': logId, 'qty': qty}),
       );
 
       if (res.statusCode == 200) {
-        await fetchProducts(); // Stock increased on server
-        await fetchServiceLogs(); // Log updated (qty reduced or status changed)
+        await fetchProducts();
+        await fetchServiceLogs();
 
         Get.snackbar(
           'Success',
@@ -539,17 +637,10 @@ class ProductController extends GetxController {
     return ['All', ...unique];
   }
 
-  // ==========================================
-  // 8. STOCK VALUATION (UPDATED FOR PAGINATION)
-  // ==========================================
-
-  /// Returns total warehouse value in BDT using SERVER DATA
-  /// This ensures it counts ALL products in DB, not just the 20 on the page.
   double get totalStockValuation {
     return overallTotalValuation.value;
   }
 
-  /// Returns the formatted value string (e.g., "1,500,200")
   String get formattedTotalValuation {
     return overallTotalValuation.value
         .toStringAsFixed(0)
@@ -558,6 +649,4 @@ class ProductController extends GetxController {
           (Match m) => '${m[1]},',
         );
   }
-
-  print(formattedTotalValuation) {}
 }
