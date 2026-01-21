@@ -35,19 +35,16 @@ class _DebatordetailsState extends State<Debatordetails> {
   static const Color textMuted = Color(0xFF6B7280);
 
   // --- TRANSACTION COLORS ---
-  static const Color colCredit = Color(0xFFEF4444); // Red (Sale/Debt Up)
-  static const Color colDebit = Color(0xFF10B981); // Green (Pay/Debt Down)
-  static const Color colAdvGiven = Color(
-    0xFFF59E0B,
-  ); // Amber (Money Out/Debt Up)
-  static const Color colAdvRecv = Color(
-    0xFF06B6D4,
-  ); // Cyan (Money In/Debt Down)
+  static const Color colCredit = Color(0xFFEF4444); // Red
+  static const Color colDebit = Color(0xFF10B981); // Green
+  static const Color colAdvGiven = Color(0xFFF59E0B); // Amber
+  static const Color colAdvRecv = Color(0xFF06B6D4); // Cyan
+  static const Color colPrevious = Colors.orange; // NEW
+  static const Color colLoanPay = Colors.purple; // NEW
 
   @override
   void initState() {
     super.initState();
-    // Reset filters and load initial data
     controller.clearTransactionState();
     controller.loadDebtorTransactions(widget.id);
     _scrollController.addListener(_onScroll);
@@ -68,7 +65,6 @@ class _DebatordetailsState extends State<Debatordetails> {
 
   @override
   Widget build(BuildContext context) {
-    // Determine Debtor Model (Safe Check)
     final debtor = controller.bodies.firstWhereOrNull((e) => e.id == widget.id);
     if (debtor == null) {
       return const Scaffold(body: Center(child: Text("Debtor Not Found")));
@@ -89,20 +85,20 @@ class _DebatordetailsState extends State<Debatordetails> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 1. LIVE BALANCE CARDS
+            // 1. UPDATED LIVE BALANCE CARDS (3-Card Layout)
             _buildLiveBalanceSection(),
 
             const SizedBox(height: 24),
 
-            // 2. FILTERS & TOOLS
+            // 2. FILTERS
             _buildFilterBar(),
 
             const SizedBox(height: 16),
 
-            // 3. TRANSACTION TABLE
+            // 3. TABLE
             _buildTableSection(debtor),
 
-            // 4. PAGINATION LOADER
+            // 4. LOADER
             Obx(() {
               if (controller.isTxLoading.value &&
                   controller.currentTransactions.isNotEmpty) {
@@ -113,7 +109,7 @@ class _DebatordetailsState extends State<Debatordetails> {
                   ),
                 );
               }
-              return const SizedBox(height: 80); // Spacer for FAB
+              return const SizedBox(height: 80);
             }),
           ],
         ),
@@ -121,7 +117,6 @@ class _DebatordetailsState extends State<Debatordetails> {
     );
   }
 
-  // --- APP BAR ---
   AppBar _buildAppBar(DebtorModel debtor) {
     return AppBar(
       backgroundColor: Colors.white,
@@ -200,85 +195,173 @@ class _DebatordetailsState extends State<Debatordetails> {
     );
   }
 
-  // --- SECTION 1: LIVE BALANCE ---
+  // --- UPDATED LIVE BALANCE (3 CARDS) ---
   Widget _buildLiveBalanceSection() {
-    return StreamBuilder<double>(
-      stream: controller.getLiveBalance(widget.id),
+    return StreamBuilder<Map<String, double>>(
+      stream: controller.getDebtorBreakdown(widget.id),
       builder: (context, snap) {
-        final balance = snap.data ?? 0.0;
-        final bool isDue = balance >= 0;
+        final data = snap.data ?? {'loan': 0.0, 'running': 0.0, 'total': 0.0};
+        double loan = data['loan']!;
+        double running = data['running']!;
+        double total = data['total']!;
 
-        return Row(
+        return Column(
           children: [
-            // Note: We don't have atomic 'Total Sales' stored on doc,
-            // so we show the most critical number: The Outstanding Balance
-            Expanded(
-              child: Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors:
-                        isDue
-                            ? [const Color(0xFF1F2937), const Color(0xFF111827)]
-                            : [Colors.blue.shade800, Colors.blue.shade900],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: (isDue ? Colors.black : Colors.blue).withOpacity(
-                        0.2,
-                      ),
-                      blurRadius: 10,
-                      offset: const Offset(0, 5),
-                    ),
-                  ],
+            // TOTAL CARD
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [const Color(0xFF1F2937), const Color(0xFF111827)],
                 ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Column(
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black26,
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "TOTAL OUTSTANDING (NET)",
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.7),
+                          fontSize: 11,
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        "Tk ${total.toStringAsFixed(0)}",
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 32,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.white12,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(
+                      FontAwesomeIcons.sackDollar,
+                      color: Colors.white,
+                      size: 24,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // BREAKDOWN ROW
+            Row(
+              children: [
+                // PREVIOUS LOAN CARD
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: Colors.orange.withOpacity(0.3),
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          isDue
-                              ? "CURRENT DUE (RECEIVABLE)"
-                              : "ADVANCE BALANCE (PAYABLE)",
-                          style: TextStyle(
-                            color: Colors.white.withOpacity(0.7),
-                            fontSize: 12,
-                            letterSpacing: 1.2,
-                          ),
+                        Row(
+                          children: [
+                            const Icon(
+                              FontAwesomeIcons.clockRotateLeft,
+                              size: 14,
+                              color: Colors.orange,
+                            ),
+                            const SizedBox(width: 8),
+                            const Text(
+                              "PREVIOUS LOAN",
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ],
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          "Tk ${balance.abs().toStringAsFixed(2)}",
+                          "Tk ${loan.toStringAsFixed(0)}",
                           style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 28,
+                            fontSize: 20,
                             fontWeight: FontWeight.bold,
+                            color: Colors.orange,
                           ),
                         ),
                       ],
                     ),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Icon(
-                        isDue
-                            ? FontAwesomeIcons.moneyBillTrendUp
-                            : FontAwesomeIcons.vault,
-                        color: Colors.white,
-                        size: 24,
+                  ),
+                ),
+                const SizedBox(width: 16),
+                // RUNNING BILLS CARD
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: activeAccent.withOpacity(0.3),
+                        width: 1.5,
                       ),
                     ),
-                  ],
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(
+                              FontAwesomeIcons.receipt,
+                              size: 14,
+                              color: activeAccent,
+                            ),
+                            const SizedBox(width: 8),
+                            const Text(
+                              "RUNNING BILLS",
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          "Tk ${running.toStringAsFixed(0)}",
+                          style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: activeAccent,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-              ),
+              ],
             ),
           ],
         );
@@ -286,7 +369,6 @@ class _DebatordetailsState extends State<Debatordetails> {
     );
   }
 
-  // --- SECTION 2: FILTERS ---
   Widget _buildFilterBar() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -318,17 +400,11 @@ class _DebatordetailsState extends State<Debatordetails> {
                       : const Icon(Icons.calendar_today, size: 14),
               backgroundColor:
                   hasFilter ? activeAccent.withOpacity(0.1) : bgGrey,
-              labelStyle: TextStyle(
-                color: hasFilter ? activeAccent : darkSlate,
-                fontSize: 12,
-              ),
-              onPressed: () {
-                if (hasFilter) {
-                  controller.setDateFilter(null, widget.id);
-                } else {
-                  _pickDateRange();
-                }
-              },
+              onPressed:
+                  () =>
+                      hasFilter
+                          ? controller.setDateFilter(null, widget.id)
+                          : _pickDateRange(),
             );
           }),
         ],
@@ -340,15 +416,11 @@ class _DebatordetailsState extends State<Debatordetails> {
     final picked = await showDateRangePicker(
       context: context,
       firstDate: DateTime(2020),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
-      initialDateRange: controller.selectedDateRange.value,
+      lastDate: DateTime(2030),
     );
-    if (picked != null) {
-      controller.setDateFilter(picked, widget.id);
-    }
+    if (picked != null) controller.setDateFilter(picked, widget.id);
   }
 
-  // --- SECTION 3: TABLE ---
   Widget _buildTableSection(DebtorModel debtor) {
     return Container(
       decoration: BoxDecoration(
@@ -361,13 +433,12 @@ class _DebatordetailsState extends State<Debatordetails> {
           _tableHeader(),
           Obx(() {
             if (controller.isTxLoading.value &&
-                controller.currentTransactions.isEmpty) {
+                controller.currentTransactions.isEmpty)
               return const Padding(
                 padding: EdgeInsets.all(40),
                 child: CircularProgressIndicator(),
               );
-            }
-            if (controller.currentTransactions.isEmpty) {
+            if (controller.currentTransactions.isEmpty)
               return const Padding(
                 padding: EdgeInsets.all(40),
                 child: Text(
@@ -375,17 +446,15 @@ class _DebatordetailsState extends State<Debatordetails> {
                   style: TextStyle(color: textMuted),
                 ),
               );
-            }
             return ListView.separated(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               itemCount: controller.currentTransactions.length,
               separatorBuilder:
                   (_, __) => const Divider(height: 1, color: Color(0xFFF3F4F6)),
-              itemBuilder: (context, index) {
-                final tx = controller.currentTransactions[index];
-                return _tableRow(tx, debtor);
-              },
+              itemBuilder:
+                  (context, index) =>
+                      _tableRow(controller.currentTransactions[index], debtor),
             );
           }),
         ],
@@ -493,6 +562,16 @@ class _DebatordetailsState extends State<Debatordetails> {
         typeIcon = FontAwesomeIcons.arrowRightToBracket;
         typeLabel = "ADV RECV";
         break;
+      case 'previous_due':
+        typeColor = colPrevious;
+        typeIcon = FontAwesomeIcons.clockRotateLeft;
+        typeLabel = "OLD DEBT";
+        break;
+      case 'loan_payment':
+        typeColor = colLoanPay;
+        typeIcon = FontAwesomeIcons.moneyBillWave;
+        typeLabel = "LOAN COLLECT";
+        break;
       default:
         typeColor = Colors.grey;
         typeIcon = Icons.circle;
@@ -506,7 +585,7 @@ class _DebatordetailsState extends State<Debatordetails> {
           Expanded(
             flex: 2,
             child: Text(
-              DateFormat("dd MMM yyyy").format(tx.date),
+              DateFormat("dd MMM yy").format(tx.date),
               style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
             ),
           ),
@@ -541,15 +620,12 @@ class _DebatordetailsState extends State<Debatordetails> {
                       color: darkSlate,
                     ),
                   ),
-                if (tx.note.isNotEmpty)
-                  Text(
-                    tx.note,
-                    style: const TextStyle(fontSize: 11, color: textMuted),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  )
-                else
-                  const Text("-", style: TextStyle(color: textMuted)),
+                Text(
+                  tx.note.isEmpty ? "-" : tx.note,
+                  style: const TextStyle(fontSize: 11, color: textMuted),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ],
             ),
           ),
@@ -599,8 +675,7 @@ class _DebatordetailsState extends State<Debatordetails> {
     );
   }
 
-  // --- DIALOGS (ADD / EDIT) ---
-
+  // --- UPDATED DIALOG (WITH NEW TYPES) ---
   void _showAddTransactionDialog(DebtorModel debtor) {
     final amountC = TextEditingController();
     final noteC = TextEditingController();
@@ -635,39 +710,70 @@ class _DebatordetailsState extends State<Debatordetails> {
                       _buildField(noteC, "Note / Description", Icons.note),
                       const SizedBox(height: 12),
 
-                      // Transaction Type Dropdown
-                      _buildDropdown<String>(
-                        value: selectedType.value,
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'credit',
-                            child: Text("CREDIT SALE (BILL)"),
+                      // UPDATED DROPDOWN
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        decoration: BoxDecoration(
+                          color: bgGrey,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            value: selectedType.value,
+                            isExpanded: true,
+                            items: const [
+                              DropdownMenuItem(
+                                value: 'credit',
+                                child: Text("🧾  New Sale/Bill (Running Due)"),
+                              ),
+                              DropdownMenuItem(
+                                value: 'debit',
+                                child: Text("💵  Receive Payment (Running)"),
+                              ),
+                              DropdownMenuItem(
+                                value: 'div1',
+                                enabled: false,
+                                child: Divider(),
+                              ),
+                              DropdownMenuItem(
+                                value: 'previous_due',
+                                child: Text("🏦  Add Previous/Old Debt"),
+                              ),
+                              DropdownMenuItem(
+                                value: 'loan_payment',
+                                child: Text("💰  Collect Old Debt (Cash In)"),
+                              ),
+                              DropdownMenuItem(
+                                value: 'div2',
+                                enabled: false,
+                                child: Divider(),
+                              ),
+                              DropdownMenuItem(
+                                value: 'advance_received',
+                                child: Text("⬅️  Receive Advance"),
+                              ),
+                              DropdownMenuItem(
+                                value: 'advance_given',
+                                child: Text("➡️  Give Advance"),
+                              ),
+                            ],
+                            onChanged: (v) {
+                              if (v != null && !v.contains('div'))
+                                selectedType.value = v;
+                            },
                           ),
-                          DropdownMenuItem(
-                            value: 'debit',
-                            child: Text("PAYMENT RECEIVED"),
-                          ),
-                          DropdownMenuItem(
-                            value: 'advance_received',
-                            child: Text("ADVANCE FROM CUSTOMER"),
-                          ),
-                          DropdownMenuItem(
-                            value: 'advance_given',
-                            child: Text("LEND TO CUSTOMER (LOAN)"),
-                          ),
-                        ],
-                        onChanged: (v) => selectedType.value = v!,
+                        ),
                       ),
-
                       const SizedBox(height: 12),
 
-                      // Show Payment Method only for Debit/AdvRecv
-                      if (selectedType.value == 'debit' ||
-                          selectedType.value == 'advance_received')
+                      if ([
+                        'debit',
+                        'loan_payment',
+                        'advance_received',
+                      ].contains(selectedType.value))
                         _buildPaymentDropdown(debtor.payments, selectedPayment),
 
                       const SizedBox(height: 24),
-
                       Row(
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
@@ -713,6 +819,7 @@ class _DebatordetailsState extends State<Debatordetails> {
     );
   }
 
+  // --- RESTORED: EDIT TRANSACTION DIALOG ---
   void _showEditTransactionDialog(TransactionModel tx, DebtorModel debtor) {
     final amountC = TextEditingController(text: tx.amount.toString());
     final noteC = TextEditingController(text: tx.note);
@@ -722,7 +829,6 @@ class _DebatordetailsState extends State<Debatordetails> {
       null,
     );
 
-    // Try finding existing payment method
     if (tx.paymentMethod != null) {
       selectedPayment.value = debtor.payments.firstWhereOrNull(
         (p) => p['number'] == tx.paymentMethod?['number'],
@@ -759,6 +865,14 @@ class _DebatordetailsState extends State<Debatordetails> {
                             child: Text("PAYMENT"),
                           ),
                           DropdownMenuItem(
+                            value: 'previous_due',
+                            child: Text("OLD DEBT"),
+                          ),
+                          DropdownMenuItem(
+                            value: 'loan_payment',
+                            child: Text("LOAN PAY"),
+                          ),
+                          DropdownMenuItem(
                             value: 'advance_received',
                             child: Text("ADV RECV"),
                           ),
@@ -770,10 +884,12 @@ class _DebatordetailsState extends State<Debatordetails> {
                         onChanged: (v) => selectedType.value = v!,
                       ),
                       const SizedBox(height: 12),
-                      if (selectedType.value == 'debit' ||
-                          selectedType.value == 'advance_received')
+                      if ([
+                        'debit',
+                        'loan_payment',
+                        'advance_received',
+                      ].contains(selectedType.value))
                         _buildPaymentDropdown(debtor.payments, selectedPayment),
-
                       const SizedBox(height: 24),
                       ElevatedButton(
                         style: ElevatedButton.styleFrom(
@@ -819,14 +935,12 @@ class _DebatordetailsState extends State<Debatordetails> {
       buttonColor: Colors.red,
       onConfirm: () async {
         Get.back();
-        await controller.deleteTransaction(
-          widget.id,
-          tx.id,
-        );
+        await controller.deleteTransaction(widget.id, tx.id);
       },
     );
   }
 
+  // --- RESTORED: EDIT PROFILE DIALOG ---
   void _showEditProfileDialog(DebtorModel debtor) {
     final nameC = TextEditingController(text: debtor.name);
     final phoneC = TextEditingController(text: debtor.phone);
@@ -865,9 +979,8 @@ class _DebatordetailsState extends State<Debatordetails> {
     );
   }
 
-  // --- PDF GENERATOR ---
+  // --- PDF DOWNLOAD ---
   Future<void> _downloadPDF() async {
-    // We can fetch ALL transactions for PDF to be complete, not just paginated ones
     final snap =
         await controller.db
             .collection("debatorbody")
@@ -875,12 +988,14 @@ class _DebatordetailsState extends State<Debatordetails> {
             .collection("transactions")
             .orderBy("date")
             .get();
-
     List<Map<String, dynamic>> data =
         snap.docs.map((d) {
           final map = d.data();
           return {
-            "date": (map["date"] as Timestamp).toDate(),
+            "date":
+                (map["date"] is Timestamp)
+                    ? (map["date"] as Timestamp).toDate()
+                    : map["date"],
             "type": map["type"],
             "amount": (map["amount"] as num).toDouble(),
             "note": map["note"] ?? "",
@@ -889,13 +1004,10 @@ class _DebatordetailsState extends State<Debatordetails> {
         }).toList();
 
     final List<int> bytes = await controller.generatePDF(widget.name, data);
-
-    // Web Download Logic
     final Uint8List uint8list = Uint8List.fromList(bytes);
     final JSUint8Array jsBytes = uint8list.toJS;
-    final blobParts = [jsBytes].toJS as JSArray<web.BlobPart>;
     final blob = web.Blob(
-      blobParts,
+      [jsBytes].toJS as JSArray<web.BlobPart>,
       web.BlobPropertyBag(type: 'application/pdf'),
     );
     final url = web.URL.createObjectURL(blob);
@@ -906,8 +1018,7 @@ class _DebatordetailsState extends State<Debatordetails> {
     web.URL.revokeObjectURL(url);
   }
 
-  // --- WIDGET HELPERS ---
-
+  // --- HELPERS ---
   Widget _dialogHeader(String title) {
     return Container(
       width: double.infinity,
@@ -1005,7 +1116,6 @@ class _DebatordetailsState extends State<Debatordetails> {
   }
 }
 
-// Utility
 String formatPaymentMethod(Map<String, dynamic> pm) {
   String type = pm['type']?.toString().toUpperCase() ?? "";
   String num = pm['number'] ?? "";

@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 // CONTROLLERS
 import 'package:gtel_erp/Account%20Overview/controllerao.dart';
@@ -23,28 +24,47 @@ class FinancialOverviewPage extends StatelessWidget {
     );
     final compactCurrency = NumberFormat.compactSimpleCurrency(name: '৳');
 
+    // COLORS
+    const Color bgSlate = Color(0xFFF8FAFC);
+    const Color darkHeader = Color(0xFF1E293B);
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF1F5F9), // Slate-100
+      backgroundColor: bgSlate,
       appBar: AppBar(
-        title: const Text(
-          "FINANCIAL OVERVIEW",
-          style: TextStyle(
-            fontWeight: FontWeight.w800,
-            letterSpacing: 1.0,
-            color: Colors.white,
-          ),
+        iconTheme: IconThemeData(color: Colors.white),
+        title: const Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "EXECUTIVE SUMMARY",
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.8,
+                fontSize: 18,
+                color: Colors.white,
+              ),
+            ),
+            Text(
+              "Financial Health Report",
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w400,
+                color: Colors.white70,
+              ),
+            ),
+          ],
         ),
-        backgroundColor: const Color(0xFF0F172A), // Slate-900
+        backgroundColor: darkHeader,
         elevation: 0,
         actions: [
           IconButton(
-            icon: const Icon(Icons.print, color: Colors.white),
-            tooltip: "Download PDF Report",
+            icon: const Icon(Icons.print_outlined, color: Colors.white),
+            tooltip: "Print Report",
             onPressed: () => controller.generateAndPrintPDF(),
           ),
           IconButton(
             icon: const Icon(Icons.sync, color: Colors.white),
-            tooltip: "Sync Data",
+            tooltip: "Refresh Data",
             onPressed: () => controller.refreshExternalData(),
           ),
         ],
@@ -58,86 +78,63 @@ class FinancialOverviewPage extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // ===============================================
-              // 1. KPI SUMMARY TILES
+              // 1. BIG NUMBERS (KPI)
               // ===============================================
-              Obx(
-                () => Row(
-                  children: [
-                    _SummaryTile(
-                      title: "TOTAL ASSETS",
-                      amount: controller.grandTotalAssets,
-                      icon: Icons.account_balance,
-                      color: const Color(0xFF0F766E), // Teal-700
-                      formatter: currency,
-                    ),
-                    const SizedBox(width: 12),
-                    _SummaryTile(
-                      title: "TOTAL LIABILITIES",
-                      amount: controller.grandTotalLiabilities,
-                      icon: Icons.money_off,
-                      color: const Color(0xFFB91C1C), // Red-700
-                      formatter: currency,
-                    ),
-                    const SizedBox(width: 12),
-                    _SummaryTile(
-                      title: "NET WORTH",
-                      amount: controller.netWorth,
-                      icon: Icons.show_chart,
-                      color: const Color(0xFF1E3A8A), // Blue-900
-                      formatter: currency,
-                    ),
-                  ],
-                ),
-              ),
+              _buildTopKPIs(controller, currency),
 
               const SizedBox(height: 24),
 
               // ===============================================
-              // 2. MAIN SPLIT VIEW (Left: Assets, Right: Liabilities)
+              // 2. RESPONSIVE SPLIT VIEW
               // ===============================================
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // LEFT: ASSETS
-                  Expanded(
-                    flex: 1,
-                    child: Column(
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  // If screen is wide (Tablet/PC), show side-by-side
+                  if (constraints.maxWidth > 850) {
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _buildCashBreakdown(controller, currency),
-                        const SizedBox(height: 20),
-                        _buildAssetsBreakdown(
-                          controller,
-                          currency,
-                          compactCurrency,
-                          context,
+                        Expanded(
+                          child: _buildAssetsColumn(
+                            controller,
+                            currency,
+                            compactCurrency,
+                            context,
+                          ),
+                        ),
+                        const SizedBox(width: 24),
+                        Expanded(
+                          child: _buildLiabilitiesColumn(
+                            controller,
+                            currency,
+                            context,
+                          ),
                         ),
                       ],
-                    ),
-                  ),
-
-                  const SizedBox(width: 20),
-
-                  // RIGHT: LIABILITIES
-                  Expanded(
-                    flex: 1,
-                    child: Column(
-                      children: [
-                        _buildLiabilitiesSection(controller, currency, context),
-                        const SizedBox(height: 20),
-                        _buildPayrollSection(controller, currency, context),
-                      ],
-                    ),
-                  ),
-                ],
+                    );
+                  }
+                  // If screen is narrow (Mobile), show vertical stack
+                  return Column(
+                    children: [
+                      _buildAssetsColumn(
+                        controller,
+                        currency,
+                        compactCurrency,
+                        context,
+                      ),
+                      const SizedBox(height: 24),
+                      _buildLiabilitiesColumn(controller, currency, context),
+                    ],
+                  );
+                },
               ),
 
               const SizedBox(height: 30),
 
               // ===============================================
-              // 3. FINANCIAL BREAKDOWN FOOTER
+              // 3. FINAL EQUATION FOOTER
               // ===============================================
-              _buildFinancialFooter(controller, currency),
-
+              _buildFinalEquation(controller, currency),
               const SizedBox(height: 50),
             ],
           ),
@@ -146,332 +143,379 @@ class FinancialOverviewPage extends StatelessWidget {
     );
   }
 
-  // ===========================================================================
-  // SECTION BUILDERS
-  // ===========================================================================
+  Widget _buildTopKPIs(FinancialController ctrl, NumberFormat fmt) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Responsive Grid Logic
+        int crossAxisCount = constraints.maxWidth > 600 ? 3 : 1;
 
-  Widget _buildCashBreakdown(FinancialController ctrl, NumberFormat fmt) {
-    final cashCtrl = Get.find<CashDrawerController>();
-    return _ErpCard(
-      title: "Liquid Assets (Cash)",
-      icon: Icons.payments,
-      color: Colors.teal,
-      child: Obx(
-        () => Column(
-          children: [
-            _StatRow("Cash In Hand", cashCtrl.netCash.value, fmt),
-            _StatRow("Bank Balance", cashCtrl.netBank.value, fmt),
-            _StatRow("Bkash Balance", cashCtrl.netBkash.value, fmt),
-            _StatRow("Nagad Balance", cashCtrl.netNagad.value, fmt),
-            const Divider(),
-            _StatRow(
-              "TOTAL LIQUID",
-              ctrl.totalCash,
-              fmt,
-              isBold: true,
-              color: Colors.teal[800],
-            ),
-          ],
-        ),
-      ),
+        // FIX: Lowered ratio from 3.0 to 2.4 to give cards more height
+        double ratio = constraints.maxWidth > 600 ? 2.2 : 2.4;
+
+        return Obx(() {
+          return GridView.count(
+            crossAxisCount: crossAxisCount,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            crossAxisSpacing: 16,
+            mainAxisSpacing: 16,
+            childAspectRatio: ratio,
+            children: [
+              _SummaryTile(
+                label: "Total Business Value",
+                subLabel: "(What You Own)",
+                amount: ctrl.grandTotalAssets,
+                icon: FontAwesomeIcons.buildingColumns,
+                color: const Color(0xFF059669),
+                formatter: fmt,
+              ),
+              _SummaryTile(
+                label: "Total Debt",
+                subLabel: "(What You Owe)",
+                amount: ctrl.grandTotalLiabilities,
+                icon: FontAwesomeIcons.fileInvoiceDollar,
+                color: const Color(0xFFDC2626),
+                formatter: fmt,
+              ),
+              _SummaryTile(
+                label: "Real Profit / Equity",
+                subLabel: "(Your Actual Money)",
+                amount: ctrl.netWorth,
+                icon: FontAwesomeIcons.chartLine,
+                color: const Color(0xFF2563EB),
+                formatter: fmt,
+                isHighlight: true,
+              ),
+            ],
+          );
+        });
+      },
     );
   }
 
-  Widget _buildAssetsBreakdown(
+  // ===========================================================================
+  // SECTION 2: ASSETS (WHAT YOU HAVE)
+  // ===========================================================================
+  Widget _buildAssetsColumn(
     FinancialController ctrl,
     NumberFormat fmt,
     NumberFormat compact,
     BuildContext context,
   ) {
-    return _ErpCard(
-      title: "Company Assets",
-      icon: Icons.domain,
-      color: Colors.blueGrey,
-      action: InkWell(
-        onTap: () => _showAddAssetDialog(context, ctrl),
-        child: const Icon(Icons.add_circle, color: Colors.blueGrey, size: 24),
-      ),
-      child: Obx(
-        () => Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Automated
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.blueGrey[50],
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Column(
-                children: [
-                  _StatRow(
-                    "Stock Value",
-                    ctrl.totalStockValuation,
-                    fmt,
-                    icon: Icons.store,
+    final cashCtrl = Get.find<CashDrawerController>();
+
+    return Column(
+      children: [
+        // 1. CASH ACCOUNTS
+        _ErpSectionHeader(
+          title: "WHAT YOU HAVE (ASSETS)",
+          color: Colors.teal[800]!,
+        ),
+        const SizedBox(height: 12),
+        _ErpCard(
+          title: "Cash & Bank Balance",
+          icon: FontAwesomeIcons.wallet,
+          accentColor: Colors.teal,
+          child: Obx(
+            () => Column(
+              children: [
+                _StatRow("Cash Drawer", cashCtrl.netCash.value, fmt),
+                _StatRow("Bank Accounts", cashCtrl.netBank.value, fmt),
+                _StatRow("bKash Wallet", cashCtrl.netBkash.value, fmt),
+                _StatRow("Nagad Wallet", cashCtrl.netNagad.value, fmt),
+                const Divider(height: 24),
+                _StatRow(
+                  "TOTAL LIQUID CASH",
+                  ctrl.totalCash,
+                  fmt,
+                  isBold: true,
+                  color: Colors.teal[800],
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 16),
+
+        // 2. INVENTORY & RECEIVABLES
+        _ErpCard(
+          title: "Inventory & Pending Collections",
+          icon: FontAwesomeIcons.boxesStacked,
+          accentColor: Colors.blueGrey,
+          action: IconButton(
+            icon: const Icon(Icons.add_circle, color: Colors.blueGrey),
+            tooltip: "Add Manual Asset (Furniture/PC)",
+            onPressed: () => _showAddAssetDialog(context, ctrl),
+          ),
+          child: Obx(
+            () => Column(
+              children: [
+                _StatRow(
+                  "Stock/Inventory Value",
+                  ctrl.totalStockValuation,
+                  fmt,
+                  helpText: "Total purchase price of items in shop",
+                ),
+                _StatRow(
+                  "Incoming Shipments",
+                  ctrl.totalShipmentValuation,
+                  fmt,
+                  helpText: "Products currently on the way",
+                ),
+                _StatRow(
+                  "Customers Owe You",
+                  ctrl.totalDebtorReceivables,
+                  fmt,
+                  color: Colors.orange[800],
+                  helpText: "Due payments from customers",
+                ),
+                _StatRow("Loans Given to Staff", ctrl.totalEmployeeDebt, fmt),
+
+                const Divider(height: 20),
+
+                // Manual Fixed Assets
+                if (ctrl.fixedAssets.isNotEmpty) ...[
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      "EQUIPMENT & FURNITURE",
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey[500],
+                      ),
+                    ),
                   ),
-                  _StatRow(
-                    "Shipments (On Way)",
-                    ctrl.totalShipmentValuation,
-                    fmt,
-                    icon: Icons.local_shipping,
+                  const SizedBox(height: 8),
+                  ...ctrl.fixedAssets.map(
+                    (asset) => _ManualItemRow(
+                      label: asset.name,
+                      amount: asset.value,
+                      compactFmt: compact,
+                      onDelete: () => ctrl.deleteAsset(asset.id!),
+                    ),
                   ),
-                  _StatRow(
-                    "Receivables (Debtors)",
-                    ctrl.totalDebtorReceivables,
-                    fmt,
-                    icon: Icons.arrow_circle_down,
-                  ),
-                  _StatRow(
-                    "Staff Loans",
-                    ctrl.totalEmployeeDebt,
-                    fmt,
-                    icon: Icons.badge,
-                  ),
+                  const Divider(height: 20),
                 ],
-              ),
-            ),
-            const SizedBox(height: 12),
-            // Manual
-            const Text(
-              "FIXED ASSETS (MANUAL)",
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-                color: Colors.grey,
-              ),
-            ),
-            const SizedBox(height: 8),
 
-            if (ctrl.fixedAssets.isEmpty)
-              const Text(
-                "No fixed assets added.",
-                style: TextStyle(color: Colors.grey, fontSize: 12),
-              ),
-
-            ...ctrl.fixedAssets.map(
-              (asset) => Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        asset.name,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ),
-                    Text(
-                      compact.format(asset.value),
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    InkWell(
-                      onTap: () => ctrl.deleteAsset(asset.id!),
-                      child: const Icon(
-                        Icons.remove_circle,
-                        size: 16,
-                        color: Colors.redAccent,
-                      ),
-                    ),
-                  ],
+                _StatRow(
+                  "TOTAL ASSETS VALUE",
+                  ctrl.grandTotalAssets,
+                  fmt,
+                  isBold: true,
+                  color: Colors.blueGrey[800],
                 ),
-              ),
+              ],
             ),
-
-            const Divider(thickness: 1.5),
-            _StatRow(
-              "TOTAL ASSETS",
-              ctrl.grandTotalAssets,
-              fmt,
-              isBold: true,
-              color: Colors.blueGrey[900],
-            ),
-          ],
+          ),
         ),
-      ),
+      ],
     );
   }
 
-  Widget _buildLiabilitiesSection(
+  // ===========================================================================
+  // SECTION 3: LIABILITIES (WHAT YOU OWE)
+  // ===========================================================================
+  Widget _buildLiabilitiesColumn(
     FinancialController ctrl,
     NumberFormat fmt,
     BuildContext context,
   ) {
-    return _ErpCard(
-      title: "Liabilities & Payables",
-      icon: Icons.money_off,
-      color: Colors.red[800]!,
-      child: Obx(
-        () => Column(
-          children: [
-            _StatRow(
-              "Vendor Payables",
-              ctrl.totalVendorDue,
-              fmt,
-              icon: Icons.store,
-              color: Colors.red[900],
-            ),
-            _StatRow(
-              "Debtor Payables",
-              ctrl.totalDebtorPayable,
-              fmt,
-              icon: Icons.person_off,
-              color: Colors.red[900],
-            ),
-
-            const Divider(),
-            _StatRow(
-              "TOTAL DEBT",
-              (ctrl.totalVendorDue + ctrl.totalDebtorPayable),
-              fmt,
-              isBold: true,
-              color: Colors.red[900],
-            ),
-          ],
+    return Column(
+      children: [
+        _ErpSectionHeader(
+          title: "WHAT YOU OWE (LIABILITIES)",
+          color: Colors.red[800]!,
         ),
-      ),
-    );
-  }
+        const SizedBox(height: 12),
 
-  Widget _buildPayrollSection(
-    FinancialController ctrl,
-    NumberFormat fmt,
-    BuildContext context,
-  ) {
-    return _ErpCard(
-      title: "Monthly Payroll & Expenses",
-      icon: Icons.groups,
-      color: Colors.orange[800]!,
-      action: InkWell(
-        onTap: () => _showAddExpenseDialog(context, ctrl),
-        child: Icon(Icons.add_circle, color: Colors.orange[800], size: 24),
-      ),
-      child: Obx(
-        () => Column(
-          children: [
-            if (ctrl.recurringExpenses.isEmpty)
-              const Padding(
-                padding: EdgeInsets.all(8.0),
-                child: Text(
-                  "No payroll setup.",
-                  style: TextStyle(color: Colors.grey),
+        // 1. PAYABLES
+        _ErpCard(
+          title: "Suppliers & Dues",
+          icon: FontAwesomeIcons.handHoldingDollar,
+          accentColor: Colors.red[700]!,
+          child: Obx(
+            () => Column(
+              children: [
+                _StatRow(
+                  "To Pay Suppliers",
+                  ctrl.totalVendorDue,
+                  fmt,
+                  color: Colors.red[700],
+                  helpText: "Money you owe to vendors",
                 ),
-              ),
+                _StatRow(
+                  "To Pay Customers",
+                  ctrl.totalDebtorPayable,
+                  fmt,
+                  helpText: "Returns or advanced payments held",
+                ),
 
-            ...ctrl.recurringExpenses.map(
-              (item) => Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        item.title,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ),
-                    Text(
-                      fmt.format(item.monthlyAmount),
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    InkWell(
-                      onTap: () => ctrl.deleteRecurringExpense(item.id!),
-                      child: const Icon(
-                        Icons.remove_circle,
-                        size: 16,
+                const Divider(height: 24),
+                _StatRow(
+                  "TOTAL PAYABLES",
+                  (ctrl.totalVendorDue + ctrl.totalDebtorPayable),
+                  fmt,
+                  isBold: true,
+                  color: Colors.red[900],
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 16),
+
+        // 2. MONTHLY EXPENSES
+        _ErpCard(
+          title: "Monthly Fixed Costs",
+          icon: FontAwesomeIcons.calendarCheck,
+          accentColor: Colors.orange[800]!,
+          action: IconButton(
+            icon: const Icon(Icons.add_circle, color: Colors.deepOrange),
+            tooltip: "Add Monthly Cost (Salary/Rent)",
+            onPressed: () => _showAddExpenseDialog(context, ctrl),
+          ),
+          child: Obx(
+            () => Column(
+              children: [
+                if (ctrl.recurringExpenses.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8.0),
+                    child: Text(
+                      "No fixed monthly costs added.",
+                      style: TextStyle(
                         color: Colors.grey,
+                        fontStyle: FontStyle.italic,
+                        fontSize: 12,
                       ),
                     ),
-                  ],
-                ),
-              ),
-            ),
+                  ),
 
-            Container(
-              margin: const EdgeInsets.only(top: 8),
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: Colors.orange[50],
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: _StatRow(
-                "MONTHLY BURN",
-                ctrl.totalMonthlyPayroll,
-                fmt,
-                isBold: true,
-                color: Colors.orange[900],
-              ),
+                ...ctrl.recurringExpenses.map(
+                  (item) => _ManualItemRow(
+                    label: item.title,
+                    amount: item.monthlyAmount,
+                    compactFmt: fmt, // Using full format here
+                    onDelete: () => ctrl.deleteRecurringExpense(item.id!),
+                  ),
+                ),
+
+                const Divider(height: 20),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.orange[50],
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: _StatRow(
+                    "TOTAL MONTHLY BURN",
+                    ctrl.totalMonthlyPayroll,
+                    fmt,
+                    isBold: true,
+                    color: Colors.deepOrange,
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
-      ),
+      ],
     );
   }
 
-  Widget _buildFinancialFooter(FinancialController ctrl, NumberFormat fmt) {
+  // ===========================================================================
+  // SECTION 4: FINAL CALCULATION
+  // ===========================================================================
+  Widget _buildFinalEquation(FinancialController ctrl, NumberFormat fmt) {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E293B), // Dark Slate
-        borderRadius: BorderRadius.circular(16),
+        gradient: LinearGradient(
+          colors: [const Color(0xFF1E293B), const Color(0xFF0F172A)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.2),
-            blurRadius: 10,
-            offset: const Offset(0, 5),
+            color: Colors.blue.withOpacity(0.2),
+            blurRadius: 15,
+            offset: const Offset(0, 8),
           ),
         ],
       ),
       child: Column(
         children: [
           const Text(
-            "COMPANY NET WORTH CALCULATION",
+            "FINAL BALANCE SHEET",
             style: TextStyle(
-              color: Colors.white70,
-              fontSize: 13,
-              letterSpacing: 1.5,
+              color: Colors.white54,
+              letterSpacing: 2,
+              fontSize: 12,
               fontWeight: FontWeight.bold,
             ),
           ),
           const SizedBox(height: 24),
           Obx(
-            () => Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
+            () => Wrap(
+              alignment: WrapAlignment.center,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 20,
+              runSpacing: 20,
               children: [
-                _FooterItem(
-                  label: "Grand Total Assets",
+                _EquationItem(
+                  label: "Total Assets",
                   amount: ctrl.grandTotalAssets,
                   fmt: fmt,
                   color: Colors.greenAccent,
                 ),
-                const Icon(Icons.remove, color: Colors.white24),
-                _FooterItem(
-                  label: "Grand Total Liabilities",
+                const Icon(
+                  FontAwesomeIcons.minus,
+                  color: Colors.white24,
+                  size: 16,
+                ),
+                _EquationItem(
+                  label: "Total Liabilities",
                   amount: ctrl.grandTotalLiabilities,
                   fmt: fmt,
                   color: Colors.redAccent,
                 ),
-                const Icon(Icons.drag_handle, color: Colors.white24),
-                _FooterItem(
-                  label: "NET WORTH",
-                  amount: ctrl.netWorth,
-                  fmt: fmt,
+                const Icon(
+                  FontAwesomeIcons.equals,
                   color: Colors.white,
-                  isLarge: true,
+                  size: 16,
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(50),
+                  ),
+                  child: Column(
+                    children: [
+                      const Text(
+                        "REAL VALUE",
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: Colors.black54,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Text(
+                        fmt.format(ctrl.netWorth),
+                        style: const TextStyle(
+                          fontSize: 20,
+                          color: Colors.black,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -482,41 +526,46 @@ class FinancialOverviewPage extends StatelessWidget {
   }
 
   // ===========================================================================
-  // HELPER DIALOGS
+  // WIDGET HELPERS
   // ===========================================================================
 
+  // Dialogs remain largely the same logic, just styled cleaner
   void _showAddAssetDialog(BuildContext context, FinancialController ctrl) {
+    // ... same logic as before, just cleaner UI if needed ...
     final nameC = TextEditingController();
     final valC = TextEditingController();
     final catC = TextEditingController();
-
     Get.defaultDialog(
-      title: "Add Fixed Asset",
-      contentPadding: const EdgeInsets.all(16),
+      title: "Add Business Asset",
+      contentPadding: const EdgeInsets.all(20),
+      radius: 8,
       content: Column(
         children: [
           TextField(
             controller: nameC,
             decoration: const InputDecoration(
-              labelText: "Asset Name",
-              hintText: "e.g. Shop PC",
+              labelText: "Item Name",
+              hintText: "e.g. Shop Laptop",
+              border: OutlineInputBorder(),
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
+          TextField(
+            controller: valC,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: "Current Value",
+              prefixText: "৳ ",
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 10),
           TextField(
             controller: catC,
             decoration: const InputDecoration(
               labelText: "Category",
               hintText: "e.g. Electronics",
-            ),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: valC,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
-              labelText: "Value",
-              prefixText: "৳ ",
+              border: OutlineInputBorder(),
             ),
           ),
         ],
@@ -531,7 +580,7 @@ class FinancialOverviewPage extends StatelessWidget {
               double.tryParse(valC.text) ?? 0,
               catC.text,
             ),
-        child: const Text("Save Asset", style: TextStyle(color: Colors.white)),
+        child: const Text("Save Record", style: TextStyle(color: Colors.white)),
       ),
       cancel: TextButton(
         onPressed: () => Get.back(),
@@ -543,42 +592,41 @@ class FinancialOverviewPage extends StatelessWidget {
   void _showAddExpenseDialog(BuildContext context, FinancialController ctrl) {
     final titleC = TextEditingController();
     final amountC = TextEditingController();
-
     Get.defaultDialog(
-      title: "Add Payroll/Expense",
-      contentPadding: const EdgeInsets.all(16),
+      title: "Add Monthly Cost",
+      contentPadding: const EdgeInsets.all(20),
+      radius: 8,
       content: Column(
         children: [
           TextField(
             controller: titleC,
             decoration: const InputDecoration(
-              labelText: "Title",
-              hintText: "e.g. Staff Salary",
+              labelText: "Expense Name",
+              hintText: "e.g. Shop Rent",
+              border: OutlineInputBorder(),
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           TextField(
             controller: amountC,
             keyboardType: TextInputType.number,
             decoration: const InputDecoration(
-              labelText: "Monthly Amount",
+              labelText: "Monthly Cost",
               prefixText: "৳ ",
+              border: OutlineInputBorder(),
             ),
           ),
         ],
       ),
       confirm: ElevatedButton(
-        style: ElevatedButton.styleFrom(backgroundColor: Colors.orange[800]),
+        style: ElevatedButton.styleFrom(backgroundColor: Colors.deepOrange),
         onPressed:
             () => ctrl.addRecurringExpense(
               titleC.text,
               double.tryParse(amountC.text) ?? 0,
               "Monthly",
             ),
-        child: const Text(
-          "Save Expense",
-          style: TextStyle(color: Colors.white),
-        ),
+        child: const Text("Save Cost", style: TextStyle(color: Colors.white)),
       ),
       cancel: TextButton(
         onPressed: () => Get.back(),
@@ -588,72 +636,135 @@ class FinancialOverviewPage extends StatelessWidget {
   }
 }
 
-// ===========================================================================
-// SMALL WIDGETS
-// ===========================================================================
+// -----------------------------------------------------------------------------
+// REUSABLE COMPONENTS (MODULAR & CLEAN)
+// -----------------------------------------------------------------------------
 
 class _SummaryTile extends StatelessWidget {
-  final String title;
+  final String label;
+  final String subLabel;
   final double amount;
   final IconData icon;
   final Color color;
   final NumberFormat formatter;
+  final bool isHighlight;
 
   const _SummaryTile({
-    required this.title,
+    required this.label,
+    required this.subLabel,
     required this.amount,
     required this.icon,
     required this.color,
     required this.formatter,
+    this.isHighlight = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        height: 100,
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border(left: BorderSide(color: color, width: 5)),
-          boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 5),
-          ],
+    return Container(
+      // FIX: Reduced padding from 20 to 14 to save space
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isHighlight ? color.withOpacity(0.5) : Colors.transparent,
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Row(
-              children: [
-                Icon(icon, size: 18, color: Colors.grey[400]),
-                const SizedBox(width: 8),
-                Text(
-                  title,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        // FIX: Distribute space evenly instead of center
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          // Header
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6), // Reduced padding
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(icon, size: 14, color: color),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  label.toUpperCase(),
                   style: TextStyle(
                     color: Colors.grey[600],
-                    fontSize: 11,
+                    fontSize: 10, // Reduced font
                     fontWeight: FontWeight.bold,
+                    letterSpacing: 0.5,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            FittedBox(
+              ),
+            ],
+          ),
+
+          // Amount (Expanded allows it to take remaining height)
+          Expanded(
+            child: FittedBox(
+              alignment: Alignment.centerLeft,
               fit: BoxFit.scaleDown,
               child: Text(
                 formatter.format(amount),
-                style: TextStyle(
-                  color: color,
+                style: const TextStyle(
+                  color: Colors.black87,
                   fontSize: 22,
                   fontWeight: FontWeight.w800,
                 ),
               ),
             ),
-          ],
-        ),
+          ),
+
+          // Footer
+          Text(
+            subLabel,
+            style: TextStyle(
+              color: color,
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
       ),
+    );
+  }
+}
+
+class _ErpSectionHeader extends StatelessWidget {
+  final String title;
+  final Color color;
+  const _ErpSectionHeader({required this.title, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(width: 4, height: 16, color: color),
+        const SizedBox(width: 8),
+        Text(
+          title,
+          style: TextStyle(
+            color: Colors.blueGrey[700],
+            fontWeight: FontWeight.w700,
+            fontSize: 13,
+            letterSpacing: 1.0,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -661,14 +772,14 @@ class _SummaryTile extends StatelessWidget {
 class _ErpCard extends StatelessWidget {
   final String title;
   final IconData icon;
-  final Color color;
+  final Color accentColor;
   final Widget child;
   final Widget? action;
 
   const _ErpCard({
     required this.title,
     required this.icon,
-    required this.color,
+    required this.accentColor,
     required this.child,
     this.action,
   });
@@ -680,26 +791,27 @@ class _ErpCard extends StatelessWidget {
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8),
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
         ],
       ),
       child: Column(
         children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: BoxDecoration(
-              border: Border(bottom: BorderSide(color: Colors.grey.shade100)),
-            ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
             child: Row(
               children: [
-                Icon(icon, color: color, size: 20),
-                const SizedBox(width: 10),
+                Icon(icon, color: accentColor, size: 18),
+                const SizedBox(width: 12),
                 Text(
-                  title.toUpperCase(),
+                  title,
                   style: TextStyle(
-                    color: color,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13,
+                    color: Colors.black87,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
                   ),
                 ),
                 const Spacer(),
@@ -707,7 +819,8 @@ class _ErpCard extends StatelessWidget {
               ],
             ),
           ),
-          Padding(padding: const EdgeInsets.all(16.0), child: child),
+          const Divider(height: 1, thickness: 1, color: Color(0xFFF1F5F9)),
+          Padding(padding: const EdgeInsets.all(20.0), child: child),
         ],
       ),
     );
@@ -720,7 +833,7 @@ class _StatRow extends StatelessWidget {
   final NumberFormat fmt;
   final bool isBold;
   final Color? color;
-  final IconData? icon;
+  final String? helpText;
 
   const _StatRow(
     this.label,
@@ -728,38 +841,40 @@ class _StatRow extends StatelessWidget {
     this.fmt, {
     this.isBold = false,
     this.color,
-    this.icon,
+    this.helpText,
   });
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Row(
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (icon != null) ...[
-                Icon(icon, size: 16, color: Colors.grey[400]),
-                const SizedBox(width: 8),
-              ],
               Text(
                 label,
                 style: TextStyle(
-                  fontWeight: isBold ? FontWeight.bold : FontWeight.w500,
+                  fontWeight: isBold ? FontWeight.w700 : FontWeight.w500,
                   color: Colors.grey[800],
-                  fontSize: 13,
+                  fontSize: 14,
                 ),
               ),
+              if (helpText != null)
+                Text(
+                  helpText!,
+                  style: TextStyle(fontSize: 10, color: Colors.grey[400]),
+                ),
             ],
           ),
           Text(
             fmt.format(amount),
             style: TextStyle(
-              fontWeight: isBold ? FontWeight.bold : FontWeight.w500,
+              fontWeight: isBold ? FontWeight.w800 : FontWeight.w500,
               color: color ?? Colors.black87,
-              fontSize: isBold ? 15 : 13,
+              fontSize: isBold ? 16 : 14,
             ),
           ),
         ],
@@ -768,19 +883,59 @@ class _StatRow extends StatelessWidget {
   }
 }
 
-class _FooterItem extends StatelessWidget {
+class _ManualItemRow extends StatelessWidget {
+  final String label;
+  final double amount;
+  final NumberFormat compactFmt;
+  final VoidCallback onDelete;
+
+  const _ManualItemRow({
+    required this.label,
+    required this.amount,
+    required this.compactFmt,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6.0),
+      child: Row(
+        children: [
+          Icon(Icons.circle, size: 6, color: Colors.grey[300]),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(fontSize: 13, color: Colors.black87),
+            ),
+          ),
+          Text(
+            compactFmt.format(amount),
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(width: 8),
+          InkWell(
+            onTap: onDelete,
+            child: Icon(Icons.close, size: 16, color: Colors.red[300]),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EquationItem extends StatelessWidget {
   final String label;
   final double amount;
   final NumberFormat fmt;
   final Color color;
-  final bool isLarge;
 
-  const _FooterItem({
+  const _EquationItem({
     required this.label,
     required this.amount,
     required this.fmt,
     required this.color,
-    this.isLarge = false,
   });
 
   @override
@@ -789,14 +944,14 @@ class _FooterItem extends StatelessWidget {
       children: [
         Text(
           label,
-          style: const TextStyle(color: Colors.white60, fontSize: 11),
+          style: const TextStyle(color: Colors.white70, fontSize: 10),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 2),
         Text(
           fmt.format(amount),
           style: TextStyle(
             color: color,
-            fontSize: isLarge ? 24 : 16,
+            fontSize: 16,
             fontWeight: FontWeight.bold,
           ),
         ),

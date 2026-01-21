@@ -1,6 +1,8 @@
 // ignore_for_file: deprecated_member_use
+
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Vendor/vendorcontroller.dart';
@@ -19,7 +21,8 @@ class ShipmentController extends GetxController {
 
   // --- STATE ---
   final RxList<ShipmentModel> shipments = <ShipmentModel>[].obs;
-  final RxBool isLoading = false.obs; 
+  // This variable now controls the Spinner on the button
+  final RxBool isLoading = false.obs;
   StreamSubscription? _shipmentSubscription;
 
   // --- MANIFEST INPUTS ---
@@ -35,15 +38,14 @@ class ShipmentController extends GetxController {
   final TextEditingController shipmentNameCtrl = TextEditingController();
   final TextEditingController searchCtrl = TextEditingController();
 
-  // --- FORMATTER HELPER (BDT Prefix, No K/M abbreviations) ---
+  // --- FORMATTER HELPER ---
   final NumberFormat _currencyFormatter = NumberFormat('#,##0.00', 'en_US');
 
-  /// Formats double to "BDT 1,200,500.00"
   String formatMoney(double amount) {
     return "BDT ${_currencyFormatter.format(amount)}";
   }
 
-  // --- DASHBOARD TOTALS (Raw values for logic) ---
+  // --- DASHBOARD TOTALS ---
   double get totalOnWayValue => shipments
       .where((s) => !s.isReceived)
       .fold(0.0, (sumv, item) => sumv + item.totalAmount);
@@ -55,7 +57,6 @@ class ShipmentController extends GetxController {
   double get currentManifestTotalCost =>
       currentManifestItems.fold(0.0, (sumv, item) => sumv + item.totalItemCost);
 
-  // --- DASHBOARD TOTALS (Formatted Strings for UI) ---
   String get totalOnWayDisplay => formatMoney(totalOnWayValue);
   String get totalCompletedDisplay => formatMoney(totalCompletedValue);
   String get currentManifestTotalDisplay =>
@@ -69,7 +70,7 @@ class ShipmentController extends GetxController {
 
   @override
   void onClose() {
-    _shipmentSubscription?.cancel(); // Prevent memory leaks
+    _shipmentSubscription?.cancel();
     totalCartonCtrl.dispose();
     totalWeightCtrl.dispose();
     shipmentNameCtrl.dispose();
@@ -91,7 +92,7 @@ class ShipmentController extends GetxController {
 
   void onSearchChanged(String val) => productController.search(val);
 
-  // --- 1. ADD TO MANIFEST ---
+  // --- ADD TO MANIFEST ---
   Future<void> addToManifestAndVerify({
     required Product product,
     required Map<String, dynamic> updates,
@@ -101,7 +102,6 @@ class ShipmentController extends GetxController {
   }) async {
     isLoading.value = true;
     try {
-      // Safe parsing helper to avoid crashes
       dynamic safeGet(String key, dynamic fallback) => updates[key] ?? fallback;
 
       final Map<String, dynamic> fullBody = {
@@ -124,7 +124,6 @@ class ShipmentController extends GetxController {
             product.shipmentDate != null
                 ? DateFormat('yyyy-MM-dd').format(product.shipmentDate!)
                 : null,
-        // Preserve existing stock
         'stock_qty': product.stockQty,
         'avg_purchase_price': product.avgPurchasePrice,
         'sea_stock_qty': product.seaStockQty,
@@ -132,20 +131,15 @@ class ShipmentController extends GetxController {
         'local_qty': product.localQty,
       };
 
-      // 1. Update Product details on Server
       await productController.updateProduct(product.id, fullBody);
-
-      // Inside ShipmentController -> addToManifestAndVerify
 
       final item = ShipmentItem(
         productId: product.id,
         productName: fullBody['name'],
         productModel: product.model,
         productBrand: product.brand,
-        // NEW FIELDS
         productCategory: product.category,
         unitWeightSnapshot: (fullBody['weight'] as num).toDouble(),
-        // END NEW FIELDS
         seaQty: seaQty,
         airQty: airQty,
         cartonNo: cartonNo,
@@ -165,7 +159,7 @@ class ShipmentController extends GetxController {
 
   void removeFromManifest(int index) => currentManifestItems.removeAt(index);
 
-  // --- 2. SAVE MANIFEST ---
+  // --- SAVE MANIFEST ---
   Future<void> saveShipmentToFirestore() async {
     if (currentManifestItems.isEmpty) {
       Get.snackbar("Error", "No items to ship");
@@ -189,7 +183,6 @@ class ShipmentController extends GetxController {
 
       await _firestore.collection('shipments').add(newShipment.toMap());
 
-      // Reset UI
       currentManifestItems.clear();
       shipmentNameCtrl.clear();
       totalCartonCtrl.text = '0';
@@ -205,19 +198,38 @@ class ShipmentController extends GetxController {
     }
   }
 
+  // --- RECEIVE SHIPMENT (No Dialog, using isLoading) ---
   Future<void> receiveShipmentFast(
     ShipmentModel shipment,
     DateTime arrivalDate, {
     String? selectedVendorId,
   }) async {
-    // 1. Show Blocking Dialog
-    _showLoadingDialog(shipment.items.length);
+    // 1. Start Loading - Controls the UI button spinner
+    isLoading.value = true;
+
+    // Optional: Notify user operation started
+    Get.snackbar(
+      "Processing",
+      "Updating stocks...",
+      snackPosition: SnackPosition.BOTTOM,
+      backgroundColor: Colors.blue[100],
+      duration: const Duration(seconds: 1),
+    );
 
     try {
-      // Format Date for API
+      // --- AUTH CHECK ---
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        throw "AUTH ERROR: Not logged in. Check API Key Domain restrictions.";
+      }
+
+      if (shipment.docId == null || shipment.docId!.isEmpty) {
+        throw "DATA ERROR: Shipment ID is missing.";
+      }
+
       final String dateString = DateFormat('yyyy-MM-dd').format(arrivalDate);
 
-      // --- A. PREPARE BULK DATA ---
+      // --- API CALL ---
       List<Map<String, dynamic>> bulkItems =
           shipment.items.map((item) {
             return {
@@ -226,130 +238,65 @@ class ShipmentController extends GetxController {
               'air_qty': item.airQty,
               'local_qty': 0,
               'local_price': 0.0,
-              'shipmentdate': dateString, // Pass date to server
+              'shipmentdate': dateString,
             };
           }).toList();
 
-      // --- B. CALL NEW API ---
       bool success = await productController.addBulkStockWithValuation(
         bulkItems,
       );
       if (!success) throw "Server rejected bulk update";
 
-      // --- C. VENDOR CREDIT ---
-      if (selectedVendorId != null && selectedVendorId.isNotEmpty) {
-        await vendorController.addAutomatedShipmentCredit(
-          vendorId: selectedVendorId,
-          amount: shipment.totalAmount,
-          shipmentName: shipment.shipmentName,
-          date: arrivalDate,
-        );
-      }
-
-      // --- D. UPDATE SHIPMENT STATUS ---
-      await _firestore.collection('shipments').doc(shipment.docId).update({
+      // --- FIRESTORE UPDATE (Timestamp Fix Included) ---
+      final Map<String, dynamic> updateData = {
         'isReceived': true,
+        // CRITICAL: Convert DateTime to Timestamp for Web
         'arrivalDate': Timestamp.fromDate(arrivalDate),
         'vendorId': selectedVendorId,
-      });
+      };
 
-      // ==============================================================
-      // FIX IS HERE: CLOSE DIALOG *BEFORE* SNACKBAR
-      // ==============================================================
+      await _firestore
+          .collection('shipments')
+          .doc(shipment.docId)
+          .update(updateData);
 
-      // 1. Force Close Keyboard
-      FocusManager.instance.primaryFocus?.unfocus();
-
-      // 2. Close the Loading Dialog explicitly
-      if (Get.isDialogOpen == true) {
-        Get.back();
+      // --- VENDOR CREDIT ---
+      if (selectedVendorId != null && selectedVendorId.isNotEmpty) {
+        try {
+          await vendorController.addAutomatedShipmentCredit(
+            vendorId: selectedVendorId,
+            amount: shipment.totalAmount,
+            shipmentName: shipment.shipmentName,
+            date: arrivalDate,
+          );
+        } catch (e) {
+          debugPrint("Vendor credit error: $e");
+        }
       }
 
-      // 3. Small delay to let the dialog animation finish
-      await Future.delayed(const Duration(milliseconds: 200));
-
-      // 4. NOW Show Success Snackbar (It stays visible now)
       Get.snackbar(
-        "Complete",
-        "Stock, Prices & Dates Updated",
+        "Success",
+        "Shipment Received & Stock Updated",
         backgroundColor: Colors.green,
         colorText: Colors.white,
-        duration: const Duration(seconds: 3),
-        snackPosition: SnackPosition.BOTTOM,
-        margin: const EdgeInsets.all(10),
       );
     } catch (e) {
-
-      // Close Dialog if error occurred
-      if (Get.isDialogOpen == true) Get.back();
-
-      Get.snackbar(
-        "Error",
-        "Process Failed: $e",
-        backgroundColor: Colors.red,
-        colorText: Colors.white,
-        duration: const Duration(seconds: 5),
+      Get.defaultDialog(
+        title: "Failed",
+        middleText: "Error receiving shipment: $e",
+        textConfirm: "OK",
+        onConfirm: () => Get.back(),
       );
+    } finally {
+      // 2. Stop Loading - Button returns to normal (or hidden if received)
+      isLoading.value = false;
+      FocusManager.instance.primaryFocus?.unfocus();
     }
-    // Remove the 'finally' block to avoid double-closing
-  }
-
-  // HELPER: MODERN LOADING DIALOG
-  void _showLoadingDialog(int count) {
-    Get.dialog(
-      PopScope(
-        canPop: false,
-        child: Dialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          elevation: 10,
-          backgroundColor: Colors.white,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const SizedBox(
-                  height: 50,
-                  width: 50,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 4,
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      Color(0xFF2563EB),
-                    ),
-                    backgroundColor: Color(0xFFEFF6FF),
-                  ),
-                ),
-                const SizedBox(height: 24),
-                const Text(
-                  "Processing Stock Entry",
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF1E293B),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  "Updating $count items & recalculating prices...",
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.grey, fontSize: 14),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-      barrierDismissible: false,
-    );
   }
 
   // --- PDF GENERATION ---
   Future<void> generatePdf(ShipmentModel shipment) async {
     final doc = pw.Document();
-
-    // Using standard fonts to ensure compatibility
     final font = await PdfGoogleFonts.robotoRegular();
     final fontBold = await PdfGoogleFonts.robotoBold();
 
@@ -361,7 +308,7 @@ class ShipmentController extends GetxController {
                 "${e.productModel}\n${e.cartonNo}",
                 "${e.seaQty}",
                 "${e.airQty}",
-                formatMoney(e.totalItemCost), // Used formatter here for PDF too
+                formatMoney(e.totalItemCost),
               ],
             )
             .toList();
@@ -395,7 +342,7 @@ class ShipmentController extends GetxController {
                       ),
                     pw.SizedBox(height: 5),
                     pw.Text(
-                      "Total Value: ${formatMoney(shipment.totalAmount)}", // Formatted
+                      "Total Value: ${formatMoney(shipment.totalAmount)}",
                       style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
                     ),
                   ],

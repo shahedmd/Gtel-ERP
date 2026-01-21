@@ -1,13 +1,16 @@
 // ignore_for_file: deprecated_member_use
 
+import 'dart:async';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // Added for Auth Check
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:gtel_erp/Vendor/vendorcontroller.dart';
-import 'package:intl/intl.dart';
 import 'package:gtel_erp/Shipment/controller.dart';
 import 'package:gtel_erp/Shipment/shipmentdialog.dart';
-import 'package:gtel_erp/Shipment/shipmodel.dart';
+import 'package:gtel_erp/Vendor/vendorcontroller.dart';
+import 'package:intl/intl.dart';
 import 'package:gtel_erp/Stock/controller.dart';
+import 'package:gtel_erp/Shipment/shipmodel.dart';
 
 // --- THEME CONSTANTS ---
 const Color kDarkSlate = Color(0xFF1E293B);
@@ -15,6 +18,10 @@ const Color kPrimary = Color(0xFF2563EB);
 const Color kSuccess = Color(0xFF10B981);
 const Color kWarning = Color(0xFFF59E0B);
 const Color kBg = Color(0xFFF1F5F9);
+
+// ==============================================================================
+// 1. SHIPMENT PAGE (UI)
+// ==============================================================================
 
 class ShipmentPage extends StatelessWidget {
   const ShipmentPage({super.key});
@@ -45,7 +52,6 @@ class ShipmentPage extends StatelessWidget {
             tooltip: "Refresh Data",
             onPressed: () {
               productController.fetchProducts();
-              // Re-bind stream if needed, usually auto-updates
             },
           ),
         ],
@@ -125,7 +131,7 @@ class ShipmentPage extends StatelessWidget {
             child: Obx(
               () => _MetricCard(
                 title: "ON THE WAY",
-                value: ctrl.totalOnWayDisplay, // Uses controller formatter
+                value: ctrl.totalOnWayDisplay,
                 color: kWarning,
                 icon: Icons.sailing,
               ),
@@ -136,7 +142,7 @@ class ShipmentPage extends StatelessWidget {
             child: Obx(
               () => _MetricCard(
                 title: "COMPLETED",
-                value: ctrl.totalCompletedDisplay, // Uses controller formatter
+                value: ctrl.totalCompletedDisplay,
                 color: kSuccess,
                 icon: Icons.check_circle_outline,
               ),
@@ -147,7 +153,7 @@ class ShipmentPage extends StatelessWidget {
     );
   }
 
-  // --- CREATE MANIFEST SCREEN (POS SPLIT VIEW) ---
+  // --- CREATE MANIFEST SCREEN ---
   void _openCreateManifestScreen(
     BuildContext context,
     ShipmentController ctrl,
@@ -160,7 +166,7 @@ class ShipmentPage extends StatelessWidget {
     ctrl.totalWeightCtrl.text = "0";
     ctrl.shipmentDateInput.value = DateTime.now();
     ctrl.searchCtrl.clear();
-    prodCtrl.search(''); // Clear search filter
+    prodCtrl.search('');
 
     Get.to(
       () => Scaffold(
@@ -194,15 +200,12 @@ class ShipmentPage extends StatelessWidget {
         ),
         body: Row(
           children: [
-            // LEFT: MANIFEST DETAILS (65%)
+            // LEFT: MANIFEST DETAILS
             Expanded(
               flex: 13,
               child: Column(
                 children: [
-                  // Header Inputs
                   _buildManifestFormHeader(context, ctrl),
-
-                  // Item List
                   Expanded(
                     child: Container(
                       margin: const EdgeInsets.all(16),
@@ -332,7 +335,7 @@ class ShipmentPage extends StatelessWidget {
               ),
             ),
 
-            // RIGHT: PRODUCT CATALOG (35%)
+            // RIGHT: PRODUCT CATALOG
             Expanded(
               flex: 7,
               child: Container(
@@ -541,8 +544,6 @@ class ShipmentPage extends StatelessWidget {
   }
 }
 
-// --- WIDGET COMPONENTS ---
-
 class _MetricCard extends StatelessWidget {
   final String title;
   final String value;
@@ -736,18 +737,24 @@ class _ShipmentCard extends StatelessWidget {
                 ),
                 const Spacer(),
                 if (!item.isReceived)
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: kDarkSlate,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 10,
-                      ),
-                    ),
-                    icon: const Icon(Icons.download_done, size: 18),
-                    label: const Text("RECEIVE STOCK"),
-                    onPressed: () => _showReceiveDialog(context, item),
+                  Obx(
+                    () =>
+                        controller.isLoading.value
+                            ? const CircularProgressIndicator()
+                            : ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: kDarkSlate,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 20,
+                                  vertical: 10,
+                                ),
+                              ),
+                              icon: const Icon(Icons.download_done, size: 18),
+                              label: const Text("RECEIVE STOCK"),
+                              onPressed:
+                                  () => _showReceiveDialog(context, item),
+                            ),
                   )
                 else
                   TextButton.icon(
@@ -768,12 +775,10 @@ class _ShipmentCard extends StatelessWidget {
 
   void _showReceiveDialog(BuildContext context, ShipmentModel item) {
     final ShipmentController controller = Get.find<ShipmentController>();
-    final VendorController vendorCtrl =
-        Get.find<VendorController>(); // Get Vendor Controller
+    final VendorController vendorCtrl = Get.find<VendorController>();
 
     final Rx<DateTime> selectedDate = DateTime.now().obs;
-    final Rxn<String> selectedVendorId =
-        Rxn<String>(); // Holds selected vendor ID
+    final Rxn<String> selectedVendorId = Rxn<String>();
 
     Get.dialog(
       Dialog(
@@ -850,7 +855,7 @@ class _ShipmentCard extends StatelessWidget {
 
               const SizedBox(height: 16),
 
-              // 2. VENDOR SELECTION (NEW)
+              // 2. VENDOR SELECTION
               const Text(
                 "Supplier / Vendor (For Credit Entry):",
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
@@ -864,7 +869,6 @@ class _ShipmentCard extends StatelessWidget {
                   color: Colors.white,
                 ),
                 child: Obx(() {
-                  // If no vendors exist, show hint
                   if (vendorCtrl.vendors.isEmpty) {
                     return const Padding(
                       padding: EdgeInsets.all(12),
@@ -916,17 +920,13 @@ class _ShipmentCard extends StatelessWidget {
                         foregroundColor: Colors.white,
                       ),
                       onPressed: () async {
-                        // 1. Force close keyboard immediately
+                        // 1. Force close keyboard
                         FocusScope.of(context).unfocus();
 
-                        // 2. Close the Selection Dialog
+                        // 2. Close the SELECTION Dialog (Not the loading one)
                         Get.back();
 
-                        // 3. CRITICAL: Wait for the dialog close animation to finish.
-                        // This prevents the "Loading Dialog" from colliding with the "Selection Dialog".
-                        await Future.delayed(const Duration(milliseconds: 350));
-
-                        // 4. Now safe to call the controller
+                        // 3. Call Controller (No loading dialog will appear now)
                         controller.receiveShipmentFast(
                           item,
                           selectedDate.value,
