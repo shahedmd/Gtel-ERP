@@ -19,11 +19,10 @@ import 'login.dart';
 
 
 Future<void> main() async {
+  
   WidgetsFlutterBinding.ensureInitialized();
-
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   Get.put(AuthController());
-  // 2. Your existing controllers (DO NOT REMOVE)
   Get.put(MonthlyExpensesController());
   Get.put(DailySalesController());
   Get.put(DailyExpensesController());
@@ -33,7 +32,7 @@ Future<void> main() async {
   Get.put(CashDrawerController());
   Get.put(ShipmentController());
   Get.put(StaffController());
-  Get.put(DebtorPurchaseController());
+  Get.put(DebtorPurchaseController()); 
   runApp(const MyApp());
 }
 

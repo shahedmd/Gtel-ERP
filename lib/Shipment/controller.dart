@@ -102,12 +102,15 @@ class ShipmentController extends GetxController {
   }) async {
     isLoading.value = true;
     try {
+      // Helper to safely get new value or fallback to existing product value
       dynamic safeGet(String key, dynamic fallback) => updates[key] ?? fallback;
 
       final Map<String, dynamic> fullBody = {
         'id': product.id,
         'name': safeGet('name', product.name),
-        'category': product.category,
+        'category':
+            product
+                .category, // Assuming category doesn't change here, or add safeGet if it does
         'brand': product.brand,
         'model': product.model,
         'weight': safeGet('weight', product.weight),
@@ -117,13 +120,21 @@ class ShipmentController extends GetxController {
         'air': safeGet('air', product.air),
         'shipmenttax': safeGet('shipmenttax', product.shipmentTax),
         'shipmenttaxair': safeGet('shipmenttaxair', product.shipmentTaxAir),
-        'agent': product.agent,
-        'wholesale': product.wholesale,
+
+        // --- UPDATED LINES START ---
+        'agent': safeGet('agent', product.agent), // Now updates Agent Price
+        'wholesale': safeGet(
+          'wholesale',
+          product.wholesale,
+        ), // Now updates Wholesale Price
+
+        // --- UPDATED LINES END ---
         'shipmentno': product.shipmentNo,
         'shipmentdate':
             product.shipmentDate != null
                 ? DateFormat('yyyy-MM-dd').format(product.shipmentDate!)
                 : null,
+        // Preserve existing stock data
         'stock_qty': product.stockQty,
         'avg_purchase_price': product.avgPurchasePrice,
         'sea_stock_qty': product.seaStockQty,
@@ -131,8 +142,10 @@ class ShipmentController extends GetxController {
         'local_qty': product.localQty,
       };
 
+      // 1. Update Product details on Server
       await productController.updateProduct(product.id, fullBody);
 
+      // 2. Add to Local Manifest List
       final item = ShipmentItem(
         productId: product.id,
         productName: fullBody['name'],
@@ -143,12 +156,13 @@ class ShipmentController extends GetxController {
         seaQty: seaQty,
         airQty: airQty,
         cartonNo: cartonNo,
+        // Use the updated prices for the manifest snapshot
         seaPriceSnapshot: (fullBody['sea'] as num).toDouble(),
         airPriceSnapshot: (fullBody['air'] as num).toDouble(),
       );
 
       currentManifestItems.add(item);
-      Get.back();
+      Get.back(); // Close Dialog
       Get.snackbar("Success", "Product Updated & Added to Manifest");
     } catch (e) {
       Get.snackbar("Error", "Update Failed: $e");

@@ -7,12 +7,12 @@ import 'package:get/get.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-
-// EXTERNAL CONTROLLERS
 import 'package:gtel_erp/Cash/controller.dart';
 import 'package:gtel_erp/Web%20Screen/Expenses/dailycontroller.dart';
 import '../Sales/controller.dart';
 import 'model.dart';
+
+
 
 class DebatorController extends GetxController {
   final FirebaseFirestore db = FirebaseFirestore.instance;
@@ -51,10 +51,6 @@ class DebatorController extends GetxController {
     calculateTotalOutstanding();
     _silentAutoRepair();
   }
-
-  // ------------------------------------------------------------------
-  // 1. DATA LOADING & BREAKDOWN
-  // ------------------------------------------------------------------
 
   Future<void> loadBodies({bool loadMore = false}) async {
     if (loadMore) {
@@ -273,9 +269,7 @@ class DebatorController extends GetxController {
     }
   }
 
-  // ------------------------------------------------------------------
-  // 3. ADD TRANSACTION (UPDATED WITH NEW LOGIC)
-  // ------------------------------------------------------------------
+
 
   Future<void> addTransaction({
     required String debtorId,
@@ -349,8 +343,9 @@ class DebatorController extends GetxController {
           'linkedDebtorId': debtorId,
           'linkedTxId': txid,
         });
-        if (!Get.isRegistered<DailyExpensesController>())
+        if (!Get.isRegistered<DailyExpensesController>()) {
           Get.put(DailyExpensesController());
+        }
         try {
           await Get.find<DailyExpensesController>().addDailyExpense(
             "Loan to $debtorName",
@@ -374,8 +369,9 @@ class DebatorController extends GetxController {
       }
       // D. Sales Logic (Credit/Debit)
       else if (type == 'credit' || type == 'debit') {
-        if (!Get.isRegistered<DailySalesController>())
+        if (!Get.isRegistered<DailySalesController>()) {
           Get.put(DailySalesController());
+        }
         final daily = Get.find<DailySalesController>();
 
         if (type == 'credit') {
@@ -464,13 +460,16 @@ class DebatorController extends GetxController {
                 .collection('cash_ledger')
                 .where('linkedTxId', isEqualTo: transactionId)
                 .get();
-        for (var doc in lSnap.docs) await doc.reference.delete();
+        for (var doc in lSnap.docs) {
+          await doc.reference.delete();
+        }
       }
 
       if (type == 'credit' || type == 'debit') {
         // Keeping your legacy sales cleanup logic
-        if (!Get.isRegistered<DailySalesController>())
+        if (!Get.isRegistered<DailySalesController>()) {
           Get.put(DailySalesController());
+        }
         final daily = Get.find<DailySalesController>();
         final debtorSnap =
             await db.collection('debatorbody').doc(debtorId).get();
@@ -508,10 +507,12 @@ class DebatorController extends GetxController {
       loadDebtorTransactions(debtorId);
       loadBodies();
       calculateTotalOutstanding();
-      if (Get.isRegistered<CashDrawerController>())
+      if (Get.isRegistered<CashDrawerController>()) {
         Get.find<CashDrawerController>().fetchData();
-      if (Get.isRegistered<DailyExpensesController>())
+      }
+      if (Get.isRegistered<DailyExpensesController>()) {
         Get.find<DailyExpensesController>().onInit();
+      }
 
       Get.snackbar("Deleted", "Transaction removed & Balance corrected");
     } catch (e) {

@@ -31,6 +31,10 @@ void showShipmentEntryDialog(
   final seaPriceC = TextEditingController(text: p.sea.toStringAsFixed(2));
   final airPriceC = TextEditingController(text: p.air.toStringAsFixed(2));
 
+  // --- NEW: SALES PRICING ---
+  final agentC = TextEditingController(text: p.agent.toString());
+  final wholesaleC = TextEditingController(text: p.wholesale.toString());
+
   // Current Stock (Read Only)
   final oldSeaStockC = TextEditingController(text: p.seaStockQty.toString());
   final oldAirStockC = TextEditingController(text: p.airStockQty.toString());
@@ -72,11 +76,12 @@ void showShipmentEntryDialog(
       backgroundColor: Colors.grey[50],
       insetPadding: const EdgeInsets.all(16),
       child: Container(
-        width: 600, // Fixed width for POS feel
-        constraints: const BoxConstraints(maxHeight: 700),
+        width: 600,
+        constraints: const BoxConstraints(
+          maxHeight: 750,
+        ), // Increased height slightly
         child: Column(
           children: [
-            // HEADER
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
               decoration: BoxDecoration(
@@ -117,7 +122,6 @@ void showShipmentEntryDialog(
               ),
             ),
 
-            // BODY
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(20),
@@ -142,7 +146,6 @@ void showShipmentEntryDialog(
                       ],
                     ),
 
-                    // B. COSTING LOGIC
                     const SizedBox(height: 20),
                     _posHeader("COST CALCULATION (AUTO UPDATES)"),
                     Row(
@@ -173,7 +176,6 @@ void showShipmentEntryDialog(
                       ],
                     ),
 
-                    // C. LANDING COST RESULT
                     const SizedBox(height: 20),
                     Row(
                       children: [
@@ -194,6 +196,25 @@ void showShipmentEntryDialog(
                             icon: Icons.air,
                             color: Colors.orange[800]!,
                             bgColor: Colors.orange[50]!,
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    // --- NEW SECTION: SALES PRICING ---
+                    const SizedBox(height: 20),
+                    _posHeader("SALES PRICING (UPDATE)"),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _posInput(agentC, "Agent Price", isNum: true),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _posInput(
+                            wholesaleC,
+                            "Wholesale",
+                            isNum: true,
                           ),
                         ),
                       ],
@@ -226,7 +247,6 @@ void showShipmentEntryDialog(
                       ),
                     ),
 
-                    // E. SHIPMENT ACTION AREA
                     const SizedBox(height: 25),
                     Container(
                       padding: const EdgeInsets.all(16),
@@ -334,6 +354,11 @@ void showShipmentEntryDialog(
                             double.tryParse(airTaxC.text) ?? p.shipmentTaxAir,
                         'sea': double.tryParse(seaPriceC.text) ?? p.sea,
                         'air': double.tryParse(airPriceC.text) ?? p.air,
+
+                        // NEW FIELDS ADDED HERE
+                        'agent': double.tryParse(agentC.text) ?? p.agent,
+                        'wholesale':
+                            double.tryParse(wholesaleC.text) ?? p.wholesale,
                       };
 
                       // 2. Send to Controller

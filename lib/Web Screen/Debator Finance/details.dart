@@ -10,9 +10,9 @@ import 'model.dart';
 import 'dart:js_interop';
 import 'dart:typed_data';
 import 'package:web/web.dart' as web;
-
-// Import your Purchase Page
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/Debtor%20Purchase/purchasepage.dart';
+
+
 
 class Debatordetails extends StatefulWidget {
   final String id;
@@ -433,12 +433,13 @@ class _DebatordetailsState extends State<Debatordetails> {
           _tableHeader(),
           Obx(() {
             if (controller.isTxLoading.value &&
-                controller.currentTransactions.isEmpty)
+                controller.currentTransactions.isEmpty) {
               return const Padding(
                 padding: EdgeInsets.all(40),
                 child: CircularProgressIndicator(),
               );
-            if (controller.currentTransactions.isEmpty)
+            }
+            if (controller.currentTransactions.isEmpty) {
               return const Padding(
                 padding: EdgeInsets.all(40),
                 child: Text(
@@ -446,6 +447,7 @@ class _DebatordetailsState extends State<Debatordetails> {
                   style: TextStyle(color: textMuted),
                 ),
               );
+            }
             return ListView.separated(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
@@ -758,8 +760,9 @@ class _DebatordetailsState extends State<Debatordetails> {
                               ),
                             ],
                             onChanged: (v) {
-                              if (v != null && !v.contains('div'))
+                              if (v != null && !v.contains('div')) {
                                 selectedType.value = v;
+                              }
                             },
                           ),
                         ),
