@@ -11,6 +11,7 @@ import 'package:gtel_erp/Web%20Screen/Debator%20Finance/debatorcontroller.dart';
 import 'package:gtel_erp/Web%20Screen/Expenses/dailycontroller.dart';
 import 'package:gtel_erp/Web%20Screen/Sales/controller.dart';
 import 'package:gtel_erp/Web%20Screen/Staff/controller.dart';
+import 'package:gtel_erp/Web%20Screen/overviewcontroller.dart';
 import 'Web Screen/Expenses/monthlycontroller.dart';
 import 'Web Screen/homepage.dart';
 import 'auth.dart';
@@ -34,6 +35,7 @@ Future<void> main() async {
   Get.put(ShipmentController());
   Get.put(StaffController());
   Get.put(DebtorPurchaseController()); 
+  Get.put(OverviewController());
   runApp(const MyApp());
 }
 
