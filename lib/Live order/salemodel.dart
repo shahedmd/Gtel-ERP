@@ -7,7 +7,7 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-import '../Stock/controller.dart';
+import '../Stock/controller.dart'; // Your ProductController path
 import '../Stock/model.dart';
 import '../Web Screen/Debator Finance/debatorcontroller.dart';
 import '../Web Screen/Debator Finance/model.dart';
@@ -27,7 +27,6 @@ class SalesCartItem {
   double get subtotal => priceAtSale * quantity.value;
 }
 
-// --- CONTROLLER ---
 class LiveSalesController extends GetxController {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
@@ -36,7 +35,12 @@ class LiveSalesController extends GetxController {
   final debtorCtrl = Get.find<DebatorController>();
   final dailyCtrl = Get.find<DailySalesController>();
 
-  // --- CONSTANTS ---
+  // --- STATE VARIABLES ---
+  final RxString customerType = "Retailer".obs;
+  final RxBool isConditionSale = false.obs;
+  final RxList<SalesCartItem> cart = <SalesCartItem>[].obs;
+  final RxBool isProcessing = false.obs;
+  final Rxn<DebtorModel> selectedDebtor = Rxn<DebtorModel>();
   final List<String> courierList = [
     'A.J.R',
     'Pathao',
@@ -48,30 +52,26 @@ class LiveSalesController extends GetxController {
     'RedX',
   ];
 
-  // --- STATE VARIABLES ---
-  final RxString customerType = "Retailer".obs;
-  final RxBool isConditionSale = false.obs;
-  final RxList<SalesCartItem> cart = <SalesCartItem>[].obs;
-  final RxBool isProcessing = false.obs;
-  final Rxn<DebtorModel> selectedDebtor = Rxn<DebtorModel>();
+  // ** DEBTOR BALANCES **
+  final RxDouble debtorOldDue = 0.0.obs;
+  final RxDouble debtorRunningDue = 0.0.obs;
+
+  // Combined Due for UI Display
+  double get totalPreviousDue => debtorOldDue.value + debtorRunningDue.value;
 
   // --- TEXT CONTROLLERS ---
   final debtorPhoneSearch = TextEditingController();
   final nameC = TextEditingController();
   final phoneC = TextEditingController();
   final shopC = TextEditingController();
-
-  // Condition Sale Specifics
   final addressC = TextEditingController();
   final challanC = TextEditingController();
   final cartonsC = TextEditingController();
   final RxnString selectedCourier = RxnString();
-
-  // Financials
   final discountC = TextEditingController();
   final RxDouble discountVal = 0.0.obs;
 
-  // --- PAYMENT CONTROLLERS ---
+  // Payment Controllers
   final cashC = TextEditingController();
   final bkashC = TextEditingController();
   final bkashNumberC = TextEditingController();
@@ -95,18 +95,43 @@ class LiveSalesController extends GetxController {
 
     ever(customerType, (_) => _handleTypeChange());
     ever(isConditionSale, (_) => updatePaymentCalculations());
-
-    // Auto-fetch courier dues
     ever(selectedCourier, (val) {
       if (val != null) fetchCourierTotalDue(val);
     });
+
+    // Ensure products are fetched initially
+    if (productCtrl.allProducts.isEmpty) {
+      productCtrl.fetchProducts();
+    }
+
+    ever(selectedDebtor, (DebtorModel? debtor) async {
+      if (debtor != null) {
+        var breakdown = await debtorCtrl.getInstantDebtorBreakdown(debtor.id);
+        debtorOldDue.value = breakdown['loan'] ?? 0.0;
+        debtorRunningDue.value = breakdown['running'] ?? 0.0;
+      } else {
+        debtorOldDue.value = 0.0;
+        debtorRunningDue.value = 0.0;
+      }
+    });
   }
+
+  // --- PAGINATION HELPERS (Delegates to ProductController) ---
+  int get currentPage => productCtrl.currentPage.value;
+  int get totalPages =>
+      (productCtrl.totalProducts.value / productCtrl.pageSize.value).ceil();
+
+  void nextPage() => productCtrl.nextPage();
+  void prevPage() => productCtrl.previousPage();
+  // -----------------------------------------------------------
 
   double _round(double val) => double.parse(val.toStringAsFixed(2));
 
   void _handleTypeChange() {
     selectedDebtor.value = null;
     debtorPhoneSearch.clear();
+    debtorOldDue.value = 0.0;
+    debtorRunningDue.value = 0.0;
 
     for (var item in cart) {
       double newPrice =
@@ -128,7 +153,7 @@ class LiveSalesController extends GetxController {
     totalPaidInput.value = _round(cash + bkash + nagad + bank);
 
     if (!isConditionSale.value) {
-      if (totalPaidInput.value > grandTotal) {
+      if (totalPaidInput.value > grandTotal && customerType.value != "Debtor") {
         changeReturn.value = _round(totalPaidInput.value - grandTotal);
       } else {
         changeReturn.value = 0.0;
@@ -222,16 +247,11 @@ class LiveSalesController extends GetxController {
     }
   }
 
-  // ==================================================================
-  // 🔥 FINALIZATION LOGIC
-  // ==================================================================
   Future<void> finalizeSale() async {
     if (cart.isEmpty) {
       Get.snackbar("Error", "Cart is empty");
       return;
     }
-
-    // --- Validation ---
     if (isConditionSale.value) {
       if (addressC.text.isEmpty) {
         Get.snackbar("Required", "Delivery Address required");
@@ -247,10 +267,8 @@ class LiveSalesController extends GetxController {
       }
     }
 
-    // 1. DEFAULT CHALLAN LOGIC
     String finalChallan =
         challanC.text.trim().isEmpty ? "0" : challanC.text.trim();
-
     String fName = "";
     String fPhone = "";
     String? debtorId;
@@ -273,45 +291,77 @@ class LiveSalesController extends GetxController {
     }
 
     isProcessing.value = true;
-
-    // Prepare Data
     final String invNo = _generateInvoiceID();
     final DateTime saleDate = DateTime.now();
-    double paidAmountInput = totalPaidInput.value;
-    double actualReceived = 0.0;
-    double dueOrConditionAmount = 0.0;
 
-    if (isConditionSale.value) {
-      actualReceived = paidAmountInput;
-      dueOrConditionAmount = _round(grandTotal - actualReceived);
+    // CALCULATIONS
+    double totalCashInput = totalPaidInput.value;
+    double paidAmountForOldDue = 0.0;
+    double paidAmountForCurrentInvoice = 0.0;
+    double oldDueSnapshot = debtorOldDue.value;
+
+    if (customerType.value == "Debtor" &&
+        !isConditionSale.value &&
+        debtorId != null) {
+      double remainingCash = totalCashInput;
+      if (oldDueSnapshot > 0) {
+        if (remainingCash >= oldDueSnapshot) {
+          paidAmountForOldDue = oldDueSnapshot;
+          remainingCash -= oldDueSnapshot;
+        } else {
+          paidAmountForOldDue = remainingCash;
+          remainingCash = 0;
+        }
+      }
+      if (remainingCash > 0) {
+        if (remainingCash >= grandTotal) {
+          paidAmountForCurrentInvoice = grandTotal;
+          remainingCash -= grandTotal;
+        } else {
+          paidAmountForCurrentInvoice = remainingCash;
+          remainingCash = 0;
+        }
+      }
     } else {
-      actualReceived =
-          paidAmountInput > grandTotal ? grandTotal : paidAmountInput;
-      dueOrConditionAmount = _round(grandTotal - actualReceived);
+      paidAmountForCurrentInvoice =
+          totalCashInput > grandTotal ? grandTotal : totalCashInput;
     }
-    if (dueOrConditionAmount < 0) dueOrConditionAmount = 0;
 
-    Map<String, dynamic> paymentMap = {
+    double invoiceDueAmount = _round(grandTotal - paidAmountForCurrentInvoice);
+    if (invoiceDueAmount < 0) invoiceDueAmount = 0;
+
+    Map<String, dynamic> fullPaymentMap = {
       "type": isConditionSale.value ? "condition_partial" : "multi",
-
-      // Amounts
       "cash": double.tryParse(cashC.text) ?? 0,
       "bkash": double.tryParse(bkashC.text) ?? 0,
       "nagad": double.tryParse(nagadC.text) ?? 0,
       "bank": double.tryParse(bankC.text) ?? 0,
-
-      // Details
       "bkashNumber": bkashNumberC.text.trim(),
       "nagadNumber": nagadNumberC.text.trim(),
       "bankName": bankNameC.text.trim(),
       "accountNumber": bankAccC.text.trim(),
-
-      "totalPaidInput": paidAmountInput,
-      "actualReceived": actualReceived,
-      "due": dueOrConditionAmount,
-      "changeReturned": isConditionSale.value ? 0 : changeReturn.value,
+      "totalPaidInput": totalCashInput,
+      "paidForOldDue": paidAmountForOldDue,
+      "paidForInvoice": paidAmountForCurrentInvoice,
+      "due": invoiceDueAmount,
       "currency": "BDT",
     };
+
+    Map<String, dynamic> dailySalesPaymentMap = Map.from(fullPaymentMap);
+    if (paidAmountForOldDue > 0) {
+      double amountToRemove = paidAmountForOldDue;
+      double pCash = double.tryParse(cashC.text) ?? 0;
+      if (amountToRemove > 0 && pCash > 0) {
+        if (pCash >= amountToRemove) {
+          pCash -= amountToRemove;
+          amountToRemove = 0;
+        } else {
+          amountToRemove -= pCash;
+          pCash = 0;
+        }
+      }
+      dailySalesPaymentMap['cash'] = pCash;
+    }
 
     List<Map<String, dynamic>> orderItems =
         cart.map((item) {
@@ -319,6 +369,7 @@ class LiveSalesController extends GetxController {
             "productId": item.product.id,
             "name": item.product.name,
             "model": item.product.model,
+            "brand": item.product.brand,
             "qty": item.quantity.value,
             "saleRate": item.priceAtSale,
             "costRate": item.product.avgPurchasePrice,
@@ -326,12 +377,13 @@ class LiveSalesController extends GetxController {
           };
         }).toList();
 
-    // 2. UPDATE STOCK
     List<Map<String, dynamic>> stockUpdates =
         cart
             .map((item) => {'id': item.product.id, 'qty': item.quantity.value})
             .toList();
 
+    // Use bulk update via controller wrapper if available, or call API directly
+    // Assuming productCtrl has updateStockBulk exposed (as per your previous snippets)
     bool stockSuccess = await productCtrl.updateStockBulk(stockUpdates);
     if (!stockSuccess) {
       isProcessing.value = false;
@@ -341,8 +393,6 @@ class LiveSalesController extends GetxController {
 
     try {
       WriteBatch batch = _db.batch();
-
-      // 3. MASTER INVOICE (Always Created)
       int cartonsInt = int.tryParse(cartonsC.text) ?? 0;
       DocumentReference orderRef = _db.collection('sales_orders').doc(invNo);
 
@@ -360,24 +410,22 @@ class LiveSalesController extends GetxController {
         "challanNo": finalChallan,
         "cartons": isConditionSale.value ? cartonsInt : 0,
         "courierName": isConditionSale.value ? selectedCourier.value : null,
-        "courierDue": isConditionSale.value ? dueOrConditionAmount : 0,
+        "courierDue": isConditionSale.value ? invoiceDueAmount : 0,
         "items": orderItems,
         "subtotal": subtotalAmount,
         "discount": discountVal.value,
         "grandTotal": grandTotal,
         "totalCost": totalInvoiceCost,
         "profit": invoiceProfit,
-        "paymentDetails": paymentMap,
-        "isFullyPaid": dueOrConditionAmount <= 0,
+        "paymentDetails": fullPaymentMap,
+        "isFullyPaid": invoiceDueAmount <= 0,
         "status":
             isConditionSale.value
-                ? (dueOrConditionAmount <= 0 ? "completed" : "on_delivery")
+                ? (invoiceDueAmount <= 0 ? "completed" : "on_delivery")
                 : "completed",
       });
 
-      // 4. LOGIC BRANCHING
       if (isConditionSale.value) {
-        // --- CONDITION SALE ---
         DocumentReference condCustRef = _db
             .collection('condition_customers')
             .doc(fPhone);
@@ -389,7 +437,7 @@ class LiveSalesController extends GetxController {
           "lastChallan": finalChallan,
           "lastCourier": selectedCourier.value,
           "lastUpdated": FieldValue.serverTimestamp(),
-          "totalCourierDue": FieldValue.increment(dueOrConditionAmount),
+          "totalCourierDue": FieldValue.increment(invoiceDueAmount),
         }, SetOptions(merge: true));
 
         DocumentReference condTxRef = condCustRef
@@ -399,45 +447,43 @@ class LiveSalesController extends GetxController {
           "invoiceId": invNo,
           "challanNo": finalChallan,
           "grandTotal": grandTotal,
-          "advance": actualReceived,
-          "courierDue": dueOrConditionAmount,
+          "advance": paidAmountForCurrentInvoice,
+          "courierDue": invoiceDueAmount,
           "courierName": selectedCourier.value,
           "cartons": cartonsInt,
           "items": orderItems,
           "date": Timestamp.fromDate(saleDate),
-          "status": dueOrConditionAmount <= 0 ? "completed" : "pending_courier",
+          "status": invoiceDueAmount <= 0 ? "completed" : "pending_courier",
         });
 
-        if (selectedCourier.value != null && dueOrConditionAmount > 0) {
+        if (selectedCourier.value != null && invoiceDueAmount > 0) {
           DocumentReference courierRef = _db
               .collection('courier_ledgers')
               .doc(selectedCourier.value);
           batch.set(courierRef, {
             "name": selectedCourier.value,
-            "totalDue": FieldValue.increment(dueOrConditionAmount),
+            "totalDue": FieldValue.increment(invoiceDueAmount),
             "lastUpdated": FieldValue.serverTimestamp(),
           }, SetOptions(merge: true));
         }
-
-        if (actualReceived > 0) {
+        if (paidAmountForCurrentInvoice > 0) {
           DocumentReference dailyRef = _db.collection('daily_sales').doc();
           batch.set(dailyRef, {
-            "name": "$fName (Condition Sales)",
+            "name": "$fName (Condition)",
             "amount": grandTotal,
-            "paid": actualReceived,
-            "pending": dueOrConditionAmount,
+            "paid": paidAmountForCurrentInvoice,
+            "pending": invoiceDueAmount,
             "customerType": "condition_advance",
             "timestamp": Timestamp.fromDate(saleDate),
-            "paymentMethod": paymentMap,
+            "paymentMethod": dailySalesPaymentMap,
             "createdAt": FieldValue.serverTimestamp(),
             "source": "pos_condition_sale",
             "transactionId": invNo,
             "invoiceId": invNo,
-            "status": dueOrConditionAmount <= 0 ? "paid" : "partial",
+            "status": invoiceDueAmount <= 0 ? "paid" : "partial",
           });
         }
       } else if (customerType.value == "Debtor" && debtorId != null) {
-        // --- DEBTOR SALE ---
         DocumentReference analyticsRef = _db
             .collection('debtor_transaction_history')
             .doc(invNo);
@@ -453,57 +499,81 @@ class LiveSalesController extends GetxController {
               orderItems.map((e) => "${e['model']} x${e['qty']}").toList(),
         });
 
-        if (dueOrConditionAmount > 0) {
-          // Unpaid/Partial
-          DocumentReference debTxRef = _db
+        if (paidAmountForOldDue > 0) {
+          DocumentReference oldPayRef =
+              _db
+                  .collection('debatorbody')
+                  .doc(debtorId)
+                  .collection('transactions')
+                  .doc();
+          batch.set(oldPayRef, {
+            "amount": paidAmountForOldDue,
+            "transactionId": oldPayRef.id,
+            "type": "loan_payment",
+            "date": Timestamp.fromDate(saleDate),
+            "createdAt": FieldValue.serverTimestamp(),
+            "note": "Payment via Inv $invNo",
+            "paymentMethod": fullPaymentMap,
+          });
+          DocumentReference cashRef = _db.collection('cash_ledger').doc();
+          batch.set(cashRef, {
+            'type': 'deposit',
+            'amount': paidAmountForOldDue,
+            'method': 'cash',
+            'description': "Loan Repayment: $fName (Inv $invNo)",
+            'timestamp': FieldValue.serverTimestamp(),
+            'linkedDebtorId': debtorId,
+            'linkedTxId': oldPayRef.id,
+          });
+        }
+
+        DocumentReference creditRef = _db
+            .collection('debatorbody')
+            .doc(debtorId)
+            .collection('transactions')
+            .doc(invNo);
+        batch.set(creditRef, {
+          "amount": grandTotal,
+          "transactionId": invNo,
+          "type": "credit",
+          "date": Timestamp.fromDate(saleDate),
+          "createdAt": FieldValue.serverTimestamp(),
+          "note": "Invoice $invNo",
+        });
+
+        if (paidAmountForCurrentInvoice > 0) {
+          DocumentReference debitRef = _db
               .collection('debatorbody')
               .doc(debtorId)
               .collection('transactions')
-              .doc(invNo);
-          batch.set(debTxRef, {
-            "amount": dueOrConditionAmount,
-            "transactionId": invNo,
-            "type": "credit",
+              .doc("${invNo}_pay");
+          batch.set(debitRef, {
+            "amount": paidAmountForCurrentInvoice,
+            "transactionId": "${invNo}_pay",
+            "type": "debit",
             "date": Timestamp.fromDate(saleDate),
             "createdAt": FieldValue.serverTimestamp(),
-            "note": "Invoice $invNo",
-          });
-
-          DocumentReference dailyRef = _db.collection('daily_sales').doc();
-          batch.set(dailyRef, {
-            "name": fName,
-            "amount": grandTotal,
-            "paid": actualReceived,
-            "pending": dueOrConditionAmount,
-            "customerType": "debtor",
-            "timestamp": Timestamp.fromDate(saleDate),
-            "paymentMethod": paymentMap,
-            "createdAt": FieldValue.serverTimestamp(),
-            "source": "pos_sale",
-            "transactionId": invNo,
-            "invoiceId": invNo,
-            "status": "due",
-          });
-        } else {
-          // Paid
-          DocumentReference dailyRef = _db.collection('daily_sales').doc();
-          batch.set(dailyRef, {
-            "name": fName,
-            "amount": grandTotal,
-            "paid": grandTotal,
-            "pending": 0.0,
-            "customerType": "debtor",
-            "timestamp": Timestamp.fromDate(saleDate),
-            "paymentMethod": paymentMap,
-            "createdAt": FieldValue.serverTimestamp(),
-            "source": "pos_sale",
-            "transactionId": invNo,
-            "invoiceId": invNo,
-            "status": "paid",
+            "note": "Payment for Inv $invNo",
+            "paymentMethod": dailySalesPaymentMap,
           });
         }
+        DocumentReference dailyRef = _db.collection('daily_sales').doc();
+        batch.set(dailyRef, {
+          "name": fName,
+          "amount": grandTotal,
+          "paid": paidAmountForCurrentInvoice,
+          "pending": invoiceDueAmount,
+          "customerType": "debtor",
+          "timestamp": Timestamp.fromDate(saleDate),
+          "paymentMethod": dailySalesPaymentMap,
+          "createdAt": FieldValue.serverTimestamp(),
+          "source": "pos_sale",
+          "transactionId": invNo,
+          "invoiceId": invNo,
+          "status": invoiceDueAmount <= 0 ? "paid" : "due",
+        });
       } else {
-        // --- RETAILER SALE ---
+        // Retailer Logic
         DocumentReference custRef = _db.collection('customers').doc(fPhone);
         batch.set(custRef, {
           "name": fName,
@@ -512,7 +582,6 @@ class LiveSalesController extends GetxController {
           "lastInv": invNo,
           "lastShopDate": FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
-
         DocumentReference custOrdRef = custRef.collection('orders').doc(invNo);
         batch.set(custOrdRef, {
           "invoiceId": invNo,
@@ -520,16 +589,15 @@ class LiveSalesController extends GetxController {
           "timestamp": FieldValue.serverTimestamp(),
           "link": "sales_orders/$invNo",
         });
-
         DocumentReference dailyRef = _db.collection('daily_sales').doc();
         batch.set(dailyRef, {
           "name": fName,
           "amount": grandTotal,
-          "paid": actualReceived,
+          "paid": paidAmountForCurrentInvoice,
           "pending": 0.0,
           "customerType": "retailer",
           "timestamp": Timestamp.fromDate(saleDate),
-          "paymentMethod": paymentMap,
+          "paymentMethod": fullPaymentMap,
           "createdAt": FieldValue.serverTimestamp(),
           "source": "pos_sale",
           "transactionId": invNo,
@@ -538,13 +606,13 @@ class LiveSalesController extends GetxController {
       }
 
       await batch.commit();
+      if (debtorId != null) debtorCtrl.loadDebtorTransactions(debtorId);
 
-      // --- PDF & CLEANUP ---
       await _generatePdf(
         invNo,
         fName,
         fPhone,
-        paymentMap,
+        fullPaymentMap,
         orderItems,
         isCondition: isConditionSale.value,
         challan: finalChallan,
@@ -552,6 +620,8 @@ class LiveSalesController extends GetxController {
         courier: selectedCourier.value,
         cartons: cartonsInt,
         shopName: shopC.text,
+        oldDueSnap: oldDueSnapshot,
+        runningDueSnap: debtorRunningDue.value,
       );
 
       _resetAll();
@@ -562,27 +632,13 @@ class LiveSalesController extends GetxController {
         colorText: Colors.white,
       );
     } catch (e) {
-      // ⚠️ ROLLBACK LOGIC
-      print("Transaction failed. Attempting stock rollback...");
-      try {
-        List<Map<String, dynamic>> rollbackStock =
-            cart
-                .map(
-                  (item) => {
-                    'id': item.product.id,
-                    'qty': -item.quantity.value,
-                  },
-                )
-                .toList();
-        await productCtrl.updateStockBulk(rollbackStock);
-      } catch (rollbackErr) {
-        print("CRITICAL: Stock rollback failed: $rollbackErr");
-        Get.defaultDialog(
-          title: "CRITICAL ERROR",
-          middleText: "Database failed & Stock rollback failed.\nError: $e",
-        );
-      }
-
+      List<Map<String, dynamic>> rollbackStock =
+          cart
+              .map(
+                (item) => {'id': item.product.id, 'qty': -item.quantity.value},
+              )
+              .toList();
+      await productCtrl.updateStockBulk(rollbackStock);
       Get.snackbar(
         "Error",
         "Transaction Failed: $e",
@@ -604,8 +660,6 @@ class LiveSalesController extends GetxController {
     cartonsC.clear();
     selectedCourier.value = null;
     discountC.clear();
-
-    // Clear Payment Fields
     cashC.clear();
     bkashC.clear();
     bkashNumberC.clear();
@@ -614,17 +668,18 @@ class LiveSalesController extends GetxController {
     bankC.clear();
     bankNameC.clear();
     bankAccC.clear();
-
     discountVal.value = 0.0;
     totalPaidInput.value = 0.0;
     changeReturn.value = 0.0;
     selectedDebtor.value = null;
     debtorPhoneSearch.clear();
     calculatedCourierDue.value = 0.0;
+    debtorOldDue.value = 0.0;
+    debtorRunningDue.value = 0.0;
   }
 
   // ==========================================
-  // PDF GENERATION (Multi-Page Supported)
+  // UPDATED PDF GENERATION (PROFESSIONAL BLACK)
   // ==========================================
   Future<void> _generatePdf(
     String invId,
@@ -638,25 +693,33 @@ class LiveSalesController extends GetxController {
     String? courier,
     int? cartons,
     String shopName = "",
+    double oldDueSnap = 0.0,
+    double runningDueSnap = 0.0,
   }) async {
     final pdf = pw.Document();
-    final boldFont = await PdfGoogleFonts.nunitoBold();
-    final regularFont = await PdfGoogleFonts.nunitoRegular();
+    final boldFont = await PdfGoogleFonts.robotoBold();
+    final regularFont = await PdfGoogleFonts.robotoRegular();
+    final italicFont = await PdfGoogleFonts.robotoItalic();
 
-    // --- 1. INVOICE PDF (MultiPage) ---
+    double paidOld = double.tryParse(payMap['paidForOldDue'].toString()) ?? 0.0;
+    double paidInv =
+        double.tryParse(payMap['paidForInvoice'].toString()) ?? 0.0;
+    double invDue = double.tryParse(payMap['due'].toString()) ?? 0.0;
+
+    double remainingOldDue = oldDueSnap - paidOld;
+    if (remainingOldDue < 0) remainingOldDue = 0;
+    double totalPreviousBalance = oldDueSnap + runningDueSnap;
+    double netTotalDue = remainingOldDue + runningDueSnap + invDue;
+
     pdf.addPage(
       pw.MultiPage(
-        pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.all(32),
-        // Footer appears on every page at the bottom
+        pageFormat: PdfPageFormat.a5, // HALF A4
+        margin: const pw.EdgeInsets.all(20),
         footer: (context) => _buildFooter(regularFont),
         build: (context) {
           return [
-            // Header (Company Info)
             _buildCompanyHeader(boldFont, regularFont),
             pw.SizedBox(height: 10),
-
-            // Invoice Details (Bill To, etc.)
             _buildInvoiceInfo(
               boldFont,
               regularFont,
@@ -668,63 +731,45 @@ class LiveSalesController extends GetxController {
               courier,
               shopName,
             ),
-            pw.SizedBox(height: 15),
-
-            // Items Table (Will split across pages automatically)
-            _buildItemTable(boldFont, regularFont, items),
-            pw.SizedBox(height: 15),
-
-            // Totals & Payment Section
-            pw.Wrap(
-              children: [
-                _buildInvoiceTotalSection(
-                  boldFont,
-                  regularFont,
-                  payMap,
-                  isCondition,
-                  cartons,
-                ),
-              ],
+            pw.SizedBox(height: 10),
+            _buildProfessionalTable(boldFont, regularFont, italicFont, items),
+            pw.SizedBox(height: 10),
+            _buildDetailedSummary(
+              boldFont,
+              regularFont,
+              payMap,
+              isCondition,
+              cartons,
+              totalPreviousBalance,
+              paidOld + paidInv,
+              netTotalDue,
             ),
           ];
         },
       ),
     );
 
-    // --- 2. CHALLAN PDF (MultiPage) ---
     if (isCondition) {
       pdf.addPage(
         pw.MultiPage(
-          pageFormat: PdfPageFormat.a4,
-          margin: const pw.EdgeInsets.all(32),
+          pageFormat: PdfPageFormat.a5,
+          margin: const pw.EdgeInsets.all(20),
           footer: (context) => _buildFooter(regularFont),
           build: (context) {
             return [
               _buildCompanyHeader(boldFont, regularFont),
               pw.SizedBox(height: 10),
-
-              // Title
               pw.Center(
-                child: pw.Container(
-                  padding: const pw.EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 5,
-                  ),
-                  decoration: pw.BoxDecoration(
-                    border: pw.Border.all(),
-                    borderRadius: const pw.BorderRadius.all(
-                      pw.Radius.circular(20),
-                    ),
-                  ),
-                  child: pw.Text(
-                    "DELIVERY CHALLAN",
-                    style: pw.TextStyle(font: boldFont, fontSize: 16),
+                child: pw.Text(
+                  "DELIVERY CHALLAN",
+                  style: pw.TextStyle(
+                    font: boldFont,
+                    fontSize: 14,
+                    decoration: pw.TextDecoration.underline,
                   ),
                 ),
               ),
-              pw.SizedBox(height: 20),
-
-              // Receiver & Courier Info
+              pw.SizedBox(height: 10),
               _buildChallanInfo(
                 boldFont,
                 regularFont,
@@ -737,73 +782,56 @@ class LiveSalesController extends GetxController {
                 cartons,
                 shopName,
               ),
+              pw.SizedBox(height: 10),
+              _buildChallanTable(boldFont, regularFont, italicFont, items),
               pw.SizedBox(height: 20),
-
-              pw.Text("Package Contents:", style: pw.TextStyle(font: boldFont)),
-
-              // Table
-              _buildChallanTable(boldFont, regularFont, items),
-              pw.SizedBox(height: 30),
-
-              // Condition Box & Signatures
-              pw.Wrap(
-                children: [
-                  _buildConditionBox(boldFont, regularFont, payMap),
-                  pw.SizedBox(height: 60),
-                  _buildSignatures(regularFont),
-                ],
-              ),
+              _buildConditionBox(boldFont, regularFont, payMap),
+              pw.SizedBox(height: 40),
+              _buildSignatures(regularFont),
             ];
           },
         ),
       );
     }
-
     await Printing.layoutPdf(onLayout: (f) => pdf.save());
   }
 
-  // --- WIDGET BUILDERS ---
-
   pw.Widget _buildCompanyHeader(pw.Font bold, pw.Font reg) {
     return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.center,
       children: [
         pw.Text(
-          "G TEL JOY EXPRESS",
+          "G TEL",
+          style: pw.TextStyle(font: bold, fontSize: 28, color: PdfColors.black),
+        ),
+        pw.Text(
+          "JOY EXPRESS",
           style: pw.TextStyle(
             font: bold,
-            fontSize: 26,
-            color: PdfColors.blue900,
+            fontSize: 14,
+            letterSpacing: 3,
+            color: PdfColors.black,
           ),
         ),
         pw.Text(
-          "MOBILE PART WHOLESALER",
+          "Mobile Parts Wholesaler",
           style: pw.TextStyle(
             font: reg,
-            fontSize: 12,
-            letterSpacing: 2,
-            color: PdfColors.grey700,
+            fontSize: 10,
+            color: PdfColors.grey800,
           ),
         ),
-        pw.SizedBox(height: 6),
-        pw.Text(
-          "Mobile: 01720677206, 01911026222, 01911026033",
-          style: pw.TextStyle(font: bold, fontSize: 10),
-        ),
-        pw.SizedBox(height: 2),
-        pw.Text(
-          "Showroom 1: 4/119 (5th floor) lift-4  |  Showroom 2: 6/24A (7th floor) lift-6",
-          style: pw.TextStyle(font: reg, fontSize: 9),
-        ),
+        pw.SizedBox(height: 4),
         pw.Text(
           "Gulistan Shopping Complex (Hall Market), 2 Bangabandu Avenue, Dhaka 1000",
-          style: pw.TextStyle(font: reg, fontSize: 9),
+          textAlign: pw.TextAlign.center,
+          style: pw.TextStyle(font: reg, fontSize: 8),
         ),
-        pw.SizedBox(height: 2),
         pw.Text(
-          "Web: www.gtelbd.com  |  Email: gtel01720677206@gmail.com",
-          style: pw.TextStyle(font: reg, fontSize: 9, color: PdfColors.blue800),
+          "01720677206, 01911026222 | gtel01720677206@gmail.com",
+          style: pw.TextStyle(font: bold, fontSize: 8),
         ),
-        pw.Divider(color: PdfColors.grey400, thickness: 1),
+        pw.Divider(color: PdfColors.black, thickness: 1),
       ],
     );
   }
@@ -820,7 +848,6 @@ class LiveSalesController extends GetxController {
     String shopName,
   ) {
     return pw.Row(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
       mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
       children: [
         pw.Column(
@@ -828,228 +855,198 @@ class LiveSalesController extends GetxController {
           children: [
             pw.Text(
               isCond ? "CONDITION INVOICE" : "SALES INVOICE",
-              style: pw.TextStyle(
-                font: bold,
-                fontSize: 16,
-                color: isCond ? PdfColors.orange800 : PdfColors.black,
-              ),
+              style: pw.TextStyle(font: bold, fontSize: 12),
             ),
-            pw.SizedBox(height: 4),
-            pw.Text("Invoice #: $invId", style: pw.TextStyle(font: bold)),
             pw.Text(
-              "Date: ${DateFormat('dd-MMM-yyyy h:mm a').format(DateTime.now())}",
+              "INV#: $invId",
               style: pw.TextStyle(font: reg, fontSize: 10),
             ),
-            if (isCond && courier != null)
+            pw.Text(
+              "Date: ${DateFormat('dd-MMM-yy').format(DateTime.now())}",
+              style: pw.TextStyle(font: reg, fontSize: 9),
+            ),
+            if (isCond)
               pw.Text(
                 "Via: $courier",
-                style: pw.TextStyle(font: bold, fontSize: 10),
+                style: pw.TextStyle(font: bold, fontSize: 9),
               ),
           ],
         ),
-        pw.Container(
-          padding: const pw.EdgeInsets.all(8),
-          decoration: pw.BoxDecoration(
-            border: pw.Border.all(color: PdfColors.grey300),
-            borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4)),
-            color: PdfColors.grey100,
-          ),
-          width: 220,
-          child: pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Text("BILL TO:", style: pw.TextStyle(font: bold, fontSize: 8)),
-              pw.Text(name, style: pw.TextStyle(font: bold, fontSize: 12)),
-              if (shopName.isNotEmpty)
-                pw.Text(shopName, style: pw.TextStyle(font: reg)),
-              pw.Text(phone, style: pw.TextStyle(font: reg)),
-              if (addr.isNotEmpty)
-                pw.Text(
-                  addr,
-                  style: pw.TextStyle(font: reg, fontSize: 9),
-                  maxLines: 2,
-                ),
-            ],
-          ),
+        pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.end,
+          children: [
+            pw.Text("CUSTOMER", style: pw.TextStyle(font: bold, fontSize: 10)),
+            pw.Text(name, style: pw.TextStyle(font: bold, fontSize: 11)),
+            if (shopName.isNotEmpty)
+              pw.Text(shopName, style: pw.TextStyle(font: reg, fontSize: 9)),
+            pw.Text(phone, style: pw.TextStyle(font: reg, fontSize: 9)),
+            if (addr.isNotEmpty)
+              pw.Text(addr, style: pw.TextStyle(font: reg, fontSize: 8)),
+          ],
         ),
       ],
     );
   }
 
-  pw.Widget _buildItemTable(
+  pw.Widget _buildProfessionalTable(
     pw.Font bold,
     pw.Font reg,
+    pw.Font italic,
     List<Map<String, dynamic>> items,
   ) {
-    return pw.TableHelper.fromTextArray(
-      border: pw.TableBorder.all(color: PdfColors.grey300),
-      headerStyle: pw.TextStyle(
-        font: bold,
-        color: PdfColors.white,
-        fontSize: 10,
-      ),
-      headerDecoration: const pw.BoxDecoration(color: PdfColors.blueGrey800),
-      cellStyle: pw.TextStyle(font: reg, fontSize: 10),
-      cellPadding: const pw.EdgeInsets.all(5),
-      headers: ['SL', 'Item Description', 'Rate', 'Qty', 'Total'],
+    return pw.Table(
+      border: pw.TableBorder.all(color: PdfColors.black, width: 0.5),
       columnWidths: {
-        0: const pw.FixedColumnWidth(30),
+        0: const pw.FixedColumnWidth(20),
         1: const pw.FlexColumnWidth(),
-        2: const pw.FixedColumnWidth(60),
-        3: const pw.FixedColumnWidth(40),
-        4: const pw.FixedColumnWidth(70),
+        2: const pw.FixedColumnWidth(35),
+        3: const pw.FixedColumnWidth(25),
+        4: const pw.FixedColumnWidth(40),
       },
-      data: List.generate(items.length, (index) {
-        final item = items[index];
-        return [
-          (index + 1).toString(),
-          "${item['model']} - ${item['name']}",
-          double.parse(item['saleRate'].toString()).toStringAsFixed(2),
-          item['qty'].toString(),
-          double.parse(item['subtotal'].toString()).toStringAsFixed(2),
-        ];
-      }),
+      children: [
+        pw.TableRow(
+          decoration: const pw.BoxDecoration(color: PdfColors.grey200),
+          children: [
+            _th("SL", bold),
+            _th("ITEM DESCRIPTION", bold, align: pw.TextAlign.left),
+            _th("RATE", bold),
+            _th("QTY", bold),
+            _th("TOTAL", bold),
+          ],
+        ),
+        ...List.generate(items.length, (index) {
+          final item = items[index];
+          return pw.TableRow(
+            verticalAlignment: pw.TableCellVerticalAlignment.middle,
+            children: [
+              _td((index + 1).toString(), reg),
+              pw.Padding(
+                padding: const pw.EdgeInsets.all(3),
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text(
+                      item['name'],
+                      style: pw.TextStyle(font: bold, fontSize: 9),
+                    ),
+                    pw.Text(
+                      "${item['brand']} - ${item['model']}",
+                      style: pw.TextStyle(
+                        font: italic,
+                        fontSize: 8,
+                        color: PdfColors.grey700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              _td(item['saleRate'].toString(), reg),
+              _td(item['qty'].toString(), bold),
+              _td(item['subtotal'].toString(), bold),
+            ],
+          );
+        }),
+      ],
     );
   }
 
-  pw.Widget _buildInvoiceTotalSection(
+  pw.Widget _th(
+    String text,
+    pw.Font font, {
+    pw.TextAlign align = pw.TextAlign.center,
+  }) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.all(4),
+      child: pw.Text(
+        text,
+        textAlign: align,
+        style: pw.TextStyle(font: font, fontSize: 8),
+      ),
+    );
+  }
+
+  pw.Widget _td(String text, pw.Font font) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.all(4),
+      child: pw.Text(
+        text,
+        textAlign: pw.TextAlign.center,
+        style: pw.TextStyle(font: font, fontSize: 8),
+      ),
+    );
+  }
+
+  pw.Widget _buildDetailedSummary(
     pw.Font bold,
     pw.Font reg,
     Map payMap,
     bool isCond,
     int? cartons,
+    double prevDue,
+    double totalPaid,
+    double netDue,
   ) {
-    // --- UPDATED PAYMENT DETAILS LOGIC ---
-    List<String> getPaymentLines() {
-      List<String> lines = [];
-      double cash = double.tryParse(payMap['cash'].toString()) ?? 0;
-      double bkash = double.tryParse(payMap['bkash'].toString()) ?? 0;
-      double nagad = double.tryParse(payMap['nagad'].toString()) ?? 0;
-      double bank = double.tryParse(payMap['bank'].toString()) ?? 0;
-
-      // Cash
-      if (cash > 0) {
-        lines.add("Cash: ${cash.toStringAsFixed(0)}");
-      }
-
-      // Bkash with Number
-      if (bkash > 0) {
-        String num = payMap['bkashNumber'] ?? "";
-        String detail = num.isNotEmpty ? " ($num)" : "";
-        lines.add("Bkash$detail: ${bkash.toStringAsFixed(0)}");
-      }
-
-      // Nagad with Number
-      if (nagad > 0) {
-        String num = payMap['nagadNumber'] ?? "";
-        String detail = num.isNotEmpty ? " ($num)" : "";
-        lines.add("Nagad$detail: ${nagad.toStringAsFixed(0)}");
-      }
-
-      // Bank with Name + Account
-      if (bank > 0) {
-        String bName = payMap['bankName'] ?? "Bank";
-        String bAcc = payMap['accountNumber'] ?? "";
-        String detail = bAcc.isNotEmpty ? " ($bName - $bAcc)" : " ($bName)";
-        lines.add("Bank$detail: ${bank.toStringAsFixed(0)}");
-      }
-
-      return lines;
-    }
-
     return pw.Row(
-      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
       crossAxisAlignment: pw.CrossAxisAlignment.start,
+      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
       children: [
-        pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            pw.Text(
-              "Payment Details:",
-              style: pw.TextStyle(font: bold, fontSize: 10),
-            ),
-            pw.SizedBox(height: 4),
-            pw.Container(
-              width: 200,
-              child: pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children:
-                    getPaymentLines()
-                        .map(
-                          (l) => pw.Text(
-                            l,
-                            style: pw.TextStyle(
-                              font: reg,
-                              fontSize: 9,
-                              color: PdfColors.grey800,
-                            ),
-                          ),
-                        )
-                        .toList(),
+        pw.Container(
+          width: 140,
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text(
+                "Payment Details:",
+                style: pw.TextStyle(font: bold, fontSize: 8),
               ),
-            ),
-          ],
+              _buildCompactPaymentLines(payMap, reg),
+              if (cartons != null && cartons > 0)
+                pw.Text(
+                  "Cartons: $cartons",
+                  style: pw.TextStyle(font: bold, fontSize: 8),
+                ),
+            ],
+          ),
         ),
         pw.Container(
-          width: 220,
+          width: 160,
           child: pw.Column(
             children: [
-              _pdfRow("Subtotal", subtotalAmount.toStringAsFixed(2), reg, 10),
-              _pdfRow(
-                "Discount",
-                "-${discountVal.value.toStringAsFixed(2)}",
-                reg,
-                10,
-              ),
-              pw.Divider(),
-              _pdfRow(
-                "Grand Total",
-                grandTotal.toStringAsFixed(2),
-                bold,
-                14,
-                color: PdfColors.blue900,
-              ),
-              pw.SizedBox(height: 5),
-              _pdfRow(
-                isCond ? "Advance Paid" : "Paid Amount",
-                double.parse(
-                  payMap['actualReceived'].toString(),
-                ).toStringAsFixed(2),
-                reg,
-                11,
-              ),
-              if (isCond) ...[
-                pw.SizedBox(height: 5),
-                pw.Container(
-                  color: PdfColors.red50,
-                  padding: const pw.EdgeInsets.all(3),
-                  child: _pdfRow(
+              _pdfRow("Subtotal", subtotalAmount.toStringAsFixed(2), reg, 9),
+              if (discountVal.value > 0)
+                _pdfRow("Discount", "-${discountVal.value}", reg, 9),
+              pw.Divider(thickness: 0.5),
+              _pdfRow("THIS INVOICE", grandTotal.toStringAsFixed(2), bold, 10),
+              if (!isCond && customerType.value == "Debtor") ...[
+                pw.SizedBox(height: 4),
+                _pdfRow("Previous Balance", prevDue.toStringAsFixed(2), reg, 9),
+                pw.Divider(thickness: 0.5, borderStyle: pw.BorderStyle.dashed),
+                _pdfRow(
+                  "TOTAL PAYABLE",
+                  (prevDue + grandTotal).toStringAsFixed(2),
+                  bold,
+                  10,
+                ),
+                if (totalPaid > 0)
+                  _pdfRow("Paid Amount", "-$totalPaid", reg, 9),
+                pw.Divider(thickness: 0.5),
+                _pdfRow("NET TOTAL DUE", netDue.toStringAsFixed(2), bold, 11),
+              ] else ...[
+                _pdfRow("Paid", totalPaid.toStringAsFixed(2), reg, 9),
+                if (isCond)
+                  _pdfRow(
                     "Courier Collect",
                     double.parse(payMap['due'].toString()).toStringAsFixed(2),
                     bold,
-                    12,
-                    color: PdfColors.red900,
+                    11,
                   ),
-                ),
-                if (cartons != null && cartons > 0)
-                  _pdfRow("Cartons", cartons.toString(), reg, 10),
               ],
-              if (!isCond && double.parse(payMap['due'].toString()) > 0)
-                _pdfRow(
-                  "Due Amount",
-                  double.parse(payMap['due'].toString()).toStringAsFixed(2),
-                  bold,
-                  12,
-                  color: PdfColors.red,
-                ),
             ],
           ),
         ),
       ],
     );
   }
-
-  // --- CHALLAN SPECIFIC WIDGETS ---
 
   pw.Widget _buildChallanInfo(
     pw.Font bold,
@@ -1065,68 +1062,49 @@ class LiveSalesController extends GetxController {
   ) {
     return pw.Row(
       mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        // Left: Courier Info
         pw.Container(
-          width: 220,
-          padding: const pw.EdgeInsets.all(8),
-          decoration: pw.BoxDecoration(
-            border: pw.Border.all(color: PdfColors.grey400),
-          ),
+          width: 150,
+          padding: const pw.EdgeInsets.all(5),
+          decoration: pw.BoxDecoration(border: pw.Border.all()),
           child: pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
               pw.Text(
-                "SHIPPING DETAILS",
-                style: pw.TextStyle(
-                  font: bold,
-                  fontSize: 9,
-                  decoration: pw.TextDecoration.underline,
-                ),
+                "COURIER INFO",
+                style: pw.TextStyle(font: bold, fontSize: 8),
               ),
-              pw.SizedBox(height: 4),
-              pw.Text("Courier: $courier", style: pw.TextStyle(font: bold)),
-              pw.Text("Challan No: $challan", style: pw.TextStyle(font: bold)),
-              if (cartons != null && cartons > 0)
-                pw.Text(
-                  "No. of Cartons: $cartons",
-                  style: pw.TextStyle(font: bold),
-                ),
-              pw.SizedBox(height: 4),
-              pw.Text("Ref Inv: $invId", style: pw.TextStyle(font: reg)),
               pw.Text(
-                "Date: ${DateFormat('dd-MM-yyyy').format(DateTime.now())}",
-                style: pw.TextStyle(font: reg),
+                "Name: $courier",
+                style: pw.TextStyle(font: reg, fontSize: 8),
               ),
+              pw.Text(
+                "Challan: $challan",
+                style: pw.TextStyle(font: bold, fontSize: 9),
+              ),
+              if (cartons != null)
+                pw.Text(
+                  "Cartons: $cartons",
+                  style: pw.TextStyle(font: bold, fontSize: 8),
+                ),
             ],
           ),
         ),
-
-        // Right: Receiver Info
         pw.Container(
-          width: 250,
-          padding: const pw.EdgeInsets.all(8),
-          decoration: pw.BoxDecoration(
-            border: pw.Border.all(color: PdfColors.grey400),
-          ),
+          width: 150,
+          padding: const pw.EdgeInsets.all(5),
+          decoration: pw.BoxDecoration(border: pw.Border.all()),
           child: pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
+              pw.Text("RECEIVER", style: pw.TextStyle(font: bold, fontSize: 8)),
+              pw.Text(name, style: pw.TextStyle(font: bold, fontSize: 9)),
+              pw.Text(phone, style: pw.TextStyle(font: reg, fontSize: 8)),
               pw.Text(
-                "RECEIVER / CUSTOMER",
-                style: pw.TextStyle(
-                  font: bold,
-                  fontSize: 9,
-                  decoration: pw.TextDecoration.underline,
-                ),
+                addr,
+                style: pw.TextStyle(font: reg, fontSize: 8),
+                maxLines: 2,
               ),
-              pw.SizedBox(height: 4),
-              pw.Text(name, style: pw.TextStyle(font: bold, fontSize: 12)),
-              if (shopName.isNotEmpty)
-                pw.Text(shopName, style: pw.TextStyle(font: bold)),
-              pw.Text(phone, style: pw.TextStyle(font: bold)),
-              pw.Text(addr, style: pw.TextStyle(font: reg)),
             ],
           ),
         ),
@@ -1134,61 +1112,66 @@ class LiveSalesController extends GetxController {
     );
   }
 
-  pw.Widget _buildChallanTable(pw.Font bold, pw.Font reg, List items) {
-    return pw.TableHelper.fromTextArray(
-      border: pw.TableBorder.all(color: PdfColors.grey300),
-      headerStyle: pw.TextStyle(font: bold, color: PdfColors.black),
-      headerDecoration: const pw.BoxDecoration(color: PdfColors.grey200),
-      headers: ['SL', 'Item Description', 'Qty'],
+  pw.Widget _buildChallanTable(
+    pw.Font bold,
+    pw.Font reg,
+    pw.Font italic,
+    List items,
+  ) {
+    return pw.Table(
+      border: pw.TableBorder.all(color: PdfColors.black, width: 0.5),
       columnWidths: {
-        0: const pw.FixedColumnWidth(40),
-        1: const pw.FlexColumnWidth(),
-        2: const pw.FixedColumnWidth(60),
+        0: const pw.FlexColumnWidth(),
+        1: const pw.FixedColumnWidth(40),
       },
-      data: List.generate(items.length, (index) {
-        final item = items[index];
-        return [
-          (index + 1).toString(),
-          "${item['model']} - ${item['name']}",
-          item['qty'].toString(),
-        ];
-      }),
+      children: [
+        pw.TableRow(children: [_th("ITEM", bold), _th("QTY", bold)]),
+        ...items
+            .map(
+              (i) => pw.TableRow(
+                children: [
+                  pw.Padding(
+                    padding: const pw.EdgeInsets.all(3),
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Text(
+                          i['name'],
+                          style: pw.TextStyle(font: bold, fontSize: 9),
+                        ),
+                        pw.Text(
+                          "${i['brand']} - ${i['model']}",
+                          style: pw.TextStyle(font: italic, fontSize: 8),
+                        ),
+                      ],
+                    ),
+                  ),
+                  _td(i['qty'].toString(), bold),
+                ],
+              ),
+            )
+            ,
+      ],
     );
   }
 
   pw.Widget _buildConditionBox(pw.Font bold, pw.Font reg, Map payMap) {
-    double conditionAmount = double.parse(payMap['due'].toString());
-    bool hasCondition = conditionAmount > 0;
-
+    double due = double.parse(payMap['due'].toString());
     return pw.Container(
       width: double.infinity,
-      padding: const pw.EdgeInsets.all(15),
-      decoration: pw.BoxDecoration(
-        border: pw.Border.all(width: 2),
-        color: hasCondition ? PdfColors.white : PdfColors.green50,
-      ),
-      child: pw.Column(
+      padding: const pw.EdgeInsets.all(10),
+      decoration: pw.BoxDecoration(border: pw.Border.all()),
+      child: pw.Row(
+        mainAxisAlignment: pw.MainAxisAlignment.center,
         children: [
           pw.Text(
-            hasCondition ? "CONDITION AMOUNT + CHARGES:" : "PAYMENT STATUS:",
-            style: pw.TextStyle(font: bold, fontSize: 14),
+            "COLLECT FROM RECEIVER:  ",
+            style: pw.TextStyle(font: bold, fontSize: 10),
           ),
-          pw.SizedBox(height: 5),
           pw.Text(
-            hasCondition
-                ? "Tk ${conditionAmount.toStringAsFixed(0)} /="
-                : "NO CONDITION / PREPAID",
-            style: pw.TextStyle(
-              font: bold,
-              fontSize: 24,
-              color: hasCondition ? PdfColors.red900 : PdfColors.green900,
-            ),
+            "Tk ${due.toStringAsFixed(0)} /=",
+            style: pw.TextStyle(font: bold, fontSize: 16),
           ),
-          if (hasCondition)
-            pw.Text(
-              "(Please collect this amount from receiver)",
-              style: pw.TextStyle(font: reg, fontSize: 10),
-            ),
         ],
       ),
     );
@@ -1198,20 +1181,18 @@ class LiveSalesController extends GetxController {
     return pw.Row(
       mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
       children: [
-        pw.Column(
-          children: [
-            pw.Container(width: 120, height: 1, color: PdfColors.black),
-            pw.SizedBox(height: 4),
-            pw.Text("Authorized Signature", style: pw.TextStyle(font: reg)),
-          ],
-        ),
-        pw.Column(
-          children: [
-            pw.Container(width: 120, height: 1, color: PdfColors.black),
-            pw.SizedBox(height: 4),
-            pw.Text("Receiver Signature", style: pw.TextStyle(font: reg)),
-          ],
-        ),
+        _sigLine("Authorized Signature", reg),
+        _sigLine("Receiver Signature", reg),
+      ],
+    );
+  }
+
+  pw.Widget _sigLine(String title, pw.Font reg) {
+    return pw.Column(
+      children: [
+        pw.Container(width: 80, height: 1, color: PdfColors.black),
+        pw.SizedBox(height: 2),
+        pw.Text(title, style: pw.TextStyle(font: reg, fontSize: 7)),
       ],
     );
   }
@@ -1219,37 +1200,50 @@ class LiveSalesController extends GetxController {
   pw.Widget _buildFooter(pw.Font reg) {
     return pw.Column(
       children: [
-        pw.Divider(color: PdfColors.grey400),
+        pw.Divider(color: PdfColors.black, thickness: 0.5),
         pw.Center(
           child: pw.Text(
             "Software by G-TEL ERP",
-            style: pw.TextStyle(font: reg, fontSize: 8, color: PdfColors.grey),
+            style: pw.TextStyle(
+              font: reg,
+              fontSize: 6,
+              color: PdfColors.grey600,
+            ),
           ),
         ),
       ],
     );
   }
 
-  pw.Widget _pdfRow(
-    String label,
-    String value,
-    pw.Font font,
-    double size, {
-    PdfColor color = PdfColors.black,
-  }) {
+  pw.Widget _buildCompactPaymentLines(Map payMap, pw.Font reg) {
+    List<String> lines = [];
+    double cash = double.tryParse(payMap['cash'].toString()) ?? 0;
+    double bkash = double.tryParse(payMap['bkash'].toString()) ?? 0;
+    double nagad = double.tryParse(payMap['nagad'].toString()) ?? 0;
+    double bank = double.tryParse(payMap['bank'].toString()) ?? 0;
+    if (cash > 0) lines.add("Cash: ${cash.toInt()}");
+    if (bkash > 0) lines.add("Bkash: ${bkash.toInt()}");
+    if (nagad > 0) lines.add("Nagad: ${nagad.toInt()}");
+    if (bank > 0) lines.add("Bank: ${bank.toInt()}");
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children:
+          lines
+              .map(
+                (l) => pw.Text(l, style: pw.TextStyle(font: reg, fontSize: 8)),
+              )
+              .toList(),
+    );
+  }
+
+  pw.Widget _pdfRow(String label, String value, pw.Font font, double size) {
     return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(vertical: 2),
+      padding: const pw.EdgeInsets.symmetric(vertical: 1),
       child: pw.Row(
         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
         children: [
-          pw.Text(
-            label,
-            style: pw.TextStyle(font: font, fontSize: size, color: color),
-          ),
-          pw.Text(
-            value,
-            style: pw.TextStyle(font: font, fontSize: size, color: color),
-          ),
+          pw.Text(label, style: pw.TextStyle(font: font, fontSize: size)),
+          pw.Text(value, style: pw.TextStyle(font: font, fontSize: size)),
         ],
       ),
     );

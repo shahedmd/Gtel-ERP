@@ -382,7 +382,7 @@ class DailyOverviewPage extends StatelessWidget {
     double bank = ctrl.methodBreakdown['Bank'] ?? 0;
     double total = cash + bkash + nagad + bank;
 
-    if (total == 0)
+    if (total == 0) {
       return [
         PieChartSectionData(
           value: 1,
@@ -391,6 +391,7 @@ class DailyOverviewPage extends StatelessWidget {
           showTitle: false,
         ),
       ];
+    }
 
     return [
       if (cash > 0)

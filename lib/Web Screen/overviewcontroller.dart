@@ -258,7 +258,7 @@ class OverviewController extends GetxController {
           LedgerItem(
             time: time,
             title: desc,
-            subtitle: "${chartKey} (Withdrawal)",
+            subtitle: "$chartKey (Withdrawal)",
             amount: amt,
             type: 'expense',
           ),

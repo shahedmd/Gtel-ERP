@@ -94,9 +94,6 @@ class ProductController extends GetxController {
     return [];
   }
 
-  // ==========================================
-  // 1. FETCH PRODUCTS (READ & VALUATION)
-  // ==========================================
   Future<void> fetchProducts({int? page}) async {
     isLoading.value = true;
 

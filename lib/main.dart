@@ -19,9 +19,7 @@ import 'firebase_options.dart';
 import 'login.dart';
 
 
-
-Future<void> main() async {
-  
+ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   Get.put(AuthController());
@@ -38,6 +36,8 @@ Future<void> main() async {
   Get.put(OverviewController());
   runApp(const MyApp());
 }
+
+
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -66,7 +66,7 @@ class MyApp extends StatelessWidget {
               ),
               initialRoute: '/',
               getPages: [
-                GetPage(name: '/', page: () => const LoginPage()),
+                GetPage(name: '/', page: () => const LoginPage()) ,
                 GetPage(name: '/home', page: () => AdminHomepage()),
               ],
             );

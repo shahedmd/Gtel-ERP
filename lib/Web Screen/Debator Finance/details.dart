@@ -12,8 +12,6 @@ import 'dart:typed_data';
 import 'package:web/web.dart' as web;
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/Debtor%20Purchase/purchasepage.dart';
 
-
-
 class Debatordetails extends StatefulWidget {
   final String id;
   final String name;

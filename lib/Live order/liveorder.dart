@@ -2,8 +2,10 @@
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:gtel_erp/Live%20order/salemodel.dart'; // Ensure this matches your path
+import 'package:gtel_erp/Live%20order/salemodel.dart';
 import '../Stock/model.dart';
+// Import your controller file here
+// import 'path_to_your_controller.dart';
 
 class LiveOrderSalesPage extends StatelessWidget {
   const LiveOrderSalesPage({super.key});
@@ -51,7 +53,6 @@ class LiveOrderSalesPage extends StatelessWidget {
                         const SizedBox(height: 20),
                         _buildCartSection(controller),
                         const SizedBox(height: 20),
-                        // UPDATED PAYMENT SECTION
                         _buildPaymentSection(controller),
                         const SizedBox(height: 20),
                       ],
@@ -485,38 +486,80 @@ class LiveOrderSalesPage extends StatelessWidget {
     );
   }
 
+  // --- UPDATED DEBTOR CARD (SINGLE CONSOLIDATED BALANCE) ---
   Widget _buildSelectedDebtorCard(LiveSalesController controller) {
     return Container(
-      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: const Color(0xFFF0FDF4),
-        border: Border.all(color: Colors.green.shade200),
-        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.green.shade300),
+        borderRadius: BorderRadius.circular(10),
       ),
-      child: Row(
+      child: Column(
         children: [
-          CircleAvatar(
-            backgroundColor: Colors.green.shade100,
-            radius: 18,
-            child: const Icon(Icons.person, color: Colors.green, size: 20),
-          ),
-          const SizedBox(width: 12),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                controller.selectedDebtor.value!.name,
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                  color: Colors.black87,
+          // Top: Name & Phone
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  backgroundColor: Colors.green.shade100,
+                  radius: 18,
+                  child: const Icon(
+                    Icons.person,
+                    color: Colors.green,
+                    size: 20,
+                  ),
                 ),
-              ),
-              Text(
-                controller.selectedDebtor.value!.phone,
-                style: TextStyle(color: Colors.grey[600], fontSize: 12),
-              ),
-            ],
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        controller.selectedDebtor.value!.name,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                          color: Colors.black87,
+                        ),
+                      ),
+                      Text(
+                        controller.selectedDebtor.value!.phone,
+                        style: TextStyle(color: Colors.grey[700], fontSize: 13),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1, color: Colors.green),
+
+          // Bottom: Consolidated Previous Balance
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  "PREVIOUS BALANCE",
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey,
+                  ),
+                ),
+                // Using totalPreviousDue from controller as requested
+                Text(
+                  "৳ ${controller.totalPreviousDue.toStringAsFixed(0)}",
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 18,
+                    color: Colors.red,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -662,7 +705,7 @@ class LiveOrderSalesPage extends StatelessWidget {
     );
   }
 
-  // --- 3. PAYMENT SECTION (UPDATED) ---
+  // --- 3. PAYMENT SECTION ---
   Widget _buildPaymentSection(LiveSalesController controller) {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -702,7 +745,7 @@ class LiveOrderSalesPage extends StatelessWidget {
           _moneyInput(controller.cashC, "Cash Received", Colors.green),
           const SizedBox(height: 12),
 
-          // 2. MOBILE BANKING (Side by side with number input)
+          // 2. MOBILE BANKING
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -747,7 +790,7 @@ class LiveOrderSalesPage extends StatelessWidget {
           ),
           const SizedBox(height: 12),
 
-          // 3. BANKING (Multiline)
+          // 3. BANKING
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -791,7 +834,8 @@ class LiveOrderSalesPage extends StatelessWidget {
               label = "Courier Collect: ৳${collect.toStringAsFixed(0)}";
               color = Colors.deepOrange;
             } else {
-              if (controller.totalPaidInput.value > controller.grandTotal) {
+              if (controller.totalPaidInput.value > controller.grandTotal &&
+                  controller.customerType.value != "Debtor") {
                 label =
                     "Change: ৳${controller.changeReturn.value.toStringAsFixed(0)}";
                 color = Colors.green;
@@ -861,7 +905,7 @@ class LiveOrderSalesPage extends StatelessWidget {
     );
   }
 
-  // --- BOTTOM TOTAL ---
+  // --- UPDATED BOTTOM TOTAL BAR WITH DEBTOR LOGIC ---
   Widget _buildBottomTotalBar(LiveSalesController controller) {
     return Container(
       padding: const EdgeInsets.all(24),
@@ -908,29 +952,104 @@ class LiveOrderSalesPage extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
+
+          // CURRENT INVOICE TOTAL
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                "GRAND TOTAL",
+              Text(
+                controller.customerType.value == "Debtor"
+                    ? "THIS INVOICE"
+                    : "GRAND TOTAL",
                 style: TextStyle(
                   fontWeight: FontWeight.w800,
-                  fontSize: 16,
+                  fontSize: controller.customerType.value == "Debtor" ? 14 : 16,
                   color: Colors.black87,
                 ),
               ),
               Obx(
                 () => Text(
                   "৳ ${controller.grandTotal.toStringAsFixed(2)}",
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontWeight: FontWeight.w900,
-                    fontSize: 24,
-                    color: Color(0xFF1E293B),
+                    fontSize:
+                        controller.customerType.value == "Debtor" ? 18 : 24,
+                    color: const Color(0xFF1E293B),
                   ),
                 ),
               ),
             ],
           ),
+
+          // DEBTOR TOTAL PAYABLE BREAKDOWN (Consolidated)
+          Obx(() {
+            if (controller.customerType.value == "Debtor" &&
+                controller.selectedDebtor.value != null &&
+                !controller.isConditionSale.value) {
+              // New Logic: Total Payable = This Invoice + Total Previous Due
+              double totalPayable =
+                  controller.grandTotal + controller.totalPreviousDue;
+
+              return Column(
+                children: [
+                  const SizedBox(height: 8),
+                  Divider(color: Colors.grey.shade300, height: 1),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        "(+) Previous Balance",
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                      Text(
+                        "৳ ${controller.totalPreviousDue.toStringAsFixed(0)}",
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.red,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 8,
+                      horizontal: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade50,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          "TOTAL PAYABLE",
+                          style: TextStyle(
+                            fontWeight: FontWeight.w900,
+                            fontSize: 14,
+                            color: Colors.red,
+                          ),
+                        ),
+                        Text(
+                          "৳ ${totalPayable.toStringAsFixed(2)}",
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w900,
+                            fontSize: 16,
+                            color: Colors.red,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            }
+            return const SizedBox.shrink();
+          }),
+
           const SizedBox(height: 20),
 
           // Action Button
@@ -1011,7 +1130,7 @@ class LiveOrderSalesPage extends StatelessWidget {
     );
   }
 
-  // --- HELPERS ---
+  // --- HELPERS (Kept exactly as requested) ---
   Widget _miniTextField(
     TextEditingController c,
     String label,
@@ -1074,7 +1193,6 @@ class LiveOrderSalesPage extends StatelessWidget {
     );
   }
 
-  // NEW HELPER FOR DETAIL INPUTS
   Widget _detailInput(TextEditingController c, String hint, IconData icon) {
     return TextField(
       controller: c,
@@ -1104,7 +1222,7 @@ class LiveOrderSalesPage extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// PRODUCT TABLE SECTION (Unchanged)
+// PRODUCT TABLE SECTION
 // ---------------------------------------------------------------------------
 class _ProductTableSection extends StatelessWidget {
   final LiveSalesController controller;
@@ -1155,6 +1273,7 @@ class _ProductTableSection extends StatelessWidget {
                           ),
                         );
                       }
+                      // Using controller.productCtrl.allProducts directly as pagination is handled by controller
                       return ListView.separated(
                         itemCount: controller.productCtrl.allProducts.length,
                         separatorBuilder:
@@ -1169,6 +1288,7 @@ class _ProductTableSection extends StatelessWidget {
                       );
                     }),
                   ),
+                  _buildPaginationControls(), // Added Pagination Controls Here
                 ],
               ),
             ),
@@ -1259,7 +1379,31 @@ class _ProductTableSection extends StatelessWidget {
           Expanded(
             flex: 3,
             child: Text(
-              "ITEM DESCRIPTION",
+              "ITEM NAME",
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          // Added Brand Column as requested by data structure update
+          Expanded(
+            flex: 2,
+            child: Text(
+              "BRAND",
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          // Added Model Column
+          Expanded(
+            flex: 2,
+            child: Text(
+              "MODEL",
               style: TextStyle(
                 color: Colors.white,
                 fontSize: 12,
@@ -1279,7 +1423,7 @@ class _ProductTableSection extends StatelessWidget {
             ),
           ),
           Expanded(
-            flex: 1,
+            flex: 2,
             child: Text(
               "RATE (BDT)",
               textAlign: TextAlign.right,
@@ -1295,6 +1439,39 @@ class _ProductTableSection extends StatelessWidget {
       ),
     );
   }
+
+  // --- NEW: Pagination Controls ---
+  Widget _buildPaginationControls() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: Colors.grey.shade200)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Obx(
+            () => Text(
+              "Page ${controller.currentPage} of ${controller.totalPages}",
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ),
+          Row(
+            children: [
+              IconButton(
+                onPressed: controller.prevPage,
+                icon: const Icon(Icons.chevron_left),
+              ),
+              IconButton(
+                onPressed: controller.nextPage,
+                icon: const Icon(Icons.chevron_right),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _ProductRow extends StatelessWidget {
@@ -1304,6 +1481,11 @@ class _ProductRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Decreased font size as requested
+    const double nameSize = 13;
+    const double metaSize = 12;
+    const double smallSize = 11;
+
     Color stockColor =
         product.stockQty == 0
             ? Colors.red
@@ -1315,63 +1497,86 @@ class _ProductRow extends StatelessWidget {
         onTap: () => controller.addToCart(product),
         hoverColor: Colors.blue.withOpacity(0.04),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          padding: const EdgeInsets.symmetric(
+            horizontal: 20,
+            vertical: 8,
+          ), // Decreased vertical padding
           child: Row(
             children: [
+              // 1. Name
               Expanded(
                 flex: 3,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      product.name,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 14,
-                        color: Color(0xFF334155),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.blue.shade50,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        product.model,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: Color(0xFF2563EB),
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
+                child: Text(
+                  product.name,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: nameSize,
+                    color: Color(0xFF334155),
+                  ),
                 ),
               ),
+              // 2. Brand (New)
+              Expanded(
+                flex: 2,
+                child: Text(
+                  product.brand,
+                  style: const TextStyle(
+                    fontSize: metaSize,
+                    color: Colors.blueGrey,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              // 3. Model
+              Expanded(
+                flex: 2,
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      product.model,
+                      style: const TextStyle(
+                        fontSize: smallSize,
+                        color: Color(0xFF2563EB),
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              // 4. Stock
               Expanded(
                 flex: 1,
                 child: Row(
                   children: [
-                    Icon(Icons.circle, size: 8, color: stockColor),
+                    Icon(
+                      Icons.circle,
+                      size: 6,
+                      color: stockColor,
+                    ), // Smaller dot
                     const SizedBox(width: 8),
                     Text(
                       product.stockQty.toString(),
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        fontSize: 14,
+                        fontSize: metaSize,
                         color: stockColor,
                       ),
                     ),
                   ],
                 ),
               ),
+              // 5. Rate
               Expanded(
-                flex: 1,
+                flex: 2,
                 child: Obx(() {
                   double price =
                       (controller.customerType.value == "Retailer")
@@ -1382,7 +1587,7 @@ class _ProductRow extends StatelessWidget {
                     textAlign: TextAlign.right,
                     style: const TextStyle(
                       fontWeight: FontWeight.w700,
-                      fontSize: 14,
+                      fontSize: metaSize,
                       color: Colors.black87,
                     ),
                   );
@@ -1390,8 +1595,8 @@ class _ProductRow extends StatelessWidget {
               ),
               const SizedBox(width: 20),
               SizedBox(
-                width: 36,
-                height: 36,
+                width: 30, // Smaller button
+                height: 30,
                 child: ElevatedButton(
                   onPressed: () => controller.addToCart(product),
                   style: ElevatedButton.styleFrom(
@@ -1405,7 +1610,7 @@ class _ProductRow extends StatelessWidget {
                   child: const Icon(
                     Icons.add,
                     color: Color(0xFF2563EB),
-                    size: 20,
+                    size: 18, // Smaller icon
                   ),
                 ),
               ),

@@ -12,8 +12,6 @@ import 'package:gtel_erp/Web%20Screen/Expenses/dailycontroller.dart';
 import '../Sales/controller.dart';
 import 'model.dart';
 
-
-
 class DebatorController extends GetxController {
   final FirebaseFirestore db = FirebaseFirestore.instance;
 
@@ -26,7 +24,7 @@ class DebatorController extends GetxController {
 
   RxBool isBodiesLoading = false.obs;
   RxBool gbIsLoading = false.obs;
-  RxBool isAddingBody = false.obs; // Restored
+  RxBool isAddingBody = false.obs;
 
   // --- PAGINATION STATE ---
   final int _limit = 20;
@@ -100,6 +98,51 @@ class DebatorController extends GetxController {
     }
   }
 
+  // --- HELPER FOR SALES CONTROLLER (Instant Fetch) ---
+  Future<Map<String, double>> getInstantDebtorBreakdown(String debtorId) async {
+    try {
+      final snap =
+          await db
+              .collection('debatorbody')
+              .doc(debtorId)
+              .collection('transactions')
+              .get();
+
+      double previousDueTotal = 0.0;
+      double previousPaid = 0.0;
+      double runningDue = 0.0;
+
+      for (var doc in snap.docs) {
+        final data = doc.data();
+        String type = (data['type'] ?? '').toString();
+        double amount = (data['amount'] as num).toDouble();
+
+        if (type == 'previous_due') {
+          previousDueTotal += amount;
+        } else if (type == 'loan_payment') {
+          previousPaid += amount;
+        } else if (type == 'credit' || type == 'advance_given') {
+          runningDue += amount;
+        } else if (type == 'debit' || type == 'advance_received') {
+          runningDue -= amount;
+        }
+      }
+
+      double currentLoan = previousDueTotal - previousPaid;
+      // Ensure loan doesn't go negative purely by calculation logic (optional)
+      if (currentLoan < 0) currentLoan = 0;
+
+      return {
+        'loan': currentLoan, // OLD DUE
+        'running': runningDue, // RUNNING DUE
+        'total': currentLoan + runningDue,
+      };
+    } catch (e) {
+      print("Breakdown Error: $e");
+      return {'loan': 0.0, 'running': 0.0, 'total': 0.0};
+    }
+  }
+
   // --- NEW FEATURE: BREAKDOWN STREAM ---
   Stream<Map<String, double>> getDebtorBreakdown(String debtorId) {
     return db
@@ -117,14 +160,11 @@ class DebatorController extends GetxController {
             String type = (data['type'] ?? '').toString();
             double amount = (data['amount'] as num).toDouble();
 
-            // 1. LOAN / PREVIOUS SECTION
             if (type == 'previous_due') {
               previousDueTotal += amount;
             } else if (type == 'loan_payment') {
               previousPaid += amount;
-            }
-            // 2. RUNNING / NORMAL SECTION (Includes advances as running debt)
-            else if (type == 'credit' || type == 'advance_given') {
+            } else if (type == 'credit' || type == 'advance_given') {
               runningDue += amount;
             } else if (type == 'debit' || type == 'advance_received') {
               runningDue -= amount;
@@ -232,7 +272,7 @@ class DebatorController extends GetxController {
     }
   }
 
-  // --- CORE RECALCULATION (UPDATED FOR NEW TYPES) ---
+  // --- CORE RECALCULATION ---
   Future<void> _recalculateSingleDebtorBalance(String debtorId) async {
     try {
       final txs =
@@ -268,8 +308,6 @@ class DebatorController extends GetxController {
       print("Auto-Fix Error: $e");
     }
   }
-
-
 
   Future<void> addTransaction({
     required String debtorId,
@@ -427,7 +465,7 @@ class DebatorController extends GetxController {
   }
 
   // ------------------------------------------------------------------
-  // 4. DELETE & EDIT (Restored)
+  // 4. DELETE & EDIT
   // ------------------------------------------------------------------
 
   Future<void> deleteTransaction(String debtorId, String transactionId) async {
@@ -466,7 +504,6 @@ class DebatorController extends GetxController {
       }
 
       if (type == 'credit' || type == 'debit') {
-        // Keeping your legacy sales cleanup logic
         if (!Get.isRegistered<DailySalesController>()) {
           Get.put(DailySalesController());
         }
@@ -535,7 +572,6 @@ class DebatorController extends GetxController {
   }) async {
     gbIsLoading.value = true;
     try {
-      // 1. Update Tx
       await db
           .collection('debatorbody')
           .doc(debtorId)
@@ -549,10 +585,8 @@ class DebatorController extends GetxController {
             'paymentMethod': paymentMethod,
           });
 
-      // 2. Force Recalculate
       await _recalculateSingleDebtorBalance(debtorId);
 
-      // 3. Update External (Simplified update - complex type changes might require delete/re-add)
       if (oldType == 'loan_payment' || oldType.contains('advance')) {
         QuerySnapshot lSnap =
             await db
@@ -560,14 +594,10 @@ class DebatorController extends GetxController {
                 .where('linkedTxId', isEqualTo: transactionId)
                 .get();
         for (var d in lSnap.docs) {
-          await d.reference.update({
-            'amount': newAmount,
-            // Simple type switch, doesn't handle deep logic change
-          });
+          await d.reference.update({'amount': newAmount});
         }
       }
 
-      // Legacy Sales update
       if (newType == 'credit' || newType == 'debit') {
         final salesSnap =
             await db
@@ -600,7 +630,7 @@ class DebatorController extends GetxController {
   }
 
   // ------------------------------------------------------------------
-  // 5. DEBTOR PROFILE CRUD (Restored)
+  // 5. DEBTOR PROFILE CRUD
   // ------------------------------------------------------------------
 
   Future<void> addBody({
@@ -745,7 +775,6 @@ class DebatorController extends GetxController {
   ) async {
     final pdf = pw.Document();
 
-    // Calculate totals for PDF
     double totalDebt = transactions
         .where(
           (t) =>
@@ -848,3 +877,4 @@ class DebatorController extends GetxController {
     );
   }
 }
+
