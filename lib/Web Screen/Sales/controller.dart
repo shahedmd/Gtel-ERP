@@ -495,7 +495,6 @@ class DailySalesController extends GetxController {
   }
 
   Future<void> reprintInvoice(String invoiceId) async {
-    // ... (This method remains unchanged as it fetches from master record)
     isLoading.value = true;
     try {
       DocumentSnapshot doc =
