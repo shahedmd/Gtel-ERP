@@ -30,6 +30,13 @@ class _DebatorpageState extends State<Debatorpage> {
   static const Color bgGrey = Color(0xFFF9FAFB);
   static const Color textMuted = Color(0xFF6B7280);
 
+  // BD Currency Formatter for UI
+  final NumberFormat bdCurrency = NumberFormat.currency(
+    locale: 'en_IN',
+    symbol: '',
+    decimalDigits: 2,
+  );
+
   @override
   void initState() {
     super.initState();
@@ -39,7 +46,7 @@ class _DebatorpageState extends State<Debatorpage> {
   @override
   void dispose() {
     _scrollController.dispose();
-    _searchController.dispose(); // Dispose search controller
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -119,71 +126,143 @@ class _DebatorpageState extends State<Debatorpage> {
     );
   }
 
-  // --- TOP HEADER (Title, Search & Add) ---
+  // --- TOP HEADER (Title, Search, Total & Add) ---
   Widget _buildHeader() {
     return Container(
       padding: const EdgeInsets.all(24),
       color: Colors.white,
-      child: Row(
+      child: Column(
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          // Top Row: Title, Total, and Print
+          Row(
             children: [
-              const Text(
-                "Debtor Management",
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: darkSlate,
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    "Debtor Management",
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: darkSlate,
+                    ),
+                  ),
+                  Text(
+                    "Track outstanding balances and credit history",
+                    style: TextStyle(fontSize: 14, color: textMuted),
+                  ),
+                ],
+              ),
+              const Spacer(),
+
+              // TOTAL OUTSTANDING CARD
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.red.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      "Total Market Due",
+                      style: TextStyle(
+                        color: Colors.red.shade800,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Obx(
+                      () => Text(
+                        "${bdCurrency.format(controller.totalMarketOutstanding.value)} ৳",
+                        style: TextStyle(
+                          color: Colors.red.shade900,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              Text(
-                "Track outstanding balances and credit history",
-                style: TextStyle(fontSize: 14, color: textMuted),
+              const SizedBox(width: 15),
+
+              // PRINT BUTTON
+              IconButton(
+                onPressed: () => controller.downloadAllDebtorsReport(),
+                icon: const Icon(Icons.print, color: darkSlate),
+                tooltip: "Download Total Due Report",
+                style: IconButton.styleFrom(
+                  backgroundColor: bgGrey,
+                  padding: const EdgeInsets.all(12),
+                ),
               ),
             ],
           ),
-          const Spacer(),
-          // Search Bar
-          Container(
-            width: 350,
-            decoration: BoxDecoration(
-              color: bgGrey,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.black12),
-            ),
-            child: TextField(
-              controller: _searchController, // FIX: Attached Controller Here
-              onChanged: (val) {
-                controller.searchDebtors(val);
-              },
-              decoration: const InputDecoration(
-                hintText: "Search by Name, Phone, or NID...",
-                prefixIcon: Icon(Icons.search, size: 20, color: textMuted),
-                border: InputBorder.none,
-                contentPadding: EdgeInsets.symmetric(vertical: 12),
+          const SizedBox(height: 20),
+
+          // Second Row: Search and Add Button
+          Row(
+            children: [
+              // Search Bar
+              Expanded(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: bgGrey,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.black12),
+                  ),
+                  child: TextField(
+                    controller: _searchController,
+                    onChanged: (val) {
+                      controller.searchDebtors(val);
+                    },
+                    decoration: const InputDecoration(
+                      hintText: "Search by Name, Phone, or NID...",
+                      prefixIcon: Icon(
+                        Icons.search,
+                        size: 20,
+                        color: textMuted,
+                      ),
+                      border: InputBorder.none,
+                      contentPadding: EdgeInsets.symmetric(vertical: 12),
+                    ),
+                  ),
+                ),
               ),
-            ),
-          ),
-          const SizedBox(width: 16),
-          // Add Debtor Button
-          ElevatedButton.icon(
-            onPressed: () => adddebatorDialog(controller),
-            icon: const Icon(Icons.person_add, color: Colors.white, size: 18),
-            label: const Text(
-              "New Debtor",
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
+              const SizedBox(width: 16),
+              // Add Debtor Button
+              ElevatedButton.icon(
+                onPressed: () => adddebatorDialog(controller),
+                icon: const Icon(
+                  Icons.person_add,
+                  color: Colors.white,
+                  size: 18,
+                ),
+                label: const Text(
+                  "New Debtor",
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: activeAccent,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 20,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
               ),
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: activeAccent,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
+            ],
           ),
         ],
       ),
@@ -227,20 +306,24 @@ class _DebatorpageState extends State<Debatorpage> {
           Expanded(
             flex: 2,
             child: Text(
-              "NID / Identity",
+              "Current Due",
               style: TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
               ),
+              textAlign: TextAlign.right,
             ),
           ),
           Expanded(
             flex: 3,
-            child: Text(
-              "Address",
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
+            child: Padding(
+              padding: EdgeInsets.only(left: 20),
+              child: Text(
+                "Address",
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ),
@@ -255,7 +338,7 @@ class _DebatorpageState extends State<Debatorpage> {
               textAlign: TextAlign.right,
             ),
           ),
-          SizedBox(width: 60), // Space for Actions
+          SizedBox(width: 40), // Space for Actions
         ],
       ),
     );
@@ -307,22 +390,40 @@ class _DebatorpageState extends State<Debatorpage> {
                   style: const TextStyle(color: darkSlate),
                 ),
               ),
-              // NID
+              // Current Balance (Replaced NID to show Balance)
               Expanded(
                 flex: 2,
-                child: Text(
-                  debtor.nid,
-                  style: const TextStyle(color: textMuted, fontSize: 13),
+                child: StreamBuilder<double>(
+                  stream: controller.getLiveBalance(debtor.id),
+                  initialData: debtor.balance,
+                  builder: (context, snapshot) {
+                    double bal = snapshot.data ?? 0.0;
+                    return Text(
+                      "${bdCurrency.format(bal)} ৳",
+                      textAlign: TextAlign.right,
+                      style: TextStyle(
+                        color:
+                            bal > 0
+                                ? Colors.red.shade700
+                                : Colors.green.shade700,
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    );
+                  },
                 ),
               ),
               // Address
               Expanded(
                 flex: 3,
-                child: Text(
-                  debtor.address,
-                  style: const TextStyle(color: textMuted, fontSize: 13),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 20),
+                  child: Text(
+                    debtor.address,
+                    style: const TextStyle(color: textMuted, fontSize: 13),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ),
               // Created At
@@ -338,7 +439,7 @@ class _DebatorpageState extends State<Debatorpage> {
               ),
               // Arrow Icon
               const SizedBox(
-                width: 60,
+                width: 40,
                 child: Align(
                   alignment: Alignment.centerRight,
                   child: Icon(

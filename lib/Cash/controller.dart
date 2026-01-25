@@ -1,6 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -41,6 +41,8 @@ class CashDrawerController extends GetxController {
   final RxDouble netBank = 0.0.obs;
   final RxDouble netBkash = 0.0.obs;
   final RxDouble netNagad = 0.0.obs;
+
+  // This is the "All Together" Cash
   final RxDouble grandTotal = 0.0.obs;
 
   // --- Raw Totals for Reporting ---
@@ -51,6 +53,9 @@ class CashDrawerController extends GetxController {
   // --- Transaction History ---
   final RxList<DrawerTransaction> recentTransactions =
       <DrawerTransaction>[].obs;
+
+  // Helper for formatting numbers in the Controller/PDF
+  final NumberFormat _currencyFormat = NumberFormat('#,##0.00');
 
   @override
   void onInit() {
@@ -76,7 +81,6 @@ class CashDrawerController extends GetxController {
         );
         break;
       case DateFilter.yearly:
-        // This is now safe to use because of the optimization below
         selectedRange.value = DateTimeRange(
           start: DateTime(now.year, 1, 1),
           end: DateTime(now.year, 12, 31),
@@ -118,9 +122,7 @@ class CashDrawerController extends GetxController {
         59,
       );
 
-      // 2. Prepare Futures (Request Data in Parallel)
-
-      // A. Sales
+      // 2. Prepare Futures
       var salesFuture =
           _db
               .collection('daily_sales')
@@ -129,7 +131,6 @@ class CashDrawerController extends GetxController {
               .orderBy('timestamp', descending: true)
               .get();
 
-      // B. Ledger (Adds/Withdrawals)
       var ledgerFuture =
           _db
               .collection('cash_ledger')
@@ -138,10 +139,9 @@ class CashDrawerController extends GetxController {
               .orderBy('timestamp', descending: true)
               .get();
 
-      // C. Expenses (Optimized)
       var expensesFuture = _fetchExpensesOptimized(start, end);
 
-      // 3. Wait for all data to arrive
+      // 3. Wait for all data
       var results = await Future.wait([
         salesFuture,
         ledgerFuture,
@@ -163,28 +163,25 @@ class CashDrawerController extends GetxController {
       for (var doc in salesSnap.docs) {
         var data = doc.data() as Map<String, dynamic>;
         double c = 0, b = 0, bk = 0, n = 0;
-
         var pm = data['paymentMethod'];
 
-        // Handle Multi-Payment
         if (pm is Map && pm['type'] == 'multi') {
           c = double.tryParse(pm['cash'].toString()) ?? 0;
           b = double.tryParse(pm['bank'].toString()) ?? 0;
           bk = double.tryParse(pm['bkash'].toString()) ?? 0;
           n = double.tryParse(pm['nagad'].toString()) ?? 0;
-        }
-        // Handle Legacy/Single Payment
-        else {
+        } else {
           double paid = double.tryParse(data['paid'].toString()) ?? 0;
           String type = (pm is Map ? pm['type'] : pm).toString().toLowerCase();
           if (type.contains('bank')) {
             b = paid;
-          } else if (type.contains('bkash'))
-            {bk = paid;}
-          else if (type.contains('nagad'))
-            {n = paid;}
-          else
-           { c = paid;}
+          } else if (type.contains('bkash')) {
+            bk = paid;
+          } else if (type.contains('nagad')) {
+            n = paid;
+          } else {
+            c = paid;
+          }
         }
 
         tempCash += c;
@@ -209,27 +206,31 @@ class CashDrawerController extends GetxController {
       for (var doc in ledgerSnap.docs) {
         var data = doc.data() as Map<String, dynamic>;
         double amount = double.tryParse(data['amount'].toString()) ?? 0;
-        String type = data['type']; // 'deposit' or 'withdraw'
+        String type = data['type'];
         String method = data['method'] ?? 'cash';
 
         if (type == 'deposit') {
           if (method == 'bank') {
             tempBank += amount;
-          } else if (method == 'bkash')
-            {tempBkash += amount;}
-          else if (method == 'nagad')
-           { tempNagad += amount;}
-          else
-           { tempCash += amount;}
+          }  if (method == 'bkash') {
+            tempBkash += amount;
+          }
+           if (method == 'nagad') {
+             tempNagad += amount;
+           } else {
+             tempCash += amount;
+           }
           tAdd += amount;
         } else if (type == 'withdraw') {
           if (method == 'bank') {
             tempBank -= amount;
-          } else if (method == 'bkash')
-           { tempBkash -= amount;}
-          else if (method == 'nagad')
-           { tempNagad -= amount;}
-          tempCash += amount; // Added to Cash Hand
+          }  if (method == 'bkash') {
+            tempBkash -= amount;
+          }
+           if (method == 'nagad') {
+             tempNagad -= amount;
+           }
+          tempCash += amount;
         }
 
         allTx.add(
@@ -243,13 +244,12 @@ class CashDrawerController extends GetxController {
         );
       }
 
-      // Process Expenses (Cascading Logic)
+      // Process Expenses (Cascading)
       for (var ex in expenseList) {
         tExp += ex.amount;
       }
 
       double remainingExpense = tExp;
-
       // Deduct from Cash -> Bank -> Bkash -> Nagad
       if (tempCash >= remainingExpense) {
         tempCash -= remainingExpense;
@@ -258,7 +258,6 @@ class CashDrawerController extends GetxController {
         remainingExpense -= tempCash;
         tempCash = 0;
       }
-
       if (remainingExpense > 0) {
         if (tempBank >= remainingExpense) {
           tempBank -= remainingExpense;
@@ -268,7 +267,6 @@ class CashDrawerController extends GetxController {
           tempBank = 0;
         }
       }
-
       if (remainingExpense > 0) {
         if (tempBkash >= remainingExpense) {
           tempBkash -= remainingExpense;
@@ -278,7 +276,6 @@ class CashDrawerController extends GetxController {
           tempBkash = 0;
         }
       }
-
       if (remainingExpense > 0) {
         if (tempNagad >= remainingExpense) {
           tempNagad -= remainingExpense;
@@ -300,9 +297,8 @@ class CashDrawerController extends GetxController {
       rawExpenseTotal.value = tExp;
       rawManualAddTotal.value = tAdd;
 
-      // Sort & Update History
       allTx.sort((a, b) => b.date.compareTo(a.date));
-      recentTransactions.assignAll(allTx.take(15).toList());
+      recentTransactions.assignAll(allTx.take(20).toList());
     } catch (e) {
       Get.snackbar("Error", "Could not calculate cash drawer.");
     } finally {
@@ -313,18 +309,12 @@ class CashDrawerController extends GetxController {
   // =========================================================
   // 3. OPTIMIZED EXPENSE FETCHING
   // =========================================================
-
-  // This replaces the old slow loop
   Future<List<DrawerTransaction>> _fetchExpensesOptimized(
     DateTime start,
     DateTime end,
   ) async {
     List<DrawerTransaction> expenses = [];
-
     try {
-      // METHOD 1: Collection Group Query (The Fastest Way)
-      // NOTE: This requires a Firestore Index on 'items' collection -> 'time' field.
-      // If the index is missing, the catch block will run Method 2.
       var snap =
           await _db
               .collectionGroup('items')
@@ -334,15 +324,11 @@ class CashDrawerController extends GetxController {
               .get();
 
       for (var doc in snap.docs) {
-        var data = doc.data();
-        _addExpenseFromDoc(data, expenses);
+        _addExpenseFromDoc(doc.data(), expenses);
       }
     } catch (e) {
-      // METHOD 2: Parallel Fetch (Fallback if Index is missing)
-      // This is still much faster than your old linear loop
       return await _fetchExpensesParallel(start, end);
     }
-
     return expenses;
   }
 
@@ -354,13 +340,10 @@ class CashDrawerController extends GetxController {
     List<Future<void>> tasks = [];
     int days = end.difference(start).inDays;
 
-    // Create a request for every single day simultaneously
     for (int i = 0; i <= days; i++) {
       DateTime current = start.add(Duration(days: i));
       tasks.add(_fetchSingleDayExpense(current, allExpenses));
     }
-
-    // Wait for all days to finish
     await Future.wait(tasks);
     return allExpenses;
   }
@@ -381,7 +364,7 @@ class CashDrawerController extends GetxController {
         _addExpenseFromDoc(doc.data(), list);
       }
     } catch (e) {
-      // No expense this day, ignore
+      // Ignore
     }
   }
 
@@ -390,14 +373,12 @@ class CashDrawerController extends GetxController {
     List<DrawerTransaction> list,
   ) {
     double amt = double.tryParse(data['amount'].toString()) ?? 0.0;
-
     DateTime txDate = DateTime.now();
     if (data['time'] is Timestamp) {
       txDate = (data['time'] as Timestamp).toDate();
     } else if (data['lastUpdated'] is Timestamp) {
       txDate = (data['lastUpdated'] as Timestamp).toDate();
     }
-
     list.add(
       DrawerTransaction(
         date: txDate,
@@ -412,7 +393,6 @@ class CashDrawerController extends GetxController {
   // =========================================================
   // 4. ACTIONS & PDF
   // =========================================================
-
   Future<void> addManualCash({
     required double amount,
     required String method,
@@ -478,44 +458,64 @@ class CashDrawerController extends GetxController {
               ),
               pw.SizedBox(height: 15),
 
-              // Overview Box
+              // Total Assets Box (Updated Prominence)
               pw.Container(
-                padding: const pw.EdgeInsets.all(10),
+                width: double.infinity,
+                padding: const pw.EdgeInsets.all(15),
                 decoration: pw.BoxDecoration(
+                  color: PdfColors.grey100,
                   border: pw.Border.all(color: PdfColors.grey),
-                  borderRadius: const pw.BorderRadius.all(
-                    pw.Radius.circular(5),
-                  ),
                 ),
-                child: pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.center,
                   children: [
-                    _pdfStat(
-                      "Sales Income",
-                      rawSalesTotal.value,
-                      fontBold,
-                      isPos: true,
+                    pw.Text(
+                      "GRAND TOTAL CASH (ALL SOURCES)",
+                      style: pw.TextStyle(font: font, fontSize: 10),
                     ),
-                    _pdfStat(
-                      "Total Expenses",
-                      rawExpenseTotal.value,
-                      fontBold,
-                      isPos: false,
-                    ),
-                    _pdfStat(
-                      "Manual Adds",
-                      rawManualAddTotal.value,
-                      fontBold,
-                      isPos: true,
+                    pw.SizedBox(height: 5),
+                    pw.Text(
+                      "${_currencyFormat.format(grandTotal.value)} BDT",
+                      style: pw.TextStyle(
+                        font: fontBold,
+                        fontSize: 24,
+                        color: PdfColors.green900,
+                      ),
                     ),
                   ],
                 ),
               ),
+              pw.SizedBox(height: 15),
+
+              // Overview Box
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
+                children: [
+                  _pdfStat(
+                    "Sales Income",
+                    rawSalesTotal.value,
+                    fontBold,
+                    isPos: true,
+                  ),
+                  _pdfStat(
+                    "Total Expenses",
+                    rawExpenseTotal.value,
+                    fontBold,
+                    isPos: false,
+                  ),
+                  _pdfStat(
+                    "Manual Adds",
+                    rawManualAddTotal.value,
+                    fontBold,
+                    isPos: true,
+                  ),
+                ],
+              ),
               pw.SizedBox(height: 20),
 
-              // Net Balances
+              // Net Balances Table
               pw.Text(
-                "NET HOLDINGS (Actual Cash in Hand)",
+                "CASH POSITIONS (Where is the money?)",
                 style: pw.TextStyle(font: fontBold, fontSize: 14),
               ),
               pw.SizedBox(height: 5),
@@ -523,26 +523,18 @@ class CashDrawerController extends GetxController {
                 border: pw.TableBorder.all(color: PdfColors.grey300),
                 children: [
                   _pdfTableRow(
-                    "Direct Cash",
+                    "Direct Cash (In Hand)",
                     netCash.value,
                     fontBold,
                     isTotal: true,
                   ),
                   _pdfTableRow("Bank Balance", netBank.value, font),
-                  _pdfTableRow("Bkash", netBkash.value, font),
-                  _pdfTableRow("Nagad", netNagad.value, font),
+                  _pdfTableRow("Bkash Balance", netBkash.value, font),
+                  _pdfTableRow("Nagad Balance", netNagad.value, font),
                 ],
               ),
-              pw.SizedBox(height: 10),
-              pw.Align(
-                alignment: pw.Alignment.centerRight,
-                child: pw.Text(
-                  "Total Asset Value: ${grandTotal.value.toStringAsFixed(2)}",
-                  style: pw.TextStyle(font: fontBold, fontSize: 16),
-                ),
-              ),
-
               pw.SizedBox(height: 20),
+
               pw.Text(
                 "Transaction Log",
                 style: pw.TextStyle(font: fontBold, fontSize: 14),
@@ -560,7 +552,7 @@ class CashDrawerController extends GetxController {
                         DateFormat('dd-MMM HH:mm').format(tx.date),
                         tx.description,
                         tx.type.toUpperCase(),
-                        "$sign${tx.amount.toStringAsFixed(0)}",
+                        "$sign${_currencyFormat.format(tx.amount)}",
                       ];
                     }).toList(),
                 headerStyle: pw.TextStyle(
@@ -594,7 +586,7 @@ class CashDrawerController extends GetxController {
           style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
         ),
         pw.Text(
-          val.toStringAsFixed(0),
+          _currencyFormat.format(val),
           style: pw.TextStyle(
             font: font,
             fontSize: 14,
@@ -622,7 +614,7 @@ class CashDrawerController extends GetxController {
         pw.Padding(
           padding: const pw.EdgeInsets.all(6),
           child: pw.Text(
-            "${val.toStringAsFixed(2)} BDT",
+            "${_currencyFormat.format(val)} BDT",
             style: pw.TextStyle(font: font),
           ),
         ),

@@ -6,7 +6,7 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
 
-import 'overviewcontroller.dart'; // Ensure this matches your file path
+import 'overviewcontroller.dart';
 
 class DailyOverviewPage extends StatelessWidget {
   DailyOverviewPage({super.key});
@@ -14,9 +14,9 @@ class DailyOverviewPage extends StatelessWidget {
   final OverviewController ctrl = Get.find<OverviewController>();
 
   // --- ERP THEME COLORS ---
-  static const Color slateDark = Color(0xFF0F172A); // Primary Text / Headers
-  static const Color slateMedium = Color(0xFF64748B); // Secondary Text
-  static const Color slateLight = Color(0xFFF1F5F9); // Background
+  static const Color slateDark = Color(0xFF0F172A);
+  static const Color slateMedium = Color(0xFF64748B);
+  static const Color slateLight = Color(0xFFF1F5F9);
   static const Color surfaceWhite = Colors.white;
   static const Color borderGrey = Color(0xFFE2E8F0);
 
@@ -24,12 +24,13 @@ class DailyOverviewPage extends StatelessWidget {
   static const Color successGreen = Color(0xFF10B981);
   static const Color errorRed = Color(0xFFEF4444);
   static const Color infoBlue = Color(0xFF3B82F6);
+  static const Color warnOrange = Color(0xFFF59E0B);
 
   // Chart Palette
-  static const Color colCash = Color(0xFF1E293B); // Dark Slate
-  static const Color colBkash = Color(0xFFBE185D); // Pink/Magenta
-  static const Color colNagad = Color(0xFFEA580C); // Orange
-  static const Color colBank = Color(0xFF2563EB); // Blue
+  static const Color colCash = Color(0xFF1E293B);
+  static const Color colBkash = Color(0xFFBE185D);
+  static const Color colNagad = Color(0xFFEA580C);
+  static const Color colBank = Color(0xFF2563EB);
 
   @override
   Widget build(BuildContext context) {
@@ -37,13 +38,21 @@ class DailyOverviewPage extends StatelessWidget {
       backgroundColor: slateLight,
       appBar: _buildAppBar(context),
       body: Obx(() {
-        // You can add an isLoading check here if your sub-controllers have one exposed
+        if (ctrl.isLoadingHistory.value) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
         return SingleChildScrollView(
           padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 1. TOP STATS CARDS
+              // 0. BALANCE SHEET (Previous + Today = Total)
+              _buildBalanceSheetSection(),
+
+              const SizedBox(height: 20),
+
+              // 1. TODAY'S STATS CARDS
               _buildSummarySection(),
 
               const SizedBox(height: 16),
@@ -74,10 +83,8 @@ class DailyOverviewPage extends StatelessWidget {
               ),
               const SizedBox(height: 10),
 
-              // Responsive Ledger Layout
               LayoutBuilder(
                 builder: (context, constraints) {
-                  // On very small screens, stack them. On tablets/phones, side-by-side.
                   return Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -88,9 +95,7 @@ class DailyOverviewPage extends StatelessWidget {
                           total: ctrl.totalCashIn.value,
                           items: ctrl.cashInList,
                           colorTheme: successGreen,
-                          icon:
-                              FontAwesomeIcons
-                                  .arrowDown, // Money coming down into pocket
+                          icon: FontAwesomeIcons.arrowDown,
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -101,14 +106,13 @@ class DailyOverviewPage extends StatelessWidget {
                           total: ctrl.totalCashOut.value,
                           items: ctrl.cashOutList,
                           colorTheme: errorRed,
-                          icon: FontAwesomeIcons.arrowUp, // Money leaving
+                          icon: FontAwesomeIcons.arrowUp,
                         ),
                       ),
                     ],
                   );
                 },
               ),
-
               const SizedBox(height: 40),
             ],
           ),
@@ -194,40 +198,144 @@ class DailyOverviewPage extends StatelessWidget {
   }
 
   // =========================================
-  // 1. STATS SECTION
+  // 0. NEW: BALANCE SHEET SECTION
+  // =========================================
+  Widget _buildBalanceSheetSection() {
+    final currency = NumberFormat("#,##0");
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.blue.shade100),
+        gradient: LinearGradient(
+          colors: [Colors.blue.shade50, Colors.white],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+        ),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Icon(
+                FontAwesomeIcons.vault,
+                size: 16,
+                color: Colors.blue.shade800,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                "CASH POSITION",
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.blue.shade900,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 15),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              // Previous
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      "Previous Balance",
+                      style: TextStyle(fontSize: 11, color: slateMedium),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      "৳${currency.format(ctrl.previousCash.value)}",
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color: slateDark,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(width: 1, height: 30, color: borderGrey),
+              // Today's Net
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    const Text(
+                      "Today's Net",
+                      style: TextStyle(fontSize: 11, color: slateMedium),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      "${ctrl.netCashBalance.value >= 0 ? '+' : ''}৳${currency.format(ctrl.netCashBalance.value)}",
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color:
+                            ctrl.netCashBalance.value >= 0
+                                ? successGreen
+                                : errorRed,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(width: 1, height: 30, color: borderGrey),
+              // Total
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    const Text(
+                      "Closing Cash",
+                      style: TextStyle(fontSize: 11, color: slateMedium),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      "৳${currency.format(ctrl.closingCash.value)}",
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 18,
+                        color: Colors.blue.shade800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // =========================================
+  // 1. STATS SECTION (Updated Format)
   // =========================================
   Widget _buildSummarySection() {
     return SizedBox(
-      height: 110, // Fixed height for alignment
+      height: 110,
       child: Row(
         children: [
           Expanded(
             child: _statCard(
-              title: "TOTAL INCOME",
+              title: "TODAY'S INCOME",
               amount: ctrl.totalCashIn.value,
               icon: FontAwesomeIcons.arrowTrendUp,
               color: successGreen,
-              isNet: false,
             ),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: _statCard(
-              title: "TOTAL EXPENSE",
+              title: "TODAY'S EXPENSE",
               amount: ctrl.totalCashOut.value,
               icon: FontAwesomeIcons.arrowTrendDown,
               color: errorRed,
-              isNet: false,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: _statCard(
-              title: "NET BALANCE",
-              amount: ctrl.netCashBalance.value,
-              icon: FontAwesomeIcons.scaleBalanced,
-              color: ctrl.netCashBalance.value >= 0 ? infoBlue : errorRed,
-              isNet: true,
             ),
           ),
         ],
@@ -240,7 +348,6 @@ class DailyOverviewPage extends StatelessWidget {
     required double amount,
     required IconData icon,
     required Color color,
-    required bool isNet,
   }) {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -248,6 +355,13 @@ class DailyOverviewPage extends StatelessWidget {
         color: surfaceWhite,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: borderGrey),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.02),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -275,7 +389,7 @@ class DailyOverviewPage extends StatelessWidget {
               style: TextStyle(
                 fontSize: 22,
                 fontWeight: FontWeight.w800,
-                color: isNet ? color : slateDark,
+                color: color,
               ),
             ),
           ),
@@ -460,7 +574,7 @@ class DailyOverviewPage extends StatelessWidget {
   }
 
   // =========================================
-  // 3. LEDGER COLUMNS
+  // 3. LEDGER COLUMNS (Updated Format)
   // =========================================
   Widget _buildLedgerColumn({
     required String title,
@@ -514,7 +628,6 @@ class DailyOverviewPage extends StatelessWidget {
               ],
             ),
           ),
-
           // List
           if (items.isEmpty)
             Padding(

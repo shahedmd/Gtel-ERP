@@ -2,14 +2,17 @@
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:gtel_erp/Cash/controller.dart';
+import 'package:gtel_erp/Cash/controller.dart'; // Ensure this matches your project structure
 import 'package:intl/intl.dart';
 
 class CashDrawerView extends StatelessWidget {
   // Inject the controller
   final controller = Get.put(CashDrawerController());
 
-   CashDrawerView({super.key});
+  // Formatter for BDT/Regular numbers (e.g. 1,500,000.00)
+  final NumberFormat currencyFormatter = NumberFormat('#,##0.00');
+
+  CashDrawerView({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -50,7 +53,75 @@ class CashDrawerView extends StatelessWidget {
                   padding: const EdgeInsets.all(16),
                   child: Column(
                     children: [
-                      // A. High Level Overview (Income vs Expense)
+                      // Date Context Indicator
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 15),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.shade50,
+                          borderRadius: BorderRadius.circular(5),
+                          border: Border.all(color: Colors.blue.shade100),
+                        ),
+                        child: Text(
+                          "Showing data for: ${DateFormat('dd MMM yyyy').format(controller.selectedRange.value.start)} - ${DateFormat('dd MMM yyyy').format(controller.selectedRange.value.end)}",
+                          style: TextStyle(
+                            color: Colors.blue.shade900,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+
+                      // A. GRAND TOTAL (ALL TOGETHER)
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              Colors.green.shade700,
+                              Colors.teal.shade600,
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.circular(12),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.green.withOpacity(0.3),
+                              blurRadius: 10,
+                              offset: const Offset(0, 5),
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          children: [
+                            const Text(
+                              "TOTAL NET CASH (All Accounts)",
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 13,
+                                letterSpacing: 1.2,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 5),
+                            Text(
+                              "${currencyFormatter.format(controller.grandTotal.value)} ৳",
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 32,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+
+                      // B. High Level Overview (Income vs Expense)
                       Row(
                         children: [
                           Expanded(
@@ -80,8 +151,8 @@ class CashDrawerView extends StatelessWidget {
                       ),
                       const SizedBox(height: 25),
 
-                      // B. Net Holdings (The "Tiles")
-                      _sectionHeader("CURRENT CASH POSITIONS"),
+                      // C. Net Holdings (Breakdown)
+                      _sectionHeader("CURRENT CASH BREAKDOWN"),
                       _buildAssetTile(
                         "Direct Cash",
                         controller.netCash.value,
@@ -119,7 +190,7 @@ class CashDrawerView extends StatelessWidget {
                       ),
                       const SizedBox(height: 25),
 
-                      // C. Quick Actions
+                      // D. Quick Actions
                       _sectionHeader("MANAGE FUNDS"),
                       Row(
                         children: [
@@ -144,8 +215,8 @@ class CashDrawerView extends StatelessWidget {
                       ),
                       const SizedBox(height: 25),
 
-                      // D. Recent Transactions
-                      _sectionHeader("RECENT TRANSACTIONS (Last 15)"),
+                      // E. Recent Transactions
+                      _sectionHeader("RECENT TRANSACTIONS"),
                       ListView.builder(
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
@@ -241,11 +312,13 @@ class CashDrawerView extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 5),
+          // Updated to use full format instead of compact
           Text(
-            NumberFormat.compact().format(amount),
+            currencyFormatter.format(amount),
+            textAlign: TextAlign.center,
             style: TextStyle(
               color: color,
-              fontSize: 16,
+              fontSize: 14, // Slightly smaller to fit big numbers
               fontWeight: FontWeight.bold,
             ),
           ),
@@ -292,7 +365,7 @@ class CashDrawerView extends StatelessWidget {
             ),
           ),
           Text(
-            "${amount.toStringAsFixed(0)} ৳",
+            "${currencyFormatter.format(amount)} ৳",
             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
           ),
         ],
@@ -308,12 +381,13 @@ class CashDrawerView extends StatelessWidget {
     IconData icon;
     if (tx.type == 'sale') {
       icon = Icons.shopping_bag_outlined;
-    } else if (tx.type == 'expense')
-      {icon = Icons.receipt_long;}
-    else if (tx.type == 'withdraw')
-      {icon = Icons.arrow_circle_down;}
-    else
-      {icon = Icons.arrow_circle_up;}
+    } else if (tx.type == 'expense') {
+      icon = Icons.receipt_long;
+    } else if (tx.type == 'withdraw') {
+      icon = Icons.arrow_circle_down;
+    } else {
+      icon = Icons.arrow_circle_up;
+    }
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -345,7 +419,7 @@ class CashDrawerView extends StatelessWidget {
             ),
           ),
           Text(
-            "${isExp ? '-' : '+'}${tx.amount.toStringAsFixed(0)}",
+            "${isExp ? '-' : '+'}${currencyFormatter.format(tx.amount)}",
             style: TextStyle(
               color: c,
               fontWeight: FontWeight.bold,

@@ -7,6 +7,7 @@ import 'package:get/get.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart'; // Required for layoutPdf
 import 'package:gtel_erp/Cash/controller.dart';
 import 'package:gtel_erp/Web%20Screen/Expenses/dailycontroller.dart';
 import '../Sales/controller.dart';
@@ -41,6 +42,14 @@ class DebatorController extends GetxController {
 
   // --- FILTERS ---
   Rx<DateTimeRange?> selectedDateRange = Rx<DateTimeRange?>(null);
+
+  // Formatters
+  // BD/Indian Format: 1,00,000.00
+  final NumberFormat bdCurrency = NumberFormat.currency(
+    locale: 'en_IN',
+    symbol: '',
+    decimalDigits: 2,
+  );
 
   @override
   void onInit() {
@@ -768,7 +777,7 @@ class DebatorController extends GetxController {
         .map((doc) => (doc.data()?['balance'] as num?)?.toDouble() ?? 0.0);
   }
 
-  // --- PDF GENERATION ---
+  // --- SINGLE DEBTOR STATEMENT PDF (OLD) ---
   Future<Uint8List> generatePDF(
     String debtorName,
     List<Map<String, dynamic>> transactions,
@@ -848,7 +857,7 @@ class DebatorController extends GetxController {
                         ),
                         t['type'].toString().toUpperCase().replaceAll('_', ' '),
                         t['note'] ?? "",
-                        (t['amount'] as num).toStringAsFixed(2),
+                        bdCurrency.format((t['amount'] as num)), // Updated
                       ];
                     }).toList(),
               ),
@@ -856,6 +865,171 @@ class DebatorController extends GetxController {
       ),
     );
     return pdf.save();
+  }
+
+ Future<void> downloadAllDebtorsReport() async {
+    try {
+      gbIsLoading.value = true;
+      Get.snackbar("Preparing", "Generating report...");
+
+      // 1. Fetch Data
+      final snap = await db
+          .collection('debatorbody')
+          .orderBy('balance', descending: true)
+          .get();
+
+      // 2. Map to Model (Safe Mapping)
+      final allDebtors = snap.docs.map((d) {
+        try {
+          return DebtorModel.fromFirestore(d);
+        } catch (e) {
+          return null;
+        }
+      }).whereType<DebtorModel>().toList();
+
+      // 3. Filter
+      final dueDebtors = allDebtors.where((d) => (d.balance ?? 0.0) > 0).toList();
+
+      if (dueDebtors.isEmpty) {
+        gbIsLoading.value = false;
+        Get.snackbar("Info", "No data to print.");
+        return;
+      }
+
+      // 4. Calculate Total
+      double grandTotal = 0.0;
+      for (var d in dueDebtors) {
+        grandTotal += (d.balance ?? 0.0);
+      }
+
+      // 5. Setup PDF
+      final pdf = pw.Document();
+      final font = pw.Font.helvetica();
+      final fontBold = pw.Font.helveticaBold();
+
+      const int rowsPerPage = 20;
+      final int totalPages = (dueDebtors.length / rowsPerPage).ceil();
+
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          theme: pw.ThemeData.withFont(base: font, bold: fontBold),
+          // HEADER: It is safe to use context here, but we just show the Title
+          header: (context) {
+            return pw.Column(
+              children: [
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text("MARKET DUE REPORT",
+                        style: pw.TextStyle(
+                            fontWeight: pw.FontWeight.bold, fontSize: 18)),
+                    pw.Text(DateFormat('dd MMM yyyy').format(DateTime.now())),
+                  ],
+                ),
+                pw.Divider(),
+                pw.SizedBox(height: 10),
+              ],
+            );
+          },
+          // BUILD: We construct the list of widgets to flow across pages
+          build: (context) {
+            List<pw.Widget> widgets = [];
+
+            // --- FIX IS HERE ---
+            // We removed "if (context.pageNumber == 1)".
+            // Just add the widget first. It will naturally sit at the top of Page 1.
+            widgets.add(
+              pw.Container(
+                padding: const pw.EdgeInsets.all(10),
+                decoration: pw.BoxDecoration(
+                  border: pw.Border.all(),
+                  color: PdfColors.grey100,
+                ),
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text("TOTAL OUTSTANDING",
+                        style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                    pw.Text(
+                        "${bdCurrency.format(grandTotal)} BDT",
+                        style: pw.TextStyle(
+                            fontWeight: pw.FontWeight.bold, fontSize: 16)),
+                  ],
+                ),
+              ),
+            );
+            widgets.add(pw.SizedBox(height: 15));
+            // -------------------
+
+            // Table Generation Loop
+            for (int i = 0; i < totalPages; i++) {
+              int start = i * rowsPerPage;
+              int end = (start + rowsPerPage < dueDebtors.length)
+                  ? start + rowsPerPage
+                  : dueDebtors.length;
+              var chunk = dueDebtors.sublist(start, end);
+
+              widgets.add(
+                pw.Table.fromTextArray(
+                  context: context,
+                  border: null,
+                  headerDecoration:
+                      const pw.BoxDecoration(color: PdfColors.grey300),
+                  headerHeight: 25,
+                  cellHeight: 30,
+                  cellAlignments: {
+                    0: pw.Alignment.centerLeft,
+                    1: pw.Alignment.centerLeft,
+                    2: pw.Alignment.centerLeft,
+                    3: pw.Alignment.centerRight,
+                  },
+                  headers: ["SL", "Name", "Phone", "Due Amount"],
+                  
+                  // Keep the Safe String Conversions
+                  data: List<List<String>>.generate(chunk.length, (idx) {
+                    final d = chunk[idx];
+
+                    String safeName = (d.name as dynamic)?.toString() ?? "Unknown";
+                    if (safeName.trim().isEmpty) safeName = "Unknown";
+                    
+                    String safePhone = (d.phone as dynamic)?.toString() ?? "";
+                    
+                    double safeBalance = (d.balance as num?)?.toDouble() ?? 0.0;
+                    String formattedBalance = bdCurrency.format(safeBalance);
+
+                    return [
+                      "${start + idx + 1}",
+                      safeName,
+                      safePhone,
+                      formattedBalance,
+                    ];
+                  }),
+                ),
+              );
+
+              // Add a page break only if there are more pages coming
+              if (i < totalPages - 1) {
+                widgets.add(pw.NewPage());
+              }
+            }
+
+            return widgets;
+          },
+        ),
+      );
+
+      await Printing.layoutPdf(
+        onLayout: (format) => pdf.save(),
+        name: 'Due_Report.pdf',
+      );
+    } catch (e, stacktrace) {
+      print("PDF GEN ERROR: $e");
+      print(stacktrace);
+      Get.snackbar("Error", "Error generating PDF: $e");
+    } finally {
+      gbIsLoading.value = false;
+    }
   }
 
   pw.Widget _pdfStat(String label, double val, PdfColor col) {
@@ -866,7 +1040,7 @@ class DebatorController extends GetxController {
           style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
         ),
         pw.Text(
-          val.toStringAsFixed(2),
+          bdCurrency.format(val),
           style: pw.TextStyle(
             fontSize: 14,
             fontWeight: pw.FontWeight.bold,
@@ -877,4 +1051,3 @@ class DebatorController extends GetxController {
     );
   }
 }
-
