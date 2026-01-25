@@ -12,23 +12,21 @@ const Color activeAccent = Color(0xFF3B82F6);
 const Color creditRed = Color(0xFFEF4444); // For Credit/Debt
 const Color debitGreen = Color(0xFF10B981); // For Debit/Payment
 const Color bgGrey = Color(0xFFF3F4F6);
+const Color textMuted = Color(0xFF6B7280);
 
 void addTransactionDialog(DebatorController controller, String id) {
   final amountC = TextEditingController();
   final noteC = TextEditingController();
   final Rx<DateTime> selectedDate = Rx<DateTime>(DateTime.now());
-  final Rx<Map<String, dynamic>?> selectedPayment = Rx<Map<String, dynamic>?>(
-    null,
-  );
 
-  // Find the debtor using the Model
+  // --- NEW: Dynamic Payment States ---
+  final RxString payMethodType = 'cash'.obs; // cash, bank, bkash, nagad, rocket
+  final bankNameC = TextEditingController();
+  final accountNoC = TextEditingController();
+  final mobileNoC = TextEditingController();
+
+  // Find the debtor using the Model (for name display)
   final debtor = controller.bodies.firstWhere((d) => d.id == id);
-  final payments = debtor.payments;
-
-  // Set default payment if available
-  if (payments.isNotEmpty) {
-    selectedPayment.value = payments.first;
-  }
 
   Get.dialog(
     Dialog(
@@ -73,24 +71,28 @@ void addTransactionDialog(DebatorController controller, String id) {
                       ),
 
                       const SizedBox(height: 24),
-                      _sectionLabel("Schedule & Method"),
+                      _sectionLabel("Date & Payment Method"),
 
-                      // Date & Payment Method Row
+                      // Date & Method Selector Row
                       Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Expanded(child: _buildDatePicker(selectedDate)),
                           const SizedBox(width: 12),
                           Expanded(
-                            child: _buildPaymentDropdown(
-                              payments,
-                              selectedPayment,
-                            ),
+                            child: _buildMethodTypeDropdown(payMethodType),
                           ),
                         ],
                       ),
 
+                      // Dynamic Inputs based on Method
                       const SizedBox(height: 12),
-                      _buildPaymentInfo(selectedPayment),
+                      _buildDynamicPaymentInputs(
+                        payMethodType.value,
+                        bankNameC,
+                        accountNoC,
+                        mobileNoC,
+                      ),
 
                       const SizedBox(height: 30),
                       _sectionLabel("Select Transaction Type"),
@@ -98,43 +100,53 @@ void addTransactionDialog(DebatorController controller, String id) {
                       // --- ACTION BUTTONS ---
                       Row(
                         children: [
-                          // CREDIT BUTTON
+                          // CREDIT BUTTON (Bill/Sale)
                           Expanded(
                             child: _actionButton(
                               label: "Take Bill (Credit)",
                               icon: FontAwesomeIcons.fileInvoice,
                               color: creditRed,
                               isLoading: controller.gbIsLoading.value,
-                              onTap:
-                                  () => _processTx(
-                                    controller,
-                                    id,
-                                    amountC,
-                                    noteC,
-                                    "credit",
-                                    selectedDate,
-                                    selectedPayment,
-                                  ),
+                              onTap: () {
+                                // For Credit, payment details are usually ignored by controller/sales logic
+                                // but we pass them just in case logic changes.
+                                _processTx(
+                                  controller,
+                                  id,
+                                  amountC,
+                                  noteC,
+                                  "credit",
+                                  selectedDate,
+                                  payMethodType,
+                                  bankNameC,
+                                  accountNoC,
+                                  mobileNoC,
+                                );
+                              },
                             ),
                           ),
                           const SizedBox(width: 12),
-                          // DEBIT BUTTON
+                          // DEBIT BUTTON (Payment Received)
                           Expanded(
                             child: _actionButton(
                               label: "Receive Pay (Debit)",
                               icon: FontAwesomeIcons.moneyCheck,
                               color: debitGreen,
                               isLoading: controller.gbIsLoading.value,
-                              onTap:
-                                  () => _processTx(
-                                    controller,
-                                    id,
-                                    amountC,
-                                    noteC,
-                                    "debit",
-                                    selectedDate,
-                                    selectedPayment,
-                                  ),
+                              onTap: () {
+                                _processTx(
+                                  controller,
+                                  id,
+                                  amountC,
+                                  noteC,
+                                  "debit",
+                                  selectedDate,
+                                  payMethodType,
+                                  bankNameC,
+                                  accountNoC,
+                                  mobileNoC,
+                                );
+                              },
                             ),
                           ),
                         ],
@@ -211,7 +223,9 @@ Widget _buildDatePicker(Rx<DateTime> date) {
         if (picked != null) date.value = picked;
       },
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        height: 50,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        alignment: Alignment.centerLeft,
         decoration: BoxDecoration(
           color: bgGrey,
           borderRadius: BorderRadius.circular(8),
@@ -219,7 +233,7 @@ Widget _buildDatePicker(Rx<DateTime> date) {
         ),
         child: Row(
           children: [
-            const Icon(Icons.calendar_today, size: 14, color: activeAccent),
+            const Icon(Icons.calendar_today, size: 16, color: activeAccent),
             const SizedBox(width: 10),
             Text(
               DateFormat('dd MMM yyyy').format(date.value),
@@ -232,73 +246,118 @@ Widget _buildDatePicker(Rx<DateTime> date) {
   );
 }
 
-Widget _buildPaymentDropdown(
-  List<Map<String, dynamic>> payments,
-  Rx<Map<String, dynamic>?> selected,
-) {
-  return Obx(
-    () => Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        color: bgGrey,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.black12),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<Map<String, dynamic>>(
-          value: selected.value,
-          isExpanded: true,
-          hint: const Text("Method", style: TextStyle(fontSize: 13)),
-          items:
-              payments.map((p) {
-                return DropdownMenuItem(
-                  value: p,
-                  child: Text(
-                    p['type']?.toString().toUpperCase() ?? "UNKNOWN",
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                );
-              }).toList(),
-          onChanged: (v) => selected.value = v,
-        ),
+// Replaces the old dropdown with simple Method Type Selector
+Widget _buildMethodTypeDropdown(RxString methodType) {
+  return Container(
+    height: 50,
+    padding: const EdgeInsets.symmetric(horizontal: 12),
+    decoration: BoxDecoration(
+      color: bgGrey,
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: Colors.black12),
+    ),
+    child: DropdownButtonHideUnderline(
+      child: DropdownButton<String>(
+        value: methodType.value,
+        isExpanded: true,
+        items: const [
+          DropdownMenuItem(
+            value: 'cash',
+            child: Row(
+              children: [
+                Icon(Icons.money, size: 16, color: Colors.green),
+                SizedBox(width: 8),
+                Text("Cash"),
+              ],
+            ),
+          ),
+          DropdownMenuItem(
+            value: 'bank',
+            child: Row(
+              children: [
+                Icon(Icons.account_balance, size: 16, color: Colors.indigo),
+                SizedBox(width: 8),
+                Text("Bank"),
+              ],
+            ),
+          ),
+          DropdownMenuItem(
+            value: 'bkash',
+            child: Row(
+              children: [
+                Icon(Icons.mobile_friendly, size: 16, color: Colors.pink),
+                SizedBox(width: 8),
+                Text("Bkash"),
+              ],
+            ),
+          ),
+          DropdownMenuItem(
+            value: 'nagad',
+            child: Row(
+              children: [
+                Icon(Icons.mobile_friendly, size: 16, color: Colors.orange),
+                SizedBox(width: 8),
+                Text("Nagad"),
+              ],
+            ),
+          ),
+          DropdownMenuItem(
+            value: 'rocket',
+            child: Row(
+              children: [
+                Icon(Icons.mobile_friendly, size: 16, color: Colors.purple),
+                SizedBox(width: 8),
+                Text("Rocket"),
+              ],
+            ),
+          ),
+        ],
+        onChanged: (v) => methodType.value = v!,
       ),
     ),
   );
 }
 
-Widget _buildPaymentInfo(Rx<Map<String, dynamic>?> pm) {
-  return Obx(() {
-    if (pm.value == null) return const SizedBox();
-    pm.value!['type']?.toString().toLowerCase();
-    String info = pm.value!['number'] ?? pm.value!['accountNumber'] ?? "";
-    if (info.isEmpty) return const SizedBox();
-
+// NEW: Conditional inputs for Bank/Mobile
+Widget _buildDynamicPaymentInputs(
+  String type,
+  TextEditingController bankC,
+  TextEditingController accC,
+  TextEditingController mobC,
+) {
+  if (type == 'bank') {
     return Container(
-      margin: const EdgeInsets.only(top: 8),
-      padding: const EdgeInsets.all(8),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: activeAccent.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: activeAccent.withOpacity(0.1)),
       ),
-      child: Row(
+      child: Column(
         children: [
-          const Icon(Icons.info_outline, size: 14, color: activeAccent),
-          const SizedBox(width: 8),
-          Text(
-            "Account: $info",
-            style: const TextStyle(
-              fontSize: 12,
-              color: activeAccent,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
+          _buildField(bankC, "Bank Name (e.g. City Bank)", Icons.business),
+          const SizedBox(height: 8),
+          _buildField(accC, "Account Number", Icons.numbers),
         ],
       ),
     );
-  });
+  } else if (['bkash', 'nagad', 'rocket'].contains(type)) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.orange.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.orange.withOpacity(0.1)),
+      ),
+      child: _buildField(
+        mobC,
+        "${type.capitalizeFirst} Number",
+        Icons.phone_android,
+        type: TextInputType.number,
+      ),
+    );
+  }
+  return const SizedBox.shrink(); // Empty for Cash
 }
 
 Widget _actionButton({
@@ -350,7 +409,11 @@ void _processTx(
   TextEditingController note,
   String type,
   Rx<DateTime> date,
-  Rx<Map<String, dynamic>?> pm,
+  // New Params
+  RxString payType,
+  TextEditingController bankC,
+  TextEditingController accC,
+  TextEditingController mobC,
 ) async {
   double amount = double.tryParse(amt.text) ?? 0;
   if (amount <= 0) {
@@ -358,18 +421,40 @@ void _processTx(
     return;
   }
 
-  // 2. Execute Transaction and WAIT for it to finish
+  // Construct Dynamic Map
+  Map<String, dynamic> finalPaymentData = {'type': 'cash'};
+  String method = payType.value;
+
+  if (method == 'bank') {
+    if (bankC.text.isEmpty) {
+      Get.snackbar("Error", "Enter Bank Name");
+      return;
+    }
+    finalPaymentData = {
+      'type': 'bank',
+      'bankName': bankC.text.trim(),
+      'accountNo': accC.text.trim(),
+    };
+  } else if (['bkash', 'nagad', 'rocket'].contains(method)) {
+    if (mobC.text.isEmpty) {
+      Get.snackbar("Error", "Enter Mobile Number");
+      return;
+    }
+    finalPaymentData = {'type': method, 'number': mobC.text.trim()};
+  } else {
+    finalPaymentData = {'type': 'cash'};
+  }
+
+  // Execute Transaction
   await c.addTransaction(
     debtorId: id,
     amount: amount,
     note: note.text,
     type: type,
     date: date.value,
-    selectedPaymentMethod: pm.value,
+    paymentMethodData: finalPaymentData, // Updated param name
   );
 
-  // 3. Close the dialog ONLY if the transaction finished successfully
-  // We check Get.isDialogOpen to ensure we don't call Get.back() if it's already closed
   if (Get.isDialogOpen ?? false) {
     Get.back();
   }
@@ -413,6 +498,7 @@ Widget _buildField(
         borderRadius: BorderRadius.circular(8),
         borderSide: const BorderSide(color: Colors.black12),
       ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
     ),
   );
 }

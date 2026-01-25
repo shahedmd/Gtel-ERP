@@ -736,7 +736,6 @@ class PdfService {
 
       await Printing.sharePdf(bytes: await doc.save(), filename: filename);
     } catch (e) {
-      print("PDF Generation Error: $e");
       rethrow;
     }
   }

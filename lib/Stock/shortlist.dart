@@ -643,7 +643,6 @@ class ShortlistPage extends StatelessWidget {
       }
     } catch (e) {
       if (Get.isDialogOpen ?? false) Get.back();
-      print("Export Error: $e");
       Get.snackbar(
         "Export Failed",
         "Error: $e",

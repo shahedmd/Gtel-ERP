@@ -17,20 +17,14 @@ class Debatorpage extends StatefulWidget {
 
 class _DebatorpageState extends State<Debatorpage> {
   final DebatorController controller = Get.put(DebatorController());
-
-  // 1. Defined Scroll Controller for Pagination
   final ScrollController _scrollController = ScrollController();
-
-  // 2. Defined Search Controller to check if search is active
   final TextEditingController _searchController = TextEditingController();
 
-  // Professional ERP Theme
   static const Color darkSlate = Color(0xFF111827);
   static const Color activeAccent = Color(0xFF3B82F6);
   static const Color bgGrey = Color(0xFFF9FAFB);
   static const Color textMuted = Color(0xFF6B7280);
 
-  // BD Currency Formatter for UI
   final NumberFormat bdCurrency = NumberFormat.currency(
     locale: 'en_IN',
     symbol: '',
@@ -51,11 +45,8 @@ class _DebatorpageState extends State<Debatorpage> {
   }
 
   void _onScroll() {
-    // If we are at the bottom of the list...
     if (_scrollController.position.pixels >=
         _scrollController.position.maxScrollExtent - 200) {
-      // FIX: Check our local _searchController.
-      // We only load more if the user is NOT searching.
       if (_searchController.text.isEmpty) {
         controller.loadBodies(loadMore: true);
       }
@@ -72,31 +63,25 @@ class _DebatorpageState extends State<Debatorpage> {
           _buildTableHead(),
           Expanded(
             child: Obx(() {
-              // Initial Loading State
               if (controller.isBodiesLoading.value) {
                 return const Center(
                   child: CircularProgressIndicator(color: activeAccent),
                 );
               }
-
               if (controller.filteredBodies.isEmpty) {
                 return _buildEmptyState();
               }
-
               return ListView.builder(
                 controller: _scrollController,
                 padding: const EdgeInsets.symmetric(
                   horizontal: 24,
                   vertical: 15,
                 ),
-                // Add +1 to item count to show the loading spinner at the bottom
                 itemCount:
                     controller.filteredBodies.length +
                     (controller.hasMore.value ? 1 : 0),
                 itemBuilder: (context, index) {
-                  // If we are at the very last item...
                   if (index == controller.filteredBodies.length) {
-                    // Show Loader if fetching more, or nothing if done
                     return Obx(
                       () =>
                           controller.isMoreLoading.value
@@ -111,7 +96,6 @@ class _DebatorpageState extends State<Debatorpage> {
                               : const SizedBox.shrink(),
                     );
                   }
-
                   final debtor = controller.filteredBodies[index];
                   return Padding(
                     padding: const EdgeInsets.symmetric(vertical: 7),
@@ -126,14 +110,12 @@ class _DebatorpageState extends State<Debatorpage> {
     );
   }
 
-  // --- TOP HEADER (Title, Search, Total & Add) ---
   Widget _buildHeader() {
     return Container(
       padding: const EdgeInsets.all(24),
       color: Colors.white,
       child: Column(
         children: [
-          // Top Row: Title, Total, and Print
           Row(
             children: [
               Column(
@@ -155,7 +137,54 @@ class _DebatorpageState extends State<Debatorpage> {
               ),
               const Spacer(),
 
-              // TOTAL OUTSTANDING CARD
+              // TOTAL PAYABLE (I Owe Them)
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      "Total Payable (Purchases)",
+                      style: TextStyle(
+                        color: Colors.orange.shade900,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Obx(
+                      () => Text(
+                        "${bdCurrency.format(controller.totalMarketPayable.value)} ৳",
+                        style: TextStyle(
+                          color: Colors.orange.shade900,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Print Payable
+              IconButton(
+                onPressed: () => controller.downloadAllPayablesReport(),
+                icon: Icon(Icons.print, color: Colors.orange.shade900),
+                tooltip: "Download Payable Report",
+                style: IconButton.styleFrom(
+                  backgroundColor: bgGrey,
+                  padding: const EdgeInsets.all(12),
+                ),
+              ),
+              const SizedBox(width: 15),
+
+              // TOTAL DUE (They Owe Me)
               Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 16,
@@ -190,9 +219,7 @@ class _DebatorpageState extends State<Debatorpage> {
                   ],
                 ),
               ),
-              const SizedBox(width: 15),
-
-              // PRINT BUTTON
+              // Print Due
               IconButton(
                 onPressed: () => controller.downloadAllDebtorsReport(),
                 icon: const Icon(Icons.print, color: darkSlate),
@@ -205,11 +232,8 @@ class _DebatorpageState extends State<Debatorpage> {
             ],
           ),
           const SizedBox(height: 20),
-
-          // Second Row: Search and Add Button
           Row(
             children: [
-              // Search Bar
               Expanded(
                 child: Container(
                   decoration: BoxDecoration(
@@ -236,7 +260,6 @@ class _DebatorpageState extends State<Debatorpage> {
                 ),
               ),
               const SizedBox(width: 16),
-              // Add Debtor Button
               ElevatedButton.icon(
                 onPressed: () => adddebatorDialog(controller),
                 icon: const Icon(
@@ -269,7 +292,6 @@ class _DebatorpageState extends State<Debatorpage> {
     );
   }
 
-  // --- TABLE HEADER ---
   Widget _buildTableHead() {
     return Container(
       margin: const EdgeInsets.only(top: 16, left: 24, right: 24),
@@ -338,13 +360,12 @@ class _DebatorpageState extends State<Debatorpage> {
               textAlign: TextAlign.right,
             ),
           ),
-          SizedBox(width: 40), // Space for Actions
+          SizedBox(width: 40),
         ],
       ),
     );
   }
 
-  // --- DATA ROW ---
   Widget _buildDebtorRow(dynamic debtor) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 24),
@@ -360,7 +381,6 @@ class _DebatorpageState extends State<Debatorpage> {
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
           child: Row(
             children: [
-              // Name & Description
               Expanded(
                 flex: 3,
                 child: Column(
@@ -382,7 +402,6 @@ class _DebatorpageState extends State<Debatorpage> {
                   ],
                 ),
               ),
-              // Phone
               Expanded(
                 flex: 2,
                 child: Text(
@@ -390,7 +409,6 @@ class _DebatorpageState extends State<Debatorpage> {
                   style: const TextStyle(color: darkSlate),
                 ),
               ),
-              // Current Balance (Replaced NID to show Balance)
               Expanded(
                 flex: 2,
                 child: StreamBuilder<double>(
@@ -413,7 +431,6 @@ class _DebatorpageState extends State<Debatorpage> {
                   },
                 ),
               ),
-              // Address
               Expanded(
                 flex: 3,
                 child: Padding(
@@ -426,7 +443,6 @@ class _DebatorpageState extends State<Debatorpage> {
                   ),
                 ),
               ),
-              // Created At
               Expanded(
                 flex: 2,
                 child: Text(
@@ -437,7 +453,6 @@ class _DebatorpageState extends State<Debatorpage> {
                   style: const TextStyle(color: textMuted, fontSize: 13),
                 ),
               ),
-              // Arrow Icon
               const SizedBox(
                 width: 40,
                 child: Align(
@@ -456,7 +471,6 @@ class _DebatorpageState extends State<Debatorpage> {
     );
   }
 
-  // --- EMPTY STATE ---
   Widget _buildEmptyState() {
     return Center(
       child: Column(

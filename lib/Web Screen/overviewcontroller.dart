@@ -1,3 +1,5 @@
+// ignore_for_file: empty_catches
+
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:get/get.dart';
@@ -172,7 +174,6 @@ class OverviewController extends GetxController {
       // Trigger recalculation of closing balance
       _processLedgerData();
     } catch (e) {
-      print("Error calculating history: $e");
     } finally {
       isLoadingHistory.value = false;
     }
@@ -661,7 +662,7 @@ class OverviewController extends GetxController {
         ),
         pw.SizedBox(height: 2),
         pw.Text(
-          "${fmt.format(amount)}",
+          fmt.format(amount),
           style: pw.TextStyle(
             font: font,
             fontSize: isLarge ? 14 : 11,

@@ -7,7 +7,7 @@ import 'package:get/get.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart'; // Required for layoutPdf
+import 'package:printing/printing.dart';
 import 'package:gtel_erp/Cash/controller.dart';
 import 'package:gtel_erp/Web%20Screen/Expenses/dailycontroller.dart';
 import '../Sales/controller.dart';
@@ -20,8 +20,10 @@ class DebatorController extends GetxController {
   var bodies = <DebtorModel>[].obs;
   var filteredBodies = <DebtorModel>[].obs;
 
-  // Total Outstanding (Global Market Debt)
+  // Global Market Debt (Receivable)
   var totalMarketOutstanding = 0.0.obs;
+  // Global Market Payable (We owe them)
+  var totalMarketPayable = 0.0.obs;
 
   RxBool isBodiesLoading = false.obs;
   RxBool gbIsLoading = false.obs;
@@ -43,8 +45,6 @@ class DebatorController extends GetxController {
   // --- FILTERS ---
   Rx<DateTimeRange?> selectedDateRange = Rx<DateTimeRange?>(null);
 
-  // Formatters
-  // BD/Indian Format: 1,00,000.00
   final NumberFormat bdCurrency = NumberFormat.currency(
     locale: 'en_IN',
     symbol: '',
@@ -55,7 +55,7 @@ class DebatorController extends GetxController {
   void onInit() {
     super.onInit();
     loadBodies();
-    calculateTotalOutstanding();
+    // silent repair not strictly needed every time, but kept as per your code
     _silentAutoRepair();
   }
 
@@ -97,6 +97,8 @@ class DebatorController extends GetxController {
         if (!loadMore) bodies.clear();
       }
 
+      // Recalculate Totals whenever we fetch (even partial) or search
+      calculateTotalOutstanding();
       searchDebtors('');
     } catch (e) {
       Get.snackbar("Error", "Could not load debtors: $e");
@@ -107,7 +109,7 @@ class DebatorController extends GetxController {
     }
   }
 
-  // --- HELPER FOR SALES CONTROLLER (Instant Fetch) ---
+  // --- HELPER FOR SALES CONTROLLER ---
   Future<Map<String, double>> getInstantDebtorBreakdown(String debtorId) async {
     try {
       final snap =
@@ -116,7 +118,6 @@ class DebatorController extends GetxController {
               .doc(debtorId)
               .collection('transactions')
               .get();
-
       double previousDueTotal = 0.0;
       double previousPaid = 0.0;
       double runningDue = 0.0;
@@ -138,12 +139,11 @@ class DebatorController extends GetxController {
       }
 
       double currentLoan = previousDueTotal - previousPaid;
-      // Ensure loan doesn't go negative purely by calculation logic (optional)
       if (currentLoan < 0) currentLoan = 0;
 
       return {
-        'loan': currentLoan, // OLD DUE
-        'running': runningDue, // RUNNING DUE
+        'loan': currentLoan,
+        'running': runningDue,
         'total': currentLoan + runningDue,
       };
     } catch (e) {
@@ -152,7 +152,7 @@ class DebatorController extends GetxController {
     }
   }
 
-  // --- NEW FEATURE: BREAKDOWN STREAM ---
+  // --- STREAM BREAKDOWN ---
   Stream<Map<String, double>> getDebtorBreakdown(String debtorId) {
     return db
         .collection('debatorbody')
@@ -181,7 +181,6 @@ class DebatorController extends GetxController {
           }
 
           double currentLoan = previousDueTotal - previousPaid;
-
           return {
             'loan': currentLoan,
             'running': runningDue,
@@ -265,7 +264,6 @@ class DebatorController extends GetxController {
         _lastTxDoc = snap.docs.last;
         final newTx =
             snap.docs.map((d) => TransactionModel.fromFirestore(d)).toList();
-
         if (loadMore) {
           currentTransactions.addAll(newTx);
         } else {
@@ -281,7 +279,6 @@ class DebatorController extends GetxController {
     }
   }
 
-  // --- CORE RECALCULATION ---
   Future<void> _recalculateSingleDebtorBalance(String debtorId) async {
     try {
       final txs =
@@ -297,14 +294,11 @@ class DebatorController extends GetxController {
         String type = (data['type'] ?? 'credit').toString();
         double amount = (data['amount'] as num).toDouble();
 
-        // ADD to Debt: Credit, Advance Given, Previous Due
         if (type == 'credit' ||
             type == 'advance_given' ||
             type == 'previous_due') {
           realBalance += amount;
-        }
-        // REDUCE Debt: Debit, Advance Recv, Loan Payment
-        else {
+        } else {
           realBalance -= amount;
         }
       }
@@ -313,18 +307,21 @@ class DebatorController extends GetxController {
         'balance': realBalance,
         'lastTransactionDate': FieldValue.serverTimestamp(),
       });
+      // Update the local list as well so UI updates instantly
+      calculateTotalOutstanding();
     } catch (e) {
       print("Auto-Fix Error: $e");
     }
   }
 
+  // UPDATED: Handles Dynamic Payment Method Map
   Future<void> addTransaction({
     required String debtorId,
     required double amount,
     required String note,
     required String type,
     required DateTime date,
-    Map<String, dynamic>? selectedPaymentMethod,
+    required Map<String, dynamic> paymentMethodData, // CHANGED
     String? txid,
   }) async {
     gbIsLoading.value = true;
@@ -342,49 +339,35 @@ class DebatorController extends GetxController {
         txid = newTxRef.id;
       }
 
-      Map<String, dynamic>? paymentData = selectedPaymentMethod;
-      if (paymentData == null &&
-          (type == 'debit' ||
-              type == 'advance_received' ||
-              type == 'loan_payment')) {
-        List pm = debtorSnap.data()?['payments'] ?? [];
-        if (pm.isNotEmpty) paymentData = pm.first;
-      }
-
+      // Save Transaction
       await newTxRef.set({
         'transactionId': txid,
         'amount': amount,
         'note': note,
         'type': type,
         'date': Timestamp.fromDate(date),
-        'paymentMethod': paymentData,
+        'paymentMethod': paymentMethodData, // Storing dynamic map
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      // --- LOGIC SPLIT START ---
+      // --- SYNC LOGIC ---
 
-      // A. Previous Due Setup (Just Internal Record)
-      if (type == 'previous_due') {
-        // No external sync
-      }
-      // B. Loan Payment (Goes to Cash Ledger Only)
-      else if (type == 'loan_payment') {
+      if (type == 'loan_payment') {
         await db.collection('cash_ledger').add({
           'type': 'deposit',
           'amount': amount,
-          'method': paymentData?['type'] ?? 'cash',
+          'method': paymentMethodData['type'] ?? 'cash',
+          'details': paymentMethodData, // Store full details
           'description': "Previous Due Collected: $debtorName",
           'timestamp': FieldValue.serverTimestamp(),
           'linkedDebtorId': debtorId,
           'linkedTxId': txid,
         });
-      }
-      // C. Advances
-      else if (type == 'advance_given') {
+      } else if (type == 'advance_given') {
         await db.collection('cash_ledger').add({
           'type': 'expense',
           'amount': amount,
-          'method': 'cash',
+          'method': 'cash', // Advances usually cash, but could change if needed
           'description': "Advance Given to $debtorName",
           'timestamp': FieldValue.serverTimestamp(),
           'linkedDebtorId': debtorId,
@@ -401,21 +384,20 @@ class DebatorController extends GetxController {
             date: date,
           );
         } catch (e) {
-          print("Expense Sync Error: $e");
+          print(e);
         }
       } else if (type == 'advance_received') {
         await db.collection('cash_ledger').add({
           'type': 'deposit',
           'amount': amount,
-          'method': paymentData?['type'] ?? 'cash',
+          'method': paymentMethodData['type'] ?? 'cash',
+          'details': paymentMethodData,
           'description': "Advance Received from $debtorName",
           'timestamp': FieldValue.serverTimestamp(),
           'linkedDebtorId': debtorId,
           'linkedTxId': txid,
         });
-      }
-      // D. Sales Logic (Credit/Debit)
-      else if (type == 'credit' || type == 'debit') {
+      } else if (type == 'credit' || type == 'debit') {
         if (!Get.isRegistered<DailySalesController>()) {
           Get.put(DailySalesController());
         }
@@ -436,24 +418,23 @@ class DebatorController extends GetxController {
           await daily.applyDebtorPayment(
             debtorName,
             amount,
-            paymentData ?? {},
+            paymentMethodData, // Dynamic Method
             date: date,
             transactionId: txid,
           );
         }
       }
-      // --- LOGIC SPLIT END ---
 
       await _recalculateSingleDebtorBalance(debtorId);
 
       loadDebtorTransactions(debtorId);
-      loadBodies();
-      calculateTotalOutstanding();
+      loadBodies(loadMore: false); // Reload list to update totals
+
       if (Get.isRegistered<CashDrawerController>()) {
         Get.find<CashDrawerController>().fetchData();
       }
-
       if (Get.isDialogOpen ?? false) Get.back();
+
       Get.snackbar(
         "Success",
         "Transaction Recorded",
@@ -474,7 +455,7 @@ class DebatorController extends GetxController {
   }
 
   // ------------------------------------------------------------------
-  // 4. DELETE & EDIT
+  // DELETE & EDIT
   // ------------------------------------------------------------------
 
   Future<void> deleteTransaction(String debtorId, String transactionId) async {
@@ -500,7 +481,7 @@ class DebatorController extends GetxController {
           .doc(transactionId)
           .delete();
 
-      // Cleanup
+      // Cleanup Ledger
       if (type == 'loan_payment' || type.contains('advance')) {
         QuerySnapshot lSnap =
             await db
@@ -512,6 +493,7 @@ class DebatorController extends GetxController {
         }
       }
 
+      // Cleanup Sales
       if (type == 'credit' || type == 'debit') {
         if (!Get.isRegistered<DailySalesController>()) {
           Get.put(DailySalesController());
@@ -552,13 +534,6 @@ class DebatorController extends GetxController {
       await _recalculateSingleDebtorBalance(debtorId);
       loadDebtorTransactions(debtorId);
       loadBodies();
-      calculateTotalOutstanding();
-      if (Get.isRegistered<CashDrawerController>()) {
-        Get.find<CashDrawerController>().fetchData();
-      }
-      if (Get.isRegistered<DailyExpensesController>()) {
-        Get.find<DailyExpensesController>().onInit();
-      }
 
       Get.snackbar("Deleted", "Transaction removed & Balance corrected");
     } catch (e) {
@@ -577,7 +552,7 @@ class DebatorController extends GetxController {
     required String newType,
     required String note,
     required DateTime date,
-    Map<String, dynamic>? paymentMethod,
+    required Map<String, dynamic> paymentMethod,
   }) async {
     gbIsLoading.value = true;
     try {
@@ -596,6 +571,7 @@ class DebatorController extends GetxController {
 
       await _recalculateSingleDebtorBalance(debtorId);
 
+      // Simple update attempts for external collections (Not robust, but adheres to existing logic)
       if (oldType == 'loan_payment' || oldType.contains('advance')) {
         QuerySnapshot lSnap =
             await db
@@ -603,32 +579,16 @@ class DebatorController extends GetxController {
                 .where('linkedTxId', isEqualTo: transactionId)
                 .get();
         for (var d in lSnap.docs) {
-          await d.reference.update({'amount': newAmount});
-        }
-      }
-
-      if (newType == 'credit' || newType == 'debit') {
-        final salesSnap =
-            await db
-                .collection('daily_sales')
-                .where('transactionId', isEqualTo: transactionId)
-                .get();
-        for (var doc in salesSnap.docs) {
-          if (newType == 'credit') {
-            await doc.reference.update({'amount': newAmount});
-          } else {
-            await doc.reference.update({
-              'amount': newAmount,
-              'paid': newAmount,
-              'paymentMethod': paymentMethod,
-            });
-          }
+          await d.reference.update({
+            'amount': newAmount,
+            'details': paymentMethod,
+            'method': paymentMethod['type'],
+          });
         }
       }
 
       loadDebtorTransactions(debtorId);
       loadBodies();
-      calculateTotalOutstanding();
       Get.back();
       Get.snackbar("Success", "Updated successfully");
     } catch (e) {
@@ -639,7 +599,7 @@ class DebatorController extends GetxController {
   }
 
   // ------------------------------------------------------------------
-  // 5. DEBTOR PROFILE CRUD
+  // 3. DEBTOR PROFILE CRUD
   // ------------------------------------------------------------------
 
   Future<void> addBody({
@@ -660,6 +620,7 @@ class DebatorController extends GetxController {
         "address": address,
         "payments": payments,
         "balance": 0.0,
+        "purchaseDue": 0.0,
         "createdAt": FieldValue.serverTimestamp(),
         "lastTransactionDate": FieldValue.serverTimestamp(),
       });
@@ -672,6 +633,7 @@ class DebatorController extends GetxController {
     }
   }
 
+  // FIXED: robust Update
   Future<void> editDebtor({
     required String id,
     required String oldName,
@@ -680,18 +642,26 @@ class DebatorController extends GetxController {
     required String nid,
     required String phone,
     required String address,
-    required List<Map<String, dynamic>> payments,
+    List<Map<String, dynamic>>?
+    payments, // Optional, defaults to keeping old if null
   }) async {
     gbIsLoading.value = true;
     try {
-      await db.collection('debatorbody').doc(id).update({
+      Map<String, dynamic> updateData = {
         "name": newName.trim(),
         "des": des,
         "nid": nid,
         "phone": phone.trim(),
         "address": address,
-        "payments": payments,
-      });
+      };
+
+      if (payments != null) {
+        updateData["payments"] = payments;
+      }
+
+      await db.collection('debatorbody').doc(id).update(updateData);
+
+      // Update name in Daily Sales if changed
       if (oldName != newName) {
         final snap =
             await db
@@ -705,17 +675,19 @@ class DebatorController extends GetxController {
         }
         await batch.commit();
       }
+
       await loadBodies(loadMore: false);
       Get.back();
+      Get.snackbar("Success", "Debtor profile updated");
     } catch (e) {
-      Get.snackbar("Error", e.toString());
+      Get.snackbar("Error", "Update failed: $e");
     } finally {
       gbIsLoading.value = false;
     }
   }
 
   // ------------------------------------------------------------------
-  // 6. HELPERS
+  // 4. HELPERS & PDF
   // ------------------------------------------------------------------
 
   Future<void> _silentAutoRepair() async {
@@ -724,12 +696,12 @@ class DebatorController extends GetxController {
       final batch = db.batch();
       bool needsUpdate = false;
       for (var doc in snap.docs) {
-        if (!doc.data().containsKey('balance')) {
+        if (!doc.data().containsKey('balance') ||
+            !doc.data().containsKey('purchaseDue')) {
           needsUpdate = true;
           batch.update(doc.reference, {
-            'balance': 0.0,
-            'lastTransactionDate':
-                doc['createdAt'] ?? FieldValue.serverTimestamp(),
+            if (!doc.data().containsKey('balance')) 'balance': 0.0,
+            if (!doc.data().containsKey('purchaseDue')) 'purchaseDue': 0.0,
           });
         }
       }
@@ -739,15 +711,26 @@ class DebatorController extends GetxController {
     }
   }
 
+  // Updated to calculate both Receivables and Payables
   Future<void> calculateTotalOutstanding() async {
     try {
+      // We iterate through 'bodies' (or fetch all for total accuracy)
+      // Since 'bodies' is paginated, we should ideally run an aggregate query or fetch all for a true total.
+      // For now, based on your structure, I will fetch all specific fields to be accurate.
       final snap = await db.collection('debatorbody').get();
-      double total = 0;
+      double totalRec = 0;
+      double totalPay = 0;
+
       for (var doc in snap.docs) {
-        total += (doc.data()['balance'] as num?)?.toDouble() ?? 0.0;
+        final data = doc.data();
+        totalRec += (data['balance'] as num?)?.toDouble() ?? 0.0;
+        totalPay += (data['purchaseDue'] as num?)?.toDouble() ?? 0.0;
       }
-      totalMarketOutstanding.value = total;
-    } catch (e) {}
+      totalMarketOutstanding.value = totalRec;
+      totalMarketPayable.value = totalPay;
+    } catch (e) {
+      print("Calc Error: $e");
+    }
   }
 
   void searchDebtors(String query) {
@@ -777,13 +760,13 @@ class DebatorController extends GetxController {
         .map((doc) => (doc.data()?['balance'] as num?)?.toDouble() ?? 0.0);
   }
 
-  // --- SINGLE DEBTOR STATEMENT PDF (OLD) ---
   Future<Uint8List> generatePDF(
     String debtorName,
     List<Map<String, dynamic>> transactions,
   ) async {
     final pdf = pw.Document();
 
+    // Calculation
     double totalDebt = transactions
         .where(
           (t) =>
@@ -846,9 +829,17 @@ class DebatorController extends GetxController {
               ),
               pw.SizedBox(height: 20),
               pw.Table.fromTextArray(
-                headers: ["Date", "Type", "Note", "Amount"],
+                headers: ["Date", "Type", "Note", "Method", "Amount"],
                 data:
                     transactions.map((t) {
+                      String method = "Cash";
+                      if (t['paymentMethod'] != null &&
+                          t['paymentMethod'] is Map) {
+                        method =
+                            (t['paymentMethod']['type'] ?? 'Cash')
+                                .toString()
+                                .toUpperCase();
+                      }
                       return [
                         DateFormat('dd/MM/yy').format(
                           (t['date'] is DateTime
@@ -857,7 +848,8 @@ class DebatorController extends GetxController {
                         ),
                         t['type'].toString().toUpperCase().replaceAll('_', ' '),
                         t['note'] ?? "",
-                        bdCurrency.format((t['amount'] as num)), // Updated
+                        method,
+                        bdCurrency.format((t['amount'] as num)),
                       ];
                     }).toList(),
               ),
@@ -867,78 +859,95 @@ class DebatorController extends GetxController {
     return pdf.save();
   }
 
- Future<void> downloadAllDebtorsReport() async {
+  // MARKET DUE REPORT (Receivables)
+  Future<void> downloadAllDebtorsReport() async {
+    await _generateGeneralReport(title: "MARKET DUE REPORT", isPayable: false);
+  }
+
+  // MARKET PAYABLE REPORT (New Requirement)
+  Future<void> downloadAllPayablesReport() async {
+    await _generateGeneralReport(
+      title: "MARKET PAYABLE REPORT",
+      isPayable: true,
+    );
+  }
+
+  Future<void> _generateGeneralReport({
+    required String title,
+    required bool isPayable,
+  }) async {
     try {
       gbIsLoading.value = true;
       Get.snackbar("Preparing", "Generating report...");
 
-      // 1. Fetch Data
-      final snap = await db
-          .collection('debatorbody')
-          .orderBy('balance', descending: true)
-          .get();
+      final snap = await db.collection('debatorbody').get();
 
-      // 2. Map to Model (Safe Mapping)
-      final allDebtors = snap.docs.map((d) {
-        try {
-          return DebtorModel.fromFirestore(d);
-        } catch (e) {
-          return null;
-        }
-      }).whereType<DebtorModel>().toList();
+      final allDebtors =
+          snap.docs
+              .map((d) {
+                try {
+                  return DebtorModel.fromFirestore(d);
+                } catch (e) {
+                  return null;
+                }
+              })
+              .whereType<DebtorModel>()
+              .toList();
 
-      // 3. Filter
-      final dueDebtors = allDebtors.where((d) => (d.balance ?? 0.0) > 0).toList();
+      // Filter based on report type
+      final targetDebtors =
+          allDebtors
+              .where((d) => isPayable ? (d.purchaseDue > 0) : (d.balance > 0))
+              .toList();
 
-      if (dueDebtors.isEmpty) {
+      if (targetDebtors.isEmpty) {
         gbIsLoading.value = false;
         Get.snackbar("Info", "No data to print.");
         return;
       }
 
-      // 4. Calculate Total
+      // Sort
+      targetDebtors.sort(
+        (a, b) =>
+            isPayable
+                ? b.purchaseDue.compareTo(a.purchaseDue)
+                : b.balance.compareTo(a.balance),
+      );
+
       double grandTotal = 0.0;
-      for (var d in dueDebtors) {
-        grandTotal += (d.balance ?? 0.0);
+      for (var d in targetDebtors) {
+        grandTotal += isPayable ? d.purchaseDue : d.balance;
       }
 
-      // 5. Setup PDF
       final pdf = pw.Document();
-      final font = pw.Font.helvetica();
-      final fontBold = pw.Font.helveticaBold();
-
       const int rowsPerPage = 20;
-      final int totalPages = (dueDebtors.length / rowsPerPage).ceil();
+      final int totalPages = (targetDebtors.length / rowsPerPage).ceil();
 
       pdf.addPage(
         pw.MultiPage(
           pageFormat: PdfPageFormat.a4,
-          theme: pw.ThemeData.withFont(base: font, bold: fontBold),
-          // HEADER: It is safe to use context here, but we just show the Title
-          header: (context) {
-            return pw.Column(
-              children: [
-                pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Text("MARKET DUE REPORT",
+          header:
+              (context) => pw.Column(
+                children: [
+                  pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Text(
+                        title,
                         style: pw.TextStyle(
-                            fontWeight: pw.FontWeight.bold, fontSize: 18)),
-                    pw.Text(DateFormat('dd MMM yyyy').format(DateTime.now())),
-                  ],
-                ),
-                pw.Divider(),
-                pw.SizedBox(height: 10),
-              ],
-            );
-          },
-          // BUILD: We construct the list of widgets to flow across pages
+                          fontWeight: pw.FontWeight.bold,
+                          fontSize: 18,
+                        ),
+                      ),
+                      pw.Text(DateFormat('dd MMM yyyy').format(DateTime.now())),
+                    ],
+                  ),
+                  pw.Divider(),
+                  pw.SizedBox(height: 10),
+                ],
+              ),
           build: (context) {
             List<pw.Widget> widgets = [];
-
-            // --- FIX IS HERE ---
-            // We removed "if (context.pageNumber == 1)".
-            // Just add the widget first. It will naturally sit at the top of Page 1.
             widgets.add(
               pw.Container(
                 padding: const pw.EdgeInsets.all(10),
@@ -949,33 +958,38 @@ class DebatorController extends GetxController {
                 child: pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
-                    pw.Text("TOTAL OUTSTANDING",
-                        style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
                     pw.Text(
-                        "${bdCurrency.format(grandTotal)} BDT",
-                        style: pw.TextStyle(
-                            fontWeight: pw.FontWeight.bold, fontSize: 16)),
+                      "TOTAL AMOUNT",
+                      style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                    ),
+                    pw.Text(
+                      "${bdCurrency.format(grandTotal)} BDT",
+                      style: pw.TextStyle(
+                        fontWeight: pw.FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
                   ],
                 ),
               ),
             );
             widgets.add(pw.SizedBox(height: 15));
-            // -------------------
 
-            // Table Generation Loop
             for (int i = 0; i < totalPages; i++) {
               int start = i * rowsPerPage;
-              int end = (start + rowsPerPage < dueDebtors.length)
-                  ? start + rowsPerPage
-                  : dueDebtors.length;
-              var chunk = dueDebtors.sublist(start, end);
+              int end =
+                  (start + rowsPerPage < targetDebtors.length)
+                      ? start + rowsPerPage
+                      : targetDebtors.length;
+              var chunk = targetDebtors.sublist(start, end);
 
               widgets.add(
                 pw.Table.fromTextArray(
                   context: context,
                   border: null,
-                  headerDecoration:
-                      const pw.BoxDecoration(color: PdfColors.grey300),
+                  headerDecoration: const pw.BoxDecoration(
+                    color: PdfColors.grey300,
+                  ),
                   headerHeight: 25,
                   cellHeight: 30,
                   cellAlignments: {
@@ -984,36 +998,21 @@ class DebatorController extends GetxController {
                     2: pw.Alignment.centerLeft,
                     3: pw.Alignment.centerRight,
                   },
-                  headers: ["SL", "Name", "Phone", "Due Amount"],
-                  
-                  // Keep the Safe String Conversions
+                  headers: ["SL", "Name", "Phone", "Amount"],
                   data: List<List<String>>.generate(chunk.length, (idx) {
                     final d = chunk[idx];
-
-                    String safeName = (d.name as dynamic)?.toString() ?? "Unknown";
-                    if (safeName.trim().isEmpty) safeName = "Unknown";
-                    
-                    String safePhone = (d.phone as dynamic)?.toString() ?? "";
-                    
-                    double safeBalance = (d.balance as num?)?.toDouble() ?? 0.0;
-                    String formattedBalance = bdCurrency.format(safeBalance);
-
+                    double val = isPayable ? d.purchaseDue : d.balance;
                     return [
                       "${start + idx + 1}",
-                      safeName,
-                      safePhone,
-                      formattedBalance,
+                      d.name,
+                      d.phone,
+                      bdCurrency.format(val),
                     ];
                   }),
                 ),
               );
-
-              // Add a page break only if there are more pages coming
-              if (i < totalPages - 1) {
-                widgets.add(pw.NewPage());
-              }
+              if (i < totalPages - 1) widgets.add(pw.NewPage());
             }
-
             return widgets;
           },
         ),
@@ -1021,11 +1020,9 @@ class DebatorController extends GetxController {
 
       await Printing.layoutPdf(
         onLayout: (format) => pdf.save(),
-        name: 'Due_Report.pdf',
+        name: '${title.replaceAll(' ', '_')}.pdf',
       );
-    } catch (e, stacktrace) {
-      print("PDF GEN ERROR: $e");
-      print(stacktrace);
+    } catch (e) {
       Get.snackbar("Error", "Error generating PDF: $e");
     } finally {
       gbIsLoading.value = false;

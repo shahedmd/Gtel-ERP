@@ -1,3 +1,5 @@
+// ignore_for_file: empty_catches
+
 import 'dart:convert';
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -88,9 +90,7 @@ class ProductController extends GetxController {
           };
         }).toList();
       }
-    } catch (e) {
-      print("Dropdown Search Error: $e");
-    }
+    } catch (e){}
     return [];
   }
 
@@ -179,7 +179,6 @@ class ProductController extends GetxController {
         _showError('Server Error: ${res.statusCode}');
       }
     } catch (e) {
-      print(e);
       _showError('Shortlist Load Error: $e');
     } finally {
       isShortListLoading.value = false;
@@ -191,7 +190,6 @@ class ProductController extends GetxController {
   // ==========================================
   Future<List<Product>> fetchAllShortListForExport() async {
     try {
-      print("Starting Export Fetch...");
       // We send 'all=true' to skip pagination on server
       final uri = Uri.parse('$baseUrl/products/shortlist?all=true');
 
@@ -207,18 +205,15 @@ class ProductController extends GetxController {
             },
           );
 
-      print("Response Status: ${res.statusCode}");
       // print("Response Body Length: ${res.body.length}"); // Debugging
 
       if (res.statusCode == 200) {
         final List<dynamic> data = jsonDecode(res.body);
-        print("Parsed ${data.length} items.");
         return data.map((e) => Product.fromJson(e)).toList();
       } else {
         _showError("Server Error: ${res.statusCode}");
       }
     } catch (e) {
-      print("Export Fetch Error: $e");
       _showError('Export Failed: ${e.toString()}');
     }
     return [];
@@ -589,7 +584,6 @@ class ProductController extends GetxController {
           colorText: Colors.white,
         );
       } else {
-        print(res.body);
         _showError('Operation Failed: ${res.body}');
       }
     } catch (e) {

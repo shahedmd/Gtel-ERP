@@ -202,34 +202,39 @@ class CashDrawerController extends GetxController {
         );
       }
 
-      // Process Ledger
+      // -----------------------------------------------------------------------
+      // FIX IS HERE: Process Ledger (Correctly handling if/else logic)
+      // -----------------------------------------------------------------------
       for (var doc in ledgerSnap.docs) {
         var data = doc.data() as Map<String, dynamic>;
         double amount = double.tryParse(data['amount'].toString()) ?? 0;
         String type = data['type'];
-        String method = data['method'] ?? 'cash';
+        // Normalize string to lowercase to match logic
+        String method = (data['method'] ?? 'cash').toString().toLowerCase();
 
         if (type == 'deposit') {
-          if (method == 'bank') {
+          if (method.contains('bank')) {
             tempBank += amount;
-          }  if (method == 'bkash') {
+          } else if (method.contains('bkash')) {
             tempBkash += amount;
+          } else if (method.contains('nagad')) {
+            tempNagad += amount;
+          } else {
+            // Only adds to cash if it's NOT Bank, Bkash or Nagad
+            tempCash += amount;
           }
-           if (method == 'nagad') {
-             tempNagad += amount;
-           } else {
-             tempCash += amount;
-           }
           tAdd += amount;
         } else if (type == 'withdraw') {
-          if (method == 'bank') {
+          if (method.contains('bank')) {
             tempBank -= amount;
-          }  if (method == 'bkash') {
+          } else if (method.contains('bkash')) {
             tempBkash -= amount;
+          } else if (method.contains('nagad')) {
+            tempNagad -= amount;
           }
-           if (method == 'nagad') {
-             tempNagad -= amount;
-           }
+          // Assuming 'withdraw' here means taking money FROM bank TO cash drawer
+          // If 'withdraw' means taking money OUT of the shop entirely, remove this line.
+          // Based on your 'cashOutFromBank' function, it seems to imply moving to Cash.
           tempCash += amount;
         }
 
@@ -244,7 +249,7 @@ class CashDrawerController extends GetxController {
         );
       }
 
-      // Process Expenses (Cascading)
+      // Process Expenses (Cascading Deduction)
       for (var ex in expenseList) {
         tExp += ex.amount;
       }
@@ -300,6 +305,7 @@ class CashDrawerController extends GetxController {
       allTx.sort((a, b) => b.date.compareTo(a.date));
       recentTransactions.assignAll(allTx.take(20).toList());
     } catch (e) {
+      print("Cash Drawer Error: $e");
       Get.snackbar("Error", "Could not calculate cash drawer.");
     } finally {
       isLoading.value = false;
