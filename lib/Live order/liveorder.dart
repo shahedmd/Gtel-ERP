@@ -1453,18 +1453,18 @@ class _ProductTableSection extends StatelessWidget {
           Obx(
             () => Text(
               "Page ${controller.currentPage} of ${controller.totalPages}",
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
+              style: const TextStyle(fontSize: 12, color: Colors.black),
             ),
           ),
           Row(
             children: [
               IconButton(
                 onPressed: controller.prevPage,
-                icon: const Icon(Icons.chevron_left),
+                icon: const Icon(Icons.chevron_left, color: Colors.black,),
               ),
               IconButton(
                 onPressed: controller.nextPage,
-                icon: const Icon(Icons.chevron_right),
+                icon: const Icon(Icons.chevron_right, color: Colors.black,),
               ),
             ],
           ),

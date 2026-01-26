@@ -8,7 +8,7 @@ import 'conditioncontroller.dart';
 class ConditionSalesPage extends StatelessWidget {
   const ConditionSalesPage({super.key});
 
-  // Theme Colors (Professional Slate/Blue Theme)
+  // Theme Colors
   static const Color darkSlate = Color(0xFF1E293B);
   static const Color activeAccent = Color(0xFF2563EB);
   static const Color bgGrey = Color(0xFFF1F5F9);
@@ -18,7 +18,6 @@ class ConditionSalesPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Inject Controller
     final ConditionSalesController ctrl = Get.put(ConditionSalesController());
 
     return Scaffold(
@@ -28,7 +27,7 @@ class ConditionSalesPage extends StatelessWidget {
           _buildHeader(context, ctrl),
           _buildStatsTicker(ctrl),
           const SizedBox(height: 10),
-          _buildFilters(ctrl),
+          _buildFilters(context, ctrl), // Pass Context for DatePicker
           Expanded(child: _buildDataTable(ctrl, context)),
         ],
       ),
@@ -36,7 +35,7 @@ class ConditionSalesPage extends StatelessWidget {
   }
 
   // ==============================================================================
-  // 1. HEADER (Added Return Button)
+  // 1. HEADER
   // ==============================================================================
   Widget _buildHeader(BuildContext context, ConditionSalesController ctrl) {
     return Container(
@@ -72,14 +71,12 @@ class ConditionSalesPage extends StatelessWidget {
                 ),
               ),
               Text(
-                "Track shipments, collect due, and manage returns",
+                "Track shipments, collect due, manage returns and print invoices",
                 style: TextStyle(fontSize: 12, color: textMuted),
               ),
             ],
           ),
           const Spacer(),
-
-          // --- NEW: RETURN BUTTON ---
           ElevatedButton.icon(
             onPressed: () => _showReturnInterface(context, ctrl),
             icon: const Icon(Icons.assignment_return, size: 18),
@@ -94,8 +91,6 @@ class ConditionSalesPage extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 20),
-
-          // Total Pending Card
           Obx(
             () => _headerCard(
               "TOTAL COURIER DUE",
@@ -200,9 +195,9 @@ class ConditionSalesPage extends StatelessWidget {
   }
 
   // ==============================================================================
-  // 3. FILTERS
+  // 3. UPDATED FILTERS (With Date Picker)
   // ==============================================================================
-  Widget _buildFilters(ConditionSalesController ctrl) {
+  Widget _buildFilters(BuildContext context, ConditionSalesController ctrl) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
       child: Row(
@@ -211,11 +206,14 @@ class ConditionSalesPage extends StatelessWidget {
           const SizedBox(width: 8),
           _filterChip(ctrl, "This Month"),
           const SizedBox(width: 8),
+          _filterChip(ctrl, "Last Month"), // New
+          const SizedBox(width: 8),
           _filterChip(ctrl, "This Year"),
           const SizedBox(width: 8),
           _filterChip(ctrl, "All Time"),
+          const SizedBox(width: 8),
+          _customDateChip(context, ctrl), // New Custom
           const Spacer(),
-          // Search
           Container(
             width: 300,
             height: 45,
@@ -248,7 +246,11 @@ class ConditionSalesPage extends StatelessWidget {
       return ChoiceChip(
         label: Text(label),
         selected: isSelected,
-        onSelected: (v) => ctrl.selectedFilter.value = label,
+        onSelected: (v) {
+          ctrl.customDateRange.value =
+              null; // Reset custom if predefined selected
+          ctrl.selectedFilter.value = label;
+        },
         selectedColor: activeAccent,
         labelStyle: TextStyle(
           color: isSelected ? Colors.white : darkSlate,
@@ -267,12 +269,63 @@ class ConditionSalesPage extends StatelessWidget {
     });
   }
 
+  Widget _customDateChip(BuildContext context, ConditionSalesController ctrl) {
+    return Obx(() {
+      bool isCustom = ctrl.selectedFilter.value == "Custom";
+      String label = "Custom Date";
+      if (isCustom && ctrl.customDateRange.value != null) {
+        label =
+            "${DateFormat('dd/MM').format(ctrl.customDateRange.value!.start)} - ${DateFormat('dd/MM').format(ctrl.customDateRange.value!.end)}";
+      }
+
+      return ActionChip(
+        label: Text(label),
+        onPressed: () async {
+          DateTimeRange? picked = await showDateRangePicker(
+            context: context,
+            firstDate: DateTime(2022),
+            lastDate: DateTime.now(),
+            builder: (context, child) {
+              return Theme(
+                data: ThemeData.light().copyWith(
+                  primaryColor: activeAccent,
+                  colorScheme: const ColorScheme.light(primary: activeAccent),
+                  buttonTheme: const ButtonThemeData(
+                    textTheme: ButtonTextTheme.primary,
+                  ),
+                ),
+                child: child!,
+              );
+            },
+          );
+          if (picked != null) {
+            ctrl.customDateRange.value = picked;
+            ctrl.selectedFilter.value = "Custom";
+          }
+        },
+        backgroundColor: isCustom ? activeAccent : Colors.white,
+        labelStyle: TextStyle(
+          color: isCustom ? Colors.white : darkSlate,
+          fontWeight: FontWeight.bold,
+          fontSize: 12,
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: BorderSide(
+            color: isCustom ? Colors.transparent : Colors.grey.shade300,
+          ),
+        ),
+      );
+    });
+  }
+
   // ==============================================================================
-  // 4. DATA TABLE
+  // 4. DATA TABLE (Added Print Icon)
   // ==============================================================================
   Widget _buildDataTable(ConditionSalesController ctrl, BuildContext context) {
     return Obx(() {
-      if (ctrl.isLoading.value && ctrl.filteredOrders.isEmpty) {
+      if (ctrl.isLoading.value) {
         return const Center(child: CircularProgressIndicator());
       }
       if (ctrl.filteredOrders.isEmpty) {
@@ -283,7 +336,7 @@ class ConditionSalesPage extends StatelessWidget {
               Icon(Icons.folder_off_outlined, size: 64, color: Colors.grey),
               SizedBox(height: 16),
               Text(
-                "No condition sales records found",
+                "No condition sales records found for this period",
                 style: TextStyle(color: Colors.grey, fontSize: 16),
               ),
             ],
@@ -368,7 +421,7 @@ class ConditionSalesPage extends StatelessWidget {
                     ),
                   ),
                   Expanded(
-                    flex: 2,
+                    flex: 3,
                     child: Text(
                       "ACTION",
                       style: TextStyle(
@@ -378,7 +431,7 @@ class ConditionSalesPage extends StatelessWidget {
                       ),
                       textAlign: TextAlign.center,
                     ),
-                  ),
+                  ), // Widened for Print btn
                 ],
               ),
             ),
@@ -452,7 +505,7 @@ class ConditionSalesPage extends StatelessWidget {
               ],
             ),
           ),
-          // 3. Logistics (WITH EDIT ICON)
+          // 3. Logistics
           Expanded(
             flex: 2,
             child: Column(
@@ -477,7 +530,6 @@ class ConditionSalesPage extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 4),
-                // --- NEW EDITABLE CHALLAN ROW ---
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -521,39 +573,49 @@ class ConditionSalesPage extends StatelessWidget {
               ),
             ),
           ),
-          // 6. Action
+          // 6. Action (Print + Collect)
           Expanded(
-            flex: 2,
-            child: Center(
-              child:
-                  isPaid
-                      ? const Icon(
-                        Icons.check_circle,
-                        color: successGreen,
-                        size: 22,
-                      )
-                      : ElevatedButton(
-                        onPressed:
-                            () => _showPaymentDialog(context, ctrl, order),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: activeAccent,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 10,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                        ),
-                        child: const Text(
-                          "Collect",
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
+            flex: 3,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // Print Button
+                IconButton(
+                  onPressed: () => ctrl.printInvoice(order),
+                  icon: const Icon(
+                    Icons.print_outlined,
+                    size: 20,
+                    color: darkSlate,
+                  ),
+                  tooltip: "Download/Print Invoice",
+                ),
+                const SizedBox(width: 8),
+                // Collect Button / Status
+                if (isPaid)
+                  const Icon(Icons.check_circle, color: successGreen, size: 22)
+                else
+                  ElevatedButton(
+                    onPressed: () => _showPaymentDialog(context, ctrl, order),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: activeAccent,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
                       ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                    ),
+                    child: const Text(
+                      "Collect",
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
         ],
@@ -562,10 +624,9 @@ class ConditionSalesPage extends StatelessWidget {
   }
 
   // ==============================================================================
-  // 5. DIALOGS (Payment, Return, Edit Challan)
+  // 5. DIALOGS
   // ==============================================================================
 
-  // --- NEW: EDIT CHALLAN DIALOG ---
   void _showEditChallanDialog(
     BuildContext context,
     ConditionSalesController ctrl,
@@ -759,7 +820,6 @@ class ConditionSalesPage extends StatelessWidget {
     );
   }
 
-  // --- RETURN INTERFACE ---
   void _showReturnInterface(
     BuildContext context,
     ConditionSalesController ctrl,
@@ -774,7 +834,7 @@ class ConditionSalesPage extends StatelessWidget {
         insetPadding: const EdgeInsets.all(20),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: Container(
-          width: 700, // Wide dialog for better view
+          width: 700,
           height: 600,
           padding: const EdgeInsets.all(24),
           child: Column(
@@ -798,8 +858,6 @@ class ConditionSalesPage extends StatelessWidget {
                 ],
               ),
               const Divider(height: 30),
-
-              // Search Bar inside Dialog
               Row(
                 children: [
                   Expanded(
@@ -849,8 +907,6 @@ class ConditionSalesPage extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 20),
-
-              // Results Area
               Expanded(
                 child: Obx(() {
                   if (ctrl.returnOrderData.value == null) {
@@ -861,7 +917,6 @@ class ConditionSalesPage extends StatelessWidget {
                       ),
                     );
                   }
-
                   return Container(
                     decoration: BoxDecoration(
                       color: Colors.white,
@@ -869,7 +924,6 @@ class ConditionSalesPage extends StatelessWidget {
                     ),
                     child: Column(
                       children: [
-                        // Invoice Info Header
                         Container(
                           padding: const EdgeInsets.all(16),
                           decoration: BoxDecoration(
@@ -897,7 +951,6 @@ class ConditionSalesPage extends StatelessWidget {
                             ],
                           ),
                         ),
-                        // Items List
                         Expanded(
                           child: ListView.separated(
                             padding: const EdgeInsets.all(16),
@@ -911,10 +964,7 @@ class ConditionSalesPage extends StatelessWidget {
                                 item['saleRate'].toString(),
                               );
                               int retQty = ctrl.returnQuantities[pid] ?? 0;
-
-                              if (maxQty <= 0) {
-                                return const SizedBox.shrink(); // Hide previously fully returned
-                              }
+                              if (maxQty <= 0) return const SizedBox.shrink();
 
                               return Row(
                                 children: [
@@ -940,7 +990,6 @@ class ConditionSalesPage extends StatelessWidget {
                                       ],
                                     ),
                                   ),
-                                  // Qty Control
                                   Container(
                                     decoration: BoxDecoration(
                                       border: Border.all(
@@ -1003,7 +1052,6 @@ class ConditionSalesPage extends StatelessWidget {
                             },
                           ),
                         ),
-                        // Footer Actions
                         Container(
                           padding: const EdgeInsets.all(16),
                           decoration: BoxDecoration(

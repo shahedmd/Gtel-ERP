@@ -8,9 +8,9 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
-import 'controller.dart'; // Ensure this points to your DailySalesController
-import 'package:gtel_erp/Web%20Screen/Sales/Condition/conditioncontroller.dart'; // Ensure this points to ConditionSalesController
-import 'model.dart'; // Ensure this points to SaleModel
+import 'controller.dart';
+import 'package:gtel_erp/Web%20Screen/Sales/Condition/conditioncontroller.dart';
+import 'model.dart';
 
 class DailySalesPage extends StatelessWidget {
   final DailySalesController dailyCtrl = Get.put(DailySalesController());
@@ -471,7 +471,7 @@ class DailySalesPage extends StatelessWidget {
   }
 
   // ==========================================================
-  // 📋 LEDGER TABLE (With Print Button Only)
+  // 📋 LEDGER TABLE (Updated with Delete)
   // ==========================================================
 
   Widget _buildTableHead() {
@@ -537,12 +537,12 @@ class DailySalesPage extends StatelessWidget {
               ),
             ),
           ),
-          // The Print Column Header
+          // Action Column Header
           SizedBox(
-            width: 50,
+            width: 90,
             child: Center(
               child: Text(
-                "PRINT",
+                "ACTIONS",
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.bold,
@@ -571,16 +571,13 @@ class DailySalesPage extends StatelessWidget {
       separatorBuilder: (_, __) => const Divider(height: 1, thickness: 0.5),
       itemBuilder: (context, index) {
         final sale = list[index];
-        bool isDebtor = (sale.customerType).toLowerCase().contains(
-          "debtor",
-        );
+        bool isDebtor = (sale.customerType).toLowerCase().contains("debtor");
         String source = (sale.source).toLowerCase();
 
         bool isRecovery =
             source.contains("condition") ||
             source.contains("payment") ||
             source.contains("recovery");
-
         String badgeText = "NORMAL";
         Color badgeColor = primaryBlue;
 
@@ -646,15 +643,17 @@ class DailySalesPage extends StatelessWidget {
                   ),
                 ),
               ),
-              // 3. Method
+              // 3. Method (Updated for Multi-Line Support)
               Expanded(
                 flex: 2,
                 child: Text(
                   dailyCtrl.formatPaymentMethod(sale.paymentMethod),
                   style: const TextStyle(
-                    fontSize: 12,
+                    fontSize: 11,
                     color: Color(0xFF475569),
                   ),
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
               // 4. Amount
@@ -683,26 +682,63 @@ class DailySalesPage extends StatelessWidget {
                   ),
                 ),
               ),
-              // 6. PRINT BUTTON (Delete button removed)
+              // 6. ACTIONS (Print & Delete)
               SizedBox(
-                width: 50,
-                child: Center(
-                  child: IconButton(
-                    icon: const Icon(
-                      Icons.print_outlined,
-                      size: 20,
-                      color: Colors.blueGrey,
+                width: 90,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    // PRINT
+                    IconButton(
+                      icon: const Icon(
+                        Icons.print_outlined,
+                        size: 20,
+                        color: Colors.blueGrey,
+                      ),
+                      tooltip: "Reprint Invoice",
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      onPressed:
+                          () => dailyCtrl.reprintInvoice(
+                            sale.transactionId ?? "",
+                          ),
                     ),
-                    tooltip: "Reprint Invoice",
-                    onPressed:
-                        () =>
-                            dailyCtrl.reprintInvoice(sale.transactionId ?? ""),
-                  ),
+                    const SizedBox(width: 15),
+                    // DELETE
+                    IconButton(
+                      icon: const Icon(
+                        Icons.delete_outline,
+                        size: 20,
+                        color: alertRed,
+                      ),
+                      tooltip: "Delete Sale",
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      onPressed:
+                          () => _confirmDelete(context, sale.id, sale.name),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
         );
+      },
+    );
+  }
+
+  void _confirmDelete(BuildContext context, String saleId, String name) {
+    Get.defaultDialog(
+      title: "Confirm Delete",
+      middleText:
+          "Are you sure you want to delete the sale for '$name'?\n\nStock will be restored automatically.",
+      textConfirm: "Delete",
+      textCancel: "Cancel",
+      confirmTextColor: Colors.white,
+      buttonColor: alertRed,
+      onConfirm: () {
+        Get.back();
+        dailyCtrl.deleteSale(saleId);
       },
     );
   }

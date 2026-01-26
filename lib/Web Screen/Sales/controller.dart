@@ -6,6 +6,7 @@ import 'package:gtel_erp/Stock/controller.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'package:intl/intl.dart';
 import 'model.dart';
 
 class DailySalesController extends GetxController {
@@ -108,12 +109,8 @@ class DailySalesController extends GetxController {
   }
 
   // ==========================================
-  // 2. ADD SALE (UPDATED FOR PAYMENT DETAILS)
+  // 2. ADD SALE
   // ==========================================
-  /// [paymentMethod] expected structure:
-  /// - Cash: {'type': 'cash', 'amount': 500}
-  /// - Mobile: {'type': 'bkash', 'amount': 500, 'number': '017xx...'}
-  /// - Bank: {'type': 'bank', 'amount': 500, 'bankName': 'City', 'accountNumber': '123'}
   Future<void> addSale({
     required String name,
     required double amount,
@@ -129,16 +126,13 @@ class DailySalesController extends GetxController {
       final paidPart = (customerType == "debtor" && !isPaid) ? 0.0 : amount;
       List<Map<String, dynamic>> initialHistory = [];
 
-      // Only add to history if there is a payment
       if (paidPart > 0 && paymentMethod != null) {
-        // We create a clean map to ensure no nulls are passed for details
         Map<String, dynamic> historyEntry = {
           'type': paymentMethod['type'] ?? 'cash',
           'amount': paidPart,
           'timestamp': Timestamp.fromDate(date),
         };
 
-        // Add details if they exist
         if (paymentMethod.containsKey('number')) {
           historyEntry['number'] = paymentMethod['number'];
         }
@@ -158,7 +152,6 @@ class DailySalesController extends GetxController {
         "paid": _round(paidPart),
         "customerType": customerType,
         "timestamp": Timestamp.fromDate(date),
-        // Save the current payment method details for quick access
         "paymentMethod": paymentMethod,
         "paymentHistory": initialHistory,
         "createdAt": FieldValue.serverTimestamp(),
@@ -175,7 +168,7 @@ class DailySalesController extends GetxController {
   }
 
   // ==========================================
-  // 3. APPLY DEBTOR PAYMENT (UPDATED)
+  // 3. APPLY DEBTOR PAYMENT
   // ==========================================
   Future<void> applyDebtorPayment(
     String debtorName,
@@ -189,7 +182,6 @@ class DailySalesController extends GetxController {
       final DateTime startOfDay = DateTime(date.year, date.month, date.day);
       final DateTime endOfDay = startOfDay.add(const Duration(days: 1));
 
-      // Fetch unpaid or partial debtor records for this day
       final snap =
           await _db
               .collection("daily_sales")
@@ -205,7 +197,6 @@ class DailySalesController extends GetxController {
 
       final batch = _db.batch();
 
-      // Distribute payment across existing entries
       for (var doc in snap.docs) {
         if (remaining <= 0) break;
         final data = doc.data();
@@ -221,24 +212,20 @@ class DailySalesController extends GetxController {
             applied.add({"id": transactionId, "amount": toApply});
           }
 
-          // Create detailed history entry
           final newHistoryEntry = {
             'type': paymentMethod['type'] ?? 'cash',
             'amount': toApply,
             'paidAt': Timestamp.now(),
             'appliedTo': doc.id,
-            // Include details explicitly
             'number': paymentMethod['number'],
             'bankName': paymentMethod['bankName'],
             'accountNumber': paymentMethod['accountNumber'],
           };
-
-          // Remove nulls just in case
           newHistoryEntry.removeWhere((key, value) => value == null);
 
           batch.update(doc.reference, {
             "paid": _round(alreadyPaid + toApply),
-            "paymentMethod": paymentMethod, // Update latest method
+            "paymentMethod": paymentMethod,
             "lastPaymentAt": FieldValue.serverTimestamp(),
             "appliedDebits": applied,
             "paymentHistory": FieldValue.arrayUnion([newHistoryEntry]),
@@ -247,7 +234,6 @@ class DailySalesController extends GetxController {
         }
       }
 
-      // If money is left over (Advance Payment), create a new entry
       if (remaining > 0) {
         await addSale(
           name: debtorName,
@@ -255,7 +241,7 @@ class DailySalesController extends GetxController {
           customerType: "debtor",
           isPaid: true,
           date: date,
-          paymentMethod: paymentMethod, // Pass full details here
+          paymentMethod: paymentMethod,
           source: "advance_payment",
           transactionId: transactionId,
           appliedDebits:
@@ -362,7 +348,6 @@ class DailySalesController extends GetxController {
           final invData = invSnap.data() as Map<String, dynamic>;
           final List<dynamic> items = invData['items'] ?? [];
 
-          // RESTORE STOCK
           if (invData['status'] != 'deleted') {
             List<Map<String, dynamic>> restockUpdates = [];
             for (var item in items) {
@@ -383,7 +368,6 @@ class DailySalesController extends GetxController {
             }
           }
 
-          // DELETE
           await _db.runTransaction((transaction) async {
             DocumentReference invRef = _db
                 .collection("sales_orders")
@@ -421,7 +405,7 @@ class DailySalesController extends GetxController {
   }
 
   // ==========================================
-  // 6. FORMATTING (UPDATED FOR DETAILS)
+  // 6. FORMATTING HELPER (ADDED)
   // ==========================================
   String formatPaymentMethod(dynamic pm) {
     if (pm == null || pm == "") return "CREDIT/DUE";
@@ -429,7 +413,6 @@ class DailySalesController extends GetxController {
 
     String type = (pm["type"] ?? "CASH").toString().toLowerCase();
 
-    // 1. Handle Multi-Pay
     if (type == "multi") {
       List<String> parts = [];
       double cash = double.tryParse(pm['cash'].toString()) ?? 0;
@@ -458,28 +441,22 @@ class DailySalesController extends GetxController {
         String bName = pm['bankName'] ?? "Bank";
         parts.add("$bName: ${bank.toStringAsFixed(0)}");
       }
-
       return parts.isEmpty ? "MULTI-PAY" : parts.join("\n");
     }
 
-    // 2. Handle Single Payment Methods with details
     switch (type) {
       case "cash":
         return "CASH";
-
       case "bkash":
       case "nagad":
       case "rocket":
-        // Look for 'number' or 'details'
         String number = (pm["number"] ?? pm["details"] ?? "").toString();
         return number.isEmpty
             ? type.toUpperCase()
             : "${type.toUpperCase()}\n($number)";
-
       case "bank":
         String bName = (pm["bankName"] ?? "BANK").toString();
         String acc = (pm["accountNumber"] ?? "").toString();
-
         if (bName != "BANK" && acc.isNotEmpty) {
           return "$bName\n($acc)";
         } else if (bName != "BANK") {
@@ -488,12 +465,14 @@ class DailySalesController extends GetxController {
           return "BANK ($acc)";
         }
         return "BANK";
-
       default:
         return type.toUpperCase();
     }
   }
 
+  // ==========================================
+  // 7. REPRINT LOGIC (UPDATED WITH SNAPSHOTS)
+  // ==========================================
   Future<void> reprintInvoice(String invoiceId) async {
     isLoading.value = true;
     try {
@@ -503,156 +482,747 @@ class DailySalesController extends GetxController {
         Get.snackbar("Error", "Invoice not found in master records.");
         return;
       }
-      Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
-      List<dynamic> items = data['items'] ?? [];
-      Map<String, dynamic> payMap = data['paymentDetails'] ?? {};
-      double getDouble(dynamic val) => double.tryParse(val.toString()) ?? 0.0;
-      final pdf = pw.Document();
-      final boldFont = await PdfGoogleFonts.nunitoBold();
-      final regularFont = await PdfGoogleFonts.nunitoRegular();
 
-      pdf.addPage(
-        pw.Page(
-          pageFormat: PdfPageFormat.a4,
-          build: (context) {
-            return pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                pw.Header(
-                  level: 0,
-                  child: pw.Row(
-                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                    children: [
-                      pw.Text(
-                        "G-TEL",
-                        style: pw.TextStyle(
-                          font: boldFont,
-                          fontSize: 24,
-                          color: PdfColors.blue900,
-                        ),
-                      ),
-                      pw.Text(
-                        data['status'] == 'returned_partial'
-                            ? "INVOICE (UPDATED)"
-                            : "INVOICE",
-                        style: pw.TextStyle(
-                          font: boldFont,
-                          fontSize: 20,
-                          color: PdfColors.red,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Column(
-                      crossAxisAlignment: pw.CrossAxisAlignment.start,
-                      children: [
-                        pw.Text(
-                          "Invoice ID: $invoiceId",
-                          style: pw.TextStyle(font: regularFont),
-                        ),
-                        pw.Text(
-                          "Date: ${data['date']}",
-                          style: pw.TextStyle(font: regularFont),
-                        ),
-                      ],
-                    ),
-                    pw.Column(
-                      crossAxisAlignment: pw.CrossAxisAlignment.end,
-                      children: [
-                        pw.Text(
-                          "Bill To:",
-                          style: pw.TextStyle(font: boldFont),
-                        ),
-                        pw.Text(
-                          data['customerName'] ?? "",
-                          style: pw.TextStyle(font: regularFont),
-                        ),
-                        pw.Text(
-                          data['customerPhone'] ?? "",
-                          style: pw.TextStyle(font: regularFont),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-                pw.SizedBox(height: 20),
-                pw.TableHelper.fromTextArray(
-                  border: pw.TableBorder.all(color: PdfColors.grey300),
-                  headerStyle: pw.TextStyle(
-                    font: boldFont,
-                    color: PdfColors.white,
-                  ),
-                  headerDecoration: const pw.BoxDecoration(
-                    color: PdfColors.blueGrey800,
-                  ),
-                  cellStyle: pw.TextStyle(font: regularFont),
-                  headers: ['Item / Model', 'Rate', 'Qty', 'Total'],
-                  data:
-                      items
-                          .map(
-                            (e) => [
-                              e['name'],
-                              getDouble(e['saleRate']).toStringAsFixed(2),
-                              e['qty'].toString(),
-                              getDouble(e['subtotal']).toStringAsFixed(2),
-                            ],
-                          )
-                          .toList(),
-                ),
-                pw.SizedBox(height: 10),
-                pw.Align(
-                  alignment: pw.Alignment.centerRight,
-                  child: pw.Container(
-                    width: 200,
-                    child: pw.Column(
-                      crossAxisAlignment: pw.CrossAxisAlignment.end,
-                      children: [
-                        pw.Divider(),
-                        pw.Row(
-                          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                          children: [
-                            pw.Text(
-                              "Grand Total",
-                              style: pw.TextStyle(font: boldFont, fontSize: 16),
-                            ),
-                            pw.Text(
-                              "Tk ${getDouble(data['grandTotal']).toStringAsFixed(2)}",
-                              style: pw.TextStyle(font: boldFont, fontSize: 16),
-                            ),
-                          ],
-                        ),
-                        pw.SizedBox(height: 5),
-                        pw.Row(
-                          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                          children: [
-                            pw.Text(
-                              "Paid Amount",
-                              style: pw.TextStyle(font: regularFont),
-                            ),
-                            pw.Text(
-                              "Tk ${getDouble(payMap['actualReceived']).toStringAsFixed(2)}",
-                              style: pw.TextStyle(font: regularFont),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            );
-          },
-        ),
+      Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+
+      // Extract Data for Reprint
+      String name = data['customerName'] ?? "";
+      String phone = data['customerPhone'] ?? "";
+      String shop = data['shopName'] ?? "";
+      String address = data['deliveryAddress'] ?? "";
+      String? courier = data['courierName'];
+      int cartons = data['cartons'] ?? 0;
+      bool isCond = data['isCondition'] ?? false;
+      String challan = data['challanNo'] ?? "";
+      List<Map<String, dynamic>> items = List<Map<String, dynamic>>.from(
+        data['items'] ?? [],
       );
-      await Printing.layoutPdf(onLayout: (f) => pdf.save());
+      Map<String, dynamic> payMap = data['paymentDetails'] ?? {};
+
+      // ✅ FIX: RETRIEVE SAVED SNAPSHOTS
+      double snapOld = (data['snapshotOldDue'] as num?)?.toDouble() ?? 0.0;
+      double snapRun = (data['snapshotRunningDue'] as num?)?.toDouble() ?? 0.0;
+
+      // ✅ RETRIEVE DISCOUNT
+      double discountVal = (data['discount'] as num?)?.toDouble() ?? 0.0;
+
+      await _generatePdf(
+        invoiceId,
+        name,
+        phone,
+        payMap,
+        items,
+        isCondition: isCond,
+        challan: challan,
+        address: address,
+        courier: courier,
+        cartons: cartons,
+        shopName: shop,
+        oldDueSnap: snapOld,
+        runningDueSnap: snapRun,
+        authorizedName: "Joynal Abedin",
+        authorizedPhone: "01720677206",
+        discount: discountVal, // <--- UPDATED: Pass the retrieved discount here
+      );
     } catch (e) {
       Get.snackbar("Error", "Could not reprint: $e");
     } finally {
       isLoading.value = false;
     }
+  }
+
+  Future<void> _generatePdf(
+    String invId,
+    String name,
+    String phone,
+    Map<String, dynamic> payMap,
+    List<Map<String, dynamic>> items, {
+    bool isCondition = false,
+    String challan = "",
+    String address = "",
+    String? courier,
+    int? cartons,
+    String shopName = "",
+    double oldDueSnap = 0.0,
+    double runningDueSnap = 0.0,
+    required String authorizedName,
+    required String authorizedPhone,
+    double discount = 0.0, // <--- UPDATED: Added discount parameter
+  }) async {
+    final pdf = pw.Document();
+    final boldFont = await PdfGoogleFonts.robotoBold();
+    final regularFont = await PdfGoogleFonts.robotoRegular();
+    final italicFont = await PdfGoogleFonts.robotoItalic();
+
+    // Reconstruct Calculations using Snapshots
+    double paidOld = double.tryParse(payMap['paidForOldDue'].toString()) ?? 0.0;
+    double paidInv =
+        double.tryParse(payMap['paidForInvoice'].toString()) ?? 0.0;
+    double invDue = double.tryParse(payMap['due'].toString()) ?? 0.0;
+    double subTotal = items.fold(
+      0,
+      (sumv, item) =>
+          sumv + (double.tryParse(item['subtotal'].toString()) ?? 0),
+    );
+
+    double remainingOldDue = oldDueSnap - paidOld;
+    if (remainingOldDue < 0) remainingOldDue = 0;
+    double totalPreviousBalance = oldDueSnap + runningDueSnap;
+    double netTotalDue = remainingOldDue + runningDueSnap + invDue;
+    double totalPaidCurrent = paidOld + paidInv;
+
+    final pageTheme = pw.PageTheme(
+      pageFormat: PdfPageFormat.a5,
+      margin: const pw.EdgeInsets.all(20),
+    );
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageTheme: pageTheme,
+        build: (context) {
+          return [
+            // ✅ FIX: CENTERED HEADER
+            _buildCompanyHeader(boldFont, regularFont),
+            pw.SizedBox(height: 15),
+            _buildInvoiceInfo(
+              boldFont,
+              regularFont,
+              invId,
+              name,
+              phone,
+              isCondition,
+              address,
+              courier,
+              shopName,
+            ),
+            pw.SizedBox(height: 15),
+            _buildProfessionalTable(boldFont, regularFont, italicFont, items),
+            pw.SizedBox(height: 10),
+            _buildDetailedSummary(
+              boldFont,
+              regularFont,
+              payMap,
+              isCondition,
+              cartons,
+              totalPreviousBalance,
+              totalPaidCurrent,
+              netTotalDue,
+              subTotal,
+              discount, // <--- UPDATED: Passed discount to summary
+            ),
+            pw.SizedBox(height: 25),
+            _buildSignatures(
+              regularFont,
+              boldFont,
+              authorizedName,
+              authorizedPhone,
+            ),
+          ];
+        },
+      ),
+    );
+
+    if (isCondition) {
+      pdf.addPage(
+        pw.MultiPage(
+          pageTheme: pageTheme,
+          build: (context) {
+            return [
+              _buildCompanyHeader(boldFont, regularFont),
+              pw.SizedBox(height: 10),
+              pw.Container(
+                width: double.infinity,
+                padding: const pw.EdgeInsets.symmetric(vertical: 5),
+                color: PdfColors.grey200,
+                child: pw.Center(
+                  child: pw.Text(
+                    "DELIVERY CHALLAN",
+                    style: pw.TextStyle(
+                      font: boldFont,
+                      fontSize: 14,
+                      letterSpacing: 2,
+                    ),
+                  ),
+                ),
+              ),
+              pw.SizedBox(height: 10),
+              _buildChallanInfo(
+                boldFont,
+                regularFont,
+                invId,
+                name,
+                phone,
+                challan,
+                address,
+                courier,
+                cartons,
+                shopName,
+              ),
+              pw.SizedBox(height: 10),
+              pw.Spacer(),
+              _buildConditionBox(boldFont, regularFont, payMap),
+              pw.SizedBox(height: 30),
+              _buildSignatures(
+                regularFont,
+                boldFont,
+                authorizedName,
+                authorizedPhone,
+              ),
+            ];
+          },
+        ),
+      );
+    }
+    await Printing.layoutPdf(onLayout: (f) => pdf.save());
+  }
+
+  pw.Widget _buildCompanyHeader(pw.Font bold, pw.Font reg) {
+    return pw.Center(
+      child: pw.Container(
+        width: double.infinity,
+        decoration: const pw.BoxDecoration(
+          border: pw.Border(bottom: pw.BorderSide(width: 2)),
+        ),
+        padding: const pw.EdgeInsets.only(bottom: 10),
+        child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.center,
+          mainAxisAlignment: pw.MainAxisAlignment.center,
+          children: [
+            pw.Text(
+              "G TEL JOY EXPRESS",
+              style: pw.TextStyle(font: bold, fontSize: 24, letterSpacing: 1),
+            ),
+            pw.Text(
+              "Mobile Parts Wholesaler",
+              style: pw.TextStyle(font: reg, fontSize: 10, letterSpacing: 3),
+            ),
+            pw.SizedBox(height: 4),
+            pw.Text(
+              "Gulistan Shopping Complex (Hall Market), 2 Bangabandu Avenue, Dhaka 1000",
+              textAlign: pw.TextAlign.center,
+              style: pw.TextStyle(font: reg, fontSize: 9),
+            ),
+            pw.SizedBox(height: 2),
+            pw.Text(
+              "Hotline: 01720677206, 01911026222 | Email: gtel01720677206@gmail.com",
+              style: pw.TextStyle(font: bold, fontSize: 9),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  pw.Widget _buildInvoiceInfo(
+    pw.Font bold,
+    pw.Font reg,
+    String invId,
+    String name,
+    String phone,
+    bool isCond,
+    String addr,
+    String? courier,
+    String shopName,
+  ) {
+    return pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.Expanded(
+          flex: 4,
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              _sectionHeader("INVOICE DETAILS", bold),
+              pw.SizedBox(height: 5),
+              _infoRow("Invoice #", invId, bold, reg),
+              _infoRow(
+                "Date",
+                DateFormat('dd-MMM-yyyy').format(DateTime.now()),
+                bold,
+                reg,
+              ),
+              _infoRow("Type", isCond ? "Condition" : "Cash/Credit", bold, reg),
+              if (isCond && courier != null)
+                _infoRow("Courier", courier, bold, reg),
+            ],
+          ),
+        ),
+        pw.SizedBox(width: 20),
+        pw.Expanded(
+          flex: 5,
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              _sectionHeader("BILL TO", bold),
+              pw.SizedBox(height: 5),
+              pw.Text(name, style: pw.TextStyle(font: bold, fontSize: 11)),
+              if (shopName.isNotEmpty)
+                pw.Text(shopName, style: pw.TextStyle(font: reg, fontSize: 10)),
+              pw.Text(phone, style: pw.TextStyle(font: reg, fontSize: 10)),
+              if (addr.isNotEmpty)
+                pw.Text(addr, style: pw.TextStyle(font: reg, fontSize: 9)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  pw.Widget _sectionHeader(String title, pw.Font font) {
+    return pw.Container(
+      width: double.infinity,
+      padding: const pw.EdgeInsets.symmetric(vertical: 2, horizontal: 5),
+      color: PdfColors.grey300,
+      child: pw.Text(title, style: pw.TextStyle(font: font, fontSize: 9)),
+    );
+  }
+
+  pw.Widget _infoRow(String label, String value, pw.Font bold, pw.Font reg) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.only(bottom: 2),
+      child: pw.Row(
+        children: [
+          pw.SizedBox(
+            width: 50,
+            child: pw.Text(
+              "$label:",
+              style: pw.TextStyle(font: bold, fontSize: 9),
+            ),
+          ),
+          pw.Text(value, style: pw.TextStyle(font: reg, fontSize: 9)),
+        ],
+      ),
+    );
+  }
+
+  pw.Widget _buildProfessionalTable(
+    pw.Font bold,
+    pw.Font reg,
+    pw.Font italic,
+    List<Map<String, dynamic>> items,
+  ) {
+    return pw.Table(
+      border: pw.TableBorder(
+        bottom: pw.BorderSide(width: 0.5, color: PdfColors.grey),
+        horizontalInside: pw.BorderSide(width: 0.5, color: PdfColors.grey300),
+      ),
+      columnWidths: {
+        0: const pw.FixedColumnWidth(25),
+        1: const pw.FlexColumnWidth(),
+        2: const pw.FixedColumnWidth(45),
+        3: const pw.FixedColumnWidth(30),
+        4: const pw.FixedColumnWidth(50),
+      },
+      children: [
+        pw.TableRow(
+          decoration: const pw.BoxDecoration(color: PdfColors.grey200),
+          children: [
+            _th("SL", bold),
+            _th("DESCRIPTION", bold, align: pw.TextAlign.left),
+            _th("RATE", bold, align: pw.TextAlign.right),
+            _th("QTY", bold, align: pw.TextAlign.center),
+            _th("TOTAL", bold, align: pw.TextAlign.right),
+          ],
+        ),
+        ...List.generate(items.length, (index) {
+          final item = items[index];
+          return pw.TableRow(
+            verticalAlignment: pw.TableCellVerticalAlignment.middle,
+            children: [
+              _td((index + 1).toString(), reg, align: pw.TextAlign.center),
+              pw.Padding(
+                padding: const pw.EdgeInsets.symmetric(
+                  vertical: 4,
+                  horizontal: 4,
+                ),
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text(
+                      item['name'],
+                      style: pw.TextStyle(font: bold, fontSize: 9),
+                    ),
+                    if (item['brand'] != null || item['model'] != null)
+                      pw.Text(
+                        "${item['brand'] ?? ''} ${item['model'] ?? ''}",
+                        style: pw.TextStyle(
+                          font: italic,
+                          fontSize: 8,
+                          color: PdfColors.grey700,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              _td(item['saleRate'].toString(), reg, align: pw.TextAlign.right),
+              _td(item['qty'].toString(), bold, align: pw.TextAlign.center),
+              _td(item['subtotal'].toString(), bold, align: pw.TextAlign.right),
+            ],
+          );
+        }),
+      ],
+    );
+  }
+
+  pw.Widget _th(
+    String text,
+    pw.Font font, {
+    pw.TextAlign align = pw.TextAlign.center,
+  }) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.all(5),
+      child: pw.Text(
+        text,
+        textAlign: align,
+        style: pw.TextStyle(font: font, fontSize: 8),
+      ),
+    );
+  }
+
+  pw.Widget _td(
+    String text,
+    pw.Font font, {
+    pw.TextAlign align = pw.TextAlign.left,
+  }) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 4),
+      child: pw.Text(
+        text,
+        textAlign: align,
+        style: pw.TextStyle(font: font, fontSize: 9),
+      ),
+    );
+  }
+
+  pw.Widget _buildDetailedSummary(
+    pw.Font bold,
+    pw.Font reg,
+    Map payMap,
+    bool isCond,
+    int? cartons,
+    double prevDue,
+    double totalPaid,
+    double netDue,
+    double subTotal,
+    double discount, // <--- ADD THIS PARAMETER
+  ) {
+    double currentInvTotal = subTotal - discount;
+
+    return pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.Expanded(
+          flex: 5,
+          child: pw.Container(
+            padding: const pw.EdgeInsets.all(5),
+            decoration: pw.BoxDecoration(
+              border: pw.Border.all(color: PdfColors.grey300),
+              borderRadius: const pw.BorderRadius.all(pw.Radius.circular(5)),
+            ),
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text(
+                  "PAYMENT METHOD",
+                  style: pw.TextStyle(font: bold, fontSize: 8),
+                ),
+                pw.Divider(thickness: 0.5),
+                _buildCompactPaymentLines(payMap, reg),
+                if (cartons != null && cartons > 0) ...[
+                  pw.SizedBox(height: 5),
+                  pw.Text(
+                    "Packaged: $cartons Cartons",
+                    style: pw.TextStyle(font: bold, fontSize: 8),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+        pw.SizedBox(width: 20),
+        pw.Expanded(
+          flex: 5,
+          child: pw.Column(
+            children: [
+              _summaryRow("Subtotal", subTotal.toStringAsFixed(2), reg),
+              if (discount > 0)
+                _summaryRow(
+                  "Discount",
+                  "- ${discount.toStringAsFixed(2)}",
+                  reg,
+                ),
+              pw.Divider(),
+              _summaryRow(
+                "INVOICE TOTAL",
+                currentInvTotal.toStringAsFixed(2),
+                bold,
+                size: 10,
+              ),
+              if (!isCond) ...[
+                pw.SizedBox(height: 5),
+                _summaryRow("Prev. Balance", prevDue.toStringAsFixed(2), reg),
+                pw.Divider(borderStyle: pw.BorderStyle.dashed),
+                _summaryRow(
+                  "TOTAL PAYABLE",
+                  (prevDue + currentInvTotal).toStringAsFixed(2),
+                  bold,
+                ),
+                if (totalPaid > 0)
+                  _summaryRow(
+                    "Less Paid",
+                    "(${totalPaid.toStringAsFixed(2)})",
+                    reg,
+                  ),
+                pw.Container(
+                  margin: const pw.EdgeInsets.only(top: 5),
+                  padding: const pw.EdgeInsets.all(5),
+                  color: PdfColors.black,
+                  child: pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Text(
+                        "NET DUE",
+                        style: pw.TextStyle(
+                          font: bold,
+                          color: PdfColors.white,
+                          fontSize: 11,
+                        ),
+                      ),
+                      pw.Text(
+                        netDue.toStringAsFixed(2),
+                        style: pw.TextStyle(
+                          font: bold,
+                          color: PdfColors.white,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ] else ...[
+                _summaryRow("Paid", totalPaid.toStringAsFixed(2), reg),
+                pw.SizedBox(height: 5),
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(5),
+                  decoration: pw.BoxDecoration(border: pw.Border.all()),
+                  child: _summaryRow(
+                    "COLLECTABLE",
+                    double.parse(payMap['due'].toString()).toStringAsFixed(2),
+                    bold,
+                    size: 12,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  pw.Widget _summaryRow(
+    String label,
+    String value,
+    pw.Font font, {
+    double size = 9,
+  }) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(vertical: 1),
+      child: pw.Row(
+        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        children: [
+          pw.Text(label, style: pw.TextStyle(font: font, fontSize: size)),
+          pw.Text(value, style: pw.TextStyle(font: font, fontSize: size)),
+        ],
+      ),
+    );
+  }
+
+  pw.Widget _buildSignatures(
+    pw.Font reg,
+    pw.Font bold,
+    String authName,
+    String authPhone,
+  ) {
+    return pw.Row(
+      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+      crossAxisAlignment: pw.CrossAxisAlignment.end,
+      children: [
+        pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Text(authName, style: pw.TextStyle(font: bold, fontSize: 10)),
+            pw.Text(authPhone, style: pw.TextStyle(font: reg, fontSize: 9)),
+            pw.Container(
+              width: 120,
+              height: 1,
+              color: PdfColors.black,
+              margin: const pw.EdgeInsets.only(top: 2),
+            ),
+            pw.SizedBox(height: 2),
+            pw.Text(
+              "Authorized Signature",
+              style: pw.TextStyle(font: reg, fontSize: 7),
+            ),
+          ],
+        ),
+        pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.end,
+          children: [
+            pw.Container(width: 120, height: 1, color: PdfColors.black),
+            pw.SizedBox(height: 2),
+            pw.Text(
+              "Receiver Signature",
+              style: pw.TextStyle(font: reg, fontSize: 7),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  pw.Widget _buildCompactPaymentLines(Map payMap, pw.Font reg) {
+    List<String> lines = [];
+    double cash = double.tryParse(payMap['cash'].toString()) ?? 0;
+    double bkash = double.tryParse(payMap['bkash'].toString()) ?? 0;
+    double nagad = double.tryParse(payMap['nagad'].toString()) ?? 0;
+    double bank = double.tryParse(payMap['bank'].toString()) ?? 0;
+
+    if (cash > 0) lines.add("Cash: $cash");
+    if (bkash > 0) lines.add("Bkash: $bkash");
+    if (nagad > 0) lines.add("Nagad: $nagad");
+    if (bank > 0) lines.add("Bank: $bank");
+
+    if (lines.isEmpty) {
+      return pw.Text(
+        "Unpaid / Due",
+        style: pw.TextStyle(font: reg, fontSize: 8),
+      );
+    }
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children:
+          lines
+              .map(
+                (l) => pw.Text(l, style: pw.TextStyle(font: reg, fontSize: 8)),
+              )
+              .toList(),
+    );
+  }
+
+  pw.Widget _buildChallanInfo(
+    pw.Font bold,
+    pw.Font reg,
+    String invId,
+    String name,
+    String phone,
+    String challan,
+    String addr,
+    String? courier,
+    int? cartons,
+    String shopName,
+  ) {
+    return pw.Row(
+      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+      children: [
+        pw.Expanded(
+          child: pw.Container(
+            padding: const pw.EdgeInsets.all(5),
+            decoration: pw.BoxDecoration(
+              border: pw.Border.all(color: PdfColors.grey400),
+            ),
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text(
+                  "LOGISTICS / COURIER",
+                  style: pw.TextStyle(font: bold, fontSize: 9),
+                ),
+                pw.Divider(thickness: 0.5),
+                pw.Text(
+                  "Name: ${courier ?? 'N/A'}",
+                  style: pw.TextStyle(font: reg, fontSize: 9),
+                ),
+                pw.Text(
+                  "Challan: $challan",
+                  style: pw.TextStyle(font: bold, fontSize: 9),
+                ),
+                if (cartons != null)
+                  pw.Text(
+                    "Total Cartons: $cartons",
+                    style: pw.TextStyle(font: bold, fontSize: 9),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        pw.SizedBox(width: 10),
+        pw.Expanded(
+          child: pw.Container(
+            padding: const pw.EdgeInsets.all(5),
+            decoration: pw.BoxDecoration(
+              border: pw.Border.all(color: PdfColors.grey400),
+            ),
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text(
+                  "DELIVER TO",
+                  style: pw.TextStyle(font: bold, fontSize: 9),
+                ),
+                pw.Divider(thickness: 0.5),
+                pw.Text(name, style: pw.TextStyle(font: bold, fontSize: 10)),
+                pw.Text(phone, style: pw.TextStyle(font: reg, fontSize: 9)),
+                pw.Text(
+                  addr,
+                  style: pw.TextStyle(font: reg, fontSize: 8),
+                  maxLines: 2,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ✅ FIX: CLEAN CHALLAN TABLE
+
+  pw.Widget _buildConditionBox(pw.Font bold, pw.Font reg, Map payMap) {
+    double due = double.parse(payMap['due'].toString());
+    return pw.Container(
+      width: double.infinity,
+      padding: const pw.EdgeInsets.all(10),
+      decoration: pw.BoxDecoration(
+        border: pw.Border.all(width: 2),
+        borderRadius: const pw.BorderRadius.all(pw.Radius.circular(5)),
+      ),
+      child: pw.Column(
+        children: [
+          pw.Text(
+            "CONDITION PAYMENT INSTRUCTION",
+            style: pw.TextStyle(font: reg, fontSize: 8),
+          ),
+          pw.SizedBox(height: 5),
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.center,
+            children: [
+              pw.Text(
+                "PLEASE COLLECT:  ",
+                style: pw.TextStyle(font: bold, fontSize: 12),
+              ),
+              pw.Text(
+                "Tk ${due.toStringAsFixed(0)} /=",
+                style: pw.TextStyle(font: bold, fontSize: 18),
+              ),
+              pw.Text(
+                "+ Charges",
+                style: pw.TextStyle(font: bold, fontSize: 18),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 }
