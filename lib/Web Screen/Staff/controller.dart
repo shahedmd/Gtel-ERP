@@ -472,6 +472,7 @@ class StaffController extends GetxController {
       if (t.type == "ADVANCE") {
         totalAdvanceTaken += t.amount;
       } else if (t.type == "SALARY" || t.type == null)
+        // ignore: curly_braces_in_flow_control_structures
         totalSalaryPaid += t.amount;
     }
 

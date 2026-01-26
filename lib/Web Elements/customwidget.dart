@@ -205,7 +205,7 @@ class SidebarMenu extends StatelessWidget {
                 _NavTile(
                   id: Routes.DASHBOARD,
                   icon: FontAwesomeIcons.chartPie,
-                  title: "Dashboard",
+                  title: "Daily Ledger",
                 ),
                 _NavTile(
                   id: Routes.LIVEORDER,
@@ -228,6 +228,11 @@ class SidebarMenu extends StatelessWidget {
                       id: Routes.VENDOR,
                       title: "Vendor Account",
                       isSubItem: true,
+                    ),
+                    _NavTile(
+                      id: '/cash', // Example of a standalone route
+                      icon: FontAwesomeIcons.cashRegister,
+                      title: "Cash Drawer",
                     ),
                   ],
                 ),
@@ -265,14 +270,25 @@ class SidebarMenu extends StatelessWidget {
                       title: "Monthly Sales",
                       isSubItem: true,
                     ),
+
+                    _NavTile(
+                      id: Routes.CONDITION,
+                      title: "Condition Sale",
+                      isSubItem: true,
+                    ),
                     _NavTile(
                       id: Routes.SALERETURN,
                       title: "Sale Return",
                       isSubItem: true,
                     ),
                     _NavTile(
-                      id: Routes.CONDITION,
-                      title: "Condition Sale",
+                      id: '/profit', // Example of a standalone route
+                      icon: FontAwesomeIcons.gears,
+                      title: "Sale Overview",
+                    ),
+                    _NavTile(
+                      id: Routes.CUSTOMEROVERVIEW,
+                      title: "Customer Overview",
                       isSubItem: true,
                     ),
                   ],
@@ -288,6 +304,16 @@ class SidebarMenu extends StatelessWidget {
                       title: "Stock Management",
                       isSubItem: true,
                     ),
+                    _NavTile(
+                      id: '/service', // Example of a standalone route
+                      icon: FontAwesomeIcons.productHunt,
+                      title: "Service Product",
+                    ),
+                    _NavTile(
+                      id: Routes.SHIPMENT,
+                      icon: FontAwesomeIcons.shippingFast,
+                      title: "Shipment Details",
+                    ),
                   ],
                 ),
 
@@ -298,31 +324,9 @@ class SidebarMenu extends StatelessWidget {
 
                 // --- STAFF ---
                 _NavTile(
-                  id: Routes.SHIPMENT,
-                  icon: FontAwesomeIcons.shippingFast,
-                  title: "Shipment Details",
-                ),
-                _NavTile(
                   id: Routes.STAFF,
                   icon: FontAwesomeIcons.userTie,
                   title: "Staff Members",
-                ),
-
-                _NavTile(
-                  id: '/profit', // Example of a standalone route
-                  icon: FontAwesomeIcons.gears,
-                  title: "Sale Overview",
-                ),
-                _NavTile(
-                  id: '/cash', // Example of a standalone route
-                  icon: FontAwesomeIcons.cashRegister,
-                  title: "Cash Drawer",
-                ),
-
-                _NavTile(
-                  id: '/service', // Example of a standalone route
-                  icon: FontAwesomeIcons.productHunt,
-                  title: "Service Product",
                 ),
               ],
             ),

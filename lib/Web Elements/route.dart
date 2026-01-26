@@ -18,4 +18,6 @@ abstract class Routes {
   static const String CONDITION = '/condition';
   static const String VENDOR = '/vendor';
   static const String OVERVIEWACCOUNT = '/accountoverview';
+    static const String CUSTOMEROVERVIEW = '/customeroverview';
+
 }
