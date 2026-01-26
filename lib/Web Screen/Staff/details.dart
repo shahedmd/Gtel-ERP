@@ -11,7 +11,6 @@ import 'dart:js_interop';
 import 'dart:typed_data';
 import 'package:web/web.dart' as web;
 
-// Theme Colors
 const Color darkSlate = Color(0xFF111827);
 const Color activeAccent = Color(0xFF3B82F6);
 const Color bgGrey = Color(0xFFF9FAFB);
@@ -28,9 +27,6 @@ class StaffDetailsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Find the specific staff member from the controller's list to get live updates
-    // Using Obx/StreamBuilder inside widgets to keep UI reactive
-
     return Scaffold(
       backgroundColor: bgGrey,
       appBar: AppBar(
@@ -49,7 +45,14 @@ class StaffDetailsPage extends StatelessWidget {
           ),
         ),
         actions: [
-          // Professional PDF Action
+          // UPDATE 1: Edit Details Button
+          IconButton(
+            onPressed: () => _showEditDialog(context),
+            icon: const Icon(Icons.edit, color: activeAccent),
+            tooltip: "Edit Staff Details",
+          ),
+          const SizedBox(width: 10),
+          // PDF Action
           TextButton.icon(
             onPressed: () => _handlePdfDownload(staffId),
             icon: const FaIcon(
@@ -97,9 +100,120 @@ class StaffDetailsPage extends StatelessWidget {
     );
   }
 
+  // --- EDIT DIALOG (UPDATE 1) ---
+  void _showEditDialog(BuildContext context) {
+    // 1. Get current data
+    final staff = controller.staffList.firstWhere((s) => s.id == staffId);
+
+    // 2. Controllers
+    final nameC = TextEditingController(text: staff.name);
+    final phoneC = TextEditingController(text: staff.phone);
+    final nidC = TextEditingController(text: staff.nid);
+    final desC = TextEditingController(text: staff.des);
+    final salaryC = TextEditingController(text: staff.salary.toString());
+    DateTime selectedDate = staff.joiningDate;
+
+    // 3. Show Dialog
+    Get.defaultDialog(
+      title: "Edit Staff Details",
+      contentPadding: const EdgeInsets.all(20),
+      titleStyle: const TextStyle(
+        color: darkSlate,
+        fontWeight: FontWeight.bold,
+      ),
+      content: SizedBox(
+        width: 400,
+        child: Column(
+          children: [
+            TextField(
+              controller: nameC,
+              decoration: const InputDecoration(
+                labelText: "Full Name",
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: phoneC,
+              decoration: const InputDecoration(
+                labelText: "Phone",
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: nidC,
+              decoration: const InputDecoration(
+                labelText: "NID Number",
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: desC,
+              decoration: const InputDecoration(
+                labelText: "Designation",
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: salaryC,
+              decoration: const InputDecoration(
+                labelText: "Base Salary",
+                border: OutlineInputBorder(),
+              ),
+              keyboardType: TextInputType.number,
+            ),
+            const SizedBox(height: 15),
+            Row(
+              children: [
+                const Text("Joining Date: "),
+                TextButton(
+                  onPressed: () async {
+                    final d = await showDatePicker(
+                      context: context,
+                      initialDate: selectedDate,
+                      firstDate: DateTime(2000),
+                      lastDate: DateTime.now(),
+                    );
+                    if (d != null) selectedDate = d;
+                  },
+                  child: const Text("Change Date"),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      confirm: ElevatedButton(
+        style: ElevatedButton.styleFrom(backgroundColor: activeAccent),
+        onPressed: () {
+          if (nameC.text.isEmpty) return;
+          controller.updateStaff(
+            id: staffId,
+            name: nameC.text,
+            phone: phoneC.text,
+            nid: nidC.text,
+            des: desC.text,
+            salary: int.tryParse(salaryC.text) ?? 0,
+            joinDate: selectedDate,
+          );
+        },
+        child: const Text(
+          "Update Details",
+          style: TextStyle(color: Colors.white),
+        ),
+      ),
+      cancel: TextButton(
+        onPressed: () => Get.back(),
+        child: const Text("Cancel"),
+      ),
+    );
+  }
+
   // --- TOP SUMMARY SECTION (Quick Stats) ---
   Widget _buildInfoSummary() {
-    // We listen to the staff list to get live updates on Debt without reloading the page
     return Obx(() {
       final staff = controller.staffList.firstWhere(
         (s) => s.id == staffId,
@@ -120,7 +234,6 @@ class StaffDetailsPage extends StatelessWidget {
         builder: (context, snapshot) {
           double totalPaid = 0;
           if (snapshot.hasData) {
-            // Calculate total SALARY paid (excluding advances/repayments for this specific stat)
             totalPaid = snapshot.data!
                 .where((item) => item.type == 'SALARY' || item.type == null)
                 .fold(0.0, (sum, item) => sum + item.amount);
@@ -130,7 +243,7 @@ class StaffDetailsPage extends StatelessWidget {
             children: [
               _statCard(
                 "Base Salary",
-                "Tk ${staff.salary}", // Assuming BDT/Tk
+                "Tk ${staff.salary}",
                 FontAwesomeIcons.moneyBillWave,
                 activeAccent,
               ),
@@ -179,7 +292,6 @@ class StaffDetailsPage extends StatelessWidget {
             ),
             const SizedBox(width: 16),
             Flexible(
-              // Prevents overflow on small screens
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -273,7 +385,6 @@ class StaffDetailsPage extends StatelessWidget {
   }
 
   Widget _buildTransactionRow(SalaryModel t) {
-    // Determine Color and Label based on Type
     String typeLabel = t.type ?? "SALARY";
     Color typeColor = activeAccent;
     Color bgColor = activeAccent.withOpacity(0.1);
@@ -374,39 +485,27 @@ class StaffDetailsPage extends StatelessWidget {
       buttonColor: Colors.redAccent,
       onConfirm: () async {
         try {
-          // 1. Reference the Staff Document
           final staffRef = controller.db.collection("staff").doc(staffId);
-
           await controller.db.runTransaction((transaction) async {
-            // 2. Get current staff data to update debt
             final staffSnapshot = await transaction.get(staffRef);
             if (staffSnapshot.exists) {
               double currentDebt =
                   (staffSnapshot.data() as Map)['currentDebt']?.toDouble() ??
                   0.0;
-
-              // 3. Reverse logic based on what we are deleting
               if (t.type == "ADVANCE") {
-                // If we delete an Advance (Debt), we REDUCE the debt
                 transaction.update(staffRef, {
                   'currentDebt': currentDebt - t.amount,
                 });
               } else if (t.type == "REPAYMENT") {
-                // If we delete a Repayment, the debt goes BACK UP
                 transaction.update(staffRef, {
                   'currentDebt': currentDebt + t.amount,
                 });
               }
-              // Salaries usually don't affect debt, so no update needed for type == SALARY
             }
-
-            // 4. Delete the actual transaction record
             final docRef = staffRef.collection("salaries").doc(t.id);
             transaction.delete(docRef);
           });
-
-          // 5. Update UI
-          await controller.loadStaff(); // Reload global list to refresh Debt UI
+          await controller.loadStaff();
           Get.back();
           Get.snackbar(
             "Deleted",
@@ -423,18 +522,13 @@ class StaffDetailsPage extends StatelessWidget {
 
   Future<void> _handlePdfDownload(String staffId) async {
     try {
-      // Fetch latest staff info
       final staff = controller.staffList.firstWhere((s) => s.id == staffId);
-      // Fetch all transactions
       final transactions = await controller.streamSalaries(staffId).first;
-
-      // 2. Generate the PDF bytes
       final List<int> pdfData = await controller.generateProfessionalPDF(
         staff,
         transactions,
       );
 
-      // Web Download Logic
       final Uint8List uint8list = Uint8List.fromList(pdfData);
       final JSUint8Array jsBytes = uint8list.toJS;
       final blobParts = [jsBytes].toJS as JSArray<web.BlobPart>;

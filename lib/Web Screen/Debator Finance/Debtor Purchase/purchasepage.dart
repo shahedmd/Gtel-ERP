@@ -44,6 +44,13 @@ class DebtorPurchasePage extends StatelessWidget {
         backgroundColor: darkSlate,
         iconTheme: const IconThemeData(color: Colors.white),
         elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: () => controller.loadPurchases(debtorId),
+            tooltip: "Refresh Data",
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -177,7 +184,7 @@ class DebtorPurchasePage extends StatelessWidget {
                 return const Center(child: CircularProgressIndicator());
               }
               if (controller.purchases.isEmpty) {
-                return const Center(child: Text("No history found"));
+                return const Center(child: Text("No records found"));
               }
 
               return ListView.builder(
@@ -189,100 +196,177 @@ class DebtorPurchasePage extends StatelessWidget {
                   final bool isInvoice = item['type'] == 'invoice';
                   final bool isAdj = item['type'] == 'adjustment';
 
-                  return Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 16,
-                    ),
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                      border: Border(
-                        bottom: BorderSide(color: Color(0xFFF3F4F6)),
+                  return InkWell(
+                    onTap:
+                        isInvoice
+                            ? () => _showPurchaseDetails(context, item)
+                            : null,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 16,
                       ),
-                    ),
-                    child: Row(
-                      children: [
-                        // Date
-                        Expanded(
-                          flex: 2,
-                          child: Text(
-                            DateFormat(
-                              'dd MMM',
-                            ).format((item['date'] as dynamic).toDate()),
-                            style: const TextStyle(color: darkSlate),
-                          ),
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        border: Border(
+                          bottom: BorderSide(color: Color(0xFFF3F4F6)),
                         ),
-                        // Desc
-                        Expanded(
-                          flex: 4,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Icon(
-                                    isInvoice
-                                        ? Icons.inventory_2_outlined
-                                        : (isAdj
-                                            ? Icons.compare_arrows
-                                            : Icons.money_off),
-                                    size: 14,
-                                    color:
-                                        isInvoice
-                                            ? activeAccent
-                                            : (isAdj
-                                                ? Colors.orange
-                                                : debitGreen),
-                                  ),
-                                  const SizedBox(width: 5),
-                                  Text(
-                                    isInvoice
-                                        ? "Stock Purchase"
-                                        : (isAdj
-                                            ? "Ledger Adjustment"
-                                            : "Payment Out"),
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 13,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              if (item['note'] != null &&
-                                  item['note'].toString().isNotEmpty)
-                                Text(
-                                  item['note'],
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    color: textMuted,
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                        // Amount
-                        Expanded(
-                          flex: 2,
-                          child: Text(
-                            (isInvoice ? "+" : "-") +
-                                (item['totalAmount'] ?? item['amount'])
-                                    .toString(),
-                            textAlign: TextAlign.right,
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color:
-                                  isInvoice
-                                      ? darkSlate
-                                      : (isAdj ? Colors.orange : debitGreen),
+                      ),
+                      child: Row(
+                        children: [
+                          // Date
+                          Expanded(
+                            flex: 2,
+                            child: Text(
+                              DateFormat(
+                                'dd MMM',
+                              ).format((item['date'] as dynamic).toDate()),
+                              style: const TextStyle(color: darkSlate),
                             ),
                           ),
-                        ),
-                      ],
+                          // Desc
+                          Expanded(
+                            flex: 4,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Icon(
+                                      isInvoice
+                                          ? Icons.inventory_2_outlined
+                                          : (isAdj
+                                              ? Icons.compare_arrows
+                                              : Icons.money_off),
+                                      size: 14,
+                                      color:
+                                          isInvoice
+                                              ? activeAccent
+                                              : (isAdj
+                                                  ? Colors.orange
+                                                  : debitGreen),
+                                    ),
+                                    const SizedBox(width: 5),
+                                    Text(
+                                      isInvoice
+                                          ? "Stock Purchase"
+                                          : (isAdj
+                                              ? "Ledger Adjustment"
+                                              : "Payment Out"),
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                    if (isInvoice) ...[
+                                      const SizedBox(width: 8),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 6,
+                                          vertical: 2,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Colors.blue[50],
+                                          borderRadius: BorderRadius.circular(
+                                            4,
+                                          ),
+                                        ),
+                                        child: const Text(
+                                          "View",
+                                          style: TextStyle(
+                                            fontSize: 9,
+                                            color: activeAccent,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                                if (item['note'] != null &&
+                                    item['note'].toString().isNotEmpty)
+                                  Text(
+                                    item['note'],
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: textMuted,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          // Amount
+                          Expanded(
+                            flex: 2,
+                            child: Text(
+                              (isInvoice ? "+" : "-") +
+                                  (item['totalAmount'] ?? item['amount'])
+                                      .toString(),
+                              textAlign: TextAlign.right,
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color:
+                                    isInvoice
+                                        ? darkSlate
+                                        : (isAdj ? Colors.orange : debitGreen),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   );
                 },
               );
             }),
+          ),
+
+          // 5. PAGINATION FOOTER
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              border: Border(top: BorderSide(color: Color(0xFFE5E7EB))),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Obx(
+                  () => TextButton.icon(
+                    onPressed:
+                        controller.isFirstPage.value
+                            ? null
+                            : () => controller.previousPage(debtorId),
+                    icon: const Icon(Icons.arrow_back, size: 16),
+                    label: const Text("Previous"),
+                    style: TextButton.styleFrom(
+                      foregroundColor: darkSlate,
+                      disabledForegroundColor: Colors.grey[300],
+                    ),
+                  ),
+                ),
+
+                Obx(
+                  () => TextButton.icon(
+                    onPressed:
+                        controller.hasMore.value
+                            ? () => controller.nextPage(debtorId)
+                            : null,
+                    label: const Text("Next"),
+                    icon: const Icon(Icons.arrow_forward, size: 16),
+                    // Putting icon to right
+                    style: TextButton.styleFrom(
+                      foregroundColor: darkSlate,
+                      disabledForegroundColor: Colors.grey[300],
+                    ),
+                  ).iconLabel(
+                    icon: const Icon(Icons.arrow_forward, size: 16),
+                    label: const Text("Next"),
+                    iconAfterLabel:
+                        true, // Extension helper logic or swap manual
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -341,6 +425,174 @@ class DebtorPurchasePage extends StatelessWidget {
   }
 
   // --- DIALOGS ---
+
+  // NEW: Details & PDF Dialog
+  void _showPurchaseDetails(BuildContext context, Map<String, dynamic> item) {
+    List items = item['items'] ?? [];
+    double total = double.tryParse(item['totalAmount'].toString()) ?? 0.0;
+
+    showDialog(
+      context: context,
+      builder:
+          (ctx) => Dialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Container(
+              width: 500,
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        "Purchase Details",
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: darkSlate,
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Get.back(),
+                        icon: const Icon(Icons.close),
+                      ),
+                    ],
+                  ),
+                  const Divider(),
+                  const SizedBox(height: 10),
+                  Container(
+                    constraints: const BoxConstraints(maxHeight: 300),
+                    child: SingleChildScrollView(
+                      child: Table(
+                        border: TableBorder.all(color: Colors.grey[300]!),
+                        columnWidths: const {
+                          0: FlexColumnWidth(3),
+                          1: FlexColumnWidth(1),
+                          2: FlexColumnWidth(1.5),
+                        },
+                        children: [
+                          const TableRow(
+                            decoration: BoxDecoration(color: Colors.grey),
+                            children: [
+                              Padding(
+                                padding: EdgeInsets.all(8),
+                                child: Text(
+                                  "Item",
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              Padding(
+                                padding: EdgeInsets.all(8),
+                                child: Text(
+                                  "Qty",
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              Padding(
+                                padding: EdgeInsets.all(8),
+                                child: Text(
+                                  "Total",
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            ],
+                          ),
+                          ...items.map(
+                            (e) => TableRow(
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.all(8),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        e['name'] ?? '',
+                                        style: const TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      Text(
+                                        "${e['model']} (${e['location']})",
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          color: Colors.grey,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Padding(
+                                  padding: const EdgeInsets.all(8),
+                                  child: Text(e['qty'].toString()),
+                                ),
+                                Padding(
+                                  padding: const EdgeInsets.all(8),
+                                  child: Text(e['subtotal'].toString()),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        "Total: $total",
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Obx(
+                        () => ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: activeAccent,
+                          ),
+                          onPressed:
+                              controller.isGeneratingPdf.value
+                                  ? null
+                                  : () => controller.generatePurchasePdf(
+                                    item,
+                                    debtorName,
+                                  ),
+                          icon:
+                              controller.isGeneratingPdf.value
+                                  ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      color: Colors.white,
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                  : const Icon(
+                                    Icons.print,
+                                    color: Colors.white,
+                                  ),
+                          label: const Text(
+                            "Download Invoice",
+                            style: TextStyle(color: Colors.white),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+    );
+  }
 
   void _showNormalPaymentDialog(BuildContext context) {
     final amountC = TextEditingController();
@@ -496,6 +748,25 @@ class DebtorPurchasePage extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// Helper extension for TextButton icon+label swap if needed, or just manual row
+extension TextButtonExt on TextButton {
+  Widget iconLabel({
+    required Widget icon,
+    required Widget label,
+    required bool iconAfterLabel,
+  }) {
+    if (!iconAfterLabel) return this;
+    return TextButton(
+      onPressed: onPressed,
+      style: style,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [label, const SizedBox(width: 8), icon],
       ),
     );
   }

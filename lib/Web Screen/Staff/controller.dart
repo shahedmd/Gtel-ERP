@@ -1,5 +1,7 @@
-// ignore_for_file: deprecated_member_use, constant_identifier_names
+// ignore_for_file: deprecated_member_use, constant_identifier_names, avoid_web_libraries_in_flutter
 import 'dart:typed_data';
+import 'dart:js_interop';
+import 'package:web/web.dart' as web; // For Web Download
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -9,15 +11,9 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
-// Import your DailyExpensesController to automate expense recording
 import 'model.dart';
 
-// FUTURE PROOF: Enum to differentiate transaction types
-enum StaffTransactionType {
-  SALARY, // Regular Monthly Salary (Expense)
-  ADVANCE, // Taking money as Loan (Expense + Increases Debt)
-  REPAYMENT, // Paying back loan or Deduction (Income/Adjustment + Decreases Debt)
-}
+enum StaffTransactionType { SALARY, ADVANCE, REPAYMENT }
 
 class StaffController extends GetxController {
   final FirebaseFirestore db = FirebaseFirestore.instance;
@@ -32,7 +28,6 @@ class StaffController extends GetxController {
   void onInit() {
     super.onInit();
     loadStaff();
-    // Listen to search query changes and update filtered list
     debounce(
       searchQuery,
       (_) => filterStaff(),
@@ -45,23 +40,21 @@ class StaffController extends GetxController {
   static const Color darkSlate = Color(0xFF111827);
 
   // ------------------------------------------------------------------
-  // 1. LOAD & FILTER STAFF
+  // 1. LOAD & FILTER STAFF (UPDATED: SORT BY SALARY)
   // ------------------------------------------------------------------
   Future<void> loadStaff() async {
     try {
       isLoading.value = true;
-      // Ordered by name or createdAt
+      // UPDATE 3: Serial staff according to salary amount (Descending)
       final snap =
           await db
               .collection("staff")
-              .orderBy("createdAt", descending: true)
+              .orderBy("salary", descending: true)
               .get();
 
-      // We map the docs. Note: Ensure your StaffModel has a 'currentDebt' field.
-      // If not, it will default to 0 via the model or map logic.
       staffList.value =
           snap.docs.map((d) => StaffModel.fromFirestore(d)).toList();
-      filteredStaffList.value = staffList;
+      filterStaff(); // Re-apply filter if any
     } catch (e) {
       Get.snackbar(
         "Error",
@@ -91,7 +84,7 @@ class StaffController extends GetxController {
   }
 
   // ------------------------------------------------------------------
-  // 2. ADD STAFF (Initialized with 0 Debt)
+  // 2. ADD & EDIT STAFF (UPDATED)
   // ------------------------------------------------------------------
   Future<void> addStaff({
     required String name,
@@ -109,9 +102,9 @@ class StaffController extends GetxController {
             "phone": phone,
             "nid": nid,
             "des": des,
-            "salary": salary, // Base Salary
+            "salary": salary,
             "joiningDate": joinDate,
-            "currentDebt": 0.0, // NEW: Track how much they owe the company
+            "currentDebt": 0.0,
             "createdAt": FieldValue.serverTimestamp(),
           });
           await loadStaff();
@@ -131,71 +124,91 @@ class StaffController extends GetxController {
     }
   }
 
-  // ------------------------------------------------------------------
-  // 3. ADD TRANSACTION (SALARY OR ADVANCE/DEBT) - UPGRADED
-  // ------------------------------------------------------------------
-  Future<void> addTransaction({
-    required String staffId,
-    required String staffName, // Needed for Daily Expense Title
-    required double amount,
-    required String note,
-    required DateTime date,
-    required StaffTransactionType type, // Enum: SALARY, ADVANCE, or REPAYMENT
-    String? month, // Optional, mostly for Salary
+  // UPDATE 1: Edit Staff Method
+  Future<void> updateStaff({
+    required String id,
+    required String name,
+    required String phone,
+    required String nid,
+    required String des,
+    required int salary,
+    required DateTime joinDate,
   }) async {
     try {
       isLoading.value = true;
+      await db.collection("staff").doc(id).update({
+        "name": name,
+        "phone": phone,
+        "nid": nid,
+        "des": des,
+        "salary": salary,
+        "joiningDate": Timestamp.fromDate(joinDate),
+      });
+      await loadStaff();
+      Get.back(); // Close dialog
+      Get.snackbar(
+        "Updated",
+        "Staff details updated successfully",
+        backgroundColor: Colors.green,
+        colorText: Colors.white,
+      );
+    } catch (e) {
+      Get.snackbar("Error", "Update failed: $e");
+    } finally {
+      isLoading.value = false;
+    }
+  }
 
+  // ------------------------------------------------------------------
+  // 3. ADD TRANSACTION
+  // ------------------------------------------------------------------
+  Future<void> addTransaction({
+    required String staffId,
+    required String staffName,
+    required double amount,
+    required String note,
+    required DateTime date,
+    required StaffTransactionType type,
+    String? month,
+  }) async {
+    try {
+      isLoading.value = true;
       final staffRef = db.collection("staff").doc(staffId);
-      final transactionRef =
-          staffRef
-              .collection("salaries")
-              .doc(); // Keeping collection name 'salaries' for legacy support, but it holds all types
+      final transactionRef = staffRef.collection("salaries").doc();
 
-      // A. ATOMIC TRANSACTION (Database Consistency)
       await db.runTransaction((transaction) async {
         DocumentSnapshot staffSnap = await transaction.get(staffRef);
         if (!staffSnap.exists) throw "Staff record not found!";
 
-        // 1. Get current debt
         double currentDebt =
             (staffSnap.data() as Map)['currentDebt']?.toDouble() ?? 0.0;
         double newDebt = currentDebt;
 
-        // 2. Calculate New Debt based on Type
         if (type == StaffTransactionType.ADVANCE) {
-          newDebt = currentDebt + amount; // Taking money increases debt
+          newDebt = currentDebt + amount;
         } else if (type == StaffTransactionType.REPAYMENT) {
-          newDebt = currentDebt - amount; // Paying back decreases debt
+          newDebt = currentDebt - amount;
         }
-        // If SALARY, debt usually doesn't change unless you implement auto-deduction logic here.
 
-        // 3. Update Staff Balance
         transaction.update(staffRef, {'currentDebt': newDebt});
-
-        // 4. Add Transaction Record
         transaction.set(transactionRef, {
           "amount": amount,
           "note": note,
           "month": month ?? DateFormat('MMMM yyyy').format(date),
           "date": Timestamp.fromDate(date),
-          "type": type.name, // Storing 'SALARY', 'ADVANCE', etc.
+          "type": type.name,
           "createdAt": FieldValue.serverTimestamp(),
         });
       });
 
-      // B. INTEGRATION: Add to Daily Expenses (If money is leaving company)
-      // Only for SALARY and ADVANCE. Repayment is money coming IN (or internal adjustment).
       if (type == StaffTransactionType.SALARY ||
           type == StaffTransactionType.ADVANCE) {
         if (Get.isRegistered<DailyExpensesController>()) {
           final dailyCtrl = Get.find<DailyExpensesController>();
-
           String expenseName =
               type == StaffTransactionType.SALARY
                   ? "Salary: $staffName ($month)"
                   : "Advance to $staffName";
-
           await dailyCtrl.addDailyExpense(
             expenseName,
             amount.toInt(),
@@ -204,25 +217,17 @@ class StaffController extends GetxController {
           );
         }
       }
-
-      // C. Refresh Data
-      // We manually update the local list to reflect the debt change immediately without full reload if possible,
-      // but loadStaff() is safer to ensure consistency.
       await loadStaff();
-
       if (Get.isDialogOpen ?? false) Get.back();
-
       Get.snackbar(
         "Success",
-        type == StaffTransactionType.ADVANCE
-            ? "Advance recorded. Debt updated."
-            : "Transaction successful.",
+        "Transaction successful.",
         backgroundColor: Colors.green,
         colorText: Colors.white,
       );
     } catch (e) {
       Get.snackbar(
-        "Payment Error",
+        "Error",
         e.toString(),
         backgroundColor: Colors.redAccent,
         colorText: Colors.white,
@@ -244,31 +249,230 @@ class StaffController extends GetxController {
         );
   }
 
+  // ... inside StaffController ...
+
   // ------------------------------------------------------------------
-  // 4. PROFESSIONAL PDF GENERATOR (UPGRADED)
+  // 4. MONTHLY PAYROLL REPORT (UPDATED WITH DUE CALCULATION)
   // ------------------------------------------------------------------
+  Future<void> downloadMonthlyPayroll(String month) async {
+    isLoading.value = true;
+    try {
+      final pdf = pw.Document();
+      double totalDisbursed = 0.0;
+      double totalLiability = 0.0;
+
+      List<List<String>> reportData = [];
+
+      // Loop through all staff
+      for (var staff in staffList) {
+        // Query logic: Get records where 'month' matches EXACTLY the string (e.g., "January 2026")
+        // regardless of the actual created date.
+        QuerySnapshot salarySnap =
+            await db
+                .collection('staff')
+                .doc(staff.id)
+                .collection('salaries')
+                .where('month', isEqualTo: month)
+                .where('type', isEqualTo: 'SALARY')
+                .get();
+
+        double paidAmount = 0.0;
+        for (var doc in salarySnap.docs) {
+          paidAmount += (doc['amount'] as num).toDouble();
+        }
+
+        // Only add to report if there is a salary defined or payment made
+        if (staff.salary > 0 || paidAmount > 0) {
+          totalDisbursed += paidAmount;
+          totalLiability += staff.salary;
+
+          double due = staff.salary - paidAmount;
+          if (due < 0) due = 0; // Prevent negative if overpaid
+
+          String status = "";
+
+          if (paidAmount >= staff.salary) {
+            status = "PAID";
+          } else if (paidAmount > 0) {
+            status = "PARTIAL";
+          } else {
+            status = "UNPAID";
+          }
+
+          reportData.add([
+            staff.name,
+            staff.des,
+            staff.salary.toString(), // Base
+            paidAmount.toStringAsFixed(0), // Paid
+            due.toStringAsFixed(0), // Due
+            status,
+          ]);
+        }
+      }
+
+      // Generate PDF
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(30),
+          build:
+              (context) => [
+                pw.Header(
+                  level: 0,
+                  child: pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text(
+                            "MONTHLY PAYROLL SHEET",
+                            style: pw.TextStyle(
+                              fontWeight: pw.FontWeight.bold,
+                              fontSize: 18,
+                            ),
+                          ),
+                          pw.Text(
+                            "G-TEL ERP",
+                            style: const pw.TextStyle(
+                              fontSize: 10,
+                              color: PdfColors.grey,
+                            ),
+                          ),
+                        ],
+                      ),
+                      pw.Text(
+                        "Period: $month",
+                        style: pw.TextStyle(
+                          fontWeight: pw.FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                pw.SizedBox(height: 20),
+
+                // Summary Box
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(10),
+                  decoration: pw.BoxDecoration(
+                    border: pw.Border.all(color: PdfColors.grey400),
+                    color: PdfColors.grey100,
+                  ),
+                  child: pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
+                    children: [
+                      pw.Column(
+                        children: [
+                          pw.Text("Total Commitment"),
+                          pw.Text(
+                            totalLiability.toStringAsFixed(0),
+                            style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                          ),
+                        ],
+                      ),
+                      pw.Column(
+                        children: [
+                          pw.Text("Total Disbursed"),
+                          pw.Text(
+                            totalDisbursed.toStringAsFixed(0),
+                            style: pw.TextStyle(
+                              fontWeight: pw.FontWeight.bold,
+                              color: PdfColors.blue,
+                            ),
+                          ),
+                        ],
+                      ),
+                      pw.Column(
+                        children: [
+                          pw.Text("Pending Due"),
+                          pw.Text(
+                            (totalLiability - totalDisbursed).toStringAsFixed(
+                              0,
+                            ),
+                            style: pw.TextStyle(
+                              fontWeight: pw.FontWeight.bold,
+                              color: PdfColors.red,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+
+                pw.SizedBox(height: 15),
+
+                pw.Table.fromTextArray(
+                  headers: [
+                    "Staff Name",
+                    "Desig.",
+                    "Base Salary",
+                    "Paid",
+                    "Due",
+                    "Status",
+                  ],
+                  data: reportData,
+                  headerStyle: pw.TextStyle(
+                    fontWeight: pw.FontWeight.bold,
+                    color: PdfColors.white,
+                    fontSize: 10,
+                  ),
+                  headerDecoration: const pw.BoxDecoration(
+                    color: PdfColors.blueGrey900,
+                  ),
+                  cellStyle: const pw.TextStyle(fontSize: 10),
+                  cellAlignments: {
+                    0: pw.Alignment.centerLeft,
+                    1: pw.Alignment.centerLeft,
+                    2: pw.Alignment.centerRight,
+                    3: pw.Alignment.centerRight,
+                    4: pw.Alignment.centerRight,
+                    5: pw.Alignment.center,
+                  },
+                ),
+                pw.Spacer(),
+                pw.Text(
+                  "Generated from G-TEL ERP",
+                  style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey),
+                ),
+              ],
+        ),
+      );
+
+      final Uint8List bytes = await pdf.save();
+      _downloadWebPdf(bytes, "Payroll_$month.pdf");
+
+      Get.snackbar(
+        "Success",
+        "Payroll Report Generated",
+        backgroundColor: Colors.green,
+        colorText: Colors.white,
+      );
+    } catch (e) {
+      Get.snackbar("Error", "Payroll generation failed: $e");
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
   // ------------------------------------------------------------------
-  // 4. PROFESSIONAL PDF GENERATOR (CORRECTED)
-  // Returns Uint8List so the UI can handle the download
+  // 5. INDIVIDUAL LEDGER PDF
   // ------------------------------------------------------------------
   Future<Uint8List> generateProfessionalPDF(
     StaffModel staff,
     List<SalaryModel> transactions,
   ) async {
     final pdf = pw.Document();
-
-    // Calculate Totals
     double totalSalaryPaid = 0;
     double totalAdvanceTaken = 0;
 
     for (var t in transactions) {
       if (t.type == "ADVANCE") {
         totalAdvanceTaken += t.amount;
-      } else if (t.type == "SALARY" || t.type == null) {
+      } else if (t.type == "SALARY" || t.type == null)
         totalSalaryPaid += t.amount;
-      }
-      // Repayments are ignored for "Total Paid out" calculation usually,
-      // or you can handle them separately if needed.
     }
 
     final formattedDate = DateFormat('dd MMM yyyy').format(DateTime.now());
@@ -279,7 +483,6 @@ class StaffController extends GetxController {
         margin: const pw.EdgeInsets.all(32),
         build:
             (context) => [
-              // Header Section
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
@@ -316,8 +519,6 @@ class StaffController extends GetxController {
               ),
               pw.Divider(thickness: 1.5, color: PdfColors.blue900),
               pw.SizedBox(height: 15),
-
-              // Staff Info Card
               pw.Container(
                 padding: const pw.EdgeInsets.all(12),
                 decoration: pw.BoxDecoration(
@@ -363,8 +564,6 @@ class StaffController extends GetxController {
                 ),
               ),
               pw.SizedBox(height: 20),
-
-              // Transactions Table
               pw.Table.fromTextArray(
                 headers: ["Date", "Type", "Month/Ref", "Note", "Amount"],
                 headerStyle: pw.TextStyle(
@@ -375,8 +574,6 @@ class StaffController extends GetxController {
                 headerDecoration: const pw.BoxDecoration(
                   color: PdfColors.blueGrey900,
                 ),
-                cellHeight: 25,
-                cellStyle: const pw.TextStyle(fontSize: 10),
                 cellAlignments: {
                   0: pw.Alignment.centerLeft,
                   1: pw.Alignment.center,
@@ -397,10 +594,7 @@ class StaffController extends GetxController {
                         )
                         .toList(),
               ),
-
               pw.SizedBox(height: 20),
-
-              // Total Summary Box
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.end,
                 children: [
@@ -425,7 +619,6 @@ class StaffController extends GetxController {
                             ),
                           ],
                         ),
-                        pw.SizedBox(height: 4),
                         pw.Row(
                           mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                           children: [
@@ -470,22 +663,11 @@ class StaffController extends GetxController {
                   ),
                 ],
               ),
-
-              pw.Spacer(),
-              pw.Text(
-                "Generated by System. No signature required.",
-                style: const pw.TextStyle(
-                  fontSize: 8,
-                  color: PdfColors.grey500,
-                ),
-              ),
             ],
       ),
     );
-
-    // CHANGED: Instead of Printing.layoutPdf(), we simply return the bytes.
     return pdf.save();
-  } 
+  }
 
   pw.Widget _pdfRow(String label, String value) {
     return pw.Padding(
@@ -503,5 +685,22 @@ class StaffController extends GetxController {
         ],
       ),
     );
+  }
+
+  // Helper for Web Download
+  void _downloadWebPdf(Uint8List data, String filename) {
+    final JSUint8Array jsBytes = data.toJS;
+    final blobParts = [jsBytes].toJS as JSArray<web.BlobPart>;
+    final blob = web.Blob(
+      blobParts,
+      web.BlobPropertyBag(type: 'application/pdf'),
+    );
+    final String url = web.URL.createObjectURL(blob);
+    final web.HTMLAnchorElement anchor =
+        web.document.createElement('a') as web.HTMLAnchorElement;
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    web.URL.revokeObjectURL(url);
   }
 }

@@ -17,7 +17,7 @@ class StaffModel {
     required this.nid,
     required this.des,
     required this.salary,
-    this.currentDebt = 0.0, // Default to 0
+    this.currentDebt = 0.0,
     required this.joiningDate,
   });
 
@@ -30,7 +30,6 @@ class StaffModel {
       nid: data['nid'] ?? '',
       des: data['des'] ?? '',
       salary: data['salary'] ?? 0,
-      // Safely parse number to double, default to 0.0 if missing
       currentDebt: (data['currentDebt'] as num?)?.toDouble() ?? 0.0,
       joiningDate: (data['joiningDate'] as Timestamp).toDate(),
     );
@@ -42,7 +41,7 @@ class SalaryModel {
   final double amount;
   final String note;
   final String month;
-  final String? type; // NEW: 'SALARY', 'ADVANCE', 'REPAYMENT'
+  final String? type; // 'SALARY', 'ADVANCE', 'REPAYMENT'
   final DateTime date;
 
   SalaryModel({
@@ -61,7 +60,6 @@ class SalaryModel {
       amount: (data['amount'] as num).toDouble(),
       note: data['note'] ?? '',
       month: data['month'] ?? '',
-      // Default to 'SALARY' for old data that doesn't have a type yet
       type: data['type'] as String? ?? 'SALARY',
       date: (data['date'] as Timestamp).toDate(),
     );
