@@ -13,7 +13,7 @@ class Product {
   final double shipmentTax; // 'shipmenttax'
   final int shipmentNo;
   final double currency;
-  final int stockQty; // Total Stock
+  int stockQty; // Total Stock
 
   // --- New Fields (Updated) ---
   final double shipmentTaxAir; // Maps to 'shipmenttaxair'

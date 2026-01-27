@@ -93,7 +93,7 @@ class VendorController extends GetxController {
     }
   }
 
-  // 4. AUTOMATED SHIPMENT CREDIT
+  // 4. AUTOMATED SHIPMENT CREDIT (Optimized for Web)
   Future<void> addAutomatedShipmentCredit({
     required String vendorId,
     required double amount,
@@ -104,32 +104,33 @@ class VendorController extends GetxController {
       final vendorRef = _firestore.collection('vendors').doc(vendorId);
       final historyRef = vendorRef.collection('history').doc();
 
-      await _firestore.runTransaction((transaction) async {
-        DocumentSnapshot vendorSnapshot = await transaction.get(vendorRef);
-        if (!vendorSnapshot.exists) throw "Vendor not found";
+      // USE BATCH INSTEAD OF TRANSACTION
+      // It is faster and less prone to network timeouts on hosted web
+      WriteBatch batch = _firestore.batch();
 
-        double currentDue = (vendorSnapshot.data() as Map)['totalDue'] ?? 0.0;
-        double newDue = currentDue + amount;
+      // 1. Atomic Increment (No need to read the doc first)
+      batch.update(vendorRef, {'totalDue': FieldValue.increment(amount)});
 
-        transaction.update(vendorRef, {'totalDue': newDue});
-
-        transaction.set(historyRef, {
-          'type': 'CREDIT',
-          'amount': amount,
-          'date': Timestamp.fromDate(date),
-          'paymentMethod': 'Stock Receive',
-          'shipmentName': shipmentName,
-          'cartons': 'N/A',
-          'notes': 'Auto-entry from Shipment: $shipmentName',
-          'isIncomingCash': false,
-        });
+      // 2. Add History Entry
+      batch.set(historyRef, {
+        'type': 'CREDIT',
+        'amount': amount,
+        'date': Timestamp.fromDate(date),
+        'paymentMethod': 'Stock Receive',
+        'shipmentName': shipmentName,
+        'cartons': 'N/A',
+        'notes': 'Auto-entry from Shipment: $shipmentName',
+        'isIncomingCash': false,
       });
+
+      await batch.commit();
     } catch (e) {
+      // Throw the error so ShipmentController knows it failed
       throw "Vendor Credit Failed: $e";
     }
   }
 
-  // 5. MANUAL TRANSACTION (Updated & Fixed)
+  // 5. MANUAL TRANSACTION (WEB OPTIMIZED - NO FREEZING)
   Future<void> addTransaction({
     required String vendorId,
     required String vendorName,
@@ -140,57 +141,59 @@ class VendorController extends GetxController {
     String? shipmentName,
     String? cartons,
     String? notes,
-    // New Parameter: Set this to true in your UI Switch/Checkbox
     bool isIncomingCash = false,
   }) async {
     isLoading.value = true;
+
     try {
       final vendorRef = _firestore.collection('vendors').doc(vendorId);
       final historyRef = vendorRef.collection('history').doc();
 
-      await _firestore.runTransaction((transaction) async {
-        DocumentSnapshot vendorSnapshot = await transaction.get(vendorRef);
-        if (!vendorSnapshot.exists) throw "Vendor does not exist!";
+      // USE BATCH INSTEAD OF TRANSACTION
+      WriteBatch batch = _firestore.batch();
 
-        double currentDue = (vendorSnapshot.data() as Map)['totalDue'] ?? 0.0;
-        double newDue;
+      // --- LOGIC FOR DUE AMOUNT (The Math) ---
+      // We use Atomic Increment.
+      // If we are paying the vendor (DEBIT), we ADD a negative number.
+      double amountChange = 0.0;
 
-        // LOGIC FOR DUE AMOUNT:
-        // 1. We Received Advance (isIncomingCash = true):
-        //    We got money, so we owe the vendor MORE (Liability increases).
-        //    Treat exactly like a Credit/Bill.
-        if (isIncomingCash) {
-          newDue = currentDue + amount;
-        }
-        // 2. Normal Bill (Credit): We owe more.
-        else if (type == 'CREDIT') {
-          newDue = currentDue + amount;
-        }
-        // 3. Normal Payment (Debit): We owe less.
-        else {
-          newDue = currentDue - amount;
-        }
+      if (isIncomingCash) {
+        // Scenario: Vendor gave us money (Advance).
+        // We owe them MORE. Liability increases.
+        amountChange = amount;
+      } else if (type == 'CREDIT') {
+        // Scenario: We bought goods on credit.
+        // We owe them MORE.
+        amountChange = amount;
+      } else {
+        // Scenario: DEBIT (We paid the vendor).
+        // We owe them LESS. So we subtract.
+        amountChange = -amount;
+      }
 
-        transaction.update(vendorRef, {'totalDue': newDue});
+      // 1. Update Vendor Balance Atomically
+      batch.update(vendorRef, {'totalDue': FieldValue.increment(amountChange)});
 
-        // If it's incoming cash, we force type to CREDIT (Liability) in history
-        transaction.set(historyRef, {
-          'type': isIncomingCash ? 'CREDIT' : type,
-          'amount': amount,
-          'date': Timestamp.fromDate(date),
-          'paymentMethod': paymentMethod,
-          'shipmentName': shipmentName,
-          'cartons': cartons,
-          'notes': notes,
-          'isIncomingCash': isIncomingCash, // Save the flag
-        });
+      // 2. Add History Record
+      batch.set(historyRef, {
+        'type': isIncomingCash ? 'CREDIT' : type,
+        'amount': amount, // Always record positive number in history log
+        'date': Timestamp.fromDate(date),
+        'paymentMethod': paymentMethod,
+        'shipmentName': shipmentName,
+        'cartons': cartons,
+        'notes': notes,
+        'isIncomingCash': isIncomingCash,
       });
 
+      // 3. Commit to Firestore (Fast & Stable)
+      await batch.commit();
+
       // --- INTEGRATION: CONNECTING TO CASH & EXPENSES ---
+      // These run AFTER the database update succeeds.
 
       // SCENARIO 1: Vendor Paid Us (Incoming Advance)
       if (isIncomingCash) {
-        // FIXED: Using helper method that handles "Fallback" if controller is missing
         await _ensureCashLedgerEntry(
           amount: amount,
           method: paymentMethod ?? 'cash',
@@ -216,6 +219,7 @@ class VendorController extends GetxController {
         colorText: Colors.white,
       );
     } catch (e) {
+      print("Transaction Error: $e"); // Helpful for debugging
       Get.snackbar(
         "Error",
         "Transaction Failed: $e",
@@ -223,6 +227,7 @@ class VendorController extends GetxController {
         colorText: Colors.white,
       );
     } finally {
+      // CRITICAL: This unfreezes the button/spinner
       isLoading.value = false;
     }
   }

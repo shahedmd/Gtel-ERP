@@ -1,6 +1,7 @@
 // ignore_for_file: deprecated_member_use, avoid_print, empty_catches
 import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
@@ -51,6 +52,19 @@ class LiveSalesController extends GetxController {
     'Steadfast',
     'RedX',
   ];
+
+  // --- NEW: PACKAGER VARIABLES ---
+  final List<String> packagerList = [
+    'Noyon',
+    'Riad',
+    'Foysal',
+    'Mahim Mal',
+    'Alif',
+    'Raihan',
+    'Hossain'
+  ]; // Add your actual staff names here
+  final RxnString selectedPackager = RxnString();
+  // -------------------------------
 
   // ** DEBTOR BALANCES **
   final RxDouble debtorOldDue = 0.0.obs;
@@ -249,6 +263,19 @@ class LiveSalesController extends GetxController {
       Get.snackbar("Error", "Cart is empty");
       return;
     }
+
+    // --- NEW VALIDATION: CHECK PACKAGER ---
+    if (selectedPackager.value == null) {
+      Get.snackbar(
+        "Required",
+        "Please select a Packager Name (Packed By)",
+        backgroundColor: Colors.redAccent,
+        colorText: Colors.white,
+      );
+      return;
+    }
+    // --------------------------------------
+
     if (isConditionSale.value) {
       if (addressC.text.isEmpty) {
         Get.snackbar("Required", "Delivery Address required");
@@ -420,6 +447,9 @@ class LiveSalesController extends GetxController {
         "cartons": isConditionSale.value ? cartonsInt : 0,
         "courierName": isConditionSale.value ? selectedCourier.value : null,
         "courierDue": isConditionSale.value ? invoiceDueAmount : 0,
+        // --- NEW: ADD PACKAGER TO ORDER ---
+        "packagerName": selectedPackager.value,
+        // ----------------------------------
         "items": orderItems,
         "subtotal": subtotalAmount,
         "discount": discountVal.value,
@@ -496,6 +526,9 @@ class LiveSalesController extends GetxController {
             "transactionId": invNo,
             "invoiceId": invNo,
             "status": invoiceDueAmount <= 0 ? "paid" : "partial",
+            // --- NEW: ADD PACKAGER TO DAILY SALES ---
+            "packagerName": selectedPackager.value,
+            // ----------------------------------------
           });
         }
       } else if (customerType.value == "Debtor" && debtorId != null) {
@@ -594,6 +627,9 @@ class LiveSalesController extends GetxController {
           "transactionId": invNo,
           "invoiceId": invNo,
           "status": invoiceDueAmount <= 0 ? "paid" : "due",
+          // --- NEW: ADD PACKAGER TO DAILY SALES ---
+          "packagerName": selectedPackager.value,
+          // ----------------------------------------
         });
       } else {
         // --- RETAILER SALE ---
@@ -627,11 +663,34 @@ class LiveSalesController extends GetxController {
           "source": "pos_sale",
           "transactionId": invNo,
           "invoiceId": invNo,
+          // --- NEW: ADD PACKAGER TO DAILY SALES ---
+          "packagerName": selectedPackager.value,
+          // ----------------------------------------
         });
       }
 
       // 7. COMMIT & GENERATE PDF
       await batch.commit();
+
+      User? currentUser = FirebaseAuth.instance.currentUser;
+      String authName = "Authorized Officer"; // Default fallback
+      String authPhone = "01720677206";
+
+      if (currentUser != null && currentUser.displayName != null) {
+        String rawData = currentUser.displayName!;
+
+        // Check if we saved it as "Name|Phone"
+        if (rawData.contains('|')) {
+          List<String> parts = rawData.split('|');
+          authName = parts[0].trim();
+          if (parts.length > 1) {
+            authPhone = parts[1].trim();
+          }
+        } else {
+          // If no phone was saved, just use the name
+          authName = rawData;
+        }
+      }
 
       // Refresh debtor if applicable
       if (debtorId != null) debtorCtrl.loadDebtorTransactions(debtorId);
@@ -651,9 +710,12 @@ class LiveSalesController extends GetxController {
         // Pass Snapshots for PDF generation
         oldDueSnap: oldDueSnapshot,
         runningDueSnap: runningDueSnapshot,
-        authorizedName: "Joynal Abedin",
-        authorizedPhone: "01720677206",
-        discount: discountVal.value, // <--- ADD THIS LINE
+        authorizedName: authName,
+        authorizedPhone: authPhone,
+        discount: discountVal.value,
+        // --- NEW: PASS PACKAGER TO PDF ---
+        packagerName: selectedPackager.value,
+        // ---------------------------------
       );
 
       _resetAll();
@@ -710,6 +772,9 @@ class LiveSalesController extends GetxController {
     calculatedCourierDue.value = 0.0;
     debtorOldDue.value = 0.0;
     debtorRunningDue.value = 0.0;
+    // --- NEW: RESET PACKAGER ---
+    selectedPackager.value = null;
+    // ---------------------------
   }
 
   Future<void> _generatePdf(
@@ -728,7 +793,10 @@ class LiveSalesController extends GetxController {
     double runningDueSnap = 0.0,
     required String authorizedName,
     required String authorizedPhone,
-    double discount = 0.0, // <--- ADD THIS PARAMETER
+    double discount = 0.0,
+    // --- NEW: ARGUMENT ---
+    String? packagerName,
+    // ---------------------
   }) async {
     final pdf = pw.Document();
     final boldFont = await PdfGoogleFonts.robotoBold();
@@ -772,6 +840,9 @@ class LiveSalesController extends GetxController {
               address,
               courier,
               shopName,
+              // --- NEW: PASS TO WIDGET ---
+              packagerName,
+              // ---------------------------
             ),
             pw.SizedBox(height: 15),
             _buildProfessionalTable(boldFont, regularFont, italicFont, items),
@@ -786,7 +857,7 @@ class LiveSalesController extends GetxController {
               totalPaidCurrent,
               netTotalDue,
               subTotal,
-              discount, // <--- ADD THIS ARGUMENT
+              discount,
             ),
             pw.SizedBox(height: 25),
             _buildSignatures(
@@ -902,6 +973,9 @@ class LiveSalesController extends GetxController {
     String addr,
     String? courier,
     String shopName,
+    // --- NEW: ARGUMENT ---
+    String? packagerName,
+    // ---------------------
   ) {
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -923,6 +997,10 @@ class LiveSalesController extends GetxController {
               _infoRow("Type", isCond ? "Condition" : "Cash/Credit", bold, reg),
               if (isCond && courier != null)
                 _infoRow("Courier", courier, bold, reg),
+              // --- NEW: SHOW PACKAGER IN PDF ---
+              if (packagerName != null)
+                _infoRow("Packed By", packagerName, bold, reg),
+              // ---------------------------------
             ],
           ),
         ),
@@ -1083,7 +1161,7 @@ class LiveSalesController extends GetxController {
     double totalPaid,
     double netDue,
     double subTotal,
-    double discount, // <--- ADD THIS PARAMETER
+    double discount,
   ) {
     double currentInvTotal = subTotal - discount;
 
@@ -1131,7 +1209,7 @@ class LiveSalesController extends GetxController {
                   reg,
                 ),
 
-              pw.Divider(), 
+              pw.Divider(),
               _summaryRow(
                 "INVOICE TOTAL",
                 currentInvTotal.toStringAsFixed(2),
@@ -1148,11 +1226,7 @@ class LiveSalesController extends GetxController {
                   bold,
                 ),
                 if (totalPaid > 0)
-                  _summaryRow(
-                    "Paid",
-                    "(${totalPaid.toStringAsFixed(2)})",
-                    reg,
-                  ),
+                  _summaryRow("Paid", "(${totalPaid.toStringAsFixed(2)})", reg),
                 pw.Container(
                   margin: const pw.EdgeInsets.only(top: 5),
                   padding: const pw.EdgeInsets.all(5),

@@ -15,11 +15,10 @@ import 'package:gtel_erp/Web%20Screen/overviewcontroller.dart';
 import 'Web Screen/Expenses/monthlycontroller.dart';
 import 'Web Screen/homepage.dart';
 import 'auth.dart';
-import 'firebase_options.dart'; 
+import 'firebase_options.dart';
 import 'login.dart';
 
-
- Future<void> main() async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   Get.put(AuthController());
@@ -32,12 +31,10 @@ import 'login.dart';
   Get.put(CashDrawerController());
   Get.put(ShipmentController());
   Get.put(StaffController());
-  Get.put(DebtorPurchaseController()); 
+  Get.put(DebtorPurchaseController());
   Get.put(OverviewController());
   runApp(const MyApp());
 }
-
-
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -60,13 +57,12 @@ class MyApp extends StatelessWidget {
                 iconTheme: const IconThemeData(color: Colors.white),
                 textTheme: Typography.englishLike2021.apply(
                   fontSizeFactor: 1.sp,
-                  bodyColor:
-                      Colors.black,
+                  bodyColor: Colors.black,
                 ),
               ),
               initialRoute: '/',
               getPages: [
-                GetPage(name: '/', page: () => const LoginPage()) ,
+                GetPage(name: '/', page: () => const LoginPage()),
                 GetPage(name: '/home', page: () => AdminHomepage()),
               ],
             );

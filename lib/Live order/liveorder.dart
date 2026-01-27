@@ -362,6 +362,72 @@ class LiveOrderSalesPage extends StatelessWidget {
                   Icons.store,
                 ),
 
+                // --- NEW: PACKAGER DROPDOWN START ---
+                const SizedBox(height: 12),
+                Container(
+                  height: 45,
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    border: Border.all(color: Colors.grey.shade300),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: controller.selectedPackager.value,
+                      hint: Row(
+                        children: [
+                          Icon(
+                            Icons.inventory_outlined,
+                            size: 18,
+                            color: Colors.grey,
+                          ),
+                          const SizedBox(width: 8),
+                          const Text(
+                            "Select Packager / Packed By",
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.black54,
+                            ),
+                          ),
+                        ],
+                      ),
+                      isExpanded: true,
+                      icon: const Icon(
+                        Icons.arrow_drop_down,
+                        color: Colors.grey,
+                      ),
+                      items:
+                          controller.packagerList.map((String value) {
+                            return DropdownMenuItem<String>(
+                              value: value,
+                              child: Row(
+                                children: [
+                                  const Icon(
+                                    Icons.person,
+                                    size: 16,
+                                    color: Colors.blueGrey,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    value,
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }).toList(),
+                      onChanged: (newValue) {
+                        controller.selectedPackager.value = newValue;
+                      },
+                    ),
+                  ),
+                ),
+                // --- NEW: PACKAGER DROPDOWN END ---
+
                 // --- CONDITION SALE FIELDS ---
                 if (controller.isConditionSale.value) ...[
                   const SizedBox(height: 20),
@@ -1460,11 +1526,11 @@ class _ProductTableSection extends StatelessWidget {
             children: [
               IconButton(
                 onPressed: controller.prevPage,
-                icon: const Icon(Icons.chevron_left, color: Colors.black,),
+                icon: const Icon(Icons.chevron_left, color: Colors.black),
               ),
               IconButton(
                 onPressed: controller.nextPage,
-                icon: const Icon(Icons.chevron_right, color: Colors.black,),
+                icon: const Icon(Icons.chevron_right, color: Colors.black),
               ),
             ],
           ),

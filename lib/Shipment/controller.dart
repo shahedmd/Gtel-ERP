@@ -127,7 +127,6 @@ class ShipmentController extends GetxController {
           'wholesale',
           product.wholesale,
         ), // Now updates Wholesale Price
-
         // --- UPDATED LINES END ---
         'shipmentno': product.shipmentNo,
         'shipmentdate':
@@ -212,30 +211,19 @@ class ShipmentController extends GetxController {
     }
   }
 
-  // --- RECEIVE SHIPMENT (No Dialog, using isLoading) ---
+  // --- RECEIVE SHIPMENT ---
   Future<void> receiveShipmentFast(
     ShipmentModel shipment,
     DateTime arrivalDate, {
     String? selectedVendorId,
   }) async {
-    // 1. Start Loading - Controls the UI button spinner
+    if (isLoading.value) return; // Prevent double clicks
     isLoading.value = true;
-
-    // Optional: Notify user operation started
-    Get.snackbar(
-      "Processing",
-      "Updating stocks...",
-      snackPosition: SnackPosition.BOTTOM,
-      backgroundColor: Colors.blue[100],
-      duration: const Duration(seconds: 1),
-    );
 
     try {
       // --- AUTH CHECK ---
       final user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        throw "AUTH ERROR: Not logged in. Check API Key Domain restrictions.";
-      }
+      if (user == null) throw "AUTH ERROR: Not logged in.";
 
       if (shipment.docId == null || shipment.docId!.isEmpty) {
         throw "DATA ERROR: Shipment ID is missing.";
@@ -243,7 +231,7 @@ class ShipmentController extends GetxController {
 
       final String dateString = DateFormat('yyyy-MM-dd').format(arrivalDate);
 
-      // --- API CALL ---
+      // 1. UPDATE STOCK (Critical)
       List<Map<String, dynamic>> bulkItems =
           shipment.items.map((item) {
             return {
@@ -261,10 +249,9 @@ class ShipmentController extends GetxController {
       );
       if (!success) throw "Server rejected bulk update";
 
-      // --- FIRESTORE UPDATE (Timestamp Fix Included) ---
+      // 2. UPDATE SHIPMENT STATUS (Critical)
       final Map<String, dynamic> updateData = {
         'isReceived': true,
-        // CRITICAL: Convert DateTime to Timestamp for Web
         'arrivalDate': Timestamp.fromDate(arrivalDate),
         'vendorId': selectedVendorId,
       };
@@ -274,7 +261,9 @@ class ShipmentController extends GetxController {
           .doc(shipment.docId)
           .update(updateData);
 
-      // --- VENDOR CREDIT ---
+      // 3. VENDOR CREDIT (Non-Critical logic, separate Try/Catch)
+      // If this fails, we don't want to revert the stock, just notify the user.
+      String vendorMsg = "";
       if (selectedVendorId != null && selectedVendorId.isNotEmpty) {
         try {
           await vendorController.addAutomatedShipmentCredit(
@@ -283,28 +272,35 @@ class ShipmentController extends GetxController {
             shipmentName: shipment.shipmentName,
             date: arrivalDate,
           );
+          vendorMsg = " & Vendor Credited";
         } catch (e) {
-          debugPrint("Vendor credit error: $e");
+          // In Release mode, debugPrint is hidden. use Get.snackbar or a flag.
+          print("CRITICAL: Vendor credit failed: $e");
+          Get.snackbar(
+            "Warning",
+            "Stock updated, but Vendor Credit Failed. Please update vendor manually.",
+            duration: const Duration(seconds: 5),
+            backgroundColor: Colors.orange,
+            colorText: Colors.white,
+          );
         }
       }
 
       Get.snackbar(
         "Success",
-        "Shipment Received & Stock Updated",
+        "Shipment Received$vendorMsg",
         backgroundColor: Colors.green,
         colorText: Colors.white,
       );
     } catch (e) {
       Get.defaultDialog(
-        title: "Failed",
-        middleText: "Error receiving shipment: $e",
+        title: "Error",
+        middleText: "Failed to receive: $e",
         textConfirm: "OK",
         onConfirm: () => Get.back(),
       );
     } finally {
-      // 2. Stop Loading - Button returns to normal (or hidden if received)
       isLoading.value = false;
-      FocusManager.instance.primaryFocus?.unfocus();
     }
   }
 

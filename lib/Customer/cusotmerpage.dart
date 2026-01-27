@@ -10,7 +10,6 @@ class CustomerAnalyticsPage extends StatelessWidget {
 
   final controller = Get.put(CustomerAnalyticsController());
 
-  // Colors
   static const Color darkSlate = Color(0xFF111827);
   static const Color activeAccent = Color(0xFF3B82F6);
   static const Color profitGreen = Color(0xFF10B981);

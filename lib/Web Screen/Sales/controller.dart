@@ -494,6 +494,7 @@ class DailySalesController extends GetxController {
       int cartons = data['cartons'] ?? 0;
       bool isCond = data['isCondition'] ?? false;
       String challan = data['challanNo'] ?? "";
+      String packagername = data['packagerName'] ?? '';
       List<Map<String, dynamic>> items = List<Map<String, dynamic>>.from(
         data['items'] ?? [],
       );
@@ -523,6 +524,7 @@ class DailySalesController extends GetxController {
         authorizedName: "Joynal Abedin",
         authorizedPhone: "01720677206",
         discount: discountVal, // <--- UPDATED: Pass the retrieved discount here
+        packager: packagername,
       );
     } catch (e) {
       Get.snackbar("Error", "Could not reprint: $e");
@@ -548,6 +550,7 @@ class DailySalesController extends GetxController {
     required String authorizedName,
     required String authorizedPhone,
     double discount = 0.0, // <--- UPDATED: Added discount parameter
+    String packager = '',
   }) async {
     final pdf = pw.Document();
     final boldFont = await PdfGoogleFonts.robotoBold();
@@ -594,6 +597,7 @@ class DailySalesController extends GetxController {
               address,
               courier,
               shopName,
+              packager,
             ),
             pw.SizedBox(height: 15),
             _buildProfessionalTable(boldFont, regularFont, italicFont, items),
@@ -723,6 +727,7 @@ class DailySalesController extends GetxController {
     String addr,
     String? courier,
     String shopName,
+    String packager,
   ) {
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -744,6 +749,8 @@ class DailySalesController extends GetxController {
               _infoRow("Type", isCond ? "Condition" : "Cash/Credit", bold, reg),
               if (isCond && courier != null)
                 _infoRow("Courier", courier, bold, reg),
+
+              _infoRow("Packed By", packager, bold, reg),
             ],
           ),
         ),

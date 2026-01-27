@@ -89,7 +89,8 @@ class SaleReturnPage extends StatelessWidget {
 
                     // List of Items from Invoice
                     ...controller.orderItems.map((item) {
-                      // Parse item details safely
+                      // Parse item details safely using Controller helpers if needed
+                      // But UI logic is fine doing basic conversion too
                       String pid = item['productId'].toString();
                       int maxQty = int.tryParse(item['qty'].toString()) ?? 0;
                       int returnQty = controller.returnQuantities[pid] ?? 0;
@@ -197,9 +198,23 @@ class SaleReturnPage extends StatelessWidget {
   }
 
   Widget _buildCustomerInfoCard(Map<String, dynamic> data) {
-    // Check if fully paid
-    double due =
-        double.tryParse(data['paymentDetails']['due'].toString()) ?? 0.0;
+    // Check payment status safely
+    var payMap = data['paymentDetails'];
+    double due = 0.0;
+
+    if (payMap != null && payMap['due'] != null) {
+      due = double.tryParse(payMap['due'].toString()) ?? 0.0;
+    } else {
+      // Fallback if field missing
+      double gt = double.tryParse(data['grandTotal'].toString()) ?? 0;
+      double paid = 0;
+      if (payMap != null && payMap['actualReceived'] != null) {
+        paid = double.tryParse(payMap['actualReceived'].toString()) ?? 0;
+      }
+      due = gt - paid;
+      if (due < 0) due = 0;
+    }
+
     bool isPaid = due <= 0;
 
     return Container(
@@ -291,12 +306,14 @@ class SaleReturnPage extends StatelessWidget {
             children: [
               _infoBadge(
                 Icons.calendar_today,
-                data['date'].toString().split(' ')[0],
+                data['date'] != null
+                    ? data['date'].toString().split(' ')[0]
+                    : 'N/A',
               ),
               const SizedBox(width: 12),
               _infoBadge(
                 Icons.receipt_long,
-                "Total: ৳${double.parse(data['grandTotal'].toString()).toStringAsFixed(0)}",
+                "Total: ৳${double.tryParse(data['grandTotal'].toString())?.toStringAsFixed(0) ?? '0'}",
               ),
             ],
           ),
@@ -388,6 +405,10 @@ class SaleReturnPage extends StatelessWidget {
                     ),
                     Text(
                       "Sold Rate: ৳$price",
+                      style: const TextStyle(fontSize: 11, color: Colors.grey),
+                    ),
+                    Text(
+                      "QTY: $maxQty",
                       style: const TextStyle(fontSize: 11, color: Colors.grey),
                     ),
                   ],
@@ -521,6 +542,9 @@ class SaleReturnPage extends StatelessWidget {
     return Obx(() {
       if (controller.orderData.value == null) return const SizedBox.shrink();
 
+      // Using the renamed getter from Controller
+      double refundTotal = controller.currentReturnTotal;
+
       return Container(
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
@@ -549,7 +573,7 @@ class SaleReturnPage extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    "৳ ${controller.totalRefundAmount.toStringAsFixed(2)}",
+                    "৳ ${refundTotal.toStringAsFixed(2)}",
                     style: const TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.w900,
@@ -645,7 +669,7 @@ class SaleReturnPage extends StatelessWidget {
                       style: TextStyle(fontSize: 12, color: Colors.red),
                     ),
                     Text(
-                      "৳${controller.totalRefundAmount.toStringAsFixed(2)}",
+                      "৳${controller.currentReturnTotal.toStringAsFixed(2)}",
                       style: const TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.w900,

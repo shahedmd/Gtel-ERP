@@ -34,8 +34,6 @@ class ProfitController extends GetxController {
   var totalCollected = 0.0.obs;
 
   // *** FIXED VARIABLE ***
-  // This now tracks "How much of THIS PERIOD'S revenue is still pending?"
-  // It does NOT subtract total collections anymore.
   var totalPendingGenerated = 0.0.obs;
 
   // =========================================================
@@ -117,7 +115,7 @@ class ProfitController extends GetxController {
     }
   }
 
-  // --- LOGIC 1: SALES & PENDING ---
+  // --- LOGIC 1: SALES & PENDING (FIXED) ---
   Future<void> _processSalesData() async {
     QuerySnapshot invoiceSnap =
         await _db
@@ -137,8 +135,6 @@ class ProfitController extends GetxController {
     double tDaily = 0;
     double tDebtor = 0;
     double tCondition = 0;
-
-    // *** NEW LOGIC FOR PENDING ***
     double tPending = 0;
 
     for (var doc in invoiceSnap.docs) {
@@ -156,35 +152,42 @@ class ProfitController extends GetxController {
       tRev += amount;
       tCost += cost;
 
-      // --- PENDING CALCULATION ---
-      // We look at the INDIVIDUAL invoice to see if IT is unpaid.
+      // --- PENDING CALCULATION FIX ---
       if (isCondition) {
-        // For Condition, use 'courierDue'
+        // Condition Sale: Pending is explicitly 'courierDue'
         tPending += double.tryParse(data['courierDue'].toString()) ?? 0;
         tCondition += amount;
       } else {
-        // For Normal/Debtor, check 'actualReceived' vs 'grandTotal'
+        // Normal/Debtor Sale: Calculate Recieved correctly
         double received = 0;
+
         if (data['paymentDetails'] != null) {
-          received =
-              double.tryParse(
-                data['paymentDetails']['actualReceived'].toString(),
-              ) ??
-              0;
+          var pd = data['paymentDetails'];
+
+          // 1. Try to get 'totalPaidInput' directly (Best Source)
+          if (pd['totalPaidInput'] != null) {
+            received = double.tryParse(pd['totalPaidInput'].toString()) ?? 0;
+          }
+          // 2. Fallback: Sum up individual methods if totalPaidInput is missing
+          else {
+            double c = double.tryParse(pd['cash'].toString()) ?? 0;
+            double b = double.tryParse(pd['bkash'].toString()) ?? 0;
+            double n = double.tryParse(pd['nagad'].toString()) ?? 0;
+            double bank = double.tryParse(pd['bank'].toString()) ?? 0;
+            received = c + b + n + bank;
+          }
         }
 
-        // If it's a debtor sale, add the difference to pending
+        double dueForThisSale = amount - received;
+        // Fix for negative due (change returned)
+        if (dueForThisSale < 0) dueForThisSale = 0;
+
         if (type == 'debtor') {
           tDebtor += amount;
-          if (amount > received) {
-            tPending += (amount - received);
-          }
+          tPending += dueForThisSale;
         } else {
           tDaily += amount;
-          // Normal sales are usually fully paid, but if logic allows partial:
-          if (amount > received) {
-            tPending += (amount - received);
-          }
+          tPending += dueForThisSale;
         }
       }
     }
@@ -195,7 +198,6 @@ class ProfitController extends GetxController {
     totalRevenue.value = tRev;
     totalCostOfGoods.value = tCost;
 
-    // Set the corrected Pending Value
     totalPendingGenerated.value = tPending;
   }
 

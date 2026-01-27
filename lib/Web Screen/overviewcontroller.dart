@@ -339,13 +339,13 @@ class OverviewController extends GetxController {
     methodBreakdown.value = tempBreakdown;
   }
 
-  // --- PDF GENERATION (PROFESSIONAL UPDATE) ---
   Future<void> generateLedgerPdf() async {
     final doc = pw.Document();
     final dateStr = DateFormat('dd MMM yyyy').format(selectedDate.value);
     final timeFormat = DateFormat('hh:mm a');
     final currency = NumberFormat("#,##0.00", "en_US");
 
+    // Load fonts
     final fontRegular = await PdfGoogleFonts.nunitoRegular();
     final fontBold = await PdfGoogleFonts.nunitoBold();
 
@@ -353,9 +353,33 @@ class OverviewController extends GetxController {
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(30),
+
+        // ✅ FIX 1: Move Footer logic here.
+        // This places the signature and page numbers at the bottom of EVERY page.
+        footer: (pw.Context context) {
+          return pw.Column(
+            children: [
+              pw.Divider(color: PdfColors.grey300),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(
+                    "Authorized Signature",
+                    style: pw.TextStyle(font: fontRegular, fontSize: 8),
+                  ),
+                  pw.Text(
+                    "Page ${context.pageNumber} of ${context.pagesCount}",
+                    style: pw.TextStyle(font: fontRegular, fontSize: 8),
+                  ),
+                ],
+              ),
+            ],
+          );
+        },
+
         build: (pw.Context context) {
           return [
-            // 1. Header with Company Name style
+            // 1. Header
             pw.Row(
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
               children: [
@@ -402,7 +426,7 @@ class OverviewController extends GetxController {
             pw.Divider(color: PdfColors.grey300),
             pw.SizedBox(height: 10),
 
-            // 2. BALANCE SHEET SUMMARY (New Feature)
+            // 2. Balance Sheet
             pw.Container(
               padding: const pw.EdgeInsets.all(12),
               decoration: pw.BoxDecoration(
@@ -458,7 +482,7 @@ class OverviewController extends GetxController {
             ),
             pw.SizedBox(height: 20),
 
-            // 3. Today's Overview Stats
+            // 3. Stats
             pw.Row(
               children: [
                 pw.Expanded(
@@ -486,7 +510,7 @@ class OverviewController extends GetxController {
             ),
             pw.SizedBox(height: 20),
 
-            // 4. Source Breakdown
+            // 4. Sources
             pw.Text(
               "Collection Sources",
               style: pw.TextStyle(font: fontBold, fontSize: 10),
@@ -518,7 +542,7 @@ class OverviewController extends GetxController {
             ),
             pw.SizedBox(height: 20),
 
-            // 5. DETAILED LEDGER
+            // 5. Table
             pw.Text(
               "TRANSACTION DETAILS",
               style: pw.TextStyle(
@@ -532,14 +556,13 @@ class OverviewController extends GetxController {
             pw.Table(
               border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
               columnWidths: {
-                0: const pw.FlexColumnWidth(1.2), // Time
-                1: const pw.FlexColumnWidth(3), // Description
-                2: const pw.FlexColumnWidth(2), // Type
-                3: const pw.FlexColumnWidth(2), // Credit (In)
-                4: const pw.FlexColumnWidth(2), // Debit (Out)
+                0: const pw.FlexColumnWidth(1.2),
+                1: const pw.FlexColumnWidth(3),
+                2: const pw.FlexColumnWidth(2),
+                3: const pw.FlexColumnWidth(2),
+                4: const pw.FlexColumnWidth(2),
               },
               children: [
-                // Table Header
                 pw.TableRow(
                   decoration: const pw.BoxDecoration(color: PdfColors.grey200),
                   children: [
@@ -550,7 +573,7 @@ class OverviewController extends GetxController {
                     _pdfCell("Debit (-)", fontBold, align: pw.TextAlign.right),
                   ],
                 ),
-                // Data Rows (Merge lists and sort by time)
+                // Ensure this returns List<pw.TableRow>
                 ..._generateMergedLedgerRows(
                   cashInList,
                   cashOutList,
@@ -560,29 +583,17 @@ class OverviewController extends GetxController {
                 ),
               ],
             ),
-
-            pw.Spacer(),
-            pw.Divider(color: PdfColors.grey300),
-            pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-              children: [
-                pw.Text(
-                  "Authorized Signature",
-                  style: pw.TextStyle(font: fontRegular, fontSize: 8),
-                ),
-                pw.Text(
-                  "Page ${context.pageNumber} of ${context.pagesCount}",
-                  style: pw.TextStyle(font: fontRegular, fontSize: 8),
-                ),
-              ],
-            ),
+            // ✅ FIX 2: Spacer() and Footer removed from here
           ];
         },
       ),
     );
 
+    // This opens the Native Print Preview
     await Printing.layoutPdf(
       onLayout: (PdfPageFormat format) async => doc.save(),
+      // Optional: Give the document a name for when they save it
+      name: 'Daily_Statement_${dateStr.replaceAll(' ', '_')}',
     );
   }
 

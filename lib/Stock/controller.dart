@@ -90,7 +90,7 @@ class ProductController extends GetxController {
           };
         }).toList();
       }
-    } catch (e){}
+    } catch (e) {}
     return [];
   }
 
@@ -354,11 +354,12 @@ class ProductController extends GetxController {
   }
 
   // ==========================================
-  // 4. BULK OPERATIONS (POS CHECKOUT)
+  // 4. BULK OPERATIONS (OPTIMIZED - NO SERVER FETCH)
   // ==========================================
   Future<bool> updateStockBulk(List<Map<String, dynamic>> updates) async {
     isActionLoading.value = true;
     try {
+      // 1. Send the update to the server (Background sync)
       final res = await http.put(
         Uri.parse('$baseUrl/products/bulk-update-stock'),
         headers: {'Content-Type': 'application/json'},
@@ -366,7 +367,36 @@ class ProductController extends GetxController {
       );
 
       if (res.statusCode == 200) {
-        await fetchProducts();
+        // 2. 🛑 REMOVED: await fetchProducts();
+
+        // 3. ✅ ADDED: Manually update the UI list
+        for (var update in updates) {
+          int id = update['id'];
+          int qtySold = update['qty'];
+
+          // Find the product in memory
+          int index = allProducts.indexWhere((p) => p.id == id);
+          if (index != -1) {
+            // Update the specific item's stock
+            var product = allProducts[index];
+
+            // Create a new copy with updated stock (Good for GetX reactivity)
+            // assuming your Product model has a copyWith or just modifying properties:
+            product.stockQty =
+                (product.stockQty - qtySold) < 0
+                    ? 0
+                    : (product.stockQty - qtySold);
+
+            // Optional: Update local quantity/air/sea logic if you track that locally
+            // product.localQty = ...
+
+            allProducts[index] = product;
+          }
+        }
+
+        // 4. Force UI Refresh
+        allProducts.refresh();
+
         return true;
       } else {
         _showError("Bulk Update Failed: ${res.body}");
