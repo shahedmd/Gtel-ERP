@@ -77,14 +77,12 @@ class DailySalesController extends GetxController {
     if (filterQuery.value.isEmpty) {
       filteredList.assignAll(salesList);
     } else {
+      String query = filterQuery.value.toLowerCase();
       filteredList.assignAll(
         salesList.where((sale) {
-          return sale.name.toLowerCase().contains(
-                filterQuery.value.toLowerCase(),
-              ) ||
-              (sale.transactionId ?? "").toLowerCase().contains(
-                filterQuery.value.toLowerCase(),
-              );
+          final name = sale.name.toLowerCase();
+          final trxId = (sale.transactionId ?? "").toLowerCase();
+          return name.contains(query) || trxId.contains(query);
         }).toList(),
       );
     }
@@ -405,73 +403,100 @@ class DailySalesController extends GetxController {
   }
 
   // ==========================================
-  // 6. FORMATTING HELPER (ADDED)
+  // 6. FORMATTING HELPER (FIXED FOR DEBTOR PAYMENTS)
   // ==========================================
-  String formatPaymentMethod(dynamic pm) {
+  /// Now accepts [totalAmount] to handle Debtor payments where amount
+  /// isn't nested inside the map.
+  String formatPaymentMethod(dynamic pm, [double? totalAmount]) {
     if (pm == null || pm == "") return "CREDIT/DUE";
     if (pm is! Map) return pm.toString().toUpperCase();
 
-    String type = (pm["type"] ?? "CASH").toString().toLowerCase();
+    // Helper to format currency
+    String toMoney(dynamic val) =>
+        double.parse(val.toString()).toStringAsFixed(0);
 
-    if (type == "multi") {
-      List<String> parts = [];
-      double cash = double.tryParse(pm['cash'].toString()) ?? 0;
-      double bkash = double.tryParse(pm['bkash'].toString()) ?? 0;
-      double nagad = double.tryParse(pm['nagad'].toString()) ?? 0;
-      double bank = double.tryParse(pm['bank'].toString()) ?? 0;
+    // 1. Extract Amounts (Normal Sales)
+    double cash = double.tryParse(pm['cash'].toString()) ?? 0;
+    double bkash = double.tryParse(pm['bkash'].toString()) ?? 0;
+    double nagad = double.tryParse(pm['nagad'].toString()) ?? 0;
+    double bank = double.tryParse(pm['bank'].toString()) ?? 0;
 
-      if (cash > 0) parts.add("Cash: ${cash.toStringAsFixed(0)}");
-      if (bkash > 0) {
-        String num = pm['bkashNumber'] ?? "";
-        parts.add(
-          num.isEmpty
-              ? "Bkash: ${bkash.toStringAsFixed(0)}"
-              : "Bkash($num): ${bkash.toStringAsFixed(0)}",
-        );
+    // 2. Fallback Logic (Debtor Payments / Single Method)
+    // If specific breakdowns are 0, but we have a totalAmount and a type, assign it.
+    if (cash == 0 &&
+        bank == 0 &&
+        bkash == 0 &&
+        nagad == 0 &&
+        totalAmount != null &&
+        totalAmount > 0) {
+      String type = (pm['type'] ?? '').toString().toLowerCase();
+      if (type.contains('bank')) {
+        bank = totalAmount;
       }
-      if (nagad > 0) {
-        String num = pm['nagadNumber'] ?? "";
-        parts.add(
-          num.isEmpty
-              ? "Nagad: ${nagad.toStringAsFixed(0)}"
-              : "Nagad($num): ${nagad.toStringAsFixed(0)}",
-        );
-      }
-      if (bank > 0) {
-        String bName = pm['bankName'] ?? "Bank";
-        parts.add("$bName: ${bank.toStringAsFixed(0)}");
-      }
-      return parts.isEmpty ? "MULTI-PAY" : parts.join("\n");
+       if (type.contains('bkash')) {
+         bkash = totalAmount;
+       }
+       if (type.contains('nagad')) {
+         nagad = totalAmount;
+       }  if (type == 'cash') {
+         cash = totalAmount;
+       }
     }
 
-    switch (type) {
-      case "cash":
-        return "CASH";
-      case "bkash":
-      case "nagad":
-      case "rocket":
-        String number = (pm["number"] ?? pm["details"] ?? "").toString();
-        return number.isEmpty
-            ? type.toUpperCase()
-            : "${type.toUpperCase()}\n($number)";
-      case "bank":
-        String bName = (pm["bankName"] ?? "BANK").toString();
-        String acc = (pm["accountNumber"] ?? "").toString();
-        if (bName != "BANK" && acc.isNotEmpty) {
-          return "$bName\n($acc)";
-        } else if (bName != "BANK") {
-          return bName;
-        } else if (acc.isNotEmpty) {
-          return "BANK ($acc)";
-        }
-        return "BANK";
-      default:
-        return type.toUpperCase();
+    List<String> parts = [];
+
+    // --- CASH ---
+    if (cash > 0) {
+      parts.add("Cash: ${toMoney(cash)}");
     }
+
+    // --- BKASH ---
+    if (bkash > 0) {
+      String num = (pm['bkashNumber'] ?? pm['number'] ?? "").toString();
+      String line = "Bkash: ${toMoney(bkash)}";
+      if (num.isNotEmpty) line += "\n($num)";
+      parts.add(line);
+    }
+
+    // --- NAGAD ---
+    if (nagad > 0) {
+      String num = (pm['nagadNumber'] ?? pm['number'] ?? "").toString();
+      String line = "Nagad: ${toMoney(nagad)}";
+      if (num.isNotEmpty) line += "\n($num)";
+      parts.add(line);
+    }
+
+    // --- BANK (Fixed for Debtor Structure) ---
+    if (bank > 0) {
+      String myBankName = (pm['bankName'] ?? "Bank").toString();
+
+      // Check both keys: 'accountNumber' (Sales) and 'accountNo' (Debtor)
+      String custTrxInfo =
+          (pm['accountNumber'] ?? pm['accountNo'] ?? "").toString();
+
+      String line = "$myBankName: ${toMoney(bank)}";
+      if (custTrxInfo.isNotEmpty) {
+        line += "\nInfo: $custTrxInfo";
+      }
+      parts.add(line);
+    }
+
+    // If still empty but type exists (e.g., pure legacy data)
+    if (parts.isEmpty && pm['type'] != null) {
+      String type = pm['type'].toString().toUpperCase();
+      if (type == "BANK") {
+        String myBankName = (pm['bankName'] ?? "BANK").toString();
+        String acc = (pm['accountNumber'] ?? pm['accountNo'] ?? "").toString();
+        return acc.isNotEmpty ? "$myBankName\n$acc" : myBankName;
+      }
+      return type;
+    }
+
+    return parts.isEmpty ? "MULTI-PAY" : parts.join("\n\n");
   }
 
   // ==========================================
-  // 7. REPRINT LOGIC (UPDATED WITH SNAPSHOTS)
+  // 7. REPRINT LOGIC (PRESERVED)
   // ==========================================
   Future<void> reprintInvoice(String invoiceId) async {
     isLoading.value = true;
@@ -500,11 +525,8 @@ class DailySalesController extends GetxController {
       );
       Map<String, dynamic> payMap = data['paymentDetails'] ?? {};
 
-      // ✅ FIX: RETRIEVE SAVED SNAPSHOTS
       double snapOld = (data['snapshotOldDue'] as num?)?.toDouble() ?? 0.0;
       double snapRun = (data['snapshotRunningDue'] as num?)?.toDouble() ?? 0.0;
-
-      // ✅ RETRIEVE DISCOUNT
       double discountVal = (data['discount'] as num?)?.toDouble() ?? 0.0;
 
       await _generatePdf(
@@ -523,7 +545,7 @@ class DailySalesController extends GetxController {
         runningDueSnap: snapRun,
         authorizedName: "Joynal Abedin",
         authorizedPhone: "01720677206",
-        discount: discountVal, // <--- UPDATED: Pass the retrieved discount here
+        discount: discountVal,
         packager: packagername,
       );
     } catch (e) {
@@ -549,7 +571,7 @@ class DailySalesController extends GetxController {
     double runningDueSnap = 0.0,
     required String authorizedName,
     required String authorizedPhone,
-    double discount = 0.0, // <--- UPDATED: Added discount parameter
+    double discount = 0.0,
     String packager = '',
   }) async {
     final pdf = pw.Document();
@@ -557,7 +579,6 @@ class DailySalesController extends GetxController {
     final regularFont = await PdfGoogleFonts.robotoRegular();
     final italicFont = await PdfGoogleFonts.robotoItalic();
 
-    // Reconstruct Calculations using Snapshots
     double paidOld = double.tryParse(payMap['paidForOldDue'].toString()) ?? 0.0;
     double paidInv =
         double.tryParse(payMap['paidForInvoice'].toString()) ?? 0.0;
@@ -584,7 +605,6 @@ class DailySalesController extends GetxController {
         pageTheme: pageTheme,
         build: (context) {
           return [
-            // ✅ FIX: CENTERED HEADER
             _buildCompanyHeader(boldFont, regularFont),
             pw.SizedBox(height: 15),
             _buildInvoiceInfo(
@@ -612,7 +632,7 @@ class DailySalesController extends GetxController {
               totalPaidCurrent,
               netTotalDue,
               subTotal,
-              discount, // <--- UPDATED: Passed discount to summary
+              discount,
             ),
             pw.SizedBox(height: 25),
             _buildSignatures(
@@ -642,7 +662,6 @@ class DailySalesController extends GetxController {
                   child: pw.Text(
                     "DELIVERY CHALLAN",
                     style: pw.TextStyle(
-                      font: boldFont,
                       fontSize: 14,
                       letterSpacing: 2,
                     ),
@@ -911,7 +930,7 @@ class DailySalesController extends GetxController {
     double totalPaid,
     double netDue,
     double subTotal,
-    double discount, // <--- ADD THIS PARAMETER
+    double discount,
   ) {
     double currentInvTotal = subTotal - discount;
 
@@ -1192,8 +1211,6 @@ class DailySalesController extends GetxController {
       ],
     );
   }
-
-  // ✅ FIX: CLEAN CHALLAN TABLE
 
   pw.Widget _buildConditionBox(pw.Font bold, pw.Font reg, Map payMap) {
     double due = double.parse(payMap['due'].toString());

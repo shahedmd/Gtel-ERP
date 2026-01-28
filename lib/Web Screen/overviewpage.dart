@@ -85,32 +85,53 @@ class DailyOverviewPage extends StatelessWidget {
 
               LayoutBuilder(
                 builder: (context, constraints) {
-                  return Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // LEFT COLUMN: INCOME
-                      Expanded(
-                        child: _buildLedgerColumn(
+                  // Responsive switching
+                  if (constraints.maxWidth > 600) {
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: _buildLedgerColumn(
+                            title: "CASH IN / INCOME",
+                            total: ctrl.totalCashIn.value,
+                            items: ctrl.cashInList,
+                            colorTheme: successGreen,
+                            icon: FontAwesomeIcons.arrowDown,
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: _buildLedgerColumn(
+                            title: "CASH OUT / EXPENSE",
+                            total: ctrl.totalCashOut.value,
+                            items: ctrl.cashOutList,
+                            colorTheme: errorRed,
+                            icon: FontAwesomeIcons.arrowUp,
+                          ),
+                        ),
+                      ],
+                    );
+                  } else {
+                    return Column(
+                      children: [
+                        _buildLedgerColumn(
                           title: "CASH IN / INCOME",
                           total: ctrl.totalCashIn.value,
                           items: ctrl.cashInList,
                           colorTheme: successGreen,
                           icon: FontAwesomeIcons.arrowDown,
                         ),
-                      ),
-                      const SizedBox(width: 12),
-                      // RIGHT COLUMN: EXPENSE
-                      Expanded(
-                        child: _buildLedgerColumn(
+                        const SizedBox(height: 20),
+                        _buildLedgerColumn(
                           title: "CASH OUT / EXPENSE",
                           total: ctrl.totalCashOut.value,
                           items: ctrl.cashOutList,
                           colorTheme: errorRed,
                           icon: FontAwesomeIcons.arrowUp,
                         ),
-                      ),
-                    ],
-                  );
+                      ],
+                    );
+                  }
                 },
               ),
               const SizedBox(height: 40),
@@ -198,21 +219,23 @@ class DailyOverviewPage extends StatelessWidget {
   }
 
   // =========================================
-  // 0. NEW: BALANCE SHEET SECTION
+  // 0. BALANCE SHEET SECTION
   // =========================================
   Widget _buildBalanceSheetSection() {
     final currency = NumberFormat("#,##0");
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.blue.shade100),
-        gradient: LinearGradient(
-          colors: [Colors.blue.shade50, Colors.white],
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.blue.shade50,
+            offset: const Offset(0, 4),
+            blurRadius: 10,
+          ),
+        ],
       ),
       child: Column(
         children: [
@@ -230,11 +253,12 @@ class DailyOverviewPage extends StatelessWidget {
                   fontWeight: FontWeight.bold,
                   color: Colors.blue.shade900,
                   fontSize: 12,
+                  letterSpacing: 1.2,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 15),
+          const SizedBox(height: 20),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -245,21 +269,25 @@ class DailyOverviewPage extends StatelessWidget {
                   children: [
                     const Text(
                       "Previous Balance",
-                      style: TextStyle(fontSize: 11, color: slateMedium),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: slateMedium,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 6),
                     Text(
                       "৳${currency.format(ctrl.previousCash.value)}",
                       style: const TextStyle(
                         fontWeight: FontWeight.bold,
-                        fontSize: 16,
+                        fontSize: 18,
                         color: slateDark,
                       ),
                     ),
                   ],
                 ),
               ),
-              Container(width: 1, height: 30, color: borderGrey),
+              Container(width: 1, height: 40, color: borderGrey),
               // Today's Net
               Expanded(
                 child: Column(
@@ -267,14 +295,18 @@ class DailyOverviewPage extends StatelessWidget {
                   children: [
                     const Text(
                       "Today's Net",
-                      style: TextStyle(fontSize: 11, color: slateMedium),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: slateMedium,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 6),
                     Text(
                       "${ctrl.netCashBalance.value >= 0 ? '+' : ''}৳${currency.format(ctrl.netCashBalance.value)}",
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        fontSize: 16,
+                        fontSize: 18,
                         color:
                             ctrl.netCashBalance.value >= 0
                                 ? successGreen
@@ -284,7 +316,7 @@ class DailyOverviewPage extends StatelessWidget {
                   ],
                 ),
               ),
-              Container(width: 1, height: 30, color: borderGrey),
+              Container(width: 1, height: 40, color: borderGrey),
               // Total
               Expanded(
                 child: Column(
@@ -292,14 +324,18 @@ class DailyOverviewPage extends StatelessWidget {
                   children: [
                     const Text(
                       "Closing Cash",
-                      style: TextStyle(fontSize: 11, color: slateMedium),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: slateMedium,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 6),
                     Text(
                       "৳${currency.format(ctrl.closingCash.value)}",
                       style: TextStyle(
                         fontWeight: FontWeight.w800,
-                        fontSize: 18,
+                        fontSize: 20,
                         color: Colors.blue.shade800,
                       ),
                     ),
@@ -314,11 +350,11 @@ class DailyOverviewPage extends StatelessWidget {
   }
 
   // =========================================
-  // 1. STATS SECTION (Updated Format)
+  // 1. STATS SECTION
   // =========================================
   Widget _buildSummarySection() {
     return SizedBox(
-      height: 110,
+      height: 100,
       child: Row(
         children: [
           Expanded(
@@ -327,6 +363,8 @@ class DailyOverviewPage extends StatelessWidget {
               amount: ctrl.totalCashIn.value,
               icon: FontAwesomeIcons.arrowTrendUp,
               color: successGreen,
+              bg: successGreen.withOpacity(0.05),
+              border: successGreen.withOpacity(0.2),
             ),
           ),
           const SizedBox(width: 12),
@@ -336,6 +374,8 @@ class DailyOverviewPage extends StatelessWidget {
               amount: ctrl.totalCashOut.value,
               icon: FontAwesomeIcons.arrowTrendDown,
               color: errorRed,
+              bg: errorRed.withOpacity(0.05),
+              border: errorRed.withOpacity(0.2),
             ),
           ),
         ],
@@ -348,20 +388,15 @@ class DailyOverviewPage extends StatelessWidget {
     required double amount,
     required IconData icon,
     required Color color,
+    required Color bg,
+    required Color border,
   }) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
-        color: surfaceWhite,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: borderGrey),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.02),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        color: bg,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -372,13 +407,14 @@ class DailyOverviewPage extends StatelessWidget {
             children: [
               Text(
                 title,
-                style: const TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                  color: slateMedium,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: color.withOpacity(0.8),
+                  letterSpacing: 0.5,
                 ),
               ),
-              Icon(icon, size: 14, color: color),
+              Icon(icon, size: 16, color: color),
             ],
           ),
           FittedBox(
@@ -387,7 +423,7 @@ class DailyOverviewPage extends StatelessWidget {
             child: Text(
               "৳${NumberFormat("#,##0").format(amount)}",
               style: TextStyle(
-                fontSize: 22,
+                fontSize: 24,
                 fontWeight: FontWeight.w800,
                 color: color,
               ),
@@ -406,7 +442,7 @@ class DailyOverviewPage extends StatelessWidget {
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: surfaceWhite,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(10),
         border: Border.all(color: borderGrey),
       ),
       child: Column(
@@ -419,8 +455,8 @@ class DailyOverviewPage extends StatelessWidget {
                 style: TextStyle(fontWeight: FontWeight.bold, color: slateDark),
               ),
               Text(
-                "Includes Sales & Loans",
-                style: TextStyle(fontSize: 10, color: slateMedium),
+                "Income Sources",
+                style: TextStyle(fontSize: 11, color: slateMedium),
               ),
             ],
           ),
@@ -429,22 +465,22 @@ class DailyOverviewPage extends StatelessWidget {
             children: [
               // Pie Chart
               SizedBox(
-                height: 120,
-                width: 120,
+                height: 130,
+                width: 130,
                 child: Stack(
                   children: [
                     PieChart(
                       PieChartData(
-                        sectionsSpace: 2,
-                        centerSpaceRadius: 40,
+                        sectionsSpace: 3,
+                        centerSpaceRadius: 45,
                         sections: _generateChartData(),
                       ),
                     ),
                     Center(
                       child: Icon(
                         FontAwesomeIcons.wallet,
-                        color: slateMedium.withOpacity(0.5),
-                        size: 20,
+                        color: slateMedium.withOpacity(0.4),
+                        size: 24,
                       ),
                     ),
                   ],
@@ -461,19 +497,19 @@ class DailyOverviewPage extends StatelessWidget {
                       ctrl.methodBreakdown['Cash'] ?? 0,
                       colCash,
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 10),
                     _chartLegendItem(
                       "Bkash",
                       ctrl.methodBreakdown['Bkash'] ?? 0,
                       colBkash,
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 10),
                     _chartLegendItem(
                       "Nagad",
                       ctrl.methodBreakdown['Nagad'] ?? 0,
                       colNagad,
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 10),
                     _chartLegendItem(
                       "Bank",
                       ctrl.methodBreakdown['Bank'] ?? 0,
@@ -501,7 +537,7 @@ class DailyOverviewPage extends StatelessWidget {
         PieChartSectionData(
           value: 1,
           color: borderGrey,
-          radius: 20,
+          radius: 18,
           showTitle: false,
         ),
       ];
@@ -512,49 +548,53 @@ class DailyOverviewPage extends StatelessWidget {
         PieChartSectionData(
           value: cash,
           color: colCash,
-          radius: 20,
+          radius: 18,
           showTitle: false,
         ),
       if (bkash > 0)
         PieChartSectionData(
           value: bkash,
           color: colBkash,
-          radius: 20,
+          radius: 18,
           showTitle: false,
         ),
       if (nagad > 0)
         PieChartSectionData(
           value: nagad,
           color: colNagad,
-          radius: 20,
+          radius: 18,
           showTitle: false,
         ),
       if (bank > 0)
         PieChartSectionData(
           value: bank,
           color: colBank,
-          radius: 20,
+          radius: 18,
           showTitle: false,
         ),
     ];
   }
 
   Widget _chartLegendItem(String label, double amount, Color color) {
+    if (amount == 0) return const SizedBox.shrink();
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Row(
           children: [
             Container(
-              width: 8,
-              height: 8,
-              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+              width: 10,
+              height: 10,
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: BorderRadius.circular(3),
+              ),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 10),
             Text(
               label,
               style: const TextStyle(
-                fontSize: 12,
+                fontSize: 13,
                 fontWeight: FontWeight.w600,
                 color: slateMedium,
               ),
@@ -564,7 +604,7 @@ class DailyOverviewPage extends StatelessWidget {
         Text(
           "৳${NumberFormat("#,##0").format(amount)}",
           style: const TextStyle(
-            fontSize: 12,
+            fontSize: 13,
             fontWeight: FontWeight.bold,
             color: slateDark,
           ),
@@ -574,7 +614,7 @@ class DailyOverviewPage extends StatelessWidget {
   }
 
   // =========================================
-  // 3. LEDGER COLUMNS (Updated Format)
+  // 3. LEDGER COLUMNS
   // =========================================
   Widget _buildLedgerColumn({
     required String title,
@@ -586,8 +626,15 @@ class DailyOverviewPage extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: surfaceWhite,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: borderGrey),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.03),
+            offset: const Offset(0, 4),
+            blurRadius: 10,
+          ),
+        ],
       ),
       child: Column(
         children: [
@@ -595,13 +642,13 @@ class DailyOverviewPage extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              color: colorTheme.withOpacity(0.05),
+              color: colorTheme.withOpacity(0.08),
               borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(8),
-                topRight: Radius.circular(8),
+                topLeft: Radius.circular(12),
+                topRight: Radius.circular(12),
               ),
               border: Border(
-                bottom: BorderSide(color: colorTheme.withOpacity(0.2)),
+                bottom: BorderSide(color: colorTheme.withOpacity(0.1)),
               ),
             ),
             child: Row(
@@ -622,7 +669,7 @@ class DailyOverviewPage extends StatelessWidget {
                   style: TextStyle(
                     color: colorTheme,
                     fontWeight: FontWeight.w800,
-                    fontSize: 12,
+                    fontSize: 13,
                   ),
                 ),
               ],
@@ -631,11 +678,15 @@ class DailyOverviewPage extends StatelessWidget {
           // List
           if (items.isEmpty)
             Padding(
-              padding: const EdgeInsets.all(24.0),
+              padding: const EdgeInsets.all(30.0),
               child: Center(
                 child: Text(
-                  "- Empty -",
-                  style: TextStyle(color: Colors.grey[300], fontSize: 12),
+                  "- No Transactions -",
+                  style: TextStyle(
+                    color: Colors.grey[400],
+                    fontSize: 12,
+                    fontStyle: FontStyle.italic,
+                  ),
                 ),
               ),
             )
@@ -646,67 +697,127 @@ class DailyOverviewPage extends StatelessWidget {
               itemCount: items.length,
               separatorBuilder:
                   (c, i) =>
-                      Divider(height: 1, color: borderGrey.withOpacity(0.5)),
+                      Divider(height: 1, color: borderGrey.withOpacity(0.6)),
               itemBuilder: (ctx, i) {
                 final item = items[i];
-                return ListTile(
-                  dense: true,
-                  visualDensity: VisualDensity.compact,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 0,
+                return Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
                   ),
-                  title: Text(
-                    item.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 12,
-                      color: slateDark,
-                    ),
-                  ),
-                  subtitle: Row(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // Time
                       Text(
                         DateFormat('hh:mm a').format(item.time),
                         style: const TextStyle(
                           fontSize: 10,
                           color: slateMedium,
+                          fontWeight: FontWeight.w500,
                         ),
                       ),
-                      const SizedBox(width: 4),
-                      const Text(
-                        "•",
-                        style: TextStyle(fontSize: 10, color: slateMedium),
-                      ),
-                      const SizedBox(width: 4),
+                      const SizedBox(width: 12),
+
+                      // Details
                       Expanded(
-                        child: Text(
-                          item.subtitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: colorTheme.withOpacity(0.8),
-                          ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              item.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                                color: slateDark,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            _buildSubtitleBadge(item.subtitle, colorTheme),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+
+                      // Amount
+                      Text(
+                        "৳${NumberFormat("#,##0").format(item.amount)}",
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: slateDark,
+                          fontSize: 13,
                         ),
                       ),
                     ],
-                  ),
-                  trailing: Text(
-                    "৳${NumberFormat("#,##0").format(item.amount)}",
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: slateDark,
-                      fontSize: 12,
-                    ),
                   ),
                 );
               },
             ),
         ],
       ),
+    );
+  }
+
+  // Parses the subtitle to create visual badges for Payment Methods
+  Widget _buildSubtitleBadge(String subtitle, Color baseColor) {
+    String text = subtitle;
+    Color badgeColor = Colors.grey.shade100;
+    Color textColor = slateMedium;
+    String? method;
+
+    if (subtitle.toUpperCase().contains("BKASH")) {
+      method = "BKASH";
+      badgeColor = colBkash.withOpacity(0.1);
+      textColor = colBkash;
+    } else if (subtitle.toUpperCase().contains("NAGAD")) {
+      method = "NAGAD";
+      badgeColor = colNagad.withOpacity(0.1);
+      textColor = colNagad;
+    } else if (subtitle.toUpperCase().contains("BANK") ||
+        subtitle.contains("(")) {
+      // If it has bank info or details in parenthesis
+      method = "BANK/DETAILS";
+      badgeColor = colBank.withOpacity(0.1);
+      textColor = colBank;
+    } else {
+      method = "CASH";
+      badgeColor = colCash.withOpacity(0.05);
+      textColor = slateMedium;
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // The main detail text
+        Text(
+          text,
+          style: TextStyle(
+            fontSize: 11,
+            color: slateMedium.withOpacity(0.8),
+            height: 1.2,
+          ),
+        ),
+        const SizedBox(height: 4),
+        // The small Badge
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: badgeColor,
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: textColor.withOpacity(0.2)),
+          ),
+          child: Text(
+            method == 'BANK/DETAILS' ? 'BANK / TRANSFER' : method,
+            style: TextStyle(
+              fontSize: 8,
+              fontWeight: FontWeight.bold,
+              color: textColor,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

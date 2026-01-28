@@ -9,6 +9,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 import 'controller.dart';
+// Ensure this path matches your project structure
 import 'package:gtel_erp/Web%20Screen/Sales/Condition/conditioncontroller.dart';
 import 'model.dart';
 
@@ -31,7 +32,7 @@ class DailySalesPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 1. Ensure Condition Data is Loaded (for unpaid condition revenue)
+    // 1. Ensure Condition Data is Loaded
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (conditionCtrl.allOrders.isEmpty) {
         conditionCtrl.loadConditionSales();
@@ -48,10 +49,15 @@ class DailySalesPage extends StatelessWidget {
         }
 
         // =================================================================
-        // 📊 1. DATA CALCULATIONS
+        // 📊 1. DATA CALCULATIONS (Always based on FULL LIST for Totals)
         // =================================================================
         DateTime selectedDate = dailyCtrl.selectedDate.value;
-        final dailyList = dailyCtrl.salesList;
+
+        // We use the FULL list for the Summary Cards
+        final fullDailyList = dailyCtrl.salesList;
+
+        // We use the FILTERED list for the Table (Search results)
+        final tableList = dailyCtrl.filteredList;
 
         // --- A. CONDITION REVENUE (Unpaid/New Condition Sales) ---
         final todayConditionOrders =
@@ -74,7 +80,8 @@ class DailySalesPage extends StatelessWidget {
         double collectedDebtor = 0;
         double collectedCondition = 0;
 
-        for (var sale in dailyList) {
+        // Iterate over FULL LIST for accurate summary
+        for (var sale in fullDailyList) {
           String type = (sale.customerType).toLowerCase();
           String source = (sale.source).toLowerCase();
 
@@ -89,7 +96,7 @@ class DailySalesPage extends StatelessWidget {
           if (!isRecovery) {
             if (type.contains('debtor')) {
               revenueDebtor += sale.amount;
-              collectedDebtor += sale.paid; // If paid partially/fully instantly
+              collectedDebtor += sale.paid;
             } else {
               revenueNormal += sale.amount;
               collectedNormal += sale.paid;
@@ -173,7 +180,7 @@ class DailySalesPage extends StatelessWidget {
 
                     const SizedBox(height: 30),
 
-                    // --- SECTION 2: TRANSACTION LEDGER ---
+                    // --- SECTION 2: TRANSACTION LEDGER WITH SEARCH ---
                     Container(
                       decoration: BoxDecoration(
                         color: Colors.white,
@@ -189,10 +196,10 @@ class DailySalesPage extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          // Ledger Header + Search Bar
                           Padding(
                             padding: const EdgeInsets.all(15),
                             child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 const Text(
                                   "TRANSACTION LEDGER",
@@ -202,6 +209,48 @@ class DailySalesPage extends StatelessWidget {
                                     fontSize: 14,
                                   ),
                                 ),
+                                const Spacer(),
+
+                                // --- SEARCH BAR ---
+                                SizedBox(
+                                  width: 250,
+                                  height: 40,
+                                  child: TextField(
+                                    onChanged:
+                                        (val) =>
+                                            dailyCtrl.filterQuery.value = val,
+                                    decoration: InputDecoration(
+                                      hintText: "Search Invoice (Last 4)...",
+                                      hintStyle: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey.shade500,
+                                      ),
+                                      prefixIcon: const Icon(
+                                        Icons.search,
+                                        size: 16,
+                                      ),
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                            horizontal: 10,
+                                          ),
+                                      border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                        borderSide: BorderSide(
+                                          color: Colors.grey.shade300,
+                                        ),
+                                      ),
+                                      enabledBorder: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                        borderSide: BorderSide(
+                                          color: Colors.grey.shade300,
+                                        ),
+                                      ),
+                                    ),
+                                    style: const TextStyle(fontSize: 13),
+                                  ),
+                                ),
+                                const SizedBox(width: 15),
+
                                 Container(
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 8,
@@ -212,7 +261,7 @@ class DailySalesPage extends StatelessWidget {
                                     borderRadius: BorderRadius.circular(4),
                                   ),
                                   child: Text(
-                                    "${dailyList.length} Transactions",
+                                    "${tableList.length} Transactions",
                                     style: TextStyle(
                                       fontSize: 11,
                                       color: Colors.grey.shade600,
@@ -224,9 +273,11 @@ class DailySalesPage extends StatelessWidget {
                             ),
                           ),
                           const Divider(height: 1),
+
                           // Ledger Table Header & List
                           _buildTableHead(),
-                          _buildTransactionList(dailyList),
+                          // Pass filtered list here for search to work
+                          _buildTransactionList(tableList),
                         ],
                       ),
                     ),
@@ -503,7 +554,7 @@ class DailySalesPage extends StatelessWidget {
             ),
           ),
           Expanded(
-            flex: 2,
+            flex: 3, // Increased flex for better multi-line method display
             child: Text(
               "METHOD",
               style: TextStyle(
@@ -560,7 +611,7 @@ class DailySalesPage extends StatelessWidget {
     if (list.isEmpty) {
       return const Padding(
         padding: EdgeInsets.all(30),
-        child: Center(child: Text("No transactions recorded for this date.")),
+        child: Center(child: Text("No transactions found.")),
       );
     }
 
@@ -592,6 +643,8 @@ class DailySalesPage extends StatelessWidget {
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
           child: Row(
+            crossAxisAlignment:
+                CrossAxisAlignment.start, // Align top for multi-line
             children: [
               // 1. Details
               Expanded(
@@ -608,11 +661,15 @@ class DailySalesPage extends StatelessWidget {
                       ),
                     ),
                     if (sale.transactionId != null)
-                      Text(
-                        sale.transactionId!,
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: Colors.grey.shade500,
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(
+                          sale.transactionId!,
+                          style: TextStyle(
+                            fontSize: 11, // Slightly larger for readability
+                            color: Colors.grey.shade600,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
                       ),
                   ],
@@ -622,7 +679,7 @@ class DailySalesPage extends StatelessWidget {
               Expanded(
                 flex: 2,
                 child: Align(
-                  alignment: Alignment.centerLeft,
+                  alignment: Alignment.topLeft,
                   child: Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 8,
@@ -643,16 +700,17 @@ class DailySalesPage extends StatelessWidget {
                   ),
                 ),
               ),
-              // 3. Method (Updated for Multi-Line Support)
+              // 3. Method (Updated for Bank Info / Multi-Line)
               Expanded(
-                flex: 2,
+                flex: 3, // Increased flex
                 child: Text(
                   dailyCtrl.formatPaymentMethod(sale.paymentMethod),
                   style: const TextStyle(
                     fontSize: 11,
+                    height: 1.3, // Better line spacing for bank info
                     color: Color(0xFF475569),
                   ),
-                  maxLines: 3,
+                  maxLines: 4, // Allow more lines for Bank+Info
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -687,6 +745,7 @@ class DailySalesPage extends StatelessWidget {
                 width: 90,
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // PRINT
                     IconButton(
