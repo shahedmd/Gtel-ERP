@@ -1,53 +1,55 @@
 // ignore_for_file: empty_catches
 
-import 'dart:convert';
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
-import 'model.dart';
+import 'model.dart'; // Ensure your Product model matches the server JSON keys
 
 class ProductController extends GetxController {
+  // ==========================================
+  // CONFIGURATION
+  // ==========================================
+  static const baseUrl = 'https://dart-server-1zun.onrender.com';
+
   // ==========================================
   // STATE VARIABLES
   // ==========================================
   final RxList<Product> allProducts = <Product>[].obs;
-
-  // NEW: Holds the total valuation of ALL products (calculated by server)
-  final RxDouble overallTotalValuation = 0.0.obs;
-
-  // State for Service/Damage Logs
+  final RxList<Product> shortListProducts = <Product>[].obs;
   final RxList<Map<String, dynamic>> serviceLogs = <Map<String, dynamic>>[].obs;
 
-  // NEW: State for Short List (Low Stock)
-  final RxList<Product> shortListProducts = <Product>[].obs;
+  // Statistics
+  final RxDouble overallTotalValuation = 0.0.obs;
+  final RxInt totalProducts = 0.obs;
+  final RxInt shortlistTotal = 0.obs;
 
-  // Filters
+  // Filters & Settings
   final RxString selectedBrand = 'All'.obs;
   final RxString searchText = ''.obs;
+  final RxDouble currentCurrency = 17.85.obs; // BDT to CNY
 
   // Loading States
   final RxBool isLoading = false.obs;
-  final RxBool isActionLoading =
-      false.obs; // Unified loading for Create/Update/Stock/Service
-  final RxBool isShortListLoading = false.obs; // Specific loading for shortlist
+  final RxBool isActionLoading = false.obs;
+  final RxBool isShortListLoading = false.obs;
 
-  // Global Settings
-  final RxDouble currentCurrency = 17.85.obs; // BDT to CNY Rate
-
-  // Pagination - Stock
+  // Pagination
   final RxInt currentPage = 1.obs;
   final RxInt pageSize = 20.obs;
-  final RxInt totalProducts = 0.obs;
-
-  // Pagination - Shortlist
   final RxInt shortlistPage = 1.obs;
-  final RxInt shortlistTotal = 0.obs;
   final RxInt shortlistLimit = 20.obs;
 
-  // Configuration
-  static const baseUrl = 'https://dart-server-1zun.onrender.com';
-  Timer? _debounce;
+  // Timers (Separated to prevent conflicts)
+  Timer? _mainSearchDebounce;
+  Timer? _shortlistSearchDebounce;
+
+  // On Way Stock Data
+  final RxMap<int, int> onWayStockMap = <int, int>{}.obs;
+
+  // Shortlist Specific Search
+  final RxString shortlistSearchText = ''.obs;
 
   @override
   void onInit() {
@@ -57,30 +59,30 @@ class ProductController extends GetxController {
 
   @override
   void onClose() {
-    _debounce?.cancel();
+    _mainSearchDebounce?.cancel();
+    _shortlistSearchDebounce?.cancel();
     super.onClose();
   }
 
   // =========================================================
-  // LIVE SERVER SEARCH (For Autocomplete Dropdowns)
+  // 1. DATA FETCHING (Main List & Dropdowns)
   // =========================================================
+
+  // Used for Autocomplete
   Future<List<Map<String, dynamic>>> searchProductsForDropdown(
     String query,
   ) async {
     if (query.isEmpty) return [];
-
     try {
-      final queryParams = {'page': '1', 'limit': '20', 'search': query};
       final uri = Uri.parse(
         '$baseUrl/products',
-      ).replace(queryParameters: queryParams);
+      ).replace(queryParameters: {'page': '1', 'limit': '20', 'search': query});
+
       final res = await http.get(uri);
-
       if (res.statusCode == 200) {
-        final Map<String, dynamic> data = jsonDecode(res.body);
-        final List<dynamic> productsJson = data['products'] ?? [];
-
-        return productsJson.map((e) {
+        final data = jsonDecode(res.body);
+        final List products = data['products'] ?? [];
+        return products.map((e) {
           final p = Product.fromJson(e);
           return {
             'id': p.id,
@@ -90,16 +92,16 @@ class ProductController extends GetxController {
           };
         }).toList();
       }
-    } catch (e) {}
+    } catch (e) {
+      // Silent failure for dropdowns
+    }
     return [];
   }
 
   Future<void> fetchProducts({int? page}) async {
     isLoading.value = true;
-
     try {
       final current = page ?? currentPage.value;
-
       final queryParams = {
         'page': current.toString(),
         'limit': pageSize.value.toString(),
@@ -110,27 +112,25 @@ class ProductController extends GetxController {
       final uri = Uri.parse(
         '$baseUrl/products',
       ).replace(queryParameters: queryParams);
-
       final res = await http.get(uri).timeout(const Duration(seconds: 20));
 
       if (res.statusCode == 200) {
-        final Map<String, dynamic> data = jsonDecode(res.body);
-        final List<dynamic> productsJson = data['products'] ?? [];
+        final data = jsonDecode(res.body);
 
-        final List<Product> loadedProducts =
-            productsJson.map<Product>((e) => Product.fromJson(e)).toList();
+        // 1. List
+        final List productsJson = data['products'] ?? [];
+        allProducts.assignAll(
+          productsJson.map((e) => Product.fromJson(e)).toList(),
+        );
 
-        allProducts.assignAll(loadedProducts);
+        // 2. Count
+        totalProducts.value = int.tryParse(data['total'].toString()) ?? 0;
 
-        // Handle total count for pagination
-        var totalRaw = data['total'];
-        totalProducts.value = int.tryParse(totalRaw.toString()) ?? 0;
-
-        // NEW: Handle Total Valuation from Server (All Pages)
-        var valRaw = data['total_value'];
-        overallTotalValuation.value = double.tryParse(valRaw.toString()) ?? 0.0;
+        // 3. Total Valuation
+        overallTotalValuation.value =
+            double.tryParse(data['total_value'].toString()) ?? 0.0;
       } else {
-        _showError('Server Error: ${res.statusCode}');
+        _handleErrorResponse(res);
       }
     } catch (e) {
       _showError('Connection failed: $e');
@@ -140,43 +140,54 @@ class ProductController extends GetxController {
   }
 
   // ==========================================
-  // 1.5 FETCH SHORTLIST (FIXED PAGINATION)
+  // 2. SHORTLIST (Low Stock) - UPDATED FOR SEARCH
   // ==========================================
+
+  void searchShortlist(String query) {
+    // 1. Update the reactive variable immediately so UI text field matches
+    shortlistSearchText.value = query;
+
+    // 2. Cancel any existing timer for the shortlist
+    if (_shortlistSearchDebounce?.isActive ?? false) {
+      _shortlistSearchDebounce!.cancel();
+    }
+
+    // 3. Start a new timer to fetch data after user stops typing
+    _shortlistSearchDebounce = Timer(const Duration(milliseconds: 600), () {
+      fetchShortList(page: 1);
+    });
+  }
+
   Future<void> fetchShortList({int page = 1}) async {
     isShortListLoading.value = true;
-    try {
-      shortlistPage.value = page;
+    shortlistPage.value = page;
 
-      final queryParams = {
+    try {
+      final Map<String, String> queryParams = {
         'page': page.toString(),
         'limit': shortlistLimit.value.toString(),
+        'search':
+            shortlistSearchText.value
+                .trim(), // Explicitly send trimmed search text
       };
 
       final uri = Uri.parse(
         '$baseUrl/products/shortlist',
       ).replace(queryParameters: queryParams);
+
       final res = await http.get(uri);
 
       if (res.statusCode == 200) {
-        final dynamic decoded = jsonDecode(res.body);
-
-        // Expecting Map now because server returns { products: [], total: x }
-        if (decoded is Map<String, dynamic>) {
-          final List<dynamic> list = decoded['products'] ?? [];
-          // Update total so "Next" button works
-          shortlistTotal.value = int.tryParse(decoded['total'].toString()) ?? 0;
-
-          final loaded = list.map((e) => Product.fromJson(e)).toList();
-          shortListProducts.assignAll(loaded);
-        } else if (decoded is List) {
-          // Fallback if server runs old code
-          final List<Product> loaded =
-              decoded.map((e) => Product.fromJson(e)).toList();
-          shortListProducts.assignAll(loaded);
-          shortlistTotal.value = loaded.length;
+        final data = jsonDecode(res.body);
+        if (data is Map<String, dynamic>) {
+          final List list = data['products'] ?? [];
+          shortlistTotal.value = int.tryParse(data['total'].toString()) ?? 0;
+          shortListProducts.assignAll(
+            list.map((e) => Product.fromJson(e)).toList(),
+          );
         }
       } else {
-        _showError('Server Error: ${res.statusCode}');
+        _handleErrorResponse(res);
       }
     } catch (e) {
       _showError('Shortlist Load Error: $e');
@@ -185,181 +196,149 @@ class ProductController extends GetxController {
     }
   }
 
-  // ==========================================
-  // 2. FETCH ALL FOR PDF EXPORT
-  // ==========================================
   Future<List<Product>> fetchAllShortListForExport() async {
     try {
-      // We send 'all=true' to skip pagination on server
+      // all=true triggers the server logic: "SELECT * ... WHERE stock <= alert" without limit
       final uri = Uri.parse('$baseUrl/products/shortlist?all=true');
-
-      // FIX: Increase timeout to 60 seconds for large datasets
-      final res = await http
-          .get(uri)
-          .timeout(
-            const Duration(seconds: 60),
-            onTimeout: () {
-              throw TimeoutException(
-                "Connection timed out. Data is too large.",
-              );
-            },
-          );
-
-      // print("Response Body Length: ${res.body.length}"); // Debugging
+      final res = await http.get(uri).timeout(const Duration(seconds: 60));
 
       if (res.statusCode == 200) {
-        final List<dynamic> data = jsonDecode(res.body);
+        final List data = jsonDecode(res.body);
         return data.map((e) => Product.fromJson(e)).toList();
       } else {
-        _showError("Server Error: ${res.statusCode}");
+        _handleErrorResponse(res);
       }
     } catch (e) {
-      _showError('Export Failed: ${e.toString()}');
+      _showError('Export Failed: $e');
     }
     return [];
   }
 
   // ==========================================
-  // SHORTLIST PAGINATION LOGIC
+  // 3. PRODUCT CRUD
   // ==========================================
-  void nextShortlistPage() {
-    // Check if we have more items
-    if ((shortlistPage.value * shortlistLimit.value) < shortlistTotal.value) {
-      fetchShortList(page: shortlistPage.value + 1);
-    }
+
+  // Single Insert
+  Future<void> createProduct(Map<String, dynamic> data) async {
+    await _performAction(
+      () => http.post(
+        Uri.parse('$baseUrl/products/add'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(data),
+      ),
+      successMsg: 'Product Created',
+    );
   }
 
-  void prevShortlistPage() {
-    if (shortlistPage.value > 1) {
-      fetchShortList(page: shortlistPage.value - 1);
-    }
+  // Bulk Insert
+  Future<void> bulkCreateProducts(List<Map<String, dynamic>> products) async {
+    await _performAction(
+      () => http.post(
+        Uri.parse('$baseUrl/products'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(products),
+      ),
+      successMsg: '${products.length} Products Imported',
+    );
   }
 
-  // Helper: Prepare Data for PDF Package (UI Use)
-  List<List<String>> formatForPdf(List<Product> products) {
-    List<List<String>> rows = [
-      ['Product Name', 'Model', 'Stock', 'Alert Limit', 'Shortage'],
-    ];
-    for (var p in products) {
-      rows.add([
-        p.name,
-        p.model,
-        p.stockQty.toString(),
-        p.alertQty.toString(),
-        (p.alertQty - p.stockQty).toString(), // Shortage amount
-      ]);
-    }
-    return rows;
+  // Update
+  Future<void> updateProduct(int id, Map<String, dynamic> data) async {
+    await _performAction(
+      () => http.put(
+        Uri.parse('$baseUrl/products/$id'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(data),
+      ),
+      successMsg: 'Product Updated',
+    );
   }
 
-  // ==========================================
-  // 2. SEARCH & FILTER LOGIC
-  // ==========================================
-  void search(String text) {
-    if (searchText.value == text) return;
-    searchText.value = text;
-    currentPage.value = 1;
-
-    if (_debounce?.isActive ?? false) _debounce!.cancel();
-    _debounce = Timer(const Duration(milliseconds: 600), () {
-      fetchProducts();
-    });
-  }
-
-  void selectBrand(String brand) {
-    if (selectedBrand.value == brand) return;
-    selectedBrand.value = brand;
-    currentPage.value = 1;
-    fetchProducts();
+  // Delete
+  Future<void> deleteProduct(int id) async {
+    await _performAction(
+      () => http.delete(Uri.parse('$baseUrl/products/$id')),
+      successMsg: 'Product Deleted',
+    );
   }
 
   // ==========================================
-  // 3. STOCK MANAGEMENT (ADD STOCK)
+  // 4. STOCK MANAGEMENT (Add Stock)
   // ==========================================
 
+  // Single Product Stock Add
   Future<void> addMixedStock({
     required int productId,
     int seaQty = 0,
     int airQty = 0,
     int localQty = 0,
     double localUnitPrice = 0.0,
+    DateTime? shipmentDate,
   }) async {
-    isActionLoading.value = true;
-    try {
-      if (seaQty < 0 || airQty < 0 || localQty < 0) {
-        _showError("Quantities cannot be negative");
-        return;
-      }
+    if (seaQty < 0 || airQty < 0 || localQty < 0) {
+      _showError("Quantities cannot be negative");
+      return;
+    }
 
-      final body = {
-        'id': productId,
-        'sea_qty': seaQty,
-        'air_qty': airQty,
-        'local_qty': localQty,
-        'local_price': localUnitPrice.toDouble(),
-      };
+    final Map<String, dynamic> body = {
+      'id': productId,
+      'sea_qty': seaQty,
+      'air_qty': airQty,
+      'local_qty': localQty,
+      'local_price': localUnitPrice,
+    };
 
-      final res = await http.post(
+    if (shipmentDate != null) {
+      body['shipmentdate'] = shipmentDate.toIso8601String();
+    }
+
+    await _performAction(
+      () => http.post(
         Uri.parse('$baseUrl/products/add-stock'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(body),
+      ),
+      successMsg: 'Stock Updated',
+    );
+  }
+
+  // Bulk Stock Add
+  Future<bool> bulkAddStockMixed(List<Map<String, dynamic>> items) async {
+    isActionLoading.value = true;
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/products/bulk-add-stock'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(items),
       );
 
       if (res.statusCode == 200) {
-        await fetchProducts(); // Refresh UI with server's calculation
+        await fetchProducts();
         Get.snackbar(
-          'Stock Updated',
-          'Inventory increased & Avg Price recalculated.',
+          'Success',
+          'Bulk Stock Added Successfully',
           backgroundColor: Colors.green,
           colorText: Colors.white,
-          snackPosition: SnackPosition.BOTTOM,
         );
+        return true;
       } else {
-        _showError('Server Calculation Error: ${res.body}');
+        _handleErrorResponse(res);
+        return false;
       }
     } catch (e) {
-      _showError('Network Error: $e');
+      _showError("Network Error: $e");
+      return false;
     } finally {
       isActionLoading.value = false;
     }
   }
 
-  /// CLIENT-SIDE PREDICTION HELPER
-  double predictNewWAC(
-    Product product,
-    int addSea,
-    int addAir,
-    int addLocal,
-    double localPrice,
-  ) {
-    double oldValue = product.stockQty * product.avgPurchasePrice;
-
-    double seaUnitCost =
-        (product.yuan * product.currency) +
-        (product.weight * product.shipmentTax);
-
-    double airUnitCost =
-        (product.yuan * product.currency) +
-        (product.weight * product.shipmentTaxAir);
-
-    double newBatchValue =
-        (addSea * seaUnitCost) +
-        (addAir * airUnitCost) +
-        (addLocal * localPrice);
-
-    int totalNewQty = product.stockQty + addSea + addAir + addLocal;
-    if (totalNewQty == 0) return 0.0;
-
-    return (oldValue + newBatchValue) / totalNewQty;
-  }
-
   // ==========================================
-  // 4. BULK OPERATIONS (OPTIMIZED - NO SERVER FETCH)
+  // 5. SALES / BULK UPDATE (Deduct Stock)
   // ==========================================
   Future<bool> updateStockBulk(List<Map<String, dynamic>> updates) async {
     isActionLoading.value = true;
     try {
-      // 1. Send the update to the server (Background sync)
       final res = await http.put(
         Uri.parse('$baseUrl/products/bulk-update-stock'),
         headers: {'Content-Type': 'application/json'},
@@ -367,39 +346,22 @@ class ProductController extends GetxController {
       );
 
       if (res.statusCode == 200) {
-        // 2. 🛑 REMOVED: await fetchProducts();
-
-        // 3. ✅ ADDED: Manually update the UI list
+        // Optimistic UI Update
         for (var update in updates) {
           int id = update['id'];
           int qtySold = update['qty'];
-
-          // Find the product in memory
           int index = allProducts.indexWhere((p) => p.id == id);
+
           if (index != -1) {
-            // Update the specific item's stock
             var product = allProducts[index];
-
-            // Create a new copy with updated stock (Good for GetX reactivity)
-            // assuming your Product model has a copyWith or just modifying properties:
-            product.stockQty =
-                (product.stockQty - qtySold) < 0
-                    ? 0
-                    : (product.stockQty - qtySold);
-
-            // Optional: Update local quantity/air/sea logic if you track that locally
-            // product.localQty = ...
-
+            product.stockQty = (product.stockQty - qtySold).clamp(0, 999999);
             allProducts[index] = product;
           }
         }
-
-        // 4. Force UI Refresh
         allProducts.refresh();
-
         return true;
       } else {
-        _showError("Bulk Update Failed: ${res.body}");
+        _handleErrorResponse(res);
         return false;
       }
     } catch (e) {
@@ -411,85 +373,35 @@ class ProductController extends GetxController {
   }
 
   // ==========================================
-  // 5. SETTINGS (Currency)
+  // 6. PRICING & CURRENCY
   // ==========================================
   Future<void> updateCurrencyAndRecalculate(double newCurrency) async {
-    isActionLoading.value = true;
-    try {
-      final res = await http.put(
+    await _performAction(
+      () => http.put(
         Uri.parse('$baseUrl/products/recalculate-prices'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'currency': newCurrency}),
-      );
-
-      if (res.statusCode == 200) {
-        currentCurrency.value = newCurrency;
-        currentPage.value = 1;
-        await fetchProducts();
-
-        Get.snackbar(
-          'Success',
-          'Prices Recalculated based on Rate: $newCurrency',
-          backgroundColor: Colors.green,
-          colorText: Colors.white,
-        );
-      } else {
-        _showError('Recalculation Failed');
-      }
-    } catch (e) {
-      _showError('Network Error');
-    } finally {
-      isActionLoading.value = false;
-    }
-  }
-
-  // ==========================================
-  // 6. CRUD OPERATIONS
-  // ==========================================
-  Future<void> createProduct(Map<String, dynamic> data) async {
-    await _performRequest(
-      () => http.post(
-        Uri.parse('$baseUrl/products/add'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(data),
       ),
-      successMessage: 'Product Created',
-    );
-  }
-
-  Future<void> updateProduct(int id, Map<String, dynamic> data) async {
-    await _performRequest(
-      () => http.put(
-        Uri.parse('$baseUrl/products/$id'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(data),
-      ),
-      successMessage: 'Product Updated',
-    );
-  }
-
-  Future<void> deleteProduct(int id) async {
-    await _performRequest(
-      () => http.delete(Uri.parse('$baseUrl/products/$id')),
-      successMessage: 'Product Deleted',
+      successMsg: 'Currency Updated & Prices Recalculated',
+      onSuccess: () => currentCurrency.value = newCurrency,
     );
   }
 
   // ==========================================
-  // 7. SERVICE & DAMAGE MANAGEMENT
+  // 7. SERVICE & LOGS
   // ==========================================
   Future<void> fetchServiceLogs() async {
     isActionLoading.value = true;
     try {
       final res = await http.get(Uri.parse('$baseUrl/service/list'));
       if (res.statusCode == 200) {
-        List<dynamic> data = jsonDecode(res.body);
+        List data = jsonDecode(res.body);
         serviceLogs.assignAll(data.cast<Map<String, dynamic>>());
       } else {
-        _showError('Failed to fetch logs');
+        _handleErrorResponse(res);
       }
     } catch (e) {
-      _showError('Network Error: $e');
+      _showError('Fetch Logs Failed: $e');
     } finally {
       isActionLoading.value = false;
     }
@@ -502,124 +414,77 @@ class ProductController extends GetxController {
     required String type,
     required double currentAvgPrice,
   }) async {
-    isActionLoading.value = true;
-    try {
-      final body = {
-        'product_id': productId,
-        'model': model,
-        'qty': qty,
-        'type': type,
-        'current_avg_price': currentAvgPrice,
-      };
+    final body = {
+      'product_id': productId,
+      'model': model,
+      'qty': qty,
+      'type': type,
+      'current_avg_price': currentAvgPrice,
+    };
 
-      final res = await http.post(
+    await _performAction(
+      () => http.post(
         Uri.parse('$baseUrl/service/add'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(body),
-      );
-
-      if (res.statusCode == 200) {
-        await fetchProducts();
-        await fetchServiceLogs();
-        Get.snackbar(
-          'Success',
-          'Item added to $type list',
-          backgroundColor: Colors.orange,
-          colorText: Colors.white,
-        );
-      } else {
-        _showError('Failed to add to service: ${res.body}');
-      }
-    } catch (e) {
-      _showError('Network Error: $e');
-    } finally {
-      isActionLoading.value = false;
-    }
-  }
-
-  // ==========================================
-  // BULK ADD STOCK (WITH WAC CALCULATION)
-  // ==========================================
-  Future<bool> addBulkStockWithValuation(
-    List<Map<String, dynamic>> items,
-  ) async {
-    isActionLoading.value = true;
-    try {
-      final res = await http.post(
-        Uri.parse('$baseUrl/products/bulk-add-stock'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(items),
-      );
-
-      if (res.statusCode == 200) {
-        await fetchProducts();
-        return true;
-      } else {
-        _showError("Bulk Add Failed: ${res.body}");
-        return false;
-      }
-    } catch (e) {
-      _showError("Network Error: $e");
-      return false;
-    } finally {
-      isActionLoading.value = false;
-    }
+      ),
+      successMsg: 'Added to Service',
+      onSuccess: () => fetchServiceLogs(),
+    );
   }
 
   Future<void> returnFromService(int logId, int qty) async {
-    isActionLoading.value = true;
-    try {
-      final res = await http.post(
+    final body = {'log_id': logId, 'qty': qty};
+
+    await _performAction(
+      () => http.post(
         Uri.parse('$baseUrl/service/return'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'log_id': logId, 'qty': qty}),
-      );
-
-      if (res.statusCode == 200) {
-        await fetchProducts();
-        await fetchServiceLogs();
-
-        Get.snackbar(
-          'Success',
-          '$qty item(s) returned to stock',
-          backgroundColor: Colors.blue,
-          colorText: Colors.white,
-        );
-      } else {
-        _showError('Return Failed: ${res.body}');
-      }
-    } catch (e) {
-      _showError('Network Error: $e');
-    } finally {
-      isActionLoading.value = false;
-    }
+        body: jsonEncode(body),
+      ),
+      successMsg: 'Returned to Stock',
+      onSuccess: () => fetchServiceLogs(),
+    );
   }
 
   // ==========================================
-  // HELPERS
+  // HELPER METHODS
   // ==========================================
-  Future<void> _performRequest(
-    Future<http.Response> Function() request, {
-    required String successMessage,
+
+  Future<void> _performAction(
+    Future<http.Response> Function() action, {
+    required String successMsg,
+    Function? onSuccess,
   }) async {
     isActionLoading.value = true;
     try {
-      final res = await request();
+      final res = await action();
       if (res.statusCode == 200) {
-        await fetchProducts();
+        if (onSuccess != null) onSuccess();
+        await fetchProducts(); // Always refresh main list
         Get.snackbar(
           'Success',
-          successMessage,
+          successMsg,
           backgroundColor: Colors.green,
           colorText: Colors.white,
         );
       } else {
-        _showError('Operation Failed: ${res.body}');
+        _handleErrorResponse(res);
       }
     } catch (e) {
-      _showError('Network Error');
+      _showError('Network Error: $e');
     } finally {
       isActionLoading.value = false;
+    }
+  }
+
+  void _handleErrorResponse(http.Response res) {
+    try {
+      final body = jsonDecode(res.body);
+      String msg = body['error'] ?? 'Server Error: ${res.statusCode}';
+      _showError(msg);
+    } catch (_) {
+      _showError('Server Error: ${res.statusCode}');
     }
   }
 
@@ -630,11 +495,28 @@ class ProductController extends GetxController {
       backgroundColor: Colors.redAccent,
       colorText: Colors.white,
       snackPosition: SnackPosition.BOTTOM,
+      duration: const Duration(seconds: 4),
     );
   }
 
-  void goToPage(int page) {
-    currentPage.value = page;
+  // Pagination & Search Logic (MAIN LIST)
+  void search(String text) {
+    if (searchText.value == text) return;
+    searchText.value = text;
+    currentPage.value = 1;
+
+    // Use the MAIN debounce timer
+    if (_mainSearchDebounce?.isActive ?? false) _mainSearchDebounce!.cancel();
+    _mainSearchDebounce = Timer(
+      const Duration(milliseconds: 600),
+      fetchProducts,
+    );
+  }
+
+  void selectBrand(String brand) {
+    if (selectedBrand.value == brand) return;
+    selectedBrand.value = brand;
+    currentPage.value = 1;
     fetchProducts();
   }
 
@@ -652,14 +534,23 @@ class ProductController extends GetxController {
     }
   }
 
+  // Pagination (SHORTLIST)
+  void nextShortlistPage() {
+    if ((shortlistPage.value * shortlistLimit.value) < shortlistTotal.value) {
+      fetchShortList(page: shortlistPage.value + 1);
+    }
+  }
+
+  void prevShortlistPage() {
+    if (shortlistPage.value > 1) {
+      fetchShortList(page: shortlistPage.value - 1);
+    }
+  }
+
   List<String> get brands {
     final unique = allProducts.map((e) => e.brand).toSet().toList();
     unique.sort();
     return ['All', ...unique];
-  }
-
-  double get totalStockValuation {
-    return overallTotalValuation.value;
   }
 
   String get formattedTotalValuation {
@@ -669,5 +560,26 @@ class ProductController extends GetxController {
           RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
           (Match m) => '${m[1]},',
         );
+  }
+
+
+
+  // 2. EXPORT FORMATTER
+  List<List<String>> formatForPdf(List<Product> products) {
+    List<List<String>> rows = [
+      ['Product Name', 'Model', 'Stock', 'On Way', 'Alert', 'Shortage'],
+    ];
+    for (var p in products) {
+      final onWay = onWayStockMap[p.id] ?? 0;
+      rows.add([
+        p.name,
+        p.model,
+        p.stockQty.toString(),
+        onWay > 0 ? onWay.toString() : '-',
+        p.alertQty.toString(),
+        (p.alertQty - p.stockQty).toString(),
+      ]);
+    }
+    return rows;
   }
 }

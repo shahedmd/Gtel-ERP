@@ -3,11 +3,13 @@
 import 'dart:ui'; // Required for PointerDeviceKind
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:intl/intl.dart'; // Added for Date Formatting
-import 'package:gtel_erp/Stock/shortlist.dart'; // Ensure path is correct
-import 'Service/servicepage.dart'; // Ensure path is correct
+import 'package:gtel_erp/Shipment/controller.dart';
+import 'package:gtel_erp/Stock/allshipmentlist.dart';
+import 'package:intl/intl.dart';
+import 'package:gtel_erp/Stock/shortlist.dart';
+import 'Service/servicepage.dart';
 import 'controller.dart';
-import 'edit.dart'; // Ensure path is correct
+import 'edit.dart';
 import 'model.dart';
 
 // THIS CLASS ENABLES MOUSE DRAGGING FOR HORIZONTAL SCROLL
@@ -29,12 +31,12 @@ class ProductScreen extends StatelessWidget {
   final ScrollController _verticalScrollController = ScrollController();
   final ScrollController _horizontalScrollController = ScrollController();
 
+  final ShipmentController shipmentController = Get.put(ShipmentController());
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(
-        0xFFF3F4F6,
-      ), // Modern Light Grey ERP Background
+      backgroundColor: const Color(0xFFF3F4F6),
       appBar: _buildAppBar(),
       body: ScrollConfiguration(
         behavior: MyCustomScrollBehavior(),
@@ -61,7 +63,7 @@ class ProductScreen extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // A. CONTROL TOOLBAR (Search, Filter, Export)
+                    // A. CONTROL TOOLBAR (Search, Filter)
                     _buildControlToolbar(),
                     const Divider(height: 1, color: Color(0xFFE5E7EB)),
 
@@ -80,16 +82,14 @@ class ProductScreen extends StatelessWidget {
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => showCreateProductDialog(controller),
-        backgroundColor: const Color(0xFF2563EB), // Royal Blue
+        backgroundColor: const Color(0xFF2563EB),
         elevation: 4,
         label: const Text(
           'Add Product',
           style: TextStyle(fontWeight: FontWeight.w600, color: Colors.white),
         ),
         icon: const Icon(Icons.add, color: Colors.white),
-
-        heroTag:
-            FloatingActionButtonLocation.centerFloat, // Change location here
+        heroTag: FloatingActionButtonLocation.centerFloat,
       ),
     );
   }
@@ -108,7 +108,7 @@ class ProductScreen extends StatelessWidget {
             style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.w700,
-              color: Color(0xFF1E293B), // Slate 800
+              color: Color(0xFF1E293B),
             ),
           ),
         ],
@@ -120,7 +120,12 @@ class ProductScreen extends StatelessWidget {
         child: Container(color: const Color(0xFFE2E8F0), height: 1),
       ),
       actions: [
-        // Service Center Button
+        TextButton.icon(
+          onPressed: () => Get.to(() => OnGoingShipmentsPage()),
+          style: TextButton.styleFrom(foregroundColor: Colors.orange[700]),
+          icon: const Icon(Icons.local_shipping, size: 20),
+          label: const Text("Upcomming Shipment List"),
+        ),
         TextButton.icon(
           onPressed: () => Get.to(() => ServicePage()),
           style: TextButton.styleFrom(foregroundColor: Colors.orange[700]),
@@ -128,7 +133,6 @@ class ProductScreen extends StatelessWidget {
           label: const Text("Service Center"),
         ),
         const SizedBox(width: 8),
-        // Low Stock Button
         TextButton.icon(
           onPressed: () => Get.to(() => ShortlistPage()),
           style: TextButton.styleFrom(
@@ -455,7 +459,6 @@ class ProductScreen extends StatelessWidget {
   // COLUMNS DEFINITION
   // ------------------------------------
   List<DataColumn> _getColumns() {
-    // Helper for Styled Header Text
     DataColumn col(String name, {bool isNumeric = false}) {
       return DataColumn(
         numeric: isNumeric,
@@ -464,7 +467,7 @@ class ProductScreen extends StatelessWidget {
           style: const TextStyle(
             fontWeight: FontWeight.w700,
             fontSize: 12,
-            color: Color(0xFF64748B), // Slate 500
+            color: Color(0xFF64748B),
             letterSpacing: 0.5,
           ),
         ),
@@ -474,9 +477,9 @@ class ProductScreen extends StatelessWidget {
     return [
       col('Name'),
       col('Model'),
-      col('Brand'),
-      col('Status'), // New Status Column
+      col('Status'),
       col('Stock', isNumeric: true),
+      col('On Way', isNumeric: true), // <--- NEW COLUMN
       col('Sea Qty', isNumeric: true),
       col('Air Qty', isNumeric: true),
       col('Avg Cost', isNumeric: true),
@@ -492,37 +495,63 @@ class ProductScreen extends StatelessWidget {
   // ------------------------------------
   List<DataRow> _getRows(BuildContext context) {
     return controller.allProducts.map((p) {
+      // NEW: Get OTW value from ShipmentController
+      // Obx is technically not needed inside DataRow builder if the parent widget refreshes,
+      // but to be reactive to JUST shipment changes, we rely on the stream updates.
+      // Since GetX rebuilds the table when variables change, we can just access the map.
+      int onWay = shipmentController.getOnWayQty(p.id);
+
       return DataRow(
         cells: [
-            DataCell(
+          DataCell(
             Text(
               p.name,
               style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
             ),
           ),
-          // 1. Model
           DataCell(
             Text(
               p.model,
               style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
             ),
           ),
-          // 2. Brand
-          DataCell(Text(p.brand)),
-          // 3. Status Badge
           DataCell(_buildStockBadge(p.stockQty, p.alertQty)),
-          // 4. Total Stock
+
           DataCell(
             Text(
               p.stockQty.toString(),
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
           ),
-          // 5. Sea
+
+          // --- NEW: ON WAY CELL ---
+          DataCell(
+            onWay > 0
+                ? Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: Colors.blue.shade200),
+                  ),
+                  child: Text(
+                    onWay.toString(),
+                    style: TextStyle(
+                      color: Colors.blue.shade800,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                )
+                : const Text("-", style: TextStyle(color: Colors.grey)),
+          ),
+
+          // ------------------------
           DataCell(Text(p.seaStockQty.toString())),
-          // 6. Air
           DataCell(Text(p.airStockQty.toString())),
-          // 7. Avg Cost (Green)
           DataCell(
             Text(
               p.avgPurchasePrice.toStringAsFixed(2),
@@ -532,7 +561,6 @@ class ProductScreen extends StatelessWidget {
               ),
             ),
           ),
-          // 8. Date
           DataCell(
             Text(
               p.shipmentDate != null
@@ -541,11 +569,8 @@ class ProductScreen extends StatelessWidget {
               style: const TextStyle(fontSize: 12, color: Colors.grey),
             ),
           ),
-          // 9. Yuan
           DataCell(Text(p.agent.toStringAsFixed(2))),
-          // 10. Weight
           DataCell(Text(p.wholesale.toStringAsFixed(2))),
-          // 11. Actions
           DataCell(_buildActions(context, p)),
         ],
       );
@@ -592,7 +617,6 @@ class ProductScreen extends StatelessWidget {
           onTap: () => showEditProductDialog(p, controller),
         ),
         const SizedBox(width: 4),
-        // More Menu
         PopupMenuButton<String>(
           icon: Icon(Icons.more_vert, size: 20, color: Colors.grey[600]),
           onSelected: (val) {
@@ -680,11 +704,8 @@ class ProductScreen extends StatelessWidget {
         final int current = controller.currentPage.value;
         final int size = controller.pageSize.value;
         final int totalPages = (total / size).ceil();
-        final int start = ((current - 1) * size) + 1;
+        final int start = total == 0 ? 0 : ((current - 1) * size) + 1;
         final int end = (current * size) > total ? total : (current * size);
-
-        // Safe display if total is 0
-        if (total == 0) return const SizedBox();
 
         return Row(
           children: [
@@ -695,7 +716,7 @@ class ProductScreen extends StatelessWidget {
             Row(
               children: [
                 IconButton(
-                  icon: const Icon(Icons.chevron_left, color: Colors.black,),
+                  icon: const Icon(Icons.chevron_left, color: Colors.black),
                   onPressed:
                       current > 1 ? () => controller.previousPage() : null,
                   tooltip: "Previous Page",
@@ -718,7 +739,7 @@ class ProductScreen extends StatelessWidget {
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.chevron_right, color: Colors.black,),
+                  icon: const Icon(Icons.chevron_right, color: Colors.black),
                   onPressed:
                       current < totalPages ? () => controller.nextPage() : null,
                   tooltip: "Next Page",
@@ -810,20 +831,33 @@ class ProductScreen extends StatelessWidget {
     );
   }
 
+  // UPDATED: Now supports Date Selection & Local WAC Prediction
   void _showAddStockDialog(Product p, ProductController controller) {
     final seaQtyC = TextEditingController(text: '0');
     final airQtyC = TextEditingController(text: '0');
     final localQtyC = TextEditingController(text: '0');
     final localPriceC = TextEditingController(text: '0');
+    final Rx<DateTime?> selectedDate = Rx<DateTime?>(null);
 
     final RxDouble predictedAvg = p.avgPurchasePrice.obs;
 
+    // Local Logic to predict price (since controller focuses on server)
     void calculatePrediction() {
       int s = int.tryParse(seaQtyC.text) ?? 0;
       int a = int.tryParse(airQtyC.text) ?? 0;
       int l = int.tryParse(localQtyC.text) ?? 0;
       double lp = double.tryParse(localPriceC.text) ?? 0.0;
-      predictedAvg.value = controller.predictNewWAC(p, s, a, l, lp);
+
+      double oldValue = p.stockQty * p.avgPurchasePrice;
+      double seaUnitCost = (p.yuan * p.currency) + (p.weight * p.shipmentTax);
+      double airUnitCost =
+          (p.yuan * p.currency) + (p.weight * p.shipmentTaxAir);
+      double newBatchValue = (s * seaUnitCost) + (a * airUnitCost) + (l * lp);
+
+      int totalNewQty = p.stockQty + s + a + l;
+      if (totalNewQty > 0) {
+        predictedAvg.value = (oldValue + newBatchValue) / totalNewQty;
+      }
     }
 
     Get.dialog(
@@ -876,6 +910,7 @@ class ProductScreen extends StatelessWidget {
                   Icons.airplanemode_active,
                   calculatePrediction,
                 ),
+
                 const Divider(height: 30),
                 const Text(
                   "Local Purchase",
@@ -903,6 +938,36 @@ class ProductScreen extends StatelessWidget {
                     ),
                   ],
                 ),
+                const SizedBox(height: 20),
+
+                // DATE PICKER FOR SHIPMENT
+                Obx(
+                  () => InkWell(
+                    onTap: () async {
+                      DateTime? picked = await showDatePicker(
+                        context: Get.context!,
+                        initialDate: DateTime.now(),
+                        firstDate: DateTime(2020),
+                        lastDate: DateTime(2030),
+                      );
+                      if (picked != null) selectedDate.value = picked;
+                    },
+                    child: InputDecorator(
+                      decoration: const InputDecoration(
+                        labelText: 'Shipment Date (Optional)',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.calendar_today, size: 18),
+                      ),
+                      child: Text(
+                        selectedDate.value == null
+                            ? 'Select Date'
+                            : DateFormat(
+                              'dd MMM yyyy',
+                            ).format(selectedDate.value!),
+                      ),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -918,6 +983,8 @@ class ProductScreen extends StatelessWidget {
                 airQty: int.tryParse(airQtyC.text) ?? 0,
                 localQty: int.tryParse(localQtyC.text) ?? 0,
                 localUnitPrice: double.tryParse(localPriceC.text) ?? 0.0,
+                shipmentDate:
+                    selectedDate.value, // Passed to updated controller
               );
               Get.back();
             },

@@ -1581,18 +1581,7 @@ class _ProductRow extends StatelessWidget {
                   ),
                 ),
               ),
-              // 2. Brand (New)
-              Expanded(
-                flex: 2,
-                child: Text(
-                  product.brand,
-                  style: const TextStyle(
-                    fontSize: metaSize,
-                    color: Colors.blueGrey,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ),
+             
               // 3. Model
               Expanded(
                 flex: 2,

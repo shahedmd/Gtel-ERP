@@ -699,8 +699,7 @@ class DailySalesPage extends StatelessWidget {
                     ),
                   ),
                 ),
-              ),
-              // 3. Method (Updated for Bank Info / Multi-Line)
+              ), 
               Expanded(
                 flex: 3, // Increased flex
                 child: Text(

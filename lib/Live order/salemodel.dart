@@ -1099,9 +1099,9 @@ class LiveSalesController extends GetxController {
                       item['name'],
                       style: pw.TextStyle(font: bold, fontSize: 9),
                     ),
-                    if (item['brand'] != null || item['model'] != null)
+                    if (item['model'] != null)
                       pw.Text(
-                        "${item['brand'] ?? ''} ${item['model'] ?? ''}",
+                        "${item['model'] ?? ''}",
                         style: pw.TextStyle(
                           font: italic,
                           fontSize: 8,

@@ -376,7 +376,6 @@ class CashDrawerController extends GetxController {
       allTx.sort((a, b) => b.date.compareTo(a.date));
       recentTransactions.assignAll(allTx);
     } catch (e) {
-      print("Cash Drawer Error: $e");
       Get.snackbar("Error", "Could not calculate cash drawer.");
     } finally {
       isLoading.value = false;

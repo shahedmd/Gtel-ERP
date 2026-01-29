@@ -433,14 +433,15 @@ class DailySalesController extends GetxController {
       if (type.contains('bank')) {
         bank = totalAmount;
       }
-       if (type.contains('bkash')) {
-         bkash = totalAmount;
-       }
-       if (type.contains('nagad')) {
-         nagad = totalAmount;
-       }  if (type == 'cash') {
-         cash = totalAmount;
-       }
+      if (type.contains('bkash')) {
+        bkash = totalAmount;
+      }
+      if (type.contains('nagad')) {
+        nagad = totalAmount;
+      }
+      if (type == 'cash') {
+        cash = totalAmount;
+      }
     }
 
     List<String> parts = [];
@@ -661,10 +662,7 @@ class DailySalesController extends GetxController {
                 child: pw.Center(
                   child: pw.Text(
                     "DELIVERY CHALLAN",
-                    style: pw.TextStyle(
-                      fontSize: 14,
-                      letterSpacing: 2,
-                    ),
+                    style: pw.TextStyle(fontSize: 14, letterSpacing: 2),
                   ),
                 ),
               ),
@@ -868,9 +866,9 @@ class DailySalesController extends GetxController {
                       item['name'],
                       style: pw.TextStyle(font: bold, fontSize: 9),
                     ),
-                    if (item['brand'] != null || item['model'] != null)
+                    if (item['model'] != null)
                       pw.Text(
-                        "${item['brand'] ?? ''} ${item['model'] ?? ''}",
+                        "${item['model'] ?? ''}",
                         style: pw.TextStyle(
                           font: italic,
                           fontSize: 8,
