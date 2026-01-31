@@ -1,41 +1,45 @@
 // ignore_for_file: deprecated_member_use
-
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:gtel_erp/Shipment/controller.dart'; // Adjust path
-import 'package:gtel_erp/Stock/controller.dart'; // Adjust path
-import 'package:gtel_erp/Stock/model.dart'; // Adjust path
+import 'package:gtel_erp/Shipment/controller.dart';
+import 'package:gtel_erp/Stock/controller.dart';
+import 'package:gtel_erp/Stock/model.dart';
 
-/// ==========================================================
-/// MODERN POS SHIPMENT ENTRY DIALOG
-/// ==========================================================
 void showShipmentEntryDialog(
   Product p,
   ShipmentController shipCtrl,
   ProductController prodCtrl,
+  double globalRate,  
 ) {
-  // --- 1. CONTROLLERS (Pre-filled) ---
   final nameC = TextEditingController(text: p.name);
   final categoryC = TextEditingController(text: p.category);
   final brandC = TextEditingController(text: p.brand);
   final modelC = TextEditingController(text: p.model);
 
+  // LOGIC: Use Global Rate if provided, otherwise fallback to product rate
+  // If Global Rate is set in the previous screen, it overrides the product's saved rate for this entry
+  double effectiveRate = (globalRate > 0) ? globalRate : p.currency;
+
   // Costs
   final weightC = TextEditingController(text: p.weight.toString());
   final yuanC = TextEditingController(text: p.yuan.toString());
-  final currencyC = TextEditingController(text: p.currency.toString());
+  final currencyC = TextEditingController(text: effectiveRate.toString());
   final seaTaxC = TextEditingController(text: p.shipmentTax.toString());
   final airTaxC = TextEditingController(text: p.shipmentTaxAir.toString());
 
-  // Calculated Results
-  final seaPriceC = TextEditingController(text: p.sea.toStringAsFixed(2));
-  final airPriceC = TextEditingController(text: p.air.toStringAsFixed(2));
+  // Trigger initial calculation with the effective rate
+  double initSea = (p.yuan * effectiveRate) + (p.weight * p.shipmentTax);
+  double initAir = (p.yuan * effectiveRate) + (p.weight * p.shipmentTaxAir);
 
-  // --- NEW: SALES PRICING ---
+  // Calculated Results
+  final seaPriceC = TextEditingController(text: initSea.toStringAsFixed(2));
+  final airPriceC = TextEditingController(text: initAir.toStringAsFixed(2));
+
+  // Sales Pricing
   final agentC = TextEditingController(text: p.agent.toString());
   final wholesaleC = TextEditingController(text: p.wholesale.toString());
 
-  // Current Stock (Read Only)
+  // Current Stock (Read Only) - RESTORED
   final oldSeaStockC = TextEditingController(text: p.seaStockQty.toString());
   final oldAirStockC = TextEditingController(text: p.airStockQty.toString());
   final oldLocalStockC = TextEditingController(text: p.localQty.toString());
@@ -44,6 +48,9 @@ void showShipmentEntryDialog(
   final addSeaQtyC = TextEditingController(text: '0');
   final addAirQtyC = TextEditingController(text: '0');
   final cartonNoC = TextEditingController();
+
+  // New: Get On Way Quantity
+  int onWayQty = shipCtrl.getOnWayQty(p.id);
 
   // --- 2. LIVE CALCULATION LOGIC ---
   void recalculatePrices() {
@@ -77,11 +84,10 @@ void showShipmentEntryDialog(
       insetPadding: const EdgeInsets.all(16),
       child: Container(
         width: 600,
-        constraints: const BoxConstraints(
-          maxHeight: 750,
-        ), // Increased height slightly
+        constraints: const BoxConstraints(maxHeight: 800),
         child: Column(
           children: [
+            // HEADER
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
               decoration: BoxDecoration(
@@ -114,6 +120,26 @@ void showShipmentEntryDialog(
                     ],
                   ),
                   const Spacer(),
+                  // NEW: ON WAY BADGE IN HEADER
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.orange,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      "On Way: $onWayQty",
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
                   InkWell(
                     onTap: () => Get.back(),
                     child: const Icon(Icons.close, color: Colors.white),
@@ -158,6 +184,7 @@ void showShipmentEntryDialog(
                           child: _posInput(weightC, "Weight (KG)", isNum: true),
                         ),
                         const SizedBox(width: 12),
+                        // This will be auto-filled from Global Rate if set
                         Expanded(
                           child: _posInput(currencyC, "Ex. Rate", isNum: true),
                         ),
@@ -201,7 +228,7 @@ void showShipmentEntryDialog(
                       ],
                     ),
 
-                    // --- NEW SECTION: SALES PRICING ---
+                    // --- SALES PRICING ---
                     const SizedBox(height: 20),
                     _posHeader("SALES PRICING (UPDATE)"),
                     Row(
@@ -220,7 +247,7 @@ void showShipmentEntryDialog(
                       ],
                     ),
 
-                    // D. CURRENT WAREHOUSE STOCK
+                    // D. CURRENT WAREHOUSE STOCK (RESTORED)
                     const SizedBox(height: 20),
                     _posHeader("CURRENT WAREHOUSE STOCK (REF ONLY)"),
                     Container(
@@ -354,8 +381,6 @@ void showShipmentEntryDialog(
                             double.tryParse(airTaxC.text) ?? p.shipmentTaxAir,
                         'sea': double.tryParse(seaPriceC.text) ?? p.sea,
                         'air': double.tryParse(airPriceC.text) ?? p.air,
-
-                        // NEW FIELDS ADDED HERE
                         'agent': double.tryParse(agentC.text) ?? p.agent,
                         'wholesale':
                             double.tryParse(wholesaleC.text) ?? p.wholesale,
@@ -510,6 +535,7 @@ Widget _posReadOnly(
   );
 }
 
+// RESTORED HELPER WIDGETS
 Widget _stockBadge(String label, String value) {
   return Column(
     children: [

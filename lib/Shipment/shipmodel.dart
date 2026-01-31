@@ -5,14 +5,20 @@ class ShipmentItem {
   final String productName;
   final String productModel;
   final String productBrand;
-  final String productCategory; // Added for better filtering/reporting
-  final double
-  unitWeightSnapshot; // Added to calculate accurate logistics weight later
+  final String productCategory;
+  final double unitWeightSnapshot;
+
+  // FINANCIAL (What we pay for)
   final int seaQty;
   final int airQty;
+
+  // PHYSICAL (What we receive - Default equals financial, but editable)
+  final int receivedSeaQty;
+  final int receivedAirQty;
+
   final String cartonNo;
 
-  // Snapshot prices to calculate accurate shipment cost (Landed Cost at time of shipment)
+  // Snapshot prices
   final double seaPriceSnapshot;
   final double airPriceSnapshot;
 
@@ -25,10 +31,15 @@ class ShipmentItem {
     required this.unitWeightSnapshot,
     required this.seaQty,
     required this.airQty,
+    required this.receivedSeaQty,
+    required this.receivedAirQty,
     required this.cartonNo,
     required this.seaPriceSnapshot,
     required this.airPriceSnapshot,
   });
+
+  // Helper to calculate Loss/On Hold
+  int get lossQty => (seaQty + airQty) - (receivedSeaQty + receivedAirQty);
 
   Map<String, dynamic> toMap() {
     return {
@@ -40,6 +51,8 @@ class ShipmentItem {
       'unitWeightSnapshot': unitWeightSnapshot,
       'seaQty': seaQty,
       'airQty': airQty,
+      'receivedSeaQty': receivedSeaQty,
+      'receivedAirQty': receivedAirQty,
       'cartonNo': cartonNo,
       'seaPriceSnapshot': seaPriceSnapshot,
       'airPriceSnapshot': airPriceSnapshot,
@@ -56,38 +69,52 @@ class ShipmentItem {
       unitWeightSnapshot: (map['unitWeightSnapshot'] ?? 0.0).toDouble(),
       seaQty: map['seaQty'] ?? 0,
       airQty: map['airQty'] ?? 0,
+      // If received qty is missing (old data), default to ordered qty
+      receivedSeaQty: map['receivedSeaQty'] ?? map['seaQty'] ?? 0,
+      receivedAirQty: map['receivedAirQty'] ?? map['airQty'] ?? 0,
       cartonNo: map['cartonNo'] ?? '',
       seaPriceSnapshot: (map['seaPriceSnapshot'] ?? 0.0).toDouble(),
       airPriceSnapshot: (map['airPriceSnapshot'] ?? 0.0).toDouble(),
     );
   }
 
-  // --- HELPERS ---
-
-  // Total cost of this line item
+  // Cost is ALWAYS based on Ordered Qty (Vendor Contract)
   double get totalItemCost =>
       (seaQty * seaPriceSnapshot) + (airQty * airPriceSnapshot);
 
-  // Total weight of this line item (Used for manifest weight sanity checks)
   double get totalLineWeight => (seaQty + airQty) * unitWeightSnapshot;
 }
 
 class ShipmentModel {
   String? docId;
   final String shipmentName;
-  final DateTime createdDate; // Departure Date
+  final DateTime purchaseDate; // Primary Date
   final DateTime? arrivalDate; // Entry Date
+
+  final String? vendorId;
+  final String vendorName;
+  final String carrier;
+  final double exchangeRate;
+
+  // REPORTING
+  final String? carrierReport;
+
   final int totalCartons;
   final double totalWeight;
-  final double totalAmount; // TOTAL SHIPMENT COST (Calculated)
+  final double totalAmount;
   final bool isReceived;
   final List<ShipmentItem> items;
 
   ShipmentModel({
     this.docId,
     required this.shipmentName,
-    required this.createdDate,
+    required this.purchaseDate,
     this.arrivalDate,
+    this.vendorId,
+    required this.vendorName,
+    required this.carrier,
+    required this.exchangeRate,
+    this.carrierReport,
     required this.totalCartons,
     required this.totalWeight,
     required this.totalAmount,
@@ -98,9 +125,14 @@ class ShipmentModel {
   Map<String, dynamic> toMap() {
     return {
       'shipmentName': shipmentName,
-      'createdDate': Timestamp.fromDate(createdDate),
+      'purchaseDate': Timestamp.fromDate(purchaseDate),
       'arrivalDate':
           arrivalDate != null ? Timestamp.fromDate(arrivalDate!) : null,
+      'vendorId': vendorId,
+      'vendorName': vendorName,
+      'carrier': carrier,
+      'exchangeRate': exchangeRate,
+      'carrierReport': carrierReport,
       'totalCartons': totalCartons,
       'totalWeight': totalWeight,
       'totalAmount': totalAmount,
@@ -114,11 +146,20 @@ class ShipmentModel {
     return ShipmentModel(
       docId: doc.id,
       shipmentName: data['shipmentName'] ?? 'Unknown',
-      createdDate: (data['createdDate'] as Timestamp).toDate(),
+      // Removed createdDate, defaulting to purchaseDate if legacy data needs it
+      purchaseDate:
+          data['purchaseDate'] != null
+              ? (data['purchaseDate'] as Timestamp).toDate()
+              : DateTime.now(),
       arrivalDate:
           data['arrivalDate'] != null
               ? (data['arrivalDate'] as Timestamp).toDate()
               : null,
+      vendorId: data['vendorId'],
+      vendorName: data['vendorName'] ?? 'N/A',
+      carrier: data['carrier'] ?? 'N/A',
+      exchangeRate: (data['exchangeRate'] ?? 0.0).toDouble(),
+      carrierReport: data['carrierReport'],
       totalCartons: data['totalCartons'] ?? 0,
       totalWeight: (data['totalWeight'] ?? 0.0).toDouble(),
       totalAmount: (data['totalAmount'] ?? 0.0).toDouble(),

@@ -1,5 +1,4 @@
 // ignore_for_file: deprecated_member_use
-
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -14,14 +13,12 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'shipmodel.dart';
 
-// =========================================================
-// 1. HELPER CLASSES FOR AGGREGATION (NEW)
-// =========================================================
+
+
 class IncomingDetail {
   final String shipmentName;
   final DateTime date;
   final int qty;
-
   IncomingDetail({
     required this.shipmentName,
     required this.date,
@@ -34,21 +31,51 @@ class AggregatedOnWayProduct {
   final String model;
   final String name;
   final List<IncomingDetail> incomingDetails;
-
   AggregatedOnWayProduct({
     required this.productId,
     required this.model,
     required this.name,
     required this.incomingDetails,
   });
-
-  // Calculate total across all shipments for this product
   int get totalQty => incomingDetails.fold(0, (sumv, item) => sumv + item.qty);
 }
 
-// =========================================================
-// 2. MAIN CONTROLLER
-// =========================================================
+// --- NEW MODEL FOR MISSING ITEMS ---
+class OnHoldItem {
+  final String docId;
+  final String shipmentName;
+  final String carrier;
+  final DateTime purchaseDate;
+  final int productId;
+  final String productName;
+  final String productModel;
+  final int missingQty;
+
+  OnHoldItem({
+    required this.docId,
+    required this.shipmentName,
+    required this.carrier,
+    required this.purchaseDate,
+    required this.productId,
+    required this.productName,
+    required this.productModel,
+    required this.missingQty,
+  });
+
+  factory OnHoldItem.fromSnapshot(DocumentSnapshot doc) {
+    final data = doc.data() as Map<String, dynamic>;
+    return OnHoldItem(
+      docId: doc.id,
+      shipmentName: data['shipmentName'] ?? '',
+      carrier: data['carrier'] ?? '',
+      purchaseDate: (data['purchaseDate'] as Timestamp).toDate(),
+      productId: data['productId'] ?? 0,
+      productName: data['productName'] ?? '',
+      productModel: data['productModel'] ?? '',
+      missingQty: data['missingQty'] ?? 0,
+    );
+  }
+}
 
 class ShipmentController extends GetxController {
   final ProductController productController = Get.find<ProductController>();
@@ -56,18 +83,33 @@ class ShipmentController extends GetxController {
   final VendorController vendorController = Get.put(VendorController());
 
   // --- STATE ---
-  final RxList<ShipmentModel> shipments = <ShipmentModel>[].obs;
-
-  // NEW: LIST FOR THE UI (Product Centric)
+  final RxList<ShipmentModel> allShipments = <ShipmentModel>[].obs;
+  final RxList<ShipmentModel> filteredShipments = <ShipmentModel>[].obs;
   final RxList<AggregatedOnWayProduct> aggregatedList =
       <AggregatedOnWayProduct>[].obs;
 
-  final RxBool isLoading = false.obs;
-  StreamSubscription? _shipmentSubscription;
+  // NEW: ON HOLD LIST
+  final RxList<OnHoldItem> onHoldItems = <OnHoldItem>[].obs;
+
+  // --- CONFIG ---
+  final List<String> carrierList = [
+    "SAJ Express",
+    "SF Express",
+    "DHL",
+    "FedEx",
+    "Cosco Shipping",
+    "Local Cargo",
+    "Other",
+  ];
+  final RxString filterCarrier = ''.obs;
+  final RxString filterVendor = ''.obs;
 
   // --- MANIFEST INPUTS ---
   final RxList<ShipmentItem> currentManifestItems = <ShipmentItem>[].obs;
-  final Rx<DateTime> shipmentDateInput = DateTime.now().obs;
+  final Rx<DateTime> purchaseDateInput = DateTime.now().obs;
+  final Rxn<String> selectedVendorId = Rxn<String>();
+  final Rxn<String> selectedVendorName = Rxn<String>();
+  final Rxn<String> selectedCarrier = Rxn<String>();
 
   final TextEditingController totalCartonCtrl = TextEditingController(
     text: '0',
@@ -77,119 +119,125 @@ class ShipmentController extends GetxController {
   );
   final TextEditingController shipmentNameCtrl = TextEditingController();
   final TextEditingController searchCtrl = TextEditingController();
+  final TextEditingController globalExchangeRateCtrl = TextEditingController(
+    text: '0.0',
+  );
 
-  // --- FORMATTER HELPER ---
+  final RxBool isLoading = false.obs;
+  final RxMap<int, int> onWayStockMap = <int, int>{}.obs;
+
+  StreamSubscription? _shipmentSubscription;
+  StreamSubscription? _onHoldSubscription;
+
   final NumberFormat _currencyFormatter = NumberFormat('#,##0.00', 'en_US');
-
   String formatMoney(double amount) =>
       "BDT ${_currencyFormatter.format(amount)}";
 
-  // --- DASHBOARD TOTALS ---
-  double get totalOnWayValue => shipments
+  // --- GETTERS ---
+  double get totalOnWayValue => allShipments
       .where((s) => !s.isReceived)
       .fold(0.0, (sumv, item) => sumv + item.totalAmount);
-
-  double get totalCompletedValue => shipments
+  double get totalCompletedValue => allShipments
       .where((s) => s.isReceived)
       .fold(0.0, (sumv, item) => sumv + item.totalAmount);
-
   double get currentManifestTotalCost =>
       currentManifestItems.fold(0.0, (sumv, item) => sumv + item.totalItemCost);
-
   String get totalOnWayDisplay => formatMoney(totalOnWayValue);
   String get totalCompletedDisplay => formatMoney(totalCompletedValue);
   String get currentManifestTotalDisplay =>
       formatMoney(currentManifestTotalCost);
 
-  final RxMap<int, int> onWayStockMap = <int, int>{}.obs;
-
   @override
   void onInit() {
     super.onInit();
     bindFirestoreStream();
+    bindOnHoldStream(); // NEW LISTENER
+    ever(filterCarrier, (_) => _applyFilters());
+    ever(filterVendor, (_) => _applyFilters());
   }
 
   @override
   void onClose() {
     _shipmentSubscription?.cancel();
+    _onHoldSubscription?.cancel();
     totalCartonCtrl.dispose();
     totalWeightCtrl.dispose();
     shipmentNameCtrl.dispose();
     searchCtrl.dispose();
+    globalExchangeRateCtrl.dispose();
     super.onClose();
   }
 
   void onSearchChanged(String val) => productController.search(val);
 
-  // ==========================================
-  // FIRESTORE LISTENER & AGGREGATION LOGIC
-  // ==========================================
+  // --- FIRESTORE LISTENERS ---
   void bindFirestoreStream() {
     _shipmentSubscription = _firestore
         .collection('shipments')
-        .orderBy('createdDate', descending: true)
-        .limit(50)
+        .orderBy('purchaseDate', descending: true)
+        .limit(100)
         .snapshots()
-        .listen(
-          (event) {
-            // 1. Parse Shipments (Existing logic)
-            final loadedShipments =
-                event.docs.map((e) => ShipmentModel.fromSnapshot(e)).toList();
-            shipments.value = loadedShipments;
-
-            // 2. Calculate On Way Totals (Existing logic for Shortlist)
-            _calculateOnWayTotals(loadedShipments);
-
-            // 3. NEW: AGGREGATE DATA (For OnGoingShipmentsPage)
-            _aggregateOnWayData(loadedShipments);
-          },
-          onError: (e) {
-            print("Firestore Error: $e");
-          },
-        );
+        .listen((event) {
+          final loaded =
+              event.docs.map((e) => ShipmentModel.fromSnapshot(e)).toList();
+          allShipments.value = loaded;
+          _applyFilters();
+          _calculateOnWayTotals(loaded);
+          _aggregateOnWayData(loaded);
+        }, onError: (e) => print("Firestore Error: $e"));
   }
 
-  // Existing helper for ShortlistPage badges
+  // NEW: ON HOLD LISTENER
+  void bindOnHoldStream() {
+    _onHoldSubscription = _firestore
+        .collection('on_hold_items')
+        .orderBy('purchaseDate', descending: true)
+        .snapshots()
+        .listen((event) {
+          onHoldItems.value =
+              event.docs.map((e) => OnHoldItem.fromSnapshot(e)).toList();
+        });
+  }
+
+  void _applyFilters() {
+    List<ShipmentModel> temp = List.from(allShipments);
+    if (filterCarrier.value.isNotEmpty) {
+      temp = temp.where((s) => s.carrier == filterCarrier.value).toList();
+    }
+    if (filterVendor.value.isNotEmpty) {
+      temp = temp.where((s) => s.vendorId == filterVendor.value).toList();
+    }
+    filteredShipments.value = temp;
+  }
+
   void _calculateOnWayTotals(List<ShipmentModel> list) {
     final Map<int, int> tempMap = {};
     for (var shipment in list) {
       if (!shipment.isReceived) {
         for (var item in shipment.items) {
           int totalQty = item.seaQty + item.airQty;
-          if (tempMap.containsKey(item.productId)) {
-            tempMap[item.productId] = tempMap[item.productId]! + totalQty;
-          } else {
-            tempMap[item.productId] = totalQty;
-          }
+          tempMap[item.productId] = (tempMap[item.productId] ?? 0) + totalQty;
         }
       }
     }
     onWayStockMap.assignAll(tempMap);
   }
 
-  // NEW: Aggregation Logic (Product Centric)
-  void _aggregateOnWayData(List<ShipmentModel> allShipments) {
+  void _aggregateOnWayData(List<ShipmentModel> list) {
     Map<int, AggregatedOnWayProduct> tempMap = {};
-
-    for (var shipment in allShipments) {
-      if (shipment.isReceived) continue; // Skip received shipments
-
+    for (var shipment in list) {
+      if (shipment.isReceived) continue;
       for (var item in shipment.items) {
         int qty = item.seaQty + item.airQty;
         if (qty <= 0) continue;
-
-        // Create a detail object for this specific shipment
         final detail = IncomingDetail(
           shipmentName: shipment.shipmentName,
-          date: shipment.createdDate,
+          date: shipment.purchaseDate,
           qty: qty,
         );
-
-        // If product already exists in map, add detail to it
         if (tempMap.containsKey(item.productId)) {
           tempMap[item.productId]!.incomingDetails.add(detail);
         } else {
-          // New product found
           tempMap[item.productId] = AggregatedOnWayProduct(
             productId: item.productId,
             model: item.productModel,
@@ -199,23 +247,15 @@ class ShipmentController extends GetxController {
         }
       }
     }
-
-    // Sort details inside each product by date (oldest shipment first)
     for (var p in tempMap.values) {
       p.incomingDetails.sort((a, b) => a.date.compareTo(b.date));
     }
-
-    // Update UI list
     aggregatedList.assignAll(tempMap.values.toList());
   }
 
-  int getOnWayQty(int productId) {
-    return onWayStockMap[productId] ?? 0;
-  }
+  int getOnWayQty(int productId) => onWayStockMap[productId] ?? 0;
 
-  // ==========================================
-  // 1. ADD TO MANIFEST (AND UPDATE PRODUCT MASTER)
-  // ==========================================
+  // --- ADD TO MANIFEST ---
   Future<void> addToManifestAndVerify({
     required Product product,
     required Map<String, dynamic> updates,
@@ -225,9 +265,7 @@ class ShipmentController extends GetxController {
   }) async {
     isLoading.value = true;
     try {
-      // Helper: Prefer new value from 'updates', fallback to 'product'
       dynamic val(String key, dynamic current) => updates[key] ?? current;
-
       final Map<String, dynamic> serverBody = {
         'name': val('name', product.name),
         'category': product.category,
@@ -247,11 +285,9 @@ class ShipmentController extends GetxController {
         'shipmentno': int.tryParse(product.shipmentNo.toString()) ?? 0,
         'shipmentdate': product.shipmentDate?.toIso8601String(),
         'stock_qty': product.stockQty,
-        'avg_purchase_price': product.avgPurchasePrice,
         'sea_stock_qty': product.seaStockQty,
         'air_stock_qty': product.airStockQty,
         'local_qty': product.localQty,
-        'alert_qty': product.alertQty,
       };
 
       await productController.updateProduct(product.id, serverBody);
@@ -265,6 +301,8 @@ class ShipmentController extends GetxController {
         unitWeightSnapshot: (serverBody['weight'] as num).toDouble(),
         seaQty: seaQty,
         airQty: airQty,
+        receivedSeaQty: seaQty,
+        receivedAirQty: airQty,
         cartonNo: cartonNo,
         seaPriceSnapshot: (serverBody['sea'] as num).toDouble(),
         airPriceSnapshot: (serverBody['air'] as num).toDouble(),
@@ -272,11 +310,11 @@ class ShipmentController extends GetxController {
 
       currentManifestItems.add(item);
       Get.back();
-      Get.snackbar("Success", "Product Details Updated & Added to Manifest");
+      Get.snackbar("Success", "Added to Manifest");
     } catch (e) {
       Get.snackbar(
         "Error",
-        "Failed to update product: $e",
+        "Update failed: $e",
         backgroundColor: Colors.redAccent,
         colorText: Colors.white,
       );
@@ -287,23 +325,27 @@ class ShipmentController extends GetxController {
 
   void removeFromManifest(int index) => currentManifestItems.removeAt(index);
 
-  // ==========================================
-  // 2. SAVE MANIFEST TO FIRESTORE
-  // ==========================================
   Future<void> saveShipmentToFirestore() async {
     if (currentManifestItems.isEmpty) {
       Get.snackbar("Error", "No items to ship");
       return;
     }
-
+    if (selectedVendorId.value == null || selectedCarrier.value == null) {
+      Get.snackbar("Error", "Please select Vendor and Carrier");
+      return;
+    }
     isLoading.value = true;
     try {
       final newShipment = ShipmentModel(
         shipmentName:
             shipmentNameCtrl.text.isEmpty
-                ? "Shipment ${DateFormat('MM/dd').format(shipmentDateInput.value)}"
+                ? "Shipment ${DateFormat('MM/dd').format(purchaseDateInput.value)}"
                 : shipmentNameCtrl.text,
-        createdDate: shipmentDateInput.value,
+        purchaseDate: purchaseDateInput.value,
+        vendorId: selectedVendorId.value,
+        vendorName: selectedVendorName.value ?? 'Unknown',
+        carrier: selectedCarrier.value!,
+        exchangeRate: double.tryParse(globalExchangeRateCtrl.text) ?? 0.0,
         totalCartons: int.tryParse(totalCartonCtrl.text) ?? 0,
         totalWeight: double.tryParse(totalWeightCtrl.text) ?? 0.0,
         totalAmount: currentManifestTotalCost,
@@ -313,14 +355,17 @@ class ShipmentController extends GetxController {
 
       await _firestore.collection('shipments').add(newShipment.toMap());
 
-      currentManifestItems.clear();
-      shipmentNameCtrl.clear();
-      totalCartonCtrl.text = '0';
-      totalWeightCtrl.text = '0';
-      searchCtrl.clear();
+      // Credit Vendor
+      await vendorController.addAutomatedShipmentCredit(
+        vendorId: newShipment.vendorId!,
+        amount: newShipment.totalAmount,
+        shipmentName: newShipment.shipmentName,
+        date: newShipment.purchaseDate,
+      );
 
+      _resetForm();
       Get.back();
-      Get.snackbar("Success", "Shipment Manifest Created");
+      Get.snackbar("Success", "Manifest Created & Vendor Credited");
     } catch (e) {
       Get.snackbar("Error", "Save failed: $e");
     } finally {
@@ -328,30 +373,59 @@ class ShipmentController extends GetxController {
     }
   }
 
-  // ==========================================
-  // 3. RECEIVE SHIPMENT (BULK STOCK ADD)
-  // ==========================================
+  void _resetForm() {
+    currentManifestItems.clear();
+    shipmentNameCtrl.clear();
+    totalCartonCtrl.text = '0';
+    totalWeightCtrl.text = '0';
+    globalExchangeRateCtrl.text = '0.0';
+    selectedVendorId.value = null;
+    selectedVendorName.value = null;
+    selectedCarrier.value = null;
+    searchCtrl.clear();
+  }
+
+  // --- UPDATE DETAILS (Add/Edit Items) ---
+  Future<void> updateShipmentDetails(
+    ShipmentModel shipment,
+    List<ShipmentItem> updatedItems,
+    String report,
+  ) async {
+    if (shipment.docId == null) return;
+    isLoading.value = true;
+    try {
+      // NOTE: We do NOT update 'totalAmount'. Vendor bill is locked to original order.
+      await _firestore.collection('shipments').doc(shipment.docId).update({
+        'items': updatedItems.map((e) => e.toMap()).toList(),
+        'carrierReport': report,
+      });
+      Get.snackbar("Success", "Shipment Details Updated");
+    } catch (e) {
+      Get.snackbar("Error", "Update failed: $e");
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+  // --- RECEIVE SHIPMENT (Logic Updated for On-Hold) ---
   Future<void> receiveShipmentFast(
     ShipmentModel shipment,
-    DateTime arrivalDate, {
-    String? selectedVendorId,
-  }) async {
+    DateTime arrivalDate,
+  ) async {
     if (isLoading.value) return;
     isLoading.value = true;
 
     try {
       final user = FirebaseAuth.instance.currentUser;
-      if (user == null) throw "Authentication Error: Please login.";
-      if (shipment.docId == null || shipment.docId!.isEmpty) {
-        throw "Invalid Shipment ID.";
-      }
+      if (user == null) throw "Authentication Error";
 
+      // 1. ADD RECEIVED STOCK
       List<Map<String, dynamic>> bulkItems =
           shipment.items.map((item) {
             return {
               'id': item.productId,
-              'sea_qty': item.seaQty,
-              'air_qty': item.airQty,
+              'sea_qty': item.receivedSeaQty,
+              'air_qty': item.receivedAirQty,
               'local_qty': 0,
               'local_price': 0.0,
               'shipmentdate': DateFormat('yyyy-MM-dd').format(arrivalDate),
@@ -359,59 +433,100 @@ class ShipmentController extends GetxController {
           }).toList();
 
       bool success = await productController.bulkAddStockMixed(bulkItems);
+      if (!success) throw "Stock update failed";
 
-      if (!success) {
-        throw "Server failed to process bulk stock update.";
-      }
+      // 2. CHECK FOR MISSING ITEMS (LOSS) -> ADD TO ON HOLD
+      WriteBatch batch = _firestore.batch();
+      bool hasLoss = false;
 
-      await _firestore.collection('shipments').doc(shipment.docId).update({
-        'isReceived': true,
-        'arrivalDate': Timestamp.fromDate(arrivalDate),
-        'vendorId': selectedVendorId,
-      });
+      for (var item in shipment.items) {
+        int ordered = item.seaQty + item.airQty;
+        int received = item.receivedSeaQty + item.receivedAirQty;
+        int missing = ordered - received;
 
-      String vendorMsg = "";
-      if (selectedVendorId != null && selectedVendorId.isNotEmpty) {
-        try {
-          await vendorController.addAutomatedShipmentCredit(
-            vendorId: selectedVendorId,
-            amount: shipment.totalAmount,
-            shipmentName: shipment.shipmentName,
-            date: arrivalDate,
-          );
-          vendorMsg = " & Vendor Credited";
-        } catch (e) {
-          Get.snackbar(
-            "Warning",
-            "Stock added, but Vendor Credit failed: $e",
-            backgroundColor: Colors.orange,
-            colorText: Colors.white,
-          );
+        if (missing > 0) {
+          hasLoss = true;
+          DocumentReference ref = _firestore.collection('on_hold_items').doc();
+          batch.set(ref, {
+            'shipmentName': shipment.shipmentName,
+            'carrier': shipment.carrier,
+            'purchaseDate': Timestamp.fromDate(shipment.purchaseDate),
+            'productId': item.productId,
+            'productName': item.productName,
+            'productModel': item.productModel,
+            'missingQty': missing,
+            'createdAt': FieldValue.serverTimestamp(),
+          });
         }
       }
 
+      if (hasLoss) await batch.commit();
+
+      // 3. CLOSE SHIPMENT
+      await _firestore.collection('shipments').doc(shipment.docId).update({
+        'isReceived': true,
+        'arrivalDate': Timestamp.fromDate(arrivalDate),
+      });
+
+      Get.back();
       Get.snackbar(
         "Success",
-        "Stock Received$vendorMsg",
+        hasLoss
+            ? "Stock Received. Missing items moved to On Hold."
+            : "Stock Received Successfully.",
         backgroundColor: Colors.green,
         colorText: Colors.white,
       );
     } catch (e) {
-      Get.defaultDialog(
-        title: "Error",
-        middleText: e.toString(),
-        textConfirm: "OK",
-        confirmTextColor: Colors.white,
-        onConfirm: () => Get.back(),
+      Get.defaultDialog(title: "Error", middleText: e.toString());
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+  // --- NEW: RESOLVE ON HOLD ITEM ---
+  Future<void> resolveOnHoldItem(OnHoldItem item) async {
+    isLoading.value = true;
+    try {
+      // 1. Add to stock
+      List<Map<String, dynamic>> singleItem = [
+        {
+          'id': item.productId,
+          // Assuming recovered items are added as Sea or Air? Let's default to Air/General or ask user.
+          // For simplicity, adding to Air as it's safer, or we could split.
+          // User requested "Give me back the product".
+          'sea_qty': 0,
+          'air_qty': item.missingQty,
+          'local_qty': 0,
+          'local_price': 0.0,
+          'shipmentdate': DateFormat('yyyy-MM-dd').format(DateTime.now()),
+        },
+      ];
+
+      bool success = await productController.bulkAddStockMixed(singleItem);
+      if (!success) throw "Stock update failed";
+
+      // 2. Remove from On Hold list
+      await _firestore.collection('on_hold_items').doc(item.docId).delete();
+
+      Get.snackbar(
+        "Success",
+        "Item recovered and added to stock.",
+        colorText: Colors.white,
+      );
+    } catch (e) {
+      Get.snackbar(
+        "Error",
+        "Failed to resolve: $e",
+        backgroundColor: Colors.redAccent,
+        colorText: Colors.white,
       );
     } finally {
       isLoading.value = false;
     }
   }
 
-  // ==========================================
-  // 4. PDF GENERATION (SINGLE MANIFEST - OLD)
-  // ==========================================
+  // --- PDF GENERATION ---
   Future<void> generatePdf(ShipmentModel shipment) async {
     final doc = pw.Document();
     final font = await PdfGoogleFonts.robotoRegular();
@@ -423,8 +538,9 @@ class ShipmentController extends GetxController {
               (e) => [
                 e.productName,
                 "${e.productModel}\n${e.cartonNo}",
-                "${e.seaQty}",
-                "${e.airQty}",
+                "${e.seaQty}/${e.airQty}",
+                "${e.receivedSeaQty}/${e.receivedAirQty}",
+                (e.lossQty > 0) ? "${e.lossQty} MISSING" : "OK",
                 formatMoney(e.totalItemCost),
               ],
             )
@@ -442,24 +558,64 @@ class ShipmentController extends GetxController {
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
                     pw.Text(
-                      "SHIPMENT MANIFEST",
+                      "SHIPMENT OVERVIEW",
                       style: pw.TextStyle(
                         fontSize: 20,
                         fontWeight: pw.FontWeight.bold,
                       ),
                     ),
                     pw.SizedBox(height: 5),
-                    pw.Text("Name: ${shipment.shipmentName}"),
-                    pw.Text(
-                      "Departed: ${DateFormat('yyyy-MM-dd').format(shipment.createdDate)}",
+                    pw.Row(
+                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                      children: [
+                        pw.Column(
+                          crossAxisAlignment: pw.CrossAxisAlignment.start,
+                          children: [
+                            pw.Text("Name: ${shipment.shipmentName}"),
+                            pw.Text("Carrier: ${shipment.carrier}"),
+                            pw.Text("Vendor: ${shipment.vendorName}"),
+                          ],
+                        ),
+                        pw.Column(
+                          crossAxisAlignment: pw.CrossAxisAlignment.end,
+                          children: [
+                            pw.Text(
+                              "Purchased: ${DateFormat('yyyy-MM-dd').format(shipment.purchaseDate)}",
+                            ),
+                            if (shipment.arrivalDate != null)
+                              pw.Text(
+                                "Arrived: ${DateFormat('yyyy-MM-dd').format(shipment.arrivalDate!)}",
+                              ),
+                          ],
+                        ),
+                      ],
                     ),
-                    if (shipment.arrivalDate != null)
-                      pw.Text(
-                        "Arrived: ${DateFormat('yyyy-MM-dd').format(shipment.arrivalDate!)}",
+                    pw.SizedBox(height: 10),
+                    if (shipment.carrierReport != null &&
+                        shipment.carrierReport!.isNotEmpty)
+                      pw.Container(
+                        padding: const pw.EdgeInsets.all(8),
+                        decoration: pw.BoxDecoration(
+                          border: pw.Border.all(color: PdfColors.red),
+                          color: PdfColors.red50,
+                        ),
+                        child: pw.Column(
+                          crossAxisAlignment: pw.CrossAxisAlignment.start,
+                          children: [
+                            pw.Text(
+                              "CARRIER / LOSS REPORT:",
+                              style: pw.TextStyle(
+                                fontWeight: pw.FontWeight.bold,
+                                color: PdfColors.red900,
+                              ),
+                            ),
+                            pw.Text(shipment.carrierReport!),
+                          ],
+                        ),
                       ),
-                    pw.SizedBox(height: 5),
+                    pw.SizedBox(height: 10),
                     pw.Text(
-                      "Total Value: ${formatMoney(shipment.totalAmount)}",
+                      "Total Value (Billable): ${formatMoney(shipment.totalAmount)}",
                       style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
                     ),
                   ],
@@ -467,7 +623,14 @@ class ShipmentController extends GetxController {
               ),
               pw.SizedBox(height: 15),
               pw.Table.fromTextArray(
-                headers: ['Item', 'Model/Ctn', 'Sea', 'Air', 'Cost'],
+                headers: [
+                  'Item',
+                  'Model',
+                  'Order(S/A)',
+                  'Recv(S/A)',
+                  'Status',
+                  'Bill Cost',
+                ],
                 data: tableData,
                 headerStyle: pw.TextStyle(
                   fontWeight: pw.FontWeight.bold,
@@ -480,9 +643,10 @@ class ShipmentController extends GetxController {
                 columnWidths: {
                   0: const pw.FlexColumnWidth(2),
                   1: const pw.FlexColumnWidth(1.5),
-                  2: const pw.FlexColumnWidth(0.5),
-                  3: const pw.FlexColumnWidth(0.5),
-                  4: const pw.FlexColumnWidth(1.5),
+                  2: const pw.FlexColumnWidth(1),
+                  3: const pw.FlexColumnWidth(1),
+                  4: const pw.FlexColumnWidth(1),
+                  5: const pw.FlexColumnWidth(1.5),
                 },
               ),
             ],
@@ -490,28 +654,19 @@ class ShipmentController extends GetxController {
     );
     await Printing.layoutPdf(
       onLayout: (format) => doc.save(),
-      name: 'Manifest_${shipment.shipmentName}.pdf',
+      name: 'Details_${shipment.shipmentName}.pdf',
     );
   }
 
-  // ==========================================
-  // 5. NEW PDF: AGGREGATED PRODUCT REPORT
-  // ==========================================
   Future<void> generateAggregatedOnWayPdf() async {
+    // Kept existing logic
     if (aggregatedList.isEmpty) {
-      Get.snackbar(
-        "Info",
-        "No on-way shipments found to export.",
-        backgroundColor: Colors.orange,
-        colorText: Colors.white,
-      );
+      Get.snackbar("Info", "No data.");
       return;
     }
-
     final doc = pw.Document();
     final font = await PdfGoogleFonts.robotoRegular();
     final fontBold = await PdfGoogleFonts.robotoBold();
-
     doc.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
@@ -520,68 +675,62 @@ class ShipmentController extends GetxController {
           return [
             pw.Header(
               level: 0,
-              child: pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text(
-                    "INCOMING INVENTORY REPORT",
-                    style: pw.TextStyle(
-                      fontSize: 18,
-                      fontWeight: pw.FontWeight.bold,
-                    ),
-                  ),
-                  pw.Text(
-                    "Generated: ${DateFormat('yyyy-MM-dd').format(DateTime.now())}",
-                    style: const pw.TextStyle(fontSize: 10),
-                  ),
-                ],
+              child: pw.Text(
+                "INCOMING INVENTORY",
+                style: pw.TextStyle(
+                  fontSize: 18,
+                  fontWeight: pw.FontWeight.bold,
+                ),
               ),
             ),
             pw.SizedBox(height: 20),
-
             pw.Table(
               border: pw.TableBorder.all(color: PdfColors.grey300),
-              columnWidths: {
-                0: const pw.FlexColumnWidth(2), // Model
-                1: const pw.FlexColumnWidth(1), // Total Qty
-                2: const pw.FlexColumnWidth(4), // Shipment Details
-              },
               children: [
-                // Header
                 pw.TableRow(
                   decoration: const pw.BoxDecoration(color: PdfColors.grey200),
                   children: [
-                    _pdfCell("Model / Product", isBold: true),
-                    _pdfCell(
-                      "Total On Way",
-                      isBold: true,
-                      align: pw.TextAlign.center,
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(6),
+                      child: pw.Text(
+                        "Model",
+                        style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                      ),
                     ),
-                    _pdfCell(
-                      "Shipment Breakdown (Ref | Date | Qty)",
-                      isBold: true,
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(6),
+                      child: pw.Text(
+                        "Qty",
+                        style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                      ),
+                    ),
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(6),
+                      child: pw.Text(
+                        "Breakdown",
+                        style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                      ),
                     ),
                   ],
                 ),
-                // Data
                 ...aggregatedList.map((product) {
-                  // Format breakdown: "Ship1 (Oct 20) : 50pcs"
                   String details = product.incomingDetails
-                      .map(
-                        (d) =>
-                            "${d.shipmentName} | ${DateFormat('MMM dd').format(d.date)} | ${d.qty} pcs",
-                      )
+                      .map((d) => "${d.shipmentName} | ${d.qty} pcs")
                       .join("\n");
-
                   return pw.TableRow(
                     children: [
-                      _pdfCell("${product.model}\n${product.name}"),
-                      _pdfCell(
-                        "${product.totalQty}",
-                        align: pw.TextAlign.center,
-                        isBold: true,
+                      pw.Padding(
+                        padding: const pw.EdgeInsets.all(6),
+                        child: pw.Text("${product.model}\n${product.name}"),
                       ),
-                      _pdfCell(details),
+                      pw.Padding(
+                        padding: const pw.EdgeInsets.all(6),
+                        child: pw.Text("${product.totalQty}"),
+                      ),
+                      pw.Padding(
+                        padding: const pw.EdgeInsets.all(6),
+                        child: pw.Text(details),
+                      ),
                     ],
                   );
                 }),
@@ -591,29 +740,9 @@ class ShipmentController extends GetxController {
         },
       ),
     );
-
     await Printing.layoutPdf(
       onLayout: (format) => doc.save(),
-      name:
-          'Incoming_Inventory_Summary_${DateFormat('MM-dd').format(DateTime.now())}.pdf',
-    );
-  }
-
-  pw.Widget _pdfCell(
-    String text, {
-    bool isBold = false,
-    pw.TextAlign align = pw.TextAlign.left,
-  }) {
-    return pw.Padding(
-      padding: const pw.EdgeInsets.all(6),
-      child: pw.Text(
-        text,
-        textAlign: align,
-        style: pw.TextStyle(
-          fontSize: 10,
-          fontWeight: isBold ? pw.FontWeight.bold : pw.FontWeight.normal,
-        ),
-      ),
+      name: 'Incoming_Report.pdf',
     );
   }
 }
