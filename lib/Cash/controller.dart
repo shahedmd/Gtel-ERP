@@ -14,7 +14,7 @@ class DrawerTransaction {
   final DateTime date;
   final String description;
   final double amount;
-  final String type;
+  final String type; // 'sale', 'collection' (deposit), 'expense', 'withdraw'
   final String method;
   final String? bankName;
   final String? accountDetails;
@@ -39,15 +39,17 @@ class CashDrawerController extends GetxController {
   final Rx<DateTimeRange> selectedRange =
       DateTimeRange(start: DateTime.now(), end: DateTime.now()).obs;
 
+  // --- LIVE BALANCES ---
   final RxDouble netCash = 0.0.obs;
   final RxDouble netBank = 0.0.obs;
   final RxDouble netBkash = 0.0.obs;
   final RxDouble netNagad = 0.0.obs;
   final RxDouble grandTotal = 0.0.obs;
 
-  final RxDouble rawSalesTotal = 0.0.obs;
-  final RxDouble rawExpenseTotal = 0.0.obs;
-  final RxDouble rawManualAddTotal = 0.0.obs;
+  // --- REPORT TOTALS ---
+  final RxDouble rawSalesTotal = 0.0.obs; // Pure Invoice Sales
+  final RxDouble rawCollectionTotal = 0.0.obs; // Old Due + Manual Adds
+  final RxDouble rawExpenseTotal = 0.0.obs; // Expenses + Withdrawals
 
   final RxList<DrawerTransaction> recentTransactions =
       <DrawerTransaction>[].obs;
@@ -94,6 +96,7 @@ class CashDrawerController extends GetxController {
   Future<void> fetchData() async {
     isLoading.value = true;
     try {
+      // 1. Prepare Date Range
       DateTime start = DateTime(
         selectedRange.value.start.year,
         selectedRange.value.start.month,
@@ -111,6 +114,7 @@ class CashDrawerController extends GetxController {
         59,
       );
 
+      // 2. Fetch Data in Parallel
       var salesFuture =
           _db
               .collection('daily_sales')
@@ -134,22 +138,34 @@ class CashDrawerController extends GetxController {
         ledgerFuture,
         expensesFuture,
       ]);
+
       var salesSnap = results[0] as QuerySnapshot;
       var ledgerSnap = results[1] as QuerySnapshot;
       List<DrawerTransaction> expenseList =
           results[2] as List<DrawerTransaction>;
 
+      // 3. Initialize Calculation Variables
       List<DrawerTransaction> allTx = [...expenseList];
-      double tempCash = 0, tempBank = 0, tempBkash = 0, tempNagad = 0;
-      double tSales = 0, tExp = 0, tAdd = 0;
+      double tCash = 0, tBank = 0, tBkash = 0, tNagad = 0;
+      double sumSales = 0, sumCollections = 0, sumExpenses = 0;
 
-      // ---------------------------------------------------
-      // 1. PROCESS SALES & DEBTOR PAYMENTS (Primary Source)
-      // ---------------------------------------------------
+      // =========================================================
+      // PART A: PROCESS DAILY SALES (Current Invoice Payments)
+      // =========================================================
       for (var doc in salesSnap.docs) {
         var data = doc.data() as Map<String, dynamic>;
-        double c = 0, b = 0, bk = 0, n = 0;
+
+        // In the new system, 'paid' is strictly the amount allocated to the invoice.
+        // It does NOT include Old Due collection.
+        double paidAmount = double.tryParse(data['paid'].toString()) ?? 0;
+
+        if (paidAmount <= 0) continue; // Skip unpaid/credit invoices
+
+        sumSales += paidAmount;
+
+        // Parse Payment Method
         var pm = data['paymentMethod'];
+        double c = 0, b = 0, bk = 0, n = 0;
 
         String? saleBankName;
         String? saleAccountInfo;
@@ -158,76 +174,92 @@ class CashDrawerController extends GetxController {
         if (pm is Map) {
           methodStr = (pm['type'] ?? 'unknown').toString();
 
-          // Extract Bank/Method Info
-          if (pm.containsKey('bankName')) {
+          // Extract Details
+          if (pm.containsKey('bankName'))
             saleBankName = pm['bankName'].toString();
-          }
-          if (pm.containsKey('accountNumber') &&
-              pm['accountNumber'].toString().isNotEmpty) {
+
+          if (pm.containsKey('accountNumber'))
             saleAccountInfo = pm['accountNumber'].toString();
-          } else if (pm.containsKey('accountNo') &&
-              pm['accountNo'].toString().isNotEmpty) {
-            saleAccountInfo = pm['accountNo'].toString();
-          }
-          if (pm.containsKey('bkashNumber') &&
-              pm['bkashNumber'].toString().isNotEmpty) {
+          else if (pm.containsKey('bkashNumber'))
             saleAccountInfo = "Bkash: ${pm['bkashNumber']}";
-          }
+          else if (pm.containsKey('nagadNumber'))
+            saleAccountInfo = "Nagad: ${pm['nagadNumber']}";
 
-          if (methodStr == 'multi') {
-            c = double.tryParse(pm['cash'].toString()) ?? 0;
-            b = double.tryParse(pm['bank'].toString()) ?? 0;
-            bk = double.tryParse(pm['bkash'].toString()) ?? 0;
-            n = double.tryParse(pm['nagad'].toString()) ?? 0;
+          // Distribution Logic for Multi/Partial
+          if (methodStr == 'multi' || methodStr == 'condition_partial') {
+            // We allocate the 'paidAmount' to buckets based on what was entered.
+            // We prioritize Cash -> Bank -> Bkash -> Nagad for the invoice portion
+            // (Assuming Ledger took the exact specific funds for Old Due first)
+            double inCash = double.tryParse(pm['cash'].toString()) ?? 0;
+            double inBank = double.tryParse(pm['bank'].toString()) ?? 0;
+            double inBkash = double.tryParse(pm['bkash'].toString()) ?? 0;
+            double inNagad = double.tryParse(pm['nagad'].toString()) ?? 0;
+
+            double remainingToAlloc = paidAmount;
+
+            if (remainingToAlloc > 0 && inCash > 0) {
+              double use =
+                  (inCash >= remainingToAlloc) ? remainingToAlloc : inCash;
+              c += use;
+              remainingToAlloc -= use;
+            }
+            if (remainingToAlloc > 0 && inBank > 0) {
+              double use =
+                  (inBank >= remainingToAlloc) ? remainingToAlloc : inBank;
+              b += use;
+              remainingToAlloc -= use;
+            }
+            if (remainingToAlloc > 0 && inBkash > 0) {
+              double use =
+                  (inBkash >= remainingToAlloc) ? remainingToAlloc : inBkash;
+              bk += use;
+              remainingToAlloc -= use;
+            }
+            if (remainingToAlloc > 0 && inNagad > 0) {
+              n += remainingToAlloc; // Dump remainder
+            }
           } else {
-            double paid = double.tryParse(data['paid'].toString()) ?? 0;
+            // Single Method Logic
             String typeCheck = methodStr.toLowerCase();
-
-            // FORCE BANK/DIGITAL: If bankName exists, it IS a bank payment
-            bool isBank =
-                typeCheck.contains('bank') ||
-                (saleBankName != null && saleBankName.isNotEmpty);
+            bool isBank = typeCheck.contains('bank') || (saleBankName != null);
             bool isBkash = typeCheck.contains('bkash');
             bool isNagad = typeCheck.contains('nagad');
 
-            if (isBank) {
-              b = paid;
-            } else if (isBkash)
-              {bk = paid;}
+            if (isBank)
+              b = paidAmount;
+            else if (isBkash)
+              bk = paidAmount;
             else if (isNagad)
-             { n = paid;}
+              n = paidAmount;
             else
-             { c = paid;}
+              c = paidAmount;
           }
         } else {
-          double paid = double.tryParse(data['paid'].toString()) ?? 0;
+          // Legacy String Support
           methodStr = pm.toString().toLowerCase();
-          if (methodStr.contains('bank')) {
-            b = paid;
-          } else if (methodStr.contains('bkash'))
-            bk = paid;
+          if (methodStr.contains('bank'))
+            b = paidAmount;
+          else if (methodStr.contains('bkash'))
+            bk = paidAmount;
           else if (methodStr.contains('nagad'))
-            n = paid;
+            n = paidAmount;
           else
-            c = paid;
+            c = paidAmount;
         }
 
-        tempCash += c;
-        tempBank += b;
-        tempBkash += bk;
-        tempNagad += n;
-        double totalDocPaid = c + b + bk + n;
-        tSales += totalDocPaid;
+        tCash += c;
+        tBank += b;
+        tBkash += bk;
+        tNagad += n;
 
         allTx.add(
           DrawerTransaction(
             date: (data['timestamp'] as Timestamp).toDate(),
             description:
-                (data['source'] == 'advance_payment' ||
-                        data['customerType'] == 'debtor')
-                    ? "Payment: ${data['name'] ?? 'Debtor'}"
+                (data['customerType'] == 'debtor')
+                    ? "Inv #${data['transactionId']} (Current)"
                     : "Sale #${data['transactionId'] ?? data['invoiceId'] ?? 'NA'}",
-            amount: totalDocPaid,
+            amount: paidAmount,
             type: 'sale',
             method: methodStr,
             bankName: saleBankName,
@@ -236,46 +268,49 @@ class CashDrawerController extends GetxController {
         );
       }
 
-      // ---------------------------------------------------
-      // 2. PROCESS LEDGER (Strict Deduplication & Fix for Double Cash)
-      // ---------------------------------------------------
+      // =========================================================
+      // PART B: PROCESS LEDGER (Old Due, Manual Adds, Withdrawals)
+      // =========================================================
       for (var doc in ledgerSnap.docs) {
         var data = doc.data() as Map<String, dynamic>;
+        String source = (data['source'] ?? '').toString();
+        String desc = (data['description'] ?? '').toString();
 
-        // >>> FIX 1: Aggressive Skipping of Duplicates
-        // If the description mentions "payment from", it is likely a system-generated duplicate of a debtor payment.
-        String desc = (data['description'] ?? '').toString().toLowerCase();
+        // --- FILTERING LOGIC (FIXED) ---
+        // 1. Skip strictly if source is 'pos_sale' (because Part A handled it)
+        if (source == 'pos_sale') continue;
 
-        bool isDuplicate =
-            data.containsKey('linkedTxId') ||
-            data.containsKey('linkedInvoiceId') ||
-            data.containsKey('linkedDebtorId') ||
-            data['source'] == 'pos_sale' ||
-            data['source'] == 'advance_payment' ||
-            // Safety Catch for old data:
-            (desc.contains('payment from') && data['type'] == 'deposit');
+        // 2. Legacy Skip: If no source, but has linkedInvoiceId (Old duplicate style)
+        if (source == '' && data.containsKey('linkedInvoiceId')) continue;
 
-        if (isDuplicate) {
-          continue;
-        }
+        // 3. ALLOW 'pos_old_due', 'debtor_manual', 'manual_add', etc.
 
         double amount = double.tryParse(data['amount'].toString()) ?? 0;
-        String type = data['type'];
+        String type = data['type']; // 'deposit' or 'withdraw'/'expense'
         String method =
             (data['method'] ?? 'cash').toString().toLowerCase().trim();
 
+        // Parse Details (New System Support)
         String? ledgerBankName = data['bankName']?.toString();
         String? ledgerAccountNo = data['accountNo']?.toString();
 
-        if (ledgerBankName == null && data['details'] is Map) {
-          ledgerBankName = data['details']['bankName']?.toString();
-        }
-        if (ledgerAccountNo == null && data['details'] is Map) {
-          ledgerAccountNo = data['details']['accountNo']?.toString();
+        // If 'details' map exists (from LiveSalesController), use it
+        if (data['details'] is Map) {
+          var d = data['details'];
+          if (d['bankName'] != null) ledgerBankName = d['bankName'].toString();
+
+          if (d['accountNumber'] != null)
+            ledgerAccountNo = d['accountNumber'].toString();
+          else if (d['bkashNumber'] != null)
+            ledgerAccountNo = "Bkash: ${d['bkashNumber']}";
+          else if (d['nagadNumber'] != null)
+            ledgerAccountNo = "Nagad: ${d['nagadNumber']}";
+
+          // Override method string if available
+          if (d['type'] != null) method = d['type'].toString().toLowerCase();
         }
 
-        // >>> FIX 2: Better Digital Detection
-        // If bank details exist, we assume it's NOT cash, even if 'method' string is missing or weird.
+        // Determine Bucket
         bool isBank =
             method.contains('bank') ||
             (ledgerBankName != null && ledgerBankName.isNotEmpty);
@@ -283,33 +318,37 @@ class CashDrawerController extends GetxController {
         bool isNagad = method.contains('nagad');
 
         if (type == 'deposit') {
-          if (isBank) {
-            tempBank += amount;
-          } else if (isBkash) {
-            tempBkash += amount;
-          } else if (isNagad) {
-            tempNagad += amount;
-          } else {
-            // Only add to Direct Cash if we are absolutely sure it's not the others
-            tempCash += amount;
-          }
-          tAdd += amount;
-        } else if (type == 'withdraw') {
-          if (isBank) {
-            tempBank -= amount;
-          } else if (isBkash)
-            tempBkash -= amount;
+          sumCollections += amount; // This includes Old Due + Manual Adds
+          if (isBank)
+            tBank += amount;
+          else if (isBkash)
+            tBkash += amount;
           else if (isNagad)
-            tempNagad -= amount;
-          tempCash += amount;
+            tNagad += amount;
+          else
+            tCash += amount;
+        } else if (type == 'withdraw' || type == 'expense') {
+          sumExpenses += amount;
+          if (isBank)
+            tBank -= amount;
+          else if (isBkash)
+            tBkash -= amount;
+          else if (isNagad)
+            tNagad -= amount;
+          else
+            tCash -= amount;
         }
+
+        // Fancy Description
+        String finalDesc = desc.isNotEmpty ? desc : type.toUpperCase();
+        if (source == 'pos_old_due') finalDesc = "Old Due Collection";
 
         allTx.add(
           DrawerTransaction(
             date: (data['timestamp'] as Timestamp).toDate(),
-            description: data['description'] ?? type.toUpperCase(),
+            description: finalDesc,
             amount: amount,
-            type: type,
+            type: type == 'deposit' ? 'collection' : 'expense',
             method: method,
             bankName: ledgerBankName,
             accountDetails: ledgerAccountNo,
@@ -317,65 +356,66 @@ class CashDrawerController extends GetxController {
         );
       }
 
-      // ---------------------------------------------------
-      // 3. PROCESS EXPENSES
-      // ---------------------------------------------------
+      // =========================================================
+      // PART C: PROCESS EXPENSES (Waterfall Deduction)
+      // =========================================================
       for (var ex in expenseList) {
-        tExp += ex.amount;
-      }
+        sumExpenses += ex.amount;
 
-      double remainingExpense = tExp;
-
-      // Waterfall Deduction: Cash -> Bank -> Bkash -> Nagad
-      if (tempCash >= remainingExpense) {
-        tempCash -= remainingExpense;
-        remainingExpense = 0;
-      } else {
-        remainingExpense -= tempCash;
-        tempCash = 0;
-      }
-      if (remainingExpense > 0) {
-        if (tempBank >= remainingExpense) {
-          tempBank -= remainingExpense;
-          remainingExpense = 0;
+        // Deduct from Cash -> Bank -> Bkash -> Nagad
+        double rem = ex.amount;
+        if (tCash >= rem) {
+          tCash -= rem;
+          rem = 0;
         } else {
-          remainingExpense -= tempBank;
-          tempBank = 0;
+          rem -= tCash;
+          tCash = 0;
+        }
+        if (rem > 0) {
+          if (tBank >= rem) {
+            tBank -= rem;
+            rem = 0;
+          } else {
+            rem -= tBank;
+            tBank = 0;
+          }
+        }
+        if (rem > 0) {
+          if (tBkash >= rem) {
+            tBkash -= rem;
+            rem = 0;
+          } else {
+            rem -= tBkash;
+            tBkash = 0;
+          }
+        }
+        if (rem > 0) {
+          if (tNagad >= rem) {
+            tNagad -= rem;
+            rem = 0;
+          } else {
+            rem -= tNagad;
+            tNagad = 0;
+          }
         }
       }
-      if (remainingExpense > 0) {
-        if (tempBkash >= remainingExpense) {
-          tempBkash -= remainingExpense;
-          remainingExpense = 0;
-        } else {
-          remainingExpense -= tempBkash;
-          tempBkash = 0;
-        }
-      }
-      if (remainingExpense > 0) {
-        if (tempNagad >= remainingExpense) {
-          tempNagad -= remainingExpense;
-          remainingExpense = 0;
-        } else {
-          remainingExpense -= tempNagad;
-          tempNagad = 0;
-        }
-      }
 
-      // --- UPDATE STATE ---
-      netCash.value = tempCash;
-      netBank.value = tempBank;
-      netBkash.value = tempBkash;
-      netNagad.value = tempNagad;
-      grandTotal.value = tempCash + tempBank + tempBkash + tempNagad;
+      // 4. Update Observables
+      netCash.value = tCash;
+      netBank.value = tBank;
+      netBkash.value = tBkash;
+      netNagad.value = tNagad;
+      grandTotal.value = tCash + tBank + tBkash + tNagad;
 
-      rawSalesTotal.value = tSales;
-      rawExpenseTotal.value = tExp;
-      rawManualAddTotal.value = tAdd;
+      rawSalesTotal.value = sumSales;
+      rawCollectionTotal.value = sumCollections;
+      rawExpenseTotal.value = sumExpenses;
 
+      // Sort recent transactions new to old
       allTx.sort((a, b) => b.date.compareTo(a.date));
       recentTransactions.assignAll(allTx);
     } catch (e) {
+      print("Cash Drawer Error: $e");
       Get.snackbar("Error", "Could not calculate cash drawer.");
     } finally {
       isLoading.value = false;
@@ -383,7 +423,7 @@ class CashDrawerController extends GetxController {
   }
 
   // =========================================================
-  // HELPER METHODS
+  // HELPER METHODS (Optimized & Parallel Fetching)
   // =========================================================
   Future<List<DrawerTransaction>> _fetchExpensesOptimized(
     DateTime start,
@@ -402,6 +442,7 @@ class CashDrawerController extends GetxController {
         _addExpenseFromDoc(doc.data(), expenses);
       }
     } catch (e) {
+      // Fallback for index issues
       return await _fetchExpensesParallel(start, end);
     }
     return expenses;
@@ -463,6 +504,9 @@ class CashDrawerController extends GetxController {
     );
   }
 
+  // =========================================================
+  // MANUAL ACTIONS
+  // =========================================================
   Future<void> addManualCash({
     required double amount,
     required String method,
@@ -478,6 +522,7 @@ class CashDrawerController extends GetxController {
       'bankName': bankName,
       'accountNo': accountNo,
       'timestamp': FieldValue.serverTimestamp(),
+      'source': 'manual_add',
     });
     fetchData();
   }
@@ -496,11 +541,15 @@ class CashDrawerController extends GetxController {
       'accountNo': accountNo,
       'description': 'Cash Out / Withdrawal',
       'timestamp': FieldValue.serverTimestamp(),
+      'source': 'manual_withdraw',
     });
     fetchData();
     Get.back();
   }
 
+  // =========================================================
+  // PDF REPORT
+  // =========================================================
   Future<void> downloadPdf() async {
     final doc = pw.Document();
     final font = await PdfGoogleFonts.nunitoRegular();
@@ -564,8 +613,14 @@ class CashDrawerController extends GetxController {
                 mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
                 children: [
                   _pdfStat(
-                    "Sales Income",
+                    "Invoice Sales",
                     rawSalesTotal.value,
+                    fontBold,
+                    isPos: true,
+                  ),
+                  _pdfStat(
+                    "Due/Manual Collect",
+                    rawCollectionTotal.value,
                     fontBold,
                     isPos: true,
                   ),
@@ -574,12 +629,6 @@ class CashDrawerController extends GetxController {
                     rawExpenseTotal.value,
                     fontBold,
                     isPos: false,
-                  ),
-                  _pdfStat(
-                    "Manual Adds",
-                    rawManualAddTotal.value,
-                    fontBold,
-                    isPos: true,
                   ),
                 ],
               ),

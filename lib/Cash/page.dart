@@ -134,12 +134,12 @@ class CashDrawerView extends StatelessWidget {
                       ),
                       const SizedBox(height: 20),
 
-                      // B. High Level Overview
+                      // B. High Level Overview (Mapped correctly to new controller vars)
                       Row(
                         children: [
                           Expanded(
                             child: _statCard(
-                              "Income (Sales)",
+                              "Sales Income",
                               controller.rawSalesTotal.value,
                               Colors.green[700]!,
                               Icons.arrow_upward,
@@ -148,19 +148,19 @@ class CashDrawerView extends StatelessWidget {
                           const SizedBox(width: 10),
                           Expanded(
                             child: _statCard(
-                              "Expense",
-                              controller.rawExpenseTotal.value,
-                              Colors.red[700]!,
-                              Icons.arrow_downward,
+                              "Due Collect/Add",
+                              controller.rawCollectionTotal.value,
+                              Colors.blue[700]!,
+                              Icons.add_circle_outline,
                             ),
                           ),
                           const SizedBox(width: 10),
                           Expanded(
                             child: _statCard(
-                              "Manual Add",
-                              controller.rawManualAddTotal.value,
-                              Colors.blue[700]!,
-                              Icons.add,
+                              "Total Expense",
+                              controller.rawExpenseTotal.value,
+                              Colors.red[700]!,
+                              Icons.arrow_downward,
                             ),
                           ),
                         ],
@@ -218,7 +218,7 @@ class CashDrawerView extends StatelessWidget {
                         children: [
                           Expanded(
                             child: _actionButton(
-                              "Deposit / Invest",
+                              "Manual Deposit",
                               Icons.add_circle_outline,
                               Colors.blue[800]!,
                               () => _showAddDialog(),
@@ -227,7 +227,7 @@ class CashDrawerView extends StatelessWidget {
                           const SizedBox(width: 12),
                           Expanded(
                             child: _actionButton(
-                              "Withdraw / Transfer",
+                              "Bank Withdraw",
                               Icons.move_down,
                               Colors.orange[800]!,
                               () => _showCashOutDialog(),
@@ -239,16 +239,26 @@ class CashDrawerView extends StatelessWidget {
 
                       // E. Recent Transactions
                       _sectionHeader("TRANSACTION STATEMENT"),
-                      ListView.builder(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: controller.recentTransactions.length,
-                        itemBuilder: (context, index) {
-                          return _transactionTile(
-                            controller.recentTransactions[index],
-                          );
-                        },
-                      ),
+                      controller.recentTransactions.isEmpty
+                          ? const Center(
+                            child: Padding(
+                              padding: EdgeInsets.all(20.0),
+                              child: Text(
+                                "No transactions in this period",
+                                style: TextStyle(color: Colors.grey),
+                              ),
+                            ),
+                          )
+                          : ListView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemCount: controller.recentTransactions.length,
+                            itemBuilder: (context, index) {
+                              return _transactionTile(
+                                controller.recentTransactions[index],
+                              );
+                            },
+                          ),
                       const SizedBox(height: 30),
                     ],
                   ),
@@ -349,7 +359,7 @@ class CashDrawerView extends StatelessWidget {
                 title,
                 style: TextStyle(
                   color: Colors.grey[600],
-                  fontSize: 11,
+                  fontSize: 10, // slightly smaller for longer text
                   fontWeight: FontWeight.bold,
                 ),
               ),
@@ -360,7 +370,7 @@ class CashDrawerView extends StatelessWidget {
             currencyFormatter.format(amount),
             style: TextStyle(
               color: Colors.black87,
-              fontSize: 15,
+              fontSize: 14,
               fontWeight: FontWeight.bold,
             ),
           ),
@@ -437,35 +447,32 @@ class CashDrawerView extends StatelessWidget {
   /// **PROFESSIONAL TRANSACTION TILE**
   /// Displays Bank Name, Account Number, and clear financial formatting.
   Widget _transactionTile(DrawerTransaction tx) {
-    bool isCredit = tx.type == 'sale' || tx.type == 'deposit';
+    // Determine colors
+    bool isCredit = tx.type == 'sale' || tx.type == 'collection';
     Color amountColor = isCredit ? Colors.green[700]! : Colors.red[700]!;
 
     // Determine Icon
     IconData icon;
     if (tx.type == 'sale') {
-      icon = Icons.shopping_cart_outlined;
+      icon = Icons.shopping_bag_outlined;
+    }  if (tx.type == 'collection') {
+      icon = Icons.input;
     }
-     if (tx.type == 'expense') {
-       icon = Icons.receipt_outlined;
-     }
      if (tx.type == 'withdraw') {
-       icon = Icons.arrow_circle_up_outlined;
+       icon = Icons.output;
      } else {
-       icon = Icons.arrow_circle_down_outlined;
+       icon = Icons.receipt_long_outlined; // Expense
      }
 
     // Build Payment Method String (e.g. "BRAC BANK • 1234...")
     String methodInfo = tx.method.toUpperCase();
-    if (tx.bankName != null) {
+    if (tx.bankName != null && tx.bankName!.isNotEmpty) {
       methodInfo = tx.bankName!;
     }
 
     String subDetails = "";
     if (tx.accountDetails != null && tx.accountDetails!.isNotEmpty) {
       subDetails = tx.accountDetails!;
-    } else {
-      // Fallback if no specific account details
-      subDetails = tx.method.toUpperCase();
     }
 
     return Container(
@@ -492,7 +499,6 @@ class CashDrawerView extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Top Row: Description & Amount
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -636,7 +642,7 @@ class CashDrawerView extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      "Add Funds / Investment",
+                      "Manual Deposit / Investment",
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
@@ -800,7 +806,7 @@ class CashDrawerView extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      "Withdraw to Cash Drawer",
+                      "Withdraw from Assets",
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
@@ -808,7 +814,7 @@ class CashDrawerView extends StatelessWidget {
                     ),
                     const SizedBox(height: 10),
                     Text(
-                      "Transfer money from Bank/Mobile to Physical Cash.",
+                      "Cash Out for personal use or transfer.",
                       style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                     ),
                     const SizedBox(height: 20),

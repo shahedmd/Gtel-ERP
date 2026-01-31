@@ -433,7 +433,7 @@ void _processTx(
     finalPaymentData = {
       'type': 'bank',
       'bankName': bankC.text.trim(),
-      'accountNo': accC.text.trim(),
+      'accountNumber': accC.text.trim(),
     };
   } else if (['bkash', 'nagad', 'rocket'].contains(method)) {
     if (mobC.text.isEmpty) {

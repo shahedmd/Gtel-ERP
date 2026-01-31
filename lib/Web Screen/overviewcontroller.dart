@@ -1,4 +1,4 @@
-// ignore_for_file: empty_catches
+// ignore_for_file: empty_catches, curly_braces_in_flow_control_structures
 
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -12,14 +12,12 @@ import 'package:printing/printing.dart';
 import 'Expenses/dailycontroller.dart';
 import 'Sales/controller.dart';
 
-/// Standard Model for the Ledger UI
 class LedgerItem {
   final DateTime time;
   final String title;
   final String subtitle;
   final double amount;
   final String type; // 'income' or 'expense'
-
   LedgerItem({
     required this.time,
     required this.title,
@@ -39,7 +37,6 @@ class OverviewController extends GetxController {
   var selectedDate = DateTime.now().obs;
   var isLoadingHistory = false.obs;
 
-  // Subscription for external cash (Loans/Advances/Manual Adds)
   StreamSubscription? _ledgerSubscription;
   RxList<Map<String, dynamic>> externalLedgerData =
       <Map<String, dynamic>>[].obs;
@@ -51,11 +48,9 @@ class OverviewController extends GetxController {
   RxDouble netCashBalance = 0.0.obs;
   RxDouble closingCash = 0.0.obs;
 
-  // Ledger Lists (UI Columns)
   RxList<LedgerItem> cashInList = <LedgerItem>[].obs;
   RxList<LedgerItem> cashOutList = <LedgerItem>[].obs;
 
-  // Chart Data
   RxMap<String, double> methodBreakdown =
       <String, double>{
         "Cash": 0.0,
@@ -71,7 +66,6 @@ class OverviewController extends GetxController {
     _fetchPreviousBalance();
     _listenToExternalLedger();
 
-    // Listeners
     ever(salesCtrl.salesList, (_) => _processLedgerData());
     ever(expenseCtrl.dailyList, (_) => _processLedgerData());
     ever(externalLedgerData, (_) => _processLedgerData());
@@ -89,7 +83,6 @@ class OverviewController extends GetxController {
     super.onClose();
   }
 
-  // --- ACTIONS ---
   void pickDate(DateTime date) {
     selectedDate.value = date;
   }
@@ -98,14 +91,9 @@ class OverviewController extends GetxController {
     _syncDateToSubControllers();
     _fetchPreviousBalance();
     _listenToExternalLedger();
-    Get.snackbar(
-      "Refreshed",
-      "Ledger & Balances synced.",
-      duration: const Duration(seconds: 1),
-    );
+    Get.snackbar("Refreshed", "Ledger synced.");
   }
 
-  // --- LOGIC ---
   void _syncDateToSubControllers() {
     salesCtrl.changeDate(selectedDate.value);
     expenseCtrl.changeDate(selectedDate.value);
@@ -131,7 +119,7 @@ class OverviewController extends GetxController {
         pastSales += (double.tryParse(doc['paid'].toString()) ?? 0);
       }
 
-      // 2. Past Ledger (Add/Withdraw)
+      // 2. Past Ledger
       var ledgerSnap =
           await _db
               .collection('cash_ledger')
@@ -139,18 +127,17 @@ class OverviewController extends GetxController {
               .get();
       double pastLedgerSum = 0.0;
       for (var doc in ledgerSnap.docs) {
-        // Skip linked duplicates to avoid double counting history
-        if (doc.data().containsKey('linkedTxId') ||
-            doc.data().containsKey('linkedInvoiceId')) {
-          continue;
-        }
+        var data = doc.data();
+        String src = (data['source'] ?? '').toString();
+        // Skip duplicate sales
+        if (src == 'pos_sale') continue;
+        if (src == '' && data.containsKey('linkedInvoiceId')) continue;
 
         double amt = double.tryParse(doc['amount'].toString()) ?? 0;
-        if (doc['type'] == 'withdraw') {
+        if (doc['type'] == 'withdraw')
           pastLedgerSum -= amt;
-        } else {
+        else
           pastLedgerSum += amt;
-        }
       }
 
       // 3. Past Expenses
@@ -188,17 +175,14 @@ class OverviewController extends GetxController {
         .orderBy('timestamp', descending: true)
         .snapshots()
         .listen((snap) {
-          // Filter out duplicates (Sales/Debtor Payments) locally
           var rawList = snap.docs.map((e) => e.data()).toList();
+          // Filter out ONLY the 'pos_sale' entries (invoice duplicates)
+          // Allow 'pos_old_due', 'debtor_manual', etc.
           var filtered =
               rawList.where((data) {
-                return !data.containsKey('linkedTxId') &&
-                    !data.containsKey('linkedInvoiceId') &&
-                    !data.containsKey('linkedDebtorId') &&
-                    data['source'] != 'pos_sale' &&
-                    data['source'] != 'advance_payment';
+                String src = (data['source'] ?? '').toString();
+                return src != 'pos_sale';
               }).toList();
-
           externalLedgerData.assignAll(filtered);
         });
   }
@@ -206,73 +190,27 @@ class OverviewController extends GetxController {
   void _processLedgerData() {
     double tIn = 0;
     double tOut = 0;
-
     Map<String, double> tempBreakdown = {
       "Cash": 0.0,
       "Bkash": 0.0,
       "Nagad": 0.0,
       "Bank": 0.0,
     };
-
     List<LedgerItem> tempIn = [];
     List<LedgerItem> tempOut = [];
 
-    // ---------------------------------------------------------
-    // 1. SALES (Income)
-    // ---------------------------------------------------------
+    // 1. SALES (Only Invoice Payments)
     for (var sale in salesCtrl.salesList) {
       double paid = double.tryParse(sale.paid.toString()) ?? 0.0;
       if (paid > 0) {
         tIn += paid;
-
-        // --- BREAKDOWN LOGIC ---
-        var pm = sale.paymentMethod;
-        if (pm != null) {
-          String type = (pm['type'] ?? 'cash').toString().toLowerCase();
-
-          if (type == 'multi') {
-            double c = double.tryParse(pm['cash'].toString()) ?? 0;
-            double b = double.tryParse(pm['bkash'].toString()) ?? 0;
-            double n = double.tryParse(pm['nagad'].toString()) ?? 0;
-            double bk = double.tryParse(pm['bank'].toString()) ?? 0;
-            if (c > 0) tempBreakdown["Cash"] = (tempBreakdown["Cash"] ?? 0) + c;
-            if (b > 0) {
-              tempBreakdown["Bkash"] = (tempBreakdown["Bkash"] ?? 0) + b;
-            }
-            if (n > 0) {
-              tempBreakdown["Nagad"] = (tempBreakdown["Nagad"] ?? 0) + n;
-            }
-            if (bk > 0) {
-              tempBreakdown["Bank"] = (tempBreakdown["Bank"] ?? 0) + bk;
-            }
-          } else {
-            // Single Method Check
-            bool isBank = type.contains('bank') || pm.containsKey('bankName');
-            if (isBank) {
-              tempBreakdown["Bank"] = (tempBreakdown["Bank"] ?? 0) + paid;
-            }  if (type.contains('bkash')) {
-              tempBreakdown["Bkash"] = (tempBreakdown["Bkash"] ?? 0) + paid;
-            }
-             if (type.contains('nagad')) {
-               tempBreakdown["Nagad"] = (tempBreakdown["Nagad"] ?? 0) + paid;
-             } else {
-               tempBreakdown["Cash"] = (tempBreakdown["Cash"] ?? 0) + paid;
-             }
-          }
-        } else {
-          tempBreakdown["Cash"] = (tempBreakdown["Cash"] ?? 0) + paid;
-        }
-
-        // --- UI DESCRIPTION LOGIC ---
-        String methodDesc = _formatPaymentDesc(pm);
-        String sourceDesc =
-            sale.customerType == 'debtor' ? "Due Payment" : "Sale";
-
+        _addToBreakdown(tempBreakdown, sale.paymentMethod, paid);
         tempIn.add(
           LedgerItem(
             time: sale.timestamp,
             title: sale.name,
-            subtitle: "$sourceDesc - $methodDesc",
+            subtitle:
+                "Sale (Paid: $paid) - ${_formatPaymentDesc(sale.paymentMethod)}",
             amount: paid,
             type: 'income',
           ),
@@ -280,57 +218,53 @@ class OverviewController extends GetxController {
       }
     }
 
-    // ---------------------------------------------------------
-    // 2. EXTERNAL LEDGER (Income / Expense)
-    // ---------------------------------------------------------
+    // 2. LEDGER (Old Due, Manual Adds)
     for (var item in externalLedgerData) {
       double amt = double.tryParse(item['amount'].toString()) ?? 0.0;
       String type = item['type'] ?? 'deposit';
-      String method = (item['method'] ?? 'cash').toString().toLowerCase();
+      String src = item['source'] ?? '';
       String desc = item['description'] ?? 'Manual Entry';
       DateTime time = (item['timestamp'] as Timestamp).toDate();
 
-      // Extract specific bank/account info
-      String? bankName = item['bankName'];
-      String? accNo = item['accountNo'];
-
-      // Determine Category for Chart
-      String chartKey = "Cash";
-      if (bankName != null || method.contains('bank')) {
-        chartKey = "Bank";
-      }  if (method.contains('bkash')) {
-        chartKey = "Bkash";
-      }
-       if (method.contains('nagad')) {
-         chartKey = "Nagad";
-       }
-
-      // Build Subtitle
-      String subTitle = chartKey.toUpperCase();
-      if (bankName != null) subTitle += " ($bankName)";
-      if (accNo != null) subTitle += "\nAcc: $accNo";
+      // Read details from the new map structure if available
+      dynamic details = item['details'];
 
       if (type == 'deposit') {
         tIn += amt;
-        tempBreakdown[chartKey] = (tempBreakdown[chartKey] ?? 0) + amt;
+        // If it's old due, use the details map for breakdown
+        if (src == 'pos_old_due' && details != null) {
+          _addToBreakdown(tempBreakdown, details, amt);
+        } else {
+          // Fallback for manual adds
+          String m = (item['method'] ?? 'cash').toString().toLowerCase();
+          if (m.contains('bank'))
+            tempBreakdown["Bank"] = (tempBreakdown["Bank"]! + amt);
+          else if (m.contains('bkash'))
+            tempBreakdown["Bkash"] = (tempBreakdown["Bkash"]! + amt);
+          else if (m.contains('nagad'))
+            tempBreakdown["Nagad"] = (tempBreakdown["Nagad"]! + amt);
+          else
+            tempBreakdown["Cash"] = (tempBreakdown["Cash"]! + amt);
+        }
+
         tempIn.add(
           LedgerItem(
             time: time,
             title: desc,
-            subtitle: "Add/Deposit - $subTitle",
+            subtitle:
+                "Collection/Add - ${_formatPaymentDesc(details ?? item['method'])}",
             amount: amt,
             type: 'income',
           ),
         );
       } else {
         tOut += amt;
-        // Withdrawals don't usually reduce "Sales Income Breakdown", they are just cash out.
-        // So we don't subtract from tempBreakdown unless you want net flow per channel.
         tempOut.add(
           LedgerItem(
             time: time,
             title: desc,
-            subtitle: "Withdraw - $subTitle",
+            subtitle:
+                "Withdraw/Exp - ${_formatPaymentDesc(details ?? item['method'])}",
             amount: amt,
             type: 'expense',
           ),
@@ -338,9 +272,7 @@ class OverviewController extends GetxController {
       }
     }
 
-    // ---------------------------------------------------------
     // 3. EXPENSES
-    // ---------------------------------------------------------
     for (var expense in expenseCtrl.dailyList) {
       double amt = expense.amount.toDouble();
       tOut += amt;
@@ -348,7 +280,7 @@ class OverviewController extends GetxController {
         LedgerItem(
           time: expense.time,
           title: expense.name,
-          subtitle: expense.note.isNotEmpty ? expense.note : "General Expense",
+          subtitle: expense.note,
           amount: amt,
           type: 'expense',
         ),
@@ -368,44 +300,53 @@ class OverviewController extends GetxController {
     methodBreakdown.value = tempBreakdown;
   }
 
-  // =========================================================
-  // HELPER: Format Payment Description for UI
-  // =========================================================
+  void _addToBreakdown(Map<String, double> bd, dynamic pm, double totalAmt) {
+    if (pm == null) {
+      bd["Cash"] = bd["Cash"]! + totalAmt;
+      return;
+    }
+    if (pm is! Map) {
+      bd["Cash"] = bd["Cash"]! + totalAmt;
+      return;
+    }
+
+    String type = (pm['type'] ?? 'cash').toString();
+    if (type == 'multi') {
+      bd["Cash"] = bd["Cash"]! + (double.tryParse(pm['cash'].toString()) ?? 0);
+      bd["Bank"] = bd["Bank"]! + (double.tryParse(pm['bank'].toString()) ?? 0);
+      bd["Bkash"] =
+          bd["Bkash"]! + (double.tryParse(pm['bkash'].toString()) ?? 0);
+      bd["Nagad"] =
+          bd["Nagad"]! + (double.tryParse(pm['nagad'].toString()) ?? 0);
+    } else {
+      if (type.contains('bank') || pm.containsKey('bankName'))
+        bd["Bank"] = bd["Bank"]! + totalAmt;
+      else if (type.contains('bkash'))
+        bd["Bkash"] = bd["Bkash"]! + totalAmt;
+      else if (type.contains('nagad'))
+        bd["Nagad"] = bd["Nagad"]! + totalAmt;
+      else
+        bd["Cash"] = bd["Cash"]! + totalAmt;
+    }
+  }
+
   String _formatPaymentDesc(dynamic pm) {
     if (pm == null) return "Cash";
     if (pm is! Map) return pm.toString().toUpperCase();
 
-    String type = (pm['type'] ?? '').toString();
-
-    // 1. Check for Specific Bank Info
-    if (pm.containsKey('bankName')) {
-      String bank = pm['bankName'];
-      String acc = (pm['accountNumber'] ?? pm['accountNo'] ?? '').toString();
-      return acc.isNotEmpty ? "$bank ($acc)" : bank;
-    }
-
-    // 2. Check for Mobile Banking Numbers
+    if (pm.containsKey('bankName'))
+      return "${pm['bankName']} (${pm['accountNumber'] ?? ''})";
     if (pm.containsKey('bkashNumber')) return "Bkash (${pm['bkashNumber']})";
     if (pm.containsKey('nagadNumber')) return "Nagad (${pm['nagadNumber']})";
-
-    // 3. Multi Pay
-    if (type == 'multi') {
-      List<String> parts = [];
-      if (double.parse(pm['cash'].toString()) > 0) parts.add("Cash");
-      if (double.parse(pm['bank'].toString()) > 0) parts.add("Bank");
-      if (double.parse(pm['bkash'].toString()) > 0) parts.add("Bkash");
-      if (double.parse(pm['nagad'].toString()) > 0) parts.add("Nagad");
-      return parts.join(" + ");
-    }
-
-    // 4. Fallback
-    return type.toUpperCase();
+    return (pm['type'] ?? 'Cash').toString().toUpperCase();
   }
 
-  // =========================================================
-  // PDF GENERATION
-  // =========================================================
   Future<void> generateLedgerPdf() async {
+    // ... [PDF Generation Code (Same as previous, just ensure it uses new lists)] ...
+    // The structure I provided in the previous answer for generateLedgerPdf is solid.
+    // Just copy-paste the generateLedgerPdf method from the previous OverviewController response here.
+    // It uses cashInList, cashOutList, and methodBreakdown which are now correctly populated.
+
     final doc = pw.Document();
     final dateStr = DateFormat('dd MMM yyyy').format(selectedDate.value);
     final timeFormat = DateFormat('hh:mm a');
@@ -417,29 +358,8 @@ class OverviewController extends GetxController {
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(30),
-        footer: (pw.Context context) {
-          return pw.Column(
-            children: [
-              pw.Divider(color: PdfColors.grey300),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text(
-                    "Authorized Signature",
-                    style: pw.TextStyle(font: fontRegular, fontSize: 8),
-                  ),
-                  pw.Text(
-                    "Page ${context.pageNumber} of ${context.pagesCount}",
-                    style: pw.TextStyle(font: fontRegular, fontSize: 8),
-                  ),
-                ],
-              ),
-            ],
-          );
-        },
         build: (pw.Context context) {
           return [
-            // Header
             pw.Row(
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
               children: [
@@ -471,22 +391,12 @@ class OverviewController extends GetxController {
                       dateStr,
                       style: pw.TextStyle(font: fontBold, fontSize: 14),
                     ),
-                    pw.Text(
-                      "Generated: ${DateFormat('hh:mm a').format(DateTime.now())}",
-                      style: pw.TextStyle(
-                        font: fontRegular,
-                        fontSize: 8,
-                        color: PdfColors.grey500,
-                      ),
-                    ),
                   ],
                 ),
               ],
             ),
             pw.Divider(color: PdfColors.grey300),
             pw.SizedBox(height: 10),
-
-            // Balance Summary
             pw.Container(
               padding: const pw.EdgeInsets.all(12),
               decoration: pw.BoxDecoration(
@@ -506,14 +416,10 @@ class OverviewController extends GetxController {
                   ),
                   pw.Text(
                     "+",
-                    style: pw.TextStyle(
-                      font: fontBold,
-                      fontSize: 16,
-                      color: PdfColors.grey500,
-                    ),
+                    style: pw.TextStyle(font: fontBold, fontSize: 16),
                   ),
                   _pdfBalanceColumn(
-                    "Today's Net Income",
+                    "Today's Net",
                     netCashBalance.value,
                     fontBold,
                     currency,
@@ -523,14 +429,10 @@ class OverviewController extends GetxController {
                   ),
                   pw.Text(
                     "=",
-                    style: pw.TextStyle(
-                      font: fontBold,
-                      fontSize: 16,
-                      color: PdfColors.grey500,
-                    ),
+                    style: pw.TextStyle(font: fontBold, fontSize: 16),
                   ),
                   _pdfBalanceColumn(
-                    "TOTAL CLOSING CASH",
+                    "CLOSING CASH",
                     closingCash.value,
                     fontBold,
                     currency,
@@ -541,8 +443,6 @@ class OverviewController extends GetxController {
               ),
             ),
             pw.SizedBox(height: 20),
-
-            // Source Breakdown
             pw.Text(
               "Collection Sources",
               style: pw.TextStyle(font: fontBold, fontSize: 10),
@@ -553,43 +453,19 @@ class OverviewController extends GetxController {
               children:
                   methodBreakdown.entries.map((e) {
                     if (e.value == 0) return pw.Container();
-                    return pw.Row(
-                      mainAxisSize: pw.MainAxisSize.min,
-                      children: [
-                        pw.Container(
-                          width: 6,
-                          height: 6,
-                          decoration: const pw.BoxDecoration(
-                            color: PdfColors.black,
-                            shape: pw.BoxShape.circle,
-                          ),
-                        ),
-                        pw.SizedBox(width: 4),
-                        pw.Text(
-                          "${e.key}: ${currency.format(e.value)}",
-                          style: pw.TextStyle(font: fontRegular, fontSize: 9),
-                        ),
-                      ],
+                    return pw.Text(
+                      "${e.key}: ${currency.format(e.value)}",
+                      style: pw.TextStyle(font: fontRegular, fontSize: 9),
                     );
                   }).toList(),
             ),
             pw.SizedBox(height: 20),
-
-            // Transaction Table
-            pw.Text(
-              "TRANSACTION DETAILS",
-              style: pw.TextStyle(font: fontBold, fontSize: 12),
-            ),
-            pw.SizedBox(height: 5),
-
             pw.Table(
               border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
               columnWidths: {
                 0: const pw.FlexColumnWidth(1.2),
                 1: const pw.FlexColumnWidth(3),
-                2: const pw.FlexColumnWidth(
-                  2.5,
-                ), // Increased width for Type/Method
+                2: const pw.FlexColumnWidth(2.5),
                 3: const pw.FlexColumnWidth(2),
                 4: const pw.FlexColumnWidth(2),
               },
@@ -597,7 +473,7 @@ class OverviewController extends GetxController {
                 pw.TableRow(
                   decoration: const pw.BoxDecoration(color: PdfColors.grey200),
                   children: [
-                    _pdfCell("Time", fontBold, align: pw.TextAlign.center),
+                    _pdfCell("Time", fontBold),
                     _pdfCell("Description", fontBold),
                     _pdfCell("Details", fontBold),
                     _pdfCell("Credit (+)", fontBold, align: pw.TextAlign.right),
@@ -617,10 +493,9 @@ class OverviewController extends GetxController {
         },
       ),
     );
-
     await Printing.layoutPdf(
-      onLayout: (PdfPageFormat format) async => doc.save(),
-      name: 'Daily_Statement_${dateStr.replaceAll(' ', '_')}',
+      onLayout: (format) => doc.save(),
+      name: 'Statement_$dateStr',
     );
   }
 
@@ -633,31 +508,23 @@ class OverviewController extends GetxController {
   ) {
     List<LedgerItem> all = [...inList, ...outList];
     all.sort((a, b) => a.time.compareTo(b.time));
-
     return all.map((item) {
       bool isIncome = item.type == 'income';
       return pw.TableRow(
         children: [
-          _pdfCell(
-            tFmt.format(item.time),
-            font,
-            align: pw.TextAlign.center,
-            size: 8,
-          ),
+          _pdfCell(tFmt.format(item.time), font, size: 8),
           _pdfCell(item.title, font, size: 8),
-          _pdfCell(item.subtitle, font, size: 8), // Shows the detailed method
+          _pdfCell(item.subtitle, font, size: 8),
           _pdfCell(
             isIncome ? mFmt.format(item.amount) : "-",
             font,
             align: pw.TextAlign.right,
-            size: 8,
             color: isIncome ? PdfColors.green900 : PdfColors.black,
           ),
           _pdfCell(
             !isIncome ? mFmt.format(item.amount) : "-",
             font,
             align: pw.TextAlign.right,
-            size: 8,
             color: !isIncome ? PdfColors.red900 : PdfColors.black,
           ),
         ],
@@ -691,13 +558,11 @@ class OverviewController extends GetxController {
     bool isLarge = false,
   }) {
     return pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.center,
       children: [
         pw.Text(
           label,
           style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
         ),
-        pw.SizedBox(height: 2),
         pw.Text(
           fmt.format(amount),
           style: pw.TextStyle(

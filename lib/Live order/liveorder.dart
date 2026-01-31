@@ -178,7 +178,7 @@ class LiveOrderSalesPage extends StatelessWidget {
     );
   }
 
-  // --- 1. CUSTOMER & LOGISTICS INFO ---
+  // --- 1. CUSTOMER & LOGISTICS INFO (UPDATED) ---
   Widget _buildCustomerSection(LiveSalesController controller) {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -219,6 +219,7 @@ class LiveOrderSalesPage extends StatelessWidget {
               children:
                   ["Retailer", "Agent", "Debtor"].map((type) {
                     bool isSelected = controller.customerType.value == type;
+                    // Debtor disabled in Condition Sale Mode based on original logic
                     bool isDisabled =
                         controller.isConditionSale.value && type == "Debtor";
 
@@ -264,105 +265,116 @@ class LiveOrderSalesPage extends StatelessWidget {
           const SizedBox(height: 16),
 
           Obx(() {
-            // DEBTOR SEARCH
-            if (controller.customerType.value == "Debtor" &&
-                !controller.isConditionSale.value) {
-              return Column(
-                children: [
-                  TextField(
-                    controller: controller.debtorPhoneSearch,
-                    decoration: InputDecoration(
-                      labelText: "Search Debtor Database",
-                      prefixIcon: const Icon(Icons.search, size: 20),
-                      suffixIcon:
-                          controller.debtorPhoneSearch.text.isNotEmpty
-                              ? IconButton(
-                                icon: const Icon(Icons.clear, size: 18),
-                                onPressed: () {
-                                  controller.debtorPhoneSearch.clear();
-                                  controller.selectedDebtor.value = null;
-                                },
-                              )
-                              : null,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      isDense: true,
-                    ),
-                    onChanged: (v) {
-                      if (v.isEmpty) {
-                        controller.selectedDebtor.value = null;
-                        return;
-                      }
-                      final match = controller.debtorCtrl.bodies
-                          .firstWhereOrNull(
-                            (e) =>
-                                e.phone.contains(v) ||
-                                e.name.toLowerCase().contains(v.toLowerCase()),
-                          );
-                      controller.selectedDebtor.value = match;
-                    },
-                  ),
-                  const SizedBox(height: 10),
-                  if (controller.selectedDebtor.value != null)
-                    _buildSelectedDebtorCard(controller)
-                  else if (controller.debtorPhoneSearch.text.isNotEmpty)
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.red.shade50,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Row(
-                        children: const [
-                          Icon(
-                            Icons.error_outline,
-                            color: Colors.red,
-                            size: 16,
+            // This column holds the dynamic content
+            return Column(
+              children: [
+                // --- SECTION A: CUSTOMER IDENTITY INPUT ---
+                if (controller.customerType.value == "Debtor" &&
+                    !controller.isConditionSale.value)
+                  // 1. DEBTOR SEARCH MODE
+                  Column(
+                    children: [
+                      TextField(
+                        controller: controller.debtorPhoneSearch,
+                        decoration: InputDecoration(
+                          labelText: "Search Debtor Database",
+                          prefixIcon: const Icon(Icons.search, size: 20),
+                          suffixIcon:
+                              controller.debtorPhoneSearch.text.isNotEmpty
+                                  ? IconButton(
+                                    icon: const Icon(Icons.clear, size: 18),
+                                    onPressed: () {
+                                      controller.debtorPhoneSearch.clear();
+                                      controller.selectedDebtor.value = null;
+                                    },
+                                  )
+                                  : null,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
                           ),
-                          SizedBox(width: 8),
-                          Text(
-                            "Debtor not found",
-                            style: TextStyle(color: Colors.red, fontSize: 12),
+                          isDense: true,
+                        ),
+                        onChanged: (v) {
+                          if (v.isEmpty) {
+                            controller.selectedDebtor.value = null;
+                            return;
+                          }
+                          final match = controller.debtorCtrl.bodies
+                              .firstWhereOrNull(
+                                (e) =>
+                                    e.phone.contains(v) ||
+                                    e.name.toLowerCase().contains(
+                                      v.toLowerCase(),
+                                    ),
+                              );
+                          controller.selectedDebtor.value = match;
+                        },
+                      ),
+                      const SizedBox(height: 10),
+                      if (controller.selectedDebtor.value != null)
+                        _buildSelectedDebtorCard(controller)
+                      else if (controller.debtorPhoneSearch.text.isNotEmpty)
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade50,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Row(
+                            children: const [
+                              Icon(
+                                Icons.error_outline,
+                                color: Colors.red,
+                                size: 16,
+                              ),
+                              SizedBox(width: 8),
+                              Text(
+                                "Debtor not found",
+                                style: TextStyle(
+                                  color: Colors.red,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  )
+                else
+                  // 2. MANUAL ENTRY MODE (Retailer/Agent/Direct)
+                  Column(
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _miniTextField(
+                              controller.nameC,
+                              "Customer Name",
+                              Icons.person,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _miniTextField(
+                              controller.phoneC,
+                              "Phone Number",
+                              Icons.phone,
+                              isNumber: true,
+                            ),
                           ),
                         ],
                       ),
-                    ),
-                ],
-              );
-            }
-
-            // MANUAL ENTRY
-            return Column(
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: _miniTextField(
-                        controller.nameC,
-                        "Customer Name",
-                        Icons.person,
+                      const SizedBox(height: 12),
+                      _miniTextField(
+                        controller.shopC,
+                        "Shop Name / Reference (Optional)",
+                        Icons.store,
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _miniTextField(
-                        controller.phoneC,
-                        "Phone Number",
-                        Icons.phone,
-                        isNumber: true,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                _miniTextField(
-                  controller.shopC,
-                  "Shop Name / Reference (Optional)",
-                  Icons.store,
-                ),
+                    ],
+                  ),
 
-                // --- NEW: PACKAGER DROPDOWN START ---
+                // --- SECTION B: PACKAGER (COMMON TO ALL TYPES) ---
+                // Now placed outside the if/else check so it appears for Debtors too
                 const SizedBox(height: 12),
                 Container(
                   height: 45,
@@ -426,9 +438,8 @@ class LiveOrderSalesPage extends StatelessWidget {
                     ),
                   ),
                 ),
-                // --- NEW: PACKAGER DROPDOWN END ---
 
-                // --- CONDITION SALE FIELDS ---
+                // --- SECTION C: CONDITION SALE FIELDS (ONLY IF ACTIVE) ---
                 if (controller.isConditionSale.value) ...[
                   const SizedBox(height: 20),
                   const Divider(thickness: 1, height: 1),
@@ -460,7 +471,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                         flex: 1,
                         child: _miniTextField(
                           controller.challanC,
-                          "Challan (Default: 0)", // UPDATED HINT
+                          "Challan (Default: 0)",
                           Icons.receipt_long,
                         ),
                       ),
@@ -1581,7 +1592,6 @@ class _ProductRow extends StatelessWidget {
                   ),
                 ),
               ),
-             
               // 3. Model
               Expanded(
                 flex: 2,

@@ -55,7 +55,6 @@ class DebatorController extends GetxController {
   void onInit() {
     super.onInit();
     loadBodies();
-    // silent repair not strictly needed every time, but kept as per your code
     _silentAutoRepair();
   }
 
@@ -97,7 +96,6 @@ class DebatorController extends GetxController {
         if (!loadMore) bodies.clear();
       }
 
-      // Recalculate Totals whenever we fetch (even partial) or search
       calculateTotalOutstanding();
       searchDebtors('');
     } catch (e) {
@@ -109,7 +107,7 @@ class DebatorController extends GetxController {
     }
   }
 
-  // --- HELPER FOR SALES CONTROLLER ---
+  // --- UPDATED: PRECISE BREAKDOWN LOGIC ---
   Future<Map<String, double>> getInstantDebtorBreakdown(String debtorId) async {
     try {
       final snap =
@@ -118,9 +116,12 @@ class DebatorController extends GetxController {
               .doc(debtorId)
               .collection('transactions')
               .get();
-      double previousDueTotal = 0.0;
-      double previousPaid = 0.0;
-      double runningDue = 0.0;
+
+      double oldDueTotal = 0.0; // From 'previous_due'
+      double oldDuePaid = 0.0; // From 'loan_payment'
+
+      double runningSales = 0.0; // From 'credit' (Invoices)
+      double runningPaid = 0.0; // From 'debit' (Invoice Payments)
 
       for (var doc in snap.docs) {
         final data = doc.data();
@@ -128,22 +129,29 @@ class DebatorController extends GetxController {
         double amount = (data['amount'] as num).toDouble();
 
         if (type == 'previous_due') {
-          previousDueTotal += amount;
+          oldDueTotal += amount;
         } else if (type == 'loan_payment') {
-          previousPaid += amount;
+          oldDuePaid += amount;
         } else if (type == 'credit' || type == 'advance_given') {
-          runningDue += amount;
+          runningSales += amount;
         } else if (type == 'debit' || type == 'advance_received') {
-          runningDue -= amount;
+          runningPaid += amount;
         }
       }
 
-      double currentLoan = previousDueTotal - previousPaid;
-      if (currentLoan < 0) currentLoan = 0;
+      // Logic: Loan payments strictly reduce Old Due.
+      // If Loan Paid > Loan Total, the excess helps cover running sales (safeguard)
+      double currentLoan = oldDueTotal - oldDuePaid;
+      if (currentLoan < 0) {
+        runningPaid += currentLoan.abs();
+        currentLoan = 0;
+      }
+
+      double runningDue = runningSales - runningPaid;
 
       return {
-        'loan': currentLoan,
-        'running': runningDue,
+        'loan': currentLoan, // Strict Old Due
+        'running': runningDue, // Strict Running Due
         'total': currentLoan + runningDue,
       };
     } catch (e) {
@@ -160,9 +168,10 @@ class DebatorController extends GetxController {
         .collection('transactions')
         .snapshots()
         .map((snap) {
-          double previousDueTotal = 0.0;
-          double previousPaid = 0.0;
-          double runningDue = 0.0;
+          double oldDueTotal = 0.0;
+          double oldDuePaid = 0.0;
+          double runningSales = 0.0;
+          double runningPaid = 0.0;
 
           for (var doc in snap.docs) {
             final data = doc.data();
@@ -170,21 +179,24 @@ class DebatorController extends GetxController {
             double amount = (data['amount'] as num).toDouble();
 
             if (type == 'previous_due') {
-              previousDueTotal += amount;
+              oldDueTotal += amount;
             } else if (type == 'loan_payment') {
-              previousPaid += amount;
+              oldDuePaid += amount;
             } else if (type == 'credit' || type == 'advance_given') {
-              runningDue += amount;
+              runningSales += amount;
             } else if (type == 'debit' || type == 'advance_received') {
-              runningDue -= amount;
+              runningPaid += amount;
             }
           }
-
-          double currentLoan = previousDueTotal - previousPaid;
+          double currentLoan = oldDueTotal - oldDuePaid;
+          if (currentLoan < 0) {
+            runningPaid += currentLoan.abs();
+            currentLoan = 0;
+          }
           return {
             'loan': currentLoan,
-            'running': runningDue,
-            'total': currentLoan + runningDue,
+            'running': runningSales - runningPaid,
+            'total': currentLoan + (runningSales - runningPaid),
           };
         });
   }
@@ -281,47 +293,27 @@ class DebatorController extends GetxController {
 
   Future<void> _recalculateSingleDebtorBalance(String debtorId) async {
     try {
-      final txs =
-          await db
-              .collection('debatorbody')
-              .doc(debtorId)
-              .collection('transactions')
-              .get();
-      double realBalance = 0.0;
-
-      for (var doc in txs.docs) {
-        final data = doc.data();
-        String type = (data['type'] ?? 'credit').toString();
-        double amount = (data['amount'] as num).toDouble();
-
-        if (type == 'credit' ||
-            type == 'advance_given' ||
-            type == 'previous_due') {
-          realBalance += amount;
-        } else {
-          realBalance -= amount;
-        }
-      }
+      // Use the strict breakdown logic for the main balance update
+      final breakdown = await getInstantDebtorBreakdown(debtorId);
 
       await db.collection('debatorbody').doc(debtorId).update({
-        'balance': realBalance,
+        'balance': breakdown['total'],
         'lastTransactionDate': FieldValue.serverTimestamp(),
       });
-      // Update the local list as well so UI updates instantly
       calculateTotalOutstanding();
     } catch (e) {
       print("Auto-Fix Error: $e");
     }
   }
 
-  // UPDATED: Handles Dynamic Payment Method Map
+  // --- UPDATED: MANUAL TRANSACTION ADD ---
   Future<void> addTransaction({
     required String debtorId,
     required double amount,
     required String note,
     required String type,
     required DateTime date,
-    required Map<String, dynamic> paymentMethodData, // CHANGED
+    required Map<String, dynamic> paymentMethodData,
     String? txid,
   }) async {
     gbIsLoading.value = true;
@@ -339,35 +331,39 @@ class DebatorController extends GetxController {
         txid = newTxRef.id;
       }
 
-      // Save Transaction
+      // Save Transaction to Debtor
       await newTxRef.set({
         'transactionId': txid,
         'amount': amount,
         'note': note,
         'type': type,
         'date': Timestamp.fromDate(date),
-        'paymentMethod': paymentMethodData, // Storing dynamic map
+        'paymentMethod': paymentMethodData,
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      // --- SYNC LOGIC ---
+      // --- SYNC LOGIC (CORRECTED) ---
 
       if (type == 'loan_payment') {
+        // MANUAL OLD DUE PAYMENT -> CASH LEDGER DIRECTLY
+        // Source marked as 'debtor_manual' to distinguish from POS
         await db.collection('cash_ledger').add({
           'type': 'deposit',
           'amount': amount,
           'method': paymentMethodData['type'] ?? 'cash',
-          'details': paymentMethodData, // Store full details
+          'details': paymentMethodData, // Store full details (Bank Name etc)
           'description': "Previous Due Collected: $debtorName",
           'timestamp': FieldValue.serverTimestamp(),
           'linkedDebtorId': debtorId,
           'linkedTxId': txid,
+          'source': 'debtor_manual',
         });
       } else if (type == 'advance_given') {
+        // We gave cash -> Expense
         await db.collection('cash_ledger').add({
           'type': 'expense',
           'amount': amount,
-          'method': 'cash', // Advances usually cash, but could change if needed
+          'method': 'cash',
           'description': "Advance Given to $debtorName",
           'timestamp': FieldValue.serverTimestamp(),
           'linkedDebtorId': debtorId,
@@ -387,6 +383,7 @@ class DebatorController extends GetxController {
           print(e);
         }
       } else if (type == 'advance_received') {
+        // Received Advance -> Deposit
         await db.collection('cash_ledger').add({
           'type': 'deposit',
           'amount': amount,
@@ -415,10 +412,11 @@ class DebatorController extends GetxController {
             transactionId: txid,
           );
         } else if (type == 'debit') {
+          // INVOICE PAYMENT -> DAILY SALES
           await daily.applyDebtorPayment(
             debtorName,
             amount,
-            paymentMethodData, // Dynamic Method
+            paymentMethodData,
             date: date,
             transactionId: txid,
           );
@@ -428,7 +426,7 @@ class DebatorController extends GetxController {
       await _recalculateSingleDebtorBalance(debtorId);
 
       loadDebtorTransactions(debtorId);
-      loadBodies(loadMore: false); // Reload list to update totals
+      loadBodies(loadMore: false);
 
       if (Get.isRegistered<CashDrawerController>()) {
         Get.find<CashDrawerController>().fetchData();
@@ -571,7 +569,6 @@ class DebatorController extends GetxController {
 
       await _recalculateSingleDebtorBalance(debtorId);
 
-      // Simple update attempts for external collections (Not robust, but adheres to existing logic)
       if (oldType == 'loan_payment' || oldType.contains('advance')) {
         QuerySnapshot lSnap =
             await db
@@ -633,7 +630,6 @@ class DebatorController extends GetxController {
     }
   }
 
-  // FIXED: robust Update
   Future<void> editDebtor({
     required String id,
     required String oldName,
@@ -642,8 +638,7 @@ class DebatorController extends GetxController {
     required String nid,
     required String phone,
     required String address,
-    List<Map<String, dynamic>>?
-    payments, // Optional, defaults to keeping old if null
+    List<Map<String, dynamic>>? payments,
   }) async {
     gbIsLoading.value = true;
     try {
@@ -661,7 +656,6 @@ class DebatorController extends GetxController {
 
       await db.collection('debatorbody').doc(id).update(updateData);
 
-      // Update name in Daily Sales if changed
       if (oldName != newName) {
         final snap =
             await db
@@ -687,7 +681,7 @@ class DebatorController extends GetxController {
   }
 
   // ------------------------------------------------------------------
-  // 4. HELPERS & PDF
+  // 4. HELPER & PDF
   // ------------------------------------------------------------------
 
   Future<void> _silentAutoRepair() async {
@@ -711,12 +705,8 @@ class DebatorController extends GetxController {
     }
   }
 
-  // Updated to calculate both Receivables and Payables
   Future<void> calculateTotalOutstanding() async {
     try {
-      // We iterate through 'bodies' (or fetch all for total accuracy)
-      // Since 'bodies' is paginated, we should ideally run an aggregate query or fetch all for a true total.
-      // For now, based on your structure, I will fetch all specific fields to be accurate.
       final snap = await db.collection('debatorbody').get();
       double totalRec = 0;
       double totalPay = 0;
@@ -760,13 +750,13 @@ class DebatorController extends GetxController {
         .map((doc) => (doc.data()?['balance'] as num?)?.toDouble() ?? 0.0);
   }
 
+  // --- PDF GENERATION LOGIC ---
   Future<Uint8List> generatePDF(
     String debtorName,
     List<Map<String, dynamic>> transactions,
   ) async {
     final pdf = pw.Document();
 
-    // Calculation
     double totalDebt = transactions
         .where(
           (t) =>
@@ -859,12 +849,10 @@ class DebatorController extends GetxController {
     return pdf.save();
   }
 
-  // MARKET DUE REPORT (Receivables)
   Future<void> downloadAllDebtorsReport() async {
     await _generateGeneralReport(title: "MARKET DUE REPORT", isPayable: false);
   }
 
-  // MARKET PAYABLE REPORT (New Requirement)
   Future<void> downloadAllPayablesReport() async {
     await _generateGeneralReport(
       title: "MARKET PAYABLE REPORT",
@@ -881,7 +869,6 @@ class DebatorController extends GetxController {
       Get.snackbar("Preparing", "Generating report...");
 
       final snap = await db.collection('debatorbody').get();
-
       final allDebtors =
           snap.docs
               .map((d) {
@@ -894,7 +881,6 @@ class DebatorController extends GetxController {
               .whereType<DebtorModel>()
               .toList();
 
-      // Filter based on report type
       final targetDebtors =
           allDebtors
               .where((d) => isPayable ? (d.purchaseDue > 0) : (d.balance > 0))
@@ -906,7 +892,6 @@ class DebatorController extends GetxController {
         return;
       }
 
-      // Sort
       targetDebtors.sort(
         (a, b) =>
             isPayable
