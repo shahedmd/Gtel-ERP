@@ -3,14 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Shipment/controller.dart';
 import 'package:gtel_erp/Shipment/shipmodel.dart';
+import 'package:gtel_erp/Shipment/shipmentdialog.dart'; // Import reusable dialog
 import 'package:gtel_erp/Stock/controller.dart';
-import 'package:intl/intl.dart';
-
-// RE-USE THE DIALOG, BUT ADAPTED TO PUSH TO LOCAL STATE
-import 'package:gtel_erp/Shipment/shipmentdialog.dart';
-// NOTE: You might need to slightly modify showShipmentEntryDialog to accept a callback
-// OR we can make a small local version here.
-// For "Don't remove anything", I will use the product catalog search to add items.
 
 class ShipmentDetailScreen extends StatefulWidget {
   final ShipmentModel shipment;
@@ -51,6 +45,7 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
                 cartonNo: e.cartonNo,
                 seaPriceSnapshot: e.seaPriceSnapshot,
                 airPriceSnapshot: e.airPriceSnapshot,
+                ignoreMissing: e.ignoreMissing, // Copy the flag
               ),
             )
             .toList();
@@ -62,30 +57,15 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
     super.dispose();
   }
 
-  void _updateQty(int index, String type, int newVal) {
+  void _updateItem(int index, ShipmentItem newItem) {
     setState(() {
-      final old = editedItems[index];
-      editedItems[index] = ShipmentItem(
-        productId: old.productId,
-        productName: old.productName,
-        productModel: old.productModel,
-        productBrand: old.productBrand,
-        productCategory: old.productCategory,
-        unitWeightSnapshot: old.unitWeightSnapshot,
-        seaQty: old.seaQty,
-        airQty: old.airQty,
-        receivedSeaQty: type == 'sea' ? newVal : old.receivedSeaQty,
-        receivedAirQty: type == 'air' ? newVal : old.receivedAirQty,
-        cartonNo: old.cartonNo,
-        seaPriceSnapshot: old.seaPriceSnapshot,
-        airPriceSnapshot: old.airPriceSnapshot,
-      );
+      editedItems[index] = newItem;
     });
   }
 
-  // LOGIC TO ADD NEW ITEM TO EDIT LIST
-  void _addNewProduct() {
-    // Show a bottom sheet with product search
+  // UPDATED: Use the Reusable Dialog
+  void _addNewProductWithDialog() {
+    // 1. Show Search Sheet first to pick product
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -96,13 +76,13 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
             child: Column(
               children: [
                 const Text(
-                  "Add Extra Product",
+                  "Search Product to Add",
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
                 ),
                 TextField(
                   decoration: const InputDecoration(
                     prefixIcon: Icon(Icons.search),
-                    hintText: "Search Product...",
+                    hintText: "Search...",
                   ),
                   onChanged: (val) => productController.search(val),
                 ),
@@ -115,39 +95,26 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
                         return ListTile(
                           title: Text(p.model),
                           subtitle: Text(p.name),
-                          trailing: IconButton(
-                            icon: const Icon(
-                              Icons.add_circle,
-                              color: Colors.blue,
-                            ),
-                            onPressed: () {
-                              // Add to editedItems list
-                              setState(() {
-                                editedItems.add(
-                                  ShipmentItem(
-                                    productId: p.id,
-                                    productName: p.name,
-                                    productModel: p.model,
-                                    productBrand: p.brand,
-                                    productCategory: p.category,
-                                    unitWeightSnapshot: p.weight,
-                                    seaQty: 0, // Not in original order
-                                    airQty: 0, // Not in original order
-                                    receivedSeaQty: 0, // User will edit this
-                                    receivedAirQty: 0, // User will edit this
-                                    cartonNo: 'Extra',
-                                    seaPriceSnapshot: p.sea,
-                                    airPriceSnapshot: p.air,
-                                  ),
-                                );
-                              });
-                              Get.back();
-                              Get.snackbar(
-                                "Added",
-                                "Product added to list. Please enter Received Qty.",
-                              );
-                            },
+                          trailing: const Icon(
+                            Icons.arrow_forward_ios,
+                            size: 16,
                           ),
+                          onTap: () {
+                            Get.back(); // Close search sheet
+                            // 2. Open the reusable Shipment Dialog
+                            showShipmentEntryDialog(
+                              p,
+                              controller,
+                              productController,
+                              widget.shipment.exchangeRate,
+                              onSubmit: (newItem) {
+                                setState(() {
+                                  editedItems.add(newItem);
+                                });
+                                Get.snackbar("Added", "Item added to list.");
+                              },
+                            );
+                          },
                         );
                       },
                     ),
@@ -158,6 +125,12 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
           ),
     );
   }
+
+  // Calculation Helper
+  double get totalReceivedValue =>
+      editedItems.fold(0.0, (sum, e) => sum + e.receivedItemValue);
+  double get originalValue => widget.shipment.totalAmount;
+  double get valueDifference => originalValue - totalReceivedValue;
 
   @override
   Widget build(BuildContext context) {
@@ -172,9 +145,9 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
         actions: [
           if (!isReceived)
             IconButton(
-              tooltip: "Add Product (Mistake/Extra)",
+              tooltip: "Add Product (Swap/Extra)",
               icon: const Icon(Icons.add_shopping_cart, color: Colors.blue),
-              onPressed: _addNewProduct,
+              onPressed: _addNewProductWithDialog,
             ),
           if (!isReceived)
             TextButton.icon(
@@ -211,6 +184,7 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
               margin: const EdgeInsets.all(16),
               child: Column(
                 children: [
+                  // Table Header
                   Container(
                     padding: const EdgeInsets.all(12),
                     color: Colors.blueGrey[800],
@@ -245,20 +219,10 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
                           ),
                         ),
                         Expanded(
-                          flex: 1,
+                          flex: 2,
                           child: Text(
-                            "Cost (Unit)",
+                            "Status / Action",
                             style: TextStyle(color: Colors.white, fontSize: 12),
-                          ),
-                        ),
-                        Expanded(
-                          flex: 1,
-                          child: Text(
-                            "Loss",
-                            style: TextStyle(
-                              color: Colors.redAccent,
-                              fontSize: 12,
-                            ),
                           ),
                         ),
                       ],
@@ -270,11 +234,8 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
                       separatorBuilder: (c, i) => const Divider(height: 1),
                       itemBuilder: (ctx, i) {
                         final item = editedItems[i];
-                        // Calc unit cost for display
-                        double unitCost =
-                            item.seaPriceSnapshot > 0
-                                ? item.seaPriceSnapshot
-                                : item.airPriceSnapshot;
+                        bool isLoss = item.lossQty > 0;
+                        bool isExtra = (item.seaQty + item.airQty) == 0;
 
                         return Padding(
                           padding: const EdgeInsets.symmetric(
@@ -301,9 +262,19 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
                                         color: Colors.grey,
                                       ),
                                     ),
+                                    if (isExtra)
+                                      const Text(
+                                        "(Added Extra)",
+                                        style: TextStyle(
+                                          color: Colors.blue,
+                                          fontSize: 10,
+                                          fontStyle: FontStyle.italic,
+                                        ),
+                                      ),
                                   ],
                                 ),
                               ),
+
                               // ORDERED
                               Expanded(
                                 flex: 2,
@@ -315,7 +286,7 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
                                 ),
                               ),
 
-                              // RECEIVED
+                              // RECEIVED INPUTS
                               Expanded(
                                 flex: 3,
                                 child: Row(
@@ -332,12 +303,33 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
                                           border: OutlineInputBorder(),
                                           labelText: "Sea",
                                         ),
-                                        onChanged:
-                                            (val) => _updateQty(
-                                              i,
-                                              'sea',
-                                              int.tryParse(val) ?? 0,
+                                        onChanged: (val) {
+                                          _updateItem(
+                                            i,
+                                            ShipmentItem(
+                                              productId: item.productId,
+                                              productName: item.productName,
+                                              productModel: item.productModel,
+                                              productBrand: item.productBrand,
+                                              productCategory:
+                                                  item.productCategory,
+                                              unitWeightSnapshot:
+                                                  item.unitWeightSnapshot,
+                                              seaQty: item.seaQty,
+                                              airQty: item.airQty,
+                                              receivedSeaQty:
+                                                  int.tryParse(val) ?? 0,
+                                              receivedAirQty:
+                                                  item.receivedAirQty,
+                                              cartonNo: item.cartonNo,
+                                              seaPriceSnapshot:
+                                                  item.seaPriceSnapshot,
+                                              airPriceSnapshot:
+                                                  item.airPriceSnapshot,
+                                              ignoreMissing: item.ignoreMissing,
                                             ),
+                                          );
+                                        },
                                       ),
                                     ),
                                     const SizedBox(width: 8),
@@ -353,37 +345,105 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
                                           border: OutlineInputBorder(),
                                           labelText: "Air",
                                         ),
-                                        onChanged:
-                                            (val) => _updateQty(
-                                              i,
-                                              'air',
-                                              int.tryParse(val) ?? 0,
+                                        onChanged: (val) {
+                                          _updateItem(
+                                            i,
+                                            ShipmentItem(
+                                              productId: item.productId,
+                                              productName: item.productName,
+                                              productModel: item.productModel,
+                                              productBrand: item.productBrand,
+                                              productCategory:
+                                                  item.productCategory,
+                                              unitWeightSnapshot:
+                                                  item.unitWeightSnapshot,
+                                              seaQty: item.seaQty,
+                                              airQty: item.airQty,
+                                              receivedSeaQty:
+                                                  item.receivedSeaQty,
+                                              receivedAirQty:
+                                                  int.tryParse(val) ?? 0,
+                                              cartonNo: item.cartonNo,
+                                              seaPriceSnapshot:
+                                                  item.seaPriceSnapshot,
+                                              airPriceSnapshot:
+                                                  item.airPriceSnapshot,
+                                              ignoreMissing: item.ignoreMissing,
                                             ),
+                                          );
+                                        },
                                       ),
                                     ),
                                   ],
                                 ),
                               ),
 
-                              // COST
+                              // STATUS / IGNORE CHECKBOX
                               Expanded(
-                                flex: 1,
-                                child: Text(unitCost.toStringAsFixed(1)),
-                              ),
-
-                              // LOSS
-                              Expanded(
-                                flex: 1,
-                                child: Text(
-                                  "${item.lossQty}",
-                                  style: TextStyle(
-                                    color:
-                                        item.lossQty > 0
-                                            ? Colors.red
-                                            : Colors.green,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
+                                flex: 2,
+                                child:
+                                    isLoss
+                                        ? Row(
+                                          children: [
+                                            Checkbox(
+                                              value: item.ignoreMissing,
+                                              activeColor: Colors.orange,
+                                              onChanged:
+                                                  isReceived
+                                                      ? null
+                                                      : (val) {
+                                                        _updateItem(
+                                                          i,
+                                                          ShipmentItem(
+                                                            productId:
+                                                                item.productId,
+                                                            productName:
+                                                                item.productName,
+                                                            productModel:
+                                                                item.productModel,
+                                                            productBrand:
+                                                                item.productBrand,
+                                                            productCategory:
+                                                                item.productCategory,
+                                                            unitWeightSnapshot:
+                                                                item.unitWeightSnapshot,
+                                                            seaQty: item.seaQty,
+                                                            airQty: item.airQty,
+                                                            receivedSeaQty:
+                                                                item.receivedSeaQty,
+                                                            receivedAirQty:
+                                                                item.receivedAirQty,
+                                                            cartonNo:
+                                                                item.cartonNo,
+                                                            seaPriceSnapshot:
+                                                                item.seaPriceSnapshot,
+                                                            airPriceSnapshot:
+                                                                item.airPriceSnapshot,
+                                                            ignoreMissing:
+                                                                val ??
+                                                                false, // Toggle Ignore
+                                                          ),
+                                                        );
+                                                      },
+                                            ),
+                                            const Expanded(
+                                              child: Text(
+                                                "Ignore Loss?",
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  color: Colors.orange,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        )
+                                        : const Text(
+                                          "OK",
+                                          style: TextStyle(
+                                            color: Colors.green,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
                               ),
                             ],
                           ),
@@ -396,6 +456,7 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
             ),
           ),
 
+          // INFO SIDEBAR
           Expanded(
             flex: 1,
             child: Card(
@@ -406,22 +467,66 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      "SHIPMENT INFO",
+                      "FINANCIAL CHECK",
                       style: TextStyle(fontWeight: FontWeight.bold),
                     ),
                     const Divider(),
-                    _infoRow("Carrier", widget.shipment.carrier),
-                    _infoRow("Vendor", widget.shipment.vendorName),
                     _infoRow(
-                      "Purchased",
-                      DateFormat(
-                        'yyyy-MM-dd',
-                      ).format(widget.shipment.purchaseDate),
+                      "Original Bill:",
+                      controller.formatMoney(originalValue),
                     ),
-                    const SizedBox(height: 20),
+                    _infoRow(
+                      "Received Val:",
+                      controller.formatMoney(totalReceivedValue),
+                    ),
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color:
+                            valueDifference > 0
+                                ? Colors.red[50]
+                                : Colors.green[50],
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            valueDifference > 0 ? "Shortage:" : "Surplus:",
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color:
+                                  valueDifference > 0
+                                      ? Colors.red
+                                      : Colors.green,
+                            ),
+                          ),
+                          Text(
+                            controller.formatMoney(valueDifference.abs()),
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color:
+                                  valueDifference > 0
+                                      ? Colors.red
+                                      : Colors.green,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (valueDifference > 0)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 4.0),
+                        child: Text(
+                          "* This shortage will be saved as a Note, but Vendor Balance remains unchanged.",
+                          style: TextStyle(fontSize: 10, color: Colors.grey),
+                        ),
+                      ),
 
+                    const SizedBox(height: 20),
                     const Text(
-                      "CARRIER / LOSS REPORT",
+                      "CARRIER REPORT",
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
                         color: Colors.red,
@@ -431,21 +536,12 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
                     TextField(
                       controller: reportCtrl,
                       enabled: !isReceived,
-                      maxLines: 10,
+                      maxLines: 5,
                       decoration: const InputDecoration(
-                        hintText: "Enter details about lost items...",
+                        hintText: "Enter details...",
                         border: OutlineInputBorder(),
                         filled: true,
                         fillColor: Color(0xFFFFF8F8),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    const Text(
-                      "* Items marked as LOSS (Ordered > Received) will automatically move to the 'On Hold / Missing' page upon receiving.",
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Colors.red,
-                        fontStyle: FontStyle.italic,
                       ),
                     ),
                   ],
@@ -461,8 +557,25 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
   void _showReceiveConfirmation() {
     Get.defaultDialog(
       title: "Confirm Receive",
-      middleText:
-          "This will add the 'RECEIVED' quantities to your stock.\n\nAny Missing items will be moved to the 'On Hold' list.",
+      content: Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: Column(
+          children: [
+            const Text(
+              "This will finalize stock. Missing items NOT marked 'Ignore' will go to On Hold.",
+            ),
+            const SizedBox(height: 10),
+            if (valueDifference > 0)
+              Text(
+                "A Shortage Note of ${controller.formatMoney(valueDifference)} will be saved.",
+                style: const TextStyle(
+                  color: Colors.red,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+          ],
+        ),
+      ),
       textConfirm: "PROCESS STOCK",
       textCancel: "Cancel",
       confirmTextColor: Colors.white,
@@ -476,7 +589,7 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
           exchangeRate: widget.shipment.exchangeRate,
           totalCartons: widget.shipment.totalCartons,
           totalWeight: widget.shipment.totalWeight,
-          totalAmount: widget.shipment.totalAmount, // Vendor bill stays same
+          totalAmount: widget.shipment.totalAmount,
           isReceived: false,
           items: editedItems,
           carrierReport: reportCtrl.text,
@@ -502,7 +615,10 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label, style: const TextStyle(color: Colors.grey)),
-          Text(val, style: const TextStyle(fontWeight: FontWeight.bold)),
+          Text(
+            val,
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+          ),
         ],
       ),
     );

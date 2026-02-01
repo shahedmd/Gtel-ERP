@@ -1,3 +1,4 @@
+// ignore_for_file: deprecated_member_use
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Shipment/controller.dart';
@@ -20,6 +21,33 @@ class OnHoldShipmentPage extends StatelessWidget {
         backgroundColor: Colors.white,
         iconTheme: const IconThemeData(color: Colors.black),
         elevation: 1,
+        actions: [
+          // FILTER DROPDOWN
+          Padding(
+            padding: const EdgeInsets.only(right: 16.0),
+            child: Obx(
+              () => DropdownButton<String>(
+                value:
+                    controller.filterOnHoldCarrier.value.isEmpty
+                        ? null
+                        : controller.filterOnHoldCarrier.value,
+                hint: const Text("Filter Carrier"),
+                underline: Container(),
+                items: [
+                  const DropdownMenuItem(
+                    value: "",
+                    child: Text("All Carriers"),
+                  ),
+                  ...controller.carrierList.map(
+                    (c) => DropdownMenuItem(value: c, child: Text(c)),
+                  ),
+                ],
+                onChanged:
+                    (val) => controller.filterOnHoldCarrier.value = val ?? "",
+              ),
+            ),
+          ),
+        ],
       ),
       body: Container(
         margin: const EdgeInsets.all(16),
@@ -39,7 +67,7 @@ class OnHoldShipmentPage extends StatelessWidget {
                   SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      "These items were ordered but not received (Customs Hold/Lost). Click 'Release' when you recover them.",
+                      "These items were ordered but not received. Click 'Release' when you recover them.",
                       style: TextStyle(
                         color: Colors.red,
                         fontWeight: FontWeight.bold,
@@ -52,10 +80,10 @@ class OnHoldShipmentPage extends StatelessWidget {
             const SizedBox(height: 10),
             Expanded(
               child: Obx(() {
-                if (controller.onHoldItems.isEmpty) {
+                if (controller.filteredOnHoldItems.isEmpty) {
                   return const Center(
                     child: Text(
-                      "No missing items found. Great job!",
+                      "No items found.",
                       style: TextStyle(color: Colors.grey),
                     ),
                   );
@@ -72,7 +100,7 @@ class OnHoldShipmentPage extends StatelessWidget {
                       DataColumn(label: Text("Action")),
                     ],
                     rows:
-                        controller.onHoldItems.map((item) {
+                        controller.filteredOnHoldItems.map((item) {
                           return DataRow(
                             cells: [
                               DataCell(
@@ -132,8 +160,8 @@ class OnHoldShipmentPage extends StatelessWidget {
                                     Get.defaultDialog(
                                       title: "Recover Item?",
                                       middleText:
-                                          "Confirm that you have received ${item.missingQty} pcs of ${item.productModel}.\nThis will add them to stock.",
-                                      textConfirm: "CONFIRM RECOVERY",
+                                          "Confirm recovery of ${item.missingQty} pcs?",
+                                      textConfirm: "CONFIRM",
                                       confirmTextColor: Colors.white,
                                       onConfirm: () {
                                         Get.back();

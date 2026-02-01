@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+
 class ShipmentItem {
   final int productId;
   final String productName;
@@ -8,19 +9,20 @@ class ShipmentItem {
   final String productCategory;
   final double unitWeightSnapshot;
 
-  // FINANCIAL (What we pay for)
+  // FINANCIAL (Ordered)
   final int seaQty;
   final int airQty;
 
-  // PHYSICAL (What we receive - Default equals financial, but editable)
+  // PHYSICAL (Received)
   final int receivedSeaQty;
   final int receivedAirQty;
 
   final String cartonNo;
 
-  // Snapshot prices
   final double seaPriceSnapshot;
   final double airPriceSnapshot;
+
+  final bool ignoreMissing;
 
   ShipmentItem({
     required this.productId,
@@ -36,10 +38,18 @@ class ShipmentItem {
     required this.cartonNo,
     required this.seaPriceSnapshot,
     required this.airPriceSnapshot,
+    this.ignoreMissing = false,
   });
 
-  // Helper to calculate Loss/On Hold
   int get lossQty => (seaQty + airQty) - (receivedSeaQty + receivedAirQty);
+
+  // Cost based on ORDERED (Billable)
+  double get totalItemCost =>
+      (seaQty * seaPriceSnapshot) + (airQty * airPriceSnapshot);
+
+  // Cost based on RECEIVED (Actual Value)
+  double get receivedItemValue =>
+      (receivedSeaQty * seaPriceSnapshot) + (receivedAirQty * airPriceSnapshot);
 
   Map<String, dynamic> toMap() {
     return {
@@ -56,6 +66,7 @@ class ShipmentItem {
       'cartonNo': cartonNo,
       'seaPriceSnapshot': seaPriceSnapshot,
       'airPriceSnapshot': airPriceSnapshot,
+      'ignoreMissing': ignoreMissing,
     };
   }
 
@@ -69,40 +80,36 @@ class ShipmentItem {
       unitWeightSnapshot: (map['unitWeightSnapshot'] ?? 0.0).toDouble(),
       seaQty: map['seaQty'] ?? 0,
       airQty: map['airQty'] ?? 0,
-      // If received qty is missing (old data), default to ordered qty
       receivedSeaQty: map['receivedSeaQty'] ?? map['seaQty'] ?? 0,
       receivedAirQty: map['receivedAirQty'] ?? map['airQty'] ?? 0,
       cartonNo: map['cartonNo'] ?? '',
       seaPriceSnapshot: (map['seaPriceSnapshot'] ?? 0.0).toDouble(),
       airPriceSnapshot: (map['airPriceSnapshot'] ?? 0.0).toDouble(),
+      ignoreMissing: map['ignoreMissing'] ?? false,
     );
   }
-
-  // Cost is ALWAYS based on Ordered Qty (Vendor Contract)
-  double get totalItemCost =>
-      (seaQty * seaPriceSnapshot) + (airQty * airPriceSnapshot);
-
-  double get totalLineWeight => (seaQty + airQty) * unitWeightSnapshot;
 }
 
 class ShipmentModel {
   String? docId;
   final String shipmentName;
-  final DateTime purchaseDate; // Primary Date
-  final DateTime? arrivalDate; // Entry Date
+  final DateTime purchaseDate;
+  final DateTime? arrivalDate;
 
   final String? vendorId;
   final String vendorName;
   final String carrier;
   final double exchangeRate;
-
-  // REPORTING
   final String? carrierReport;
 
   final int totalCartons;
   final double totalWeight;
-  final double totalAmount;
+  final double totalAmount; // Original Bill
   final bool isReceived;
+
+  // NEW: Store the calculated loss/difference from vendor swaps
+  final double vendorLossAmount;
+
   final List<ShipmentItem> items;
 
   ShipmentModel({
@@ -119,6 +126,7 @@ class ShipmentModel {
     required this.totalWeight,
     required this.totalAmount,
     this.isReceived = false,
+    this.vendorLossAmount = 0.0,
     required this.items,
   });
 
@@ -137,6 +145,7 @@ class ShipmentModel {
       'totalWeight': totalWeight,
       'totalAmount': totalAmount,
       'isReceived': isReceived,
+      'vendorLossAmount': vendorLossAmount,
       'items': items.map((e) => e.toMap()).toList(),
     };
   }
@@ -146,7 +155,6 @@ class ShipmentModel {
     return ShipmentModel(
       docId: doc.id,
       shipmentName: data['shipmentName'] ?? 'Unknown',
-      // Removed createdDate, defaulting to purchaseDate if legacy data needs it
       purchaseDate:
           data['purchaseDate'] != null
               ? (data['purchaseDate'] as Timestamp).toDate()
@@ -164,6 +172,7 @@ class ShipmentModel {
       totalWeight: (data['totalWeight'] ?? 0.0).toDouble(),
       totalAmount: (data['totalAmount'] ?? 0.0).toDouble(),
       isReceived: data['isReceived'] ?? false,
+      vendorLossAmount: (data['vendorLossAmount'] ?? 0.0).toDouble(),
       items:
           (data['items'] as List<dynamic>?)
               ?.map((e) => ShipmentItem.fromMap(e))

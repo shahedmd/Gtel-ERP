@@ -2,10 +2,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:gtel_erp/Live%20order/salemodel.dart';
+import 'package:gtel_erp/Live%20order/salemodel.dart'; // Ensure this matches your file structure
 import '../Stock/model.dart';
-// Import your controller file here
-// import 'path_to_your_controller.dart';
 
 class LiveOrderSalesPage extends StatelessWidget {
   const LiveOrderSalesPage({super.key});
@@ -219,7 +217,6 @@ class LiveOrderSalesPage extends StatelessWidget {
               children:
                   ["Retailer", "Agent", "Debtor"].map((type) {
                     bool isSelected = controller.customerType.value == type;
-                    // Debtor disabled in Condition Sale Mode based on original logic
                     bool isDisabled =
                         controller.isConditionSale.value && type == "Debtor";
 
@@ -265,13 +262,12 @@ class LiveOrderSalesPage extends StatelessWidget {
           const SizedBox(height: 16),
 
           Obx(() {
-            // This column holds the dynamic content
             return Column(
               children: [
-                // --- SECTION A: CUSTOMER IDENTITY INPUT ---
+                // --- SECTION A: CUSTOMER IDENTITY ---
                 if (controller.customerType.value == "Debtor" &&
                     !controller.isConditionSale.value)
-                  // 1. DEBTOR SEARCH MODE
+                  // 1. DEBTOR SEARCH
                   Column(
                     children: [
                       TextField(
@@ -341,7 +337,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                     ],
                   )
                 else
-                  // 2. MANUAL ENTRY MODE (Retailer/Agent/Direct)
+                  // 2. MANUAL ENTRY
                   Column(
                     children: [
                       Row(
@@ -373,8 +369,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                     ],
                   ),
 
-                // --- SECTION B: PACKAGER (COMMON TO ALL TYPES) ---
-                // Now placed outside the if/else check so it appears for Debtors too
+                // --- SECTION B: PACKAGER ---
                 const SizedBox(height: 12),
                 Container(
                   height: 45,
@@ -388,14 +383,14 @@ class LiveOrderSalesPage extends StatelessWidget {
                     child: DropdownButton<String>(
                       value: controller.selectedPackager.value,
                       hint: Row(
-                        children: [
+                        children: const [
                           Icon(
                             Icons.inventory_outlined,
                             size: 18,
                             color: Colors.grey,
                           ),
-                          const SizedBox(width: 8),
-                          const Text(
+                          SizedBox(width: 8),
+                          Text(
                             "Select Packager / Packed By",
                             style: TextStyle(
                               fontSize: 13,
@@ -439,7 +434,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                   ),
                 ),
 
-                // --- SECTION C: CONDITION SALE FIELDS (ONLY IF ACTIVE) ---
+                // --- SECTION C: LOGISTICS (CONDITION/COURIER) ---
                 if (controller.isConditionSale.value) ...[
                   const SizedBox(height: 20),
                   const Divider(thickness: 1, height: 1),
@@ -471,7 +466,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                         flex: 1,
                         child: _miniTextField(
                           controller.challanC,
-                          "Challan (Default: 0)",
+                          "Challan No",
                           Icons.receipt_long,
                         ),
                       ),
@@ -527,7 +522,9 @@ class LiveOrderSalesPage extends StatelessWidget {
                                 ),
                               ),
                             ),
-                            if (controller.selectedCourier.value != null)
+                            // Show existing due only if NOT 'Other'
+                            if (controller.selectedCourier.value != null &&
+                                controller.selectedCourier.value != 'Other')
                               Padding(
                                 padding: const EdgeInsets.only(top: 4, left: 4),
                                 child: Text(
@@ -554,6 +551,17 @@ class LiveOrderSalesPage extends StatelessWidget {
                       ),
                     ],
                   ),
+
+                  // ** UPDATED: "Other" Courier Text Field **
+                  if (controller.selectedCourier.value == 'Other')
+                    Padding(
+                      padding: const EdgeInsets.only(top: 10),
+                      child: _miniTextField(
+                        controller.otherCourierC,
+                        "Enter Transport / Courier Name",
+                        Icons.local_shipping,
+                      ),
+                    ),
                 ],
               ],
             );
@@ -563,7 +571,7 @@ class LiveOrderSalesPage extends StatelessWidget {
     );
   }
 
-  // --- UPDATED DEBTOR CARD (SINGLE CONSOLIDATED BALANCE) ---
+  // --- UPDATED DEBTOR CARD ---
   Widget _buildSelectedDebtorCard(LiveSalesController controller) {
     return Container(
       decoration: BoxDecoration(
@@ -573,7 +581,6 @@ class LiveOrderSalesPage extends StatelessWidget {
       ),
       child: Column(
         children: [
-          // Top: Name & Phone
           Padding(
             padding: const EdgeInsets.all(12),
             child: Row(
@@ -611,8 +618,6 @@ class LiveOrderSalesPage extends StatelessWidget {
             ),
           ),
           const Divider(height: 1, color: Colors.green),
-
-          // Bottom: Consolidated Previous Balance
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Row(
@@ -626,7 +631,6 @@ class LiveOrderSalesPage extends StatelessWidget {
                     color: Colors.grey,
                   ),
                 ),
-                // Using totalPreviousDue from controller as requested
                 Text(
                   "৳ ${controller.totalPreviousDue.toStringAsFixed(0)}",
                   style: const TextStyle(
@@ -982,7 +986,7 @@ class LiveOrderSalesPage extends StatelessWidget {
     );
   }
 
-  // --- UPDATED BOTTOM TOTAL BAR WITH DEBTOR LOGIC ---
+  // --- UPDATED BOTTOM TOTAL BAR ---
   Widget _buildBottomTotalBar(LiveSalesController controller) {
     return Container(
       padding: const EdgeInsets.all(24),
@@ -1058,12 +1062,11 @@ class LiveOrderSalesPage extends StatelessWidget {
             ],
           ),
 
-          // DEBTOR TOTAL PAYABLE BREAKDOWN (Consolidated)
+          // DEBTOR TOTAL PAYABLE BREAKDOWN
           Obx(() {
             if (controller.customerType.value == "Debtor" &&
                 controller.selectedDebtor.value != null &&
                 !controller.isConditionSale.value) {
-              // New Logic: Total Payable = This Invoice + Total Previous Due
               double totalPayable =
                   controller.grandTotal + controller.totalPreviousDue;
 
@@ -1207,7 +1210,7 @@ class LiveOrderSalesPage extends StatelessWidget {
     );
   }
 
-  // --- HELPERS (Kept exactly as requested) ---
+  // --- HELPERS ---
   Widget _miniTextField(
     TextEditingController c,
     String label,
@@ -1350,7 +1353,6 @@ class _ProductTableSection extends StatelessWidget {
                           ),
                         );
                       }
-                      // Using controller.productCtrl.allProducts directly as pagination is handled by controller
                       return ListView.separated(
                         itemCount: controller.productCtrl.allProducts.length,
                         separatorBuilder:
@@ -1365,7 +1367,7 @@ class _ProductTableSection extends StatelessWidget {
                       );
                     }),
                   ),
-                  _buildPaginationControls(), // Added Pagination Controls Here
+                  _buildPaginationControls(),
                 ],
               ),
             ),
@@ -1464,7 +1466,6 @@ class _ProductTableSection extends StatelessWidget {
               ),
             ),
           ),
-          // Added Brand Column as requested by data structure update
           Expanded(
             flex: 2,
             child: Text(
@@ -1476,7 +1477,6 @@ class _ProductTableSection extends StatelessWidget {
               ),
             ),
           ),
-          // Added Model Column
           Expanded(
             flex: 2,
             child: Text(
@@ -1517,7 +1517,6 @@ class _ProductTableSection extends StatelessWidget {
     );
   }
 
-  // --- NEW: Pagination Controls ---
   Widget _buildPaginationControls() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -1558,7 +1557,6 @@ class _ProductRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Decreased font size as requested
     const double nameSize = 13;
     const double metaSize = 12;
     const double smallSize = 11;
@@ -1574,10 +1572,7 @@ class _ProductRow extends StatelessWidget {
         onTap: () => controller.addToCart(product),
         hoverColor: Colors.blue.withOpacity(0.04),
         child: Container(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 20,
-            vertical: 8,
-          ), // Decreased vertical padding
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
           child: Row(
             children: [
               // 1. Name
@@ -1592,6 +1587,7 @@ class _ProductRow extends StatelessWidget {
                   ),
                 ),
               ),
+             
               // 3. Model
               Expanded(
                 flex: 2,
@@ -1622,11 +1618,7 @@ class _ProductRow extends StatelessWidget {
                 flex: 1,
                 child: Row(
                   children: [
-                    Icon(
-                      Icons.circle,
-                      size: 6,
-                      color: stockColor,
-                    ), // Smaller dot
+                    Icon(Icons.circle, size: 6, color: stockColor),
                     const SizedBox(width: 8),
                     Text(
                       product.stockQty.toString(),
@@ -1660,7 +1652,7 @@ class _ProductRow extends StatelessWidget {
               ),
               const SizedBox(width: 20),
               SizedBox(
-                width: 30, // Smaller button
+                width: 30,
                 height: 30,
                 child: ElevatedButton(
                   onPressed: () => controller.addToCart(product),
@@ -1675,7 +1667,7 @@ class _ProductRow extends StatelessWidget {
                   child: const Icon(
                     Icons.add,
                     color: Color(0xFF2563EB),
-                    size: 18, // Smaller icon
+                    size: 18,
                   ),
                 ),
               ),

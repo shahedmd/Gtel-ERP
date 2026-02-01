@@ -13,8 +13,6 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'shipmodel.dart';
 
-
-
 class IncomingDetail {
   final String shipmentName;
   final DateTime date;
@@ -40,7 +38,7 @@ class AggregatedOnWayProduct {
   int get totalQty => incomingDetails.fold(0, (sumv, item) => sumv + item.qty);
 }
 
-// --- NEW MODEL FOR MISSING ITEMS ---
+// --- MODEL FOR MISSING ITEMS ---
 class OnHoldItem {
   final String docId;
   final String shipmentName;
@@ -88,8 +86,10 @@ class ShipmentController extends GetxController {
   final RxList<AggregatedOnWayProduct> aggregatedList =
       <AggregatedOnWayProduct>[].obs;
 
-  // NEW: ON HOLD LIST
+  // NEW: ON HOLD LIST & FILTERED LIST
   final RxList<OnHoldItem> onHoldItems = <OnHoldItem>[].obs;
+  final RxList<OnHoldItem> filteredOnHoldItems =
+      <OnHoldItem>[].obs; // Added for sorting
 
   // --- CONFIG ---
   final List<String> carrierList = [
@@ -103,6 +103,7 @@ class ShipmentController extends GetxController {
   ];
   final RxString filterCarrier = ''.obs;
   final RxString filterVendor = ''.obs;
+  final RxString filterOnHoldCarrier = ''.obs; // Added filter for On Hold
 
   // --- MANIFEST INPUTS ---
   final RxList<ShipmentItem> currentManifestItems = <ShipmentItem>[].obs;
@@ -151,9 +152,13 @@ class ShipmentController extends GetxController {
   void onInit() {
     super.onInit();
     bindFirestoreStream();
-    bindOnHoldStream(); // NEW LISTENER
+    bindOnHoldStream();
     ever(filterCarrier, (_) => _applyFilters());
     ever(filterVendor, (_) => _applyFilters());
+    ever(
+      filterOnHoldCarrier,
+      (_) => _applyOnHoldFilters(),
+    ); // Listener for On Hold Sort
   }
 
   @override
@@ -187,7 +192,6 @@ class ShipmentController extends GetxController {
         }, onError: (e) => print("Firestore Error: $e"));
   }
 
-  // NEW: ON HOLD LISTENER
   void bindOnHoldStream() {
     _onHoldSubscription = _firestore
         .collection('on_hold_items')
@@ -196,6 +200,7 @@ class ShipmentController extends GetxController {
         .listen((event) {
           onHoldItems.value =
               event.docs.map((e) => OnHoldItem.fromSnapshot(e)).toList();
+          _applyOnHoldFilters(); // Apply filter initially
         });
   }
 
@@ -208,6 +213,17 @@ class ShipmentController extends GetxController {
       temp = temp.where((s) => s.vendorId == filterVendor.value).toList();
     }
     filteredShipments.value = temp;
+  }
+
+  // NEW: Filter logic for On Hold Items
+  void _applyOnHoldFilters() {
+    if (filterOnHoldCarrier.value.isEmpty) {
+      filteredOnHoldItems.assignAll(onHoldItems);
+    } else {
+      filteredOnHoldItems.assignAll(
+        onHoldItems.where((i) => i.carrier == filterOnHoldCarrier.value),
+      );
+    }
   }
 
   void _calculateOnWayTotals(List<ShipmentModel> list) {
@@ -407,7 +423,7 @@ class ShipmentController extends GetxController {
     }
   }
 
-  // --- RECEIVE SHIPMENT (Logic Updated for On-Hold) ---
+  // --- RECEIVE SHIPMENT (UPDATED LOGIC: IGNORE MISSING + FINANCIAL CALC) ---
   Future<void> receiveShipmentFast(
     ShipmentModel shipment,
     DateTime arrivalDate,
@@ -444,7 +460,8 @@ class ShipmentController extends GetxController {
         int received = item.receivedSeaQty + item.receivedAirQty;
         int missing = ordered - received;
 
-        if (missing > 0) {
+        // UPDATED: Only send to On Hold if missing > 0 AND ignoreMissing is false
+        if (missing > 0 && !item.ignoreMissing) {
           hasLoss = true;
           DocumentReference ref = _firestore.collection('on_hold_items').doc();
           batch.set(ref, {
@@ -462,20 +479,32 @@ class ShipmentController extends GetxController {
 
       if (hasLoss) await batch.commit();
 
-      // 3. CLOSE SHIPMENT
+      // 3. CALCULATE FINANCIAL DIFFERENCE (Current Received Value vs Original Bill)
+      double totalReceivedValue = shipment.items.fold(
+        0.0,
+        (sum, item) => sum + item.receivedItemValue,
+      );
+      double originalBill = shipment.totalAmount;
+      double diff = originalBill - totalReceivedValue;
+
+      // If diff is positive, it means we received LESS value than we billed.
+      // This amount is saved as a "Loss Note" but does NOT deduct from vendor balance automatically.
+      double vendorLoss = (diff > 0) ? diff : 0.0;
+
+      // 4. CLOSE SHIPMENT
       await _firestore.collection('shipments').doc(shipment.docId).update({
         'isReceived': true,
         'arrivalDate': Timestamp.fromDate(arrivalDate),
+        'vendorLossAmount': vendorLoss, // Save the note amount
       });
 
       Get.back();
       Get.snackbar(
         "Success",
-        hasLoss
-            ? "Stock Received. Missing items moved to On Hold."
-            : "Stock Received Successfully.",
+        "Stock Received. ${hasLoss ? 'Missing items moved to On Hold.' : ''} ${vendorLoss > 0 ? 'Shortage Note: ${formatMoney(vendorLoss)}' : ''}",
         backgroundColor: Colors.green,
         colorText: Colors.white,
+        duration: const Duration(seconds: 4),
       );
     } catch (e) {
       Get.defaultDialog(title: "Error", middleText: e.toString());
@@ -484,7 +513,7 @@ class ShipmentController extends GetxController {
     }
   }
 
-  // --- NEW: RESOLVE ON HOLD ITEM ---
+  // --- RESOLVE ON HOLD ITEM ---
   Future<void> resolveOnHoldItem(OnHoldItem item) async {
     isLoading.value = true;
     try {
@@ -492,11 +521,8 @@ class ShipmentController extends GetxController {
       List<Map<String, dynamic>> singleItem = [
         {
           'id': item.productId,
-          // Assuming recovered items are added as Sea or Air? Let's default to Air/General or ask user.
-          // For simplicity, adding to Air as it's safer, or we could split.
-          // User requested "Give me back the product".
           'sea_qty': 0,
-          'air_qty': item.missingQty,
+          'air_qty': item.missingQty, // Default to Air for recovery
           'local_qty': 0,
           'local_price': 0.0,
           'shipmentdate': DateFormat('yyyy-MM-dd').format(DateTime.now()),
@@ -526,140 +552,209 @@ class ShipmentController extends GetxController {
     }
   }
 
-  // --- PDF GENERATION ---
+  // --- UPDATED PROFESSIONAL PDF GENERATION ---
   Future<void> generatePdf(ShipmentModel shipment) async {
     final doc = pw.Document();
     final font = await PdfGoogleFonts.robotoRegular();
     final fontBold = await PdfGoogleFonts.robotoBold();
 
+    // Prepare Table Data
+    final tableHeaders = [
+      'Carton',
+      'Model',
+      'Name',
+      'Qty (Ord)',
+      'Qty (Recv)',
+      'Cost/Unit',
+      'Total',
+    ];
+
     final tableData =
-        shipment.items
-            .map(
-              (e) => [
-                e.productName,
-                "${e.productModel}\n${e.cartonNo}",
-                "${e.seaQty}/${e.airQty}",
-                "${e.receivedSeaQty}/${e.receivedAirQty}",
-                (e.lossQty > 0) ? "${e.lossQty} MISSING" : "OK",
-                formatMoney(e.totalItemCost),
-              ],
-            )
-            .toList();
+        shipment.items.map((e) {
+          // Determine cost used (Snapshot)
+          double cost =
+              (e.seaPriceSnapshot > 0)
+                  ? e.seaPriceSnapshot
+                  : e.airPriceSnapshot;
+          return [
+            e.cartonNo,
+            e.productModel,
+            e.productName,
+            "${e.seaQty + e.airQty}",
+            "${e.receivedSeaQty + e.receivedAirQty}",
+            formatMoney(cost),
+            formatMoney(e.totalItemCost),
+          ];
+        }).toList();
 
     doc.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(24),
         theme: pw.ThemeData.withFont(base: font, bold: fontBold),
         build:
             (context) => [
-              pw.Header(
-                level: 0,
-                child: pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+              // 1. HEADER SECTION
+              pw.Container(
+                padding: const pw.EdgeInsets.only(bottom: 20),
+                decoration: const pw.BoxDecoration(
+                  border: pw.Border(
+                    bottom: pw.BorderSide(width: 1, color: PdfColors.grey),
+                  ),
+                ),
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
-                    pw.Text(
-                      "SHIPMENT OVERVIEW",
-                      style: pw.TextStyle(
-                        fontSize: 20,
-                        fontWeight: pw.FontWeight.bold,
-                      ),
-                    ),
-                    pw.SizedBox(height: 5),
-                    pw.Row(
-                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
                       children: [
-                        pw.Column(
-                          crossAxisAlignment: pw.CrossAxisAlignment.start,
-                          children: [
-                            pw.Text("Name: ${shipment.shipmentName}"),
-                            pw.Text("Carrier: ${shipment.carrier}"),
-                            pw.Text("Vendor: ${shipment.vendorName}"),
-                          ],
+                        pw.Text(
+                          "SHIPMENT MANIFEST",
+                          style: pw.TextStyle(
+                            fontSize: 22,
+                            fontWeight: pw.FontWeight.bold,
+                            color: PdfColors.blue900,
+                          ),
                         ),
-                        pw.Column(
-                          crossAxisAlignment: pw.CrossAxisAlignment.end,
-                          children: [
-                            pw.Text(
-                              "Purchased: ${DateFormat('yyyy-MM-dd').format(shipment.purchaseDate)}",
-                            ),
-                            if (shipment.arrivalDate != null)
-                              pw.Text(
-                                "Arrived: ${DateFormat('yyyy-MM-dd').format(shipment.arrivalDate!)}",
-                              ),
-                          ],
+                        pw.SizedBox(height: 5),
+                        pw.Text("ID: ${shipment.shipmentName}"),
+                        pw.Text(
+                          "Date: ${DateFormat('yyyy-MM-dd').format(shipment.purchaseDate)}",
                         ),
                       ],
                     ),
-                    pw.SizedBox(height: 10),
-                    if (shipment.carrierReport != null &&
-                        shipment.carrierReport!.isNotEmpty)
-                      pw.Container(
-                        padding: const pw.EdgeInsets.all(8),
-                        decoration: pw.BoxDecoration(
-                          border: pw.Border.all(color: PdfColors.red),
-                          color: PdfColors.red50,
+                    pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.end,
+                      children: [
+                        pw.Text(
+                          "Vendor: ${shipment.vendorName}",
+                          style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
                         ),
-                        child: pw.Column(
-                          crossAxisAlignment: pw.CrossAxisAlignment.start,
-                          children: [
-                            pw.Text(
-                              "CARRIER / LOSS REPORT:",
-                              style: pw.TextStyle(
-                                fontWeight: pw.FontWeight.bold,
-                                color: PdfColors.red900,
-                              ),
+                        pw.Text("Carrier: ${shipment.carrier}"),
+                        pw.Text(
+                          "Cartons: ${shipment.totalCartons} | Weight: ${shipment.totalWeight}kg",
+                        ),
+                        if (shipment.isReceived)
+                          pw.Text(
+                            "Status: RECEIVED",
+                            style: pw.TextStyle(
+                              color: PdfColors.green,
+                              fontWeight: pw.FontWeight.bold,
                             ),
-                            pw.Text(shipment.carrierReport!),
-                          ],
-                        ),
-                      ),
-                    pw.SizedBox(height: 10),
-                    pw.Text(
-                      "Total Value (Billable): ${formatMoney(shipment.totalAmount)}",
-                      style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                          ),
+                      ],
                     ),
                   ],
                 ),
               ),
-              pw.SizedBox(height: 15),
+              pw.SizedBox(height: 20),
+
+              // 2. REPORT SECTION (If exists)
+              if (shipment.carrierReport != null &&
+                  shipment.carrierReport!.isNotEmpty)
+                pw.Container(
+                  width: double.infinity,
+                  margin: const pw.EdgeInsets.only(bottom: 15),
+                  padding: const pw.EdgeInsets.all(10),
+                  decoration: pw.BoxDecoration(
+                    color: PdfColors.orange50,
+                    border: pw.Border.all(color: PdfColors.orange200),
+                    borderRadius: const pw.BorderRadius.all(
+                      pw.Radius.circular(4),
+                    ),
+                  ),
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text(
+                        "NOTE / REPORT:",
+                        style: pw.TextStyle(
+                          fontWeight: pw.FontWeight.bold,
+                          color: PdfColors.orange900,
+                          fontSize: 10,
+                        ),
+                      ),
+                      pw.Text(
+                        shipment.carrierReport!,
+                        style: const pw.TextStyle(fontSize: 10),
+                      ),
+                    ],
+                  ),
+                ),
+
+              // 3. PRODUCT TABLE
               pw.Table.fromTextArray(
-                headers: [
-                  'Item',
-                  'Model',
-                  'Order(S/A)',
-                  'Recv(S/A)',
-                  'Status',
-                  'Bill Cost',
-                ],
+                headers: tableHeaders,
                 data: tableData,
+                border: pw.TableBorder.all(
+                  color: PdfColors.grey400,
+                  width: 0.5,
+                ),
                 headerStyle: pw.TextStyle(
                   fontWeight: pw.FontWeight.bold,
                   color: PdfColors.white,
+                  fontSize: 10,
                 ),
                 headerDecoration: const pw.BoxDecoration(
                   color: PdfColors.blueGrey800,
                 ),
+                cellStyle: const pw.TextStyle(fontSize: 9),
                 cellAlignment: pw.Alignment.centerLeft,
-                columnWidths: {
-                  0: const pw.FlexColumnWidth(2),
-                  1: const pw.FlexColumnWidth(1.5),
-                  2: const pw.FlexColumnWidth(1),
-                  3: const pw.FlexColumnWidth(1),
-                  4: const pw.FlexColumnWidth(1),
-                  5: const pw.FlexColumnWidth(1.5),
+                cellAlignments: {
+                  0: pw.Alignment.center, // Carton
+                  3: pw.Alignment.center, // Qty Ord
+                  4: pw.Alignment.center, // Qty Recv
+                  5: pw.Alignment.centerRight, // Cost
+                  6: pw.Alignment.centerRight, // Total
                 },
+                columnWidths: {
+                  0: const pw.FlexColumnWidth(0.8),
+                  1: const pw.FlexColumnWidth(1.5),
+                  2: const pw.FlexColumnWidth(2.5),
+                  3: const pw.FlexColumnWidth(0.8),
+                  4: const pw.FlexColumnWidth(0.8),
+                  5: const pw.FlexColumnWidth(1.2),
+                  6: const pw.FlexColumnWidth(1.2),
+                },
+              ),
+
+              pw.SizedBox(height: 10),
+
+              // 4. TOTALS
+              pw.Container(
+                alignment: pw.Alignment.centerRight,
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.end,
+                  children: [
+                    pw.Text(
+                      "Total Value (Billable): ${formatMoney(shipment.totalAmount)}",
+                      style: pw.TextStyle(
+                        fontSize: 14,
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                    ),
+                    if (shipment.vendorLossAmount > 0)
+                      pw.Text(
+                        "Shortage Note: ${formatMoney(shipment.vendorLossAmount)}",
+                        style: pw.TextStyle(
+                          fontSize: 12,
+                          color: PdfColors.red,
+                          fontStyle: pw.FontStyle.italic,
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ],
       ),
     );
     await Printing.layoutPdf(
       onLayout: (format) => doc.save(),
-      name: 'Details_${shipment.shipmentName}.pdf',
+      name: 'Manifest_${shipment.shipmentName}.pdf',
     );
   }
 
   Future<void> generateAggregatedOnWayPdf() async {
-    // Kept existing logic
     if (aggregatedList.isEmpty) {
       Get.snackbar("Info", "No data.");
       return;
