@@ -2,7 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'salereturnController.dart'; // Ensure correct import path
+import 'package:gtel_erp/Sale%20Return/salereturnController.dart';
 
 class SaleReturnPage extends StatelessWidget {
   // Inject the updated controller
@@ -89,8 +89,6 @@ class SaleReturnPage extends StatelessWidget {
 
                     // List of Items from Invoice
                     ...controller.orderItems.map((item) {
-                      // Parse item details safely using Controller helpers if needed
-                      // But UI logic is fine doing basic conversion too
                       String pid = item['productId'].toString();
                       int maxQty = int.tryParse(item['qty'].toString()) ?? 0;
                       int returnQty = controller.returnQuantities[pid] ?? 0;
@@ -163,7 +161,6 @@ class SaleReturnPage extends StatelessWidget {
                   ),
                   contentPadding: const EdgeInsets.symmetric(horizontal: 15),
                 ),
-                // UPDATED: Now calls smartSearch
                 onSubmitted: (val) => controller.smartSearch(val),
               ),
             ),
@@ -172,7 +169,6 @@ class SaleReturnPage extends StatelessWidget {
           SizedBox(
             height: 50,
             child: ElevatedButton(
-              // UPDATED: Now calls smartSearch
               onPressed:
                   () =>
                       controller.smartSearch(controller.searchController.text),
@@ -198,23 +194,28 @@ class SaleReturnPage extends StatelessWidget {
   }
 
   Widget _buildCustomerInfoCard(Map<String, dynamic> data) {
-    // Check payment status safely
-    var payMap = data['paymentDetails'];
+    // Detect Condition
+    bool isCondition = data['isCondition'] == true;
+    String courierName = data['courierName'] ?? "";
+
+    // Calculate Due
     double due = 0.0;
-
-    if (payMap != null && payMap['due'] != null) {
-      due = double.tryParse(payMap['due'].toString()) ?? 0.0;
+    if (isCondition) {
+      due = double.tryParse(data['courierDue'].toString()) ?? 0.0;
     } else {
-      // Fallback if field missing
-      double gt = double.tryParse(data['grandTotal'].toString()) ?? 0;
-      double paid = 0;
-      if (payMap != null && payMap['actualReceived'] != null) {
-        paid = double.tryParse(payMap['actualReceived'].toString()) ?? 0;
+      var payMap = data['paymentDetails'];
+      if (payMap != null && payMap['due'] != null) {
+        due = double.tryParse(payMap['due'].toString()) ?? 0.0;
+      } else {
+        double gt = double.tryParse(data['grandTotal'].toString()) ?? 0;
+        double paid = 0;
+        if (payMap != null && payMap['actualReceived'] != null) {
+          paid = double.tryParse(payMap['actualReceived'].toString()) ?? 0;
+        }
+        due = gt - paid;
       }
-      due = gt - paid;
-      if (due < 0) due = 0;
     }
-
+    if (due < 0) due = 0;
     bool isPaid = due <= 0;
 
     return Container(
@@ -237,67 +238,100 @@ class SaleReturnPage extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    "BILL TO",
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey,
-                      letterSpacing: 1,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      "BILL TO",
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey,
+                        letterSpacing: 1,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    data['customerName'] ?? "Unknown",
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 16,
-                      color: Color(0xFF1E293B),
+                    const SizedBox(height: 4),
+                    Text(
+                      data['customerName'] ?? "Unknown",
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 16,
+                        color: Color(0xFF1E293B),
+                      ),
                     ),
-                  ),
-                  Text(
-                    data['customerPhone'] ?? "",
-                    style: const TextStyle(
-                      fontSize: 13,
-                      color: Colors.blueGrey,
+                    Text(
+                      data['customerPhone'] ?? "",
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: Colors.blueGrey,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    "INV: ${data['invoiceId']}",
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontFamily: 'monospace',
-                      color: Colors.grey,
+                    const SizedBox(height: 4),
+                    Text(
+                      "INV: ${data['invoiceId']}",
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontFamily: 'monospace',
+                        color: Colors.grey,
+                      ),
                     ),
-                  ),
-                ],
+                    // Show Courier Name if Condition
+                    if (isCondition)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          "Via: $courierName",
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.purple,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: isPaid ? Colors.green.shade50 : Colors.orange.shade50,
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(
-                    color:
-                        isPaid ? Colors.green.shade200 : Colors.orange.shade200,
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color:
+                          isPaid ? Colors.green.shade50 : Colors.orange.shade50,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(
+                        color:
+                            isPaid
+                                ? Colors.green.shade200
+                                : Colors.orange.shade200,
+                      ),
+                    ),
+                    child: Text(
+                      isPaid ? "PAID" : "DUE: ৳${due.toStringAsFixed(0)}",
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                        color:
+                            isPaid
+                                ? Colors.green.shade700
+                                : Colors.orange.shade800,
+                      ),
+                    ),
                   ),
-                ),
-                child: Text(
-                  isPaid ? "PAID" : "DUE: ৳${due.toStringAsFixed(0)}",
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 11,
-                    color:
-                        isPaid ? Colors.green.shade700 : Colors.orange.shade800,
-                  ),
-                ),
+                  if (isCondition)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 5),
+                      child: Text(
+                        "Condition Sale",
+                        style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+                      ),
+                    ),
+                ],
               ),
             ],
           ),
@@ -542,7 +576,6 @@ class SaleReturnPage extends StatelessWidget {
     return Obx(() {
       if (controller.orderData.value == null) return const SizedBox.shrink();
 
-      // Using the renamed getter from Controller
       double refundTotal = controller.currentReturnTotal;
 
       return Container(

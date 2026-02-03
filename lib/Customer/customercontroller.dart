@@ -1,4 +1,5 @@
 // ignore_for_file: avoid_print, deprecated_member_use
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Customer/model.dart';
@@ -12,39 +13,60 @@ class CustomerAnalyticsController extends GetxController {
 
   // --- STATE ---
   var isLoading = false.obs;
-  var aggregatedList = <CustomerAnalyticsModel>[].obs;
 
-  // Totals for the whole period
+  // Data Holding
+  List<CustomerAnalyticsModel> _allAggregatedData = []; // Master List (for PDF)
+  var paginatedList = <CustomerAnalyticsModel>[].obs; // Page List (for UI)
+
+  // Pagination
+  var currentPage = 1.obs;
+  var itemsPerPage = 50;
+  var totalItems = 0.obs;
+  int get totalPages => (totalItems.value / itemsPerPage).ceil();
+
+  // Summary
   var periodTotalSales = 0.0.obs;
   var periodTotalProfit = 0.0.obs;
 
-  // Filters
+  // --- FILTERS ---
+  // Options: 'Daily', 'Monthly', 'Yearly'
+  var reportType = 'Monthly'.obs;
+
   var selectedYear = DateTime.now().year.obs;
   var selectedMonth = DateTime.now().month.obs;
-  var isYearlyReport = false.obs; // Toggle between Monthly vs Yearly
+  var selectedDate = DateTime.now().obs; // For Specific Date
+
+  @override
+  void onInit() {
+    super.onInit();
+    generateReport();
+  }
+
+  String formatCurrency(double amount) {
+    return NumberFormat('#,##0.00').format(amount);
+  }
 
   // ----------------------------------------------------------------
-  // 1. DATA PROCESSING LOGIC
+  // 1. DATA PROCESSING
   // ----------------------------------------------------------------
   Future<void> generateReport() async {
     isLoading.value = true;
-    aggregatedList.clear();
+    _allAggregatedData.clear();
+    paginatedList.clear();
     periodTotalSales.value = 0.0;
     periodTotalProfit.value = 0.0;
+    totalItems.value = 0;
+    currentPage.value = 1;
 
     try {
-      // A. Calculate Date Range
       DateTime start;
       DateTime end;
 
-      if (isYearlyReport.value) {
-        // Whole Year: Jan 1 to Dec 31
+      if (reportType.value == 'Yearly') {
         start = DateTime(selectedYear.value, 1, 1);
         end = DateTime(selectedYear.value, 12, 31, 23, 59, 59);
-      } else {
-        // Specific Month
+      } else if (reportType.value == 'Monthly') {
         start = DateTime(selectedYear.value, selectedMonth.value, 1);
-        // Trick to get last day of month: Day 0 of next month
         end = DateTime(
           selectedYear.value,
           selectedMonth.value + 1,
@@ -53,11 +75,27 @@ class CustomerAnalyticsController extends GetxController {
           59,
           59,
         );
+      } else {
+        // Daily
+        start = DateTime(
+          selectedDate.value.year,
+          selectedDate.value.month,
+          selectedDate.value.day,
+          0,
+          0,
+          0,
+        );
+        end = DateTime(
+          selectedDate.value.year,
+          selectedDate.value.month,
+          selectedDate.value.day,
+          23,
+          59,
+          59,
+        );
       }
 
-      print("Querying from $start to $end");
-
-      // B. Fetch Data
+      // Fetch Sales
       QuerySnapshot snap =
           await _db
               .collection('sales_orders')
@@ -68,24 +106,24 @@ class CustomerAnalyticsController extends GetxController {
               .where('timestamp', isLessThanOrEqualTo: Timestamp.fromDate(end))
               .get();
 
-      print("Found ${snap.docs.length} orders");
-
-      // C. Aggregate (Group By Customer Phone)
+      // Aggregation Map
       Map<String, CustomerAnalyticsModel> tempMap = {};
 
       for (var doc in snap.docs) {
         Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
 
-        // Identifiers
-        String phone = data['customerPhone'] ?? 'Unknown';
-        String name = data['customerName'] ?? 'Unknown';
+        if (data['status'] == 'deleted' || data['status'] == 'cancelled') {
+          continue;
+        }
+
+        String phone = (data['customerPhone'] ?? '').toString().trim();
+        if (phone.isEmpty) phone = "Unknown";
+
+        String name = data['customerName'] ?? 'Guest';
         String shop = data['shopName'] ?? '';
+        double saleAmt = double.tryParse(data['grandTotal'].toString()) ?? 0.0;
+        double profitAmt = double.tryParse(data['profit'].toString()) ?? 0.0;
 
-        // Metrics
-        double saleAmt = (data['grandTotal'] as num?)?.toDouble() ?? 0.0;
-        double profitAmt = (data['profit'] as num?)?.toDouble() ?? 0.0;
-
-        // If customer exists in map, update values. If not, create new.
         if (tempMap.containsKey(phone)) {
           var entry = tempMap[phone]!;
           entry.totalSales += saleAmt;
@@ -103,17 +141,16 @@ class CustomerAnalyticsController extends GetxController {
         }
       }
 
-      // D. Convert to List & Sort (Highest Sales First)
-      List<CustomerAnalyticsModel> finalResult = tempMap.values.toList();
-      finalResult.sort((a, b) => b.totalSales.compareTo(a.totalSales));
+      _allAggregatedData = tempMap.values.toList();
+      _allAggregatedData.sort((a, b) => b.totalSales.compareTo(a.totalSales));
 
-      aggregatedList.value = finalResult;
-
-      // E. Calculate Period Totals
-      for (var item in finalResult) {
+      for (var item in _allAggregatedData) {
         periodTotalSales.value += item.totalSales;
         periodTotalProfit.value += item.totalProfit;
       }
+
+      totalItems.value = _allAggregatedData.length;
+      _updatePagination();
     } catch (e) {
       Get.snackbar("Error", "Analysis Failed: $e");
     } finally {
@@ -121,140 +158,135 @@ class CustomerAnalyticsController extends GetxController {
     }
   }
 
+  void _updatePagination() {
+    if (_allAggregatedData.isEmpty) {
+      paginatedList.clear();
+      return;
+    }
+    int start = (currentPage.value - 1) * itemsPerPage;
+    int end = start + itemsPerPage;
+    if (end > _allAggregatedData.length) end = _allAggregatedData.length;
+    paginatedList.value = _allAggregatedData.sublist(start, end);
+  }
+
+  void nextPage() {
+    if (currentPage.value < totalPages) {
+      currentPage.value++;
+      _updatePagination();
+    }
+  }
+
+  void prevPage() {
+    if (currentPage.value > 1) {
+      currentPage.value--;
+      _updatePagination();
+    }
+  }
+
   // ----------------------------------------------------------------
-  // 2. PDF GENERATION
+  // 3. PDF GENERATION
   // ----------------------------------------------------------------
   Future<void> downloadPdf() async {
-    if (aggregatedList.isEmpty) {
+    if (_allAggregatedData.isEmpty) {
       Get.snackbar("Alert", "No data to print. Generate report first.");
       return;
     }
 
     final pdf = pw.Document();
-    final fontRegular = await PdfGoogleFonts.robotoRegular();
-    final fontBold = await PdfGoogleFonts.robotoBold();
+    final fontRegular = await PdfGoogleFonts.openSansRegular();
+    final fontBold = await PdfGoogleFonts.openSansBold();
 
-    String periodTitle =
-        isYearlyReport.value
-            ? "Yearly Report: ${selectedYear.value}"
-            : "Monthly Report: ${DateFormat('MMMM yyyy').format(DateTime(selectedYear.value, selectedMonth.value))}";
+    // Generate Title
+    String periodStr = "";
+    if (reportType.value == 'Daily') {
+      periodStr = DateFormat('dd MMM yyyy').format(selectedDate.value);
+    } else if (reportType.value == 'Monthly') {
+      periodStr = DateFormat(
+        'MMMM yyyy',
+      ).format(DateTime(selectedYear.value, selectedMonth.value));
+    } else {
+      periodStr = "Year: ${selectedYear.value}";
+    }
+
+    final dataToPrint = _allAggregatedData; // ALL DATA (No Pagination)
 
     pdf.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(30),
+        header: (context) => _buildPdfHeader(fontBold, fontRegular, periodStr),
+        footer: (context) => _buildPdfFooter(fontRegular, context),
         build: (context) {
           return [
-            // Header
-            pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-              children: [
-                pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    pw.Text(
-                      "CUSTOMER BUSINESS REPORT",
-                      style: pw.TextStyle(font: fontBold, fontSize: 16),
-                    ),
-                    pw.Text(
-                      "G-TEL ERP Analytics",
-                      style: pw.TextStyle(
-                        font: fontRegular,
-                        fontSize: 10,
-                        color: PdfColors.grey700,
-                      ),
-                    ),
-                  ],
-                ),
-                pw.Text(
-                  periodTitle,
-                  style: pw.TextStyle(font: fontBold, fontSize: 12),
-                ),
-              ],
-            ),
-            pw.SizedBox(height: 20),
-
-            // Summary Box
+            pw.SizedBox(height: 10),
+            // Summary
             pw.Container(
               padding: const pw.EdgeInsets.all(10),
               decoration: pw.BoxDecoration(
-                border: pw.Border.all(color: PdfColors.grey300),
                 color: PdfColors.grey100,
+                border: pw.Border.all(color: PdfColors.grey400),
               ),
               child: pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
                 children: [
-                  _pdfStatParam(
+                  _pdfMetric(
                     "Total Customers",
-                    aggregatedList.length.toString(),
-                    fontRegular,
+                    dataToPrint.length.toString(),
                     fontBold,
                   ),
-                  _pdfStatParam(
-                    "Total Sales",
-                    periodTotalSales.value.toStringAsFixed(2),
-                    fontRegular,
+                  _pdfMetric(
+                    "Total Revenue",
+                    "Tk ${formatCurrency(periodTotalSales.value)}",
                     fontBold,
                   ),
-                  _pdfStatParam(
+                  _pdfMetric(
                     "Total Profit",
-                    periodTotalProfit.value.toStringAsFixed(2),
-                    fontRegular,
+                    "Tk ${formatCurrency(periodTotalProfit.value)}",
                     fontBold,
-                    color: PdfColors.green800,
                   ),
                 ],
               ),
             ),
-            pw.SizedBox(height: 15),
+            pw.SizedBox(height: 20),
 
             // Table
             pw.Table.fromTextArray(
               headers: [
                 "Rank",
-                "Customer / Shop",
+                "Customer",
+                "Phone",
                 "Orders",
                 "Sales (Tk)",
                 "Profit (Tk)",
               ],
               headerStyle: pw.TextStyle(
                 font: fontBold,
-                color: PdfColors.white,
                 fontSize: 9,
+                color: PdfColors.white,
               ),
               headerDecoration: const pw.BoxDecoration(
-                color: PdfColors.blueGrey900,
+                color: PdfColors.blue900,
               ),
-              cellStyle: pw.TextStyle(font: fontRegular, fontSize: 9),
+              cellStyle: pw.TextStyle(font: fontRegular, fontSize: 8),
               cellAlignments: {
                 0: pw.Alignment.center,
                 1: pw.Alignment.centerLeft,
-                2: pw.Alignment.center,
-                3: pw.Alignment.centerRight,
+                2: pw.Alignment.centerLeft,
+                3: pw.Alignment.center,
                 4: pw.Alignment.centerRight,
+                5: pw.Alignment.centerRight,
               },
-              data: List<List<dynamic>>.generate(aggregatedList.length, (
-                index,
-              ) {
-                final item = aggregatedList[index];
+              data: List<List<dynamic>>.generate(dataToPrint.length, (index) {
+                final item = dataToPrint[index];
                 return [
                   (index + 1).toString(),
-                  "${item.name}\n${item.phone}",
+                  item.name,
+                  item.phone,
                   item.orderCount.toString(),
-                  item.totalSales.toStringAsFixed(0),
-                  item.totalProfit.toStringAsFixed(0),
+                  formatCurrency(item.totalSales),
+                  formatCurrency(item.totalProfit),
                 ];
               }),
-            ),
-
-            // Footer
-            pw.Divider(),
-            pw.Align(
-              alignment: pw.Alignment.centerRight,
-              child: pw.Text(
-                "Generated on ${DateFormat('dd MMM yyyy hh:mm a').format(DateTime.now())}",
-                style: pw.TextStyle(fontSize: 8, color: PdfColors.grey),
-              ),
             ),
           ];
         },
@@ -264,20 +296,65 @@ class CustomerAnalyticsController extends GetxController {
     await Printing.layoutPdf(onLayout: (format) => pdf.save());
   }
 
-  pw.Widget _pdfStatParam(
-    String label,
-    String value,
-    pw.Font reg,
-    pw.Font bold, {
-    PdfColor color = PdfColors.black,
-  }) {
+  pw.Widget _buildPdfHeader(pw.Font bold, pw.Font reg, String period) {
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text(
+              "CUSTOMER PERFORMANCE REPORT",
+              style: pw.TextStyle(font: bold, fontSize: 16),
+            ),
+            pw.Text(
+              period,
+              style: pw.TextStyle(
+                font: bold,
+                fontSize: 12,
+                color: PdfColors.blue900,
+              ),
+            ),
+          ],
+        ),
+        pw.Text(
+          "G-TEL ERP Solutions",
+          style: pw.TextStyle(font: reg, fontSize: 9, color: PdfColors.grey700),
+        ),
+        pw.Divider(),
+      ],
+    );
+  }
+
+  pw.Widget _buildPdfFooter(pw.Font reg, pw.Context context) {
     return pw.Column(
       children: [
-        pw.Text(label, style: pw.TextStyle(font: reg, fontSize: 9)),
-        pw.Text(
-          value,
-          style: pw.TextStyle(font: bold, fontSize: 11, color: color),
+        pw.Divider(),
+        pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text(
+              "Generated on: ${DateFormat('dd MMM yyyy HH:mm').format(DateTime.now())}",
+              style: pw.TextStyle(font: reg, fontSize: 8),
+            ),
+            pw.Text(
+              "Page ${context.pageNumber} of ${context.pagesCount}",
+              style: pw.TextStyle(font: reg, fontSize: 8),
+            ),
+          ],
         ),
+      ],
+    );
+  }
+
+  pw.Widget _pdfMetric(String label, String value, pw.Font font) {
+    return pw.Column(
+      children: [
+        pw.Text(
+          label,
+          style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey700),
+        ),
+        pw.Text(value, style: pw.TextStyle(font: font, fontSize: 11)),
       ],
     );
   }

@@ -47,7 +47,7 @@ class DailyOverviewPage extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 0. BALANCE SHEET (Previous + Today = Total)
+              // 0. BALANCE SHEET
               _buildBalanceSheetSection(),
 
               const SizedBox(height: 20),
@@ -66,7 +66,7 @@ class DailyOverviewPage extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
+                  const Text(
                     "TRANSACTION LEDGER",
                     style: TextStyle(
                       color: slateMedium,
@@ -75,7 +75,7 @@ class DailyOverviewPage extends StatelessWidget {
                       letterSpacing: 1.0,
                     ),
                   ),
-                  Text(
+                  const Text(
                     "Sorted by Time",
                     style: TextStyle(color: slateMedium, fontSize: 10),
                   ),
@@ -454,7 +454,7 @@ class DailyOverviewPage extends StatelessWidget {
                 "Source Breakdown",
                 style: TextStyle(fontWeight: FontWeight.bold, color: slateDark),
               ),
-              Text(
+              const Text(
                 "Income Sources",
                 style: TextStyle(fontSize: 11, color: slateMedium),
               ),
@@ -735,7 +735,8 @@ class DailyOverviewPage extends StatelessWidget {
                               ),
                             ),
                             const SizedBox(height: 2),
-                            _buildSubtitleBadge(item.subtitle, colorTheme),
+                            // Updated subtitle badge logic
+                            _buildSubtitleWithBadges(item.subtitle, colorTheme),
                           ],
                         ),
                       ),
@@ -760,64 +761,56 @@ class DailyOverviewPage extends StatelessWidget {
     );
   }
 
-  // Parses the subtitle to create visual badges for Payment Methods
-  Widget _buildSubtitleBadge(String subtitle, Color baseColor) {
-    String text = subtitle;
-    Color badgeColor = Colors.grey.shade100;
-    Color textColor = slateMedium;
-    String? method;
-
-    if (subtitle.toUpperCase().contains("BKASH")) {
-      method = "BKASH";
-      badgeColor = colBkash.withOpacity(0.1);
-      textColor = colBkash;
-    } else if (subtitle.toUpperCase().contains("NAGAD")) {
-      method = "NAGAD";
-      badgeColor = colNagad.withOpacity(0.1);
-      textColor = colNagad;
-    } else if (subtitle.toUpperCase().contains("BANK") ||
-        subtitle.contains("(")) {
-      // If it has bank info or details in parenthesis
-      method = "BANK/DETAILS";
-      badgeColor = colBank.withOpacity(0.1);
-      textColor = colBank;
+  // --- NEW MULTI-BADGE GENERATOR ---
+  // Parses strings like "Cash: 500, Bkash: 200" or simple "Cash"
+  Widget _buildSubtitleWithBadges(String subtitle, Color baseColor) {
+    // If it's a multi-payment string (contains comma)
+    if (subtitle.contains(',')) {
+      List<String> parts = subtitle.split(', ');
+      return Wrap(
+        spacing: 4,
+        runSpacing: 4,
+        children:
+            parts.map((part) {
+              return _createSingleBadge(part);
+            }).toList(),
+      );
     } else {
-      method = "CASH";
-      badgeColor = colCash.withOpacity(0.05);
-      textColor = slateMedium;
+      // Single Payment
+      return _createSingleBadge(subtitle);
+    }
+  }
+
+  Widget _createSingleBadge(String text) {
+    Color bg = slateLight;
+    Color fg = slateMedium;
+
+    String upper = text.toUpperCase();
+    if (upper.contains("BKASH")) {
+      bg = colBkash.withOpacity(0.1);
+      fg = colBkash;
+    } else if (upper.contains("NAGAD")) {
+      bg = colNagad.withOpacity(0.1);
+      fg = colNagad;
+    } else if (upper.contains("BANK")) {
+      bg = colBank.withOpacity(0.1);
+      fg = colBank;
+    } else if (upper.contains("CASH")) {
+      bg = colCash.withOpacity(0.05);
+      fg = slateMedium;
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // The main detail text
-        Text(
-          text,
-          style: TextStyle(
-            fontSize: 11,
-            color: slateMedium.withOpacity(0.8),
-            height: 1.2,
-          ),
-        ),
-        const SizedBox(height: 4),
-        // The small Badge
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-          decoration: BoxDecoration(
-            color: badgeColor,
-            borderRadius: BorderRadius.circular(4),
-            border: Border.all(color: textColor.withOpacity(0.2)),
-          ),
-          child: Text(
-            method == 'BANK/DETAILS' ? 'BANK / TRANSFER' : method,
-            style: TextStyle(
-              fontSize: 8,
-              fontWeight: FontWeight.bold,
-              color: textColor,
-            ),
-          ),
-        ),
-      ],
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: fg.withOpacity(0.2)),
+      ),
+      child: Text(
+        text, // keep original text (e.g. "Cash: 500")
+        style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: fg),
+      ),
     );
   }
 }

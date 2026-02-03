@@ -22,8 +22,8 @@ class DailySalesPage extends StatelessWidget {
   // Color Palette
   static const Color bgSlate = Color(0xFFF1F5F9);
   static const Color darkText = Color(0xFF0F172A);
-  static const Color primaryBlue = Color(0xFF2563EB); // Revenue Color
-  static const Color successGreen = Color(0xFF059669); // Collection Color
+  static const Color primaryBlue = Color(0xFF2563EB);
+  static const Color successGreen = Color(0xFF059669);
   static const Color alertRed = Color(0xFFDC2626);
   static const Color warningOrange = Color(0xFFD97706);
   static const Color purpleDebtor = Color(0xFF7C3AED);
@@ -49,17 +49,12 @@ class DailySalesPage extends StatelessWidget {
         }
 
         // =================================================================
-        // 📊 1. DATA CALCULATIONS (Always based on FULL LIST for Totals)
+        // 📊 DATA CALCULATIONS
         // =================================================================
         DateTime selectedDate = dailyCtrl.selectedDate.value;
-
-        // We use the FULL list for the Summary Cards
         final fullDailyList = dailyCtrl.salesList;
-
-        // We use the FILTERED list for the Table (Search results)
         final tableList = dailyCtrl.filteredList;
 
-        // --- A. CONDITION REVENUE (Unpaid/New Condition Sales) ---
         final todayConditionOrders =
             conditionCtrl.allOrders.where((order) {
               return order.date.year == selectedDate.year &&
@@ -72,27 +67,22 @@ class DailySalesPage extends StatelessWidget {
           revenueCondition += o.grandTotal;
         }
 
-        // --- B. DAILY SALES & COLLECTIONS (From Daily Ledger) ---
         double revenueNormal = 0;
         double revenueDebtor = 0;
-
         double collectedNormal = 0;
         double collectedDebtor = 0;
         double collectedCondition = 0;
 
-        // Iterate over FULL LIST for accurate summary
         for (var sale in fullDailyList) {
           String type = (sale.customerType).toLowerCase();
           String source = (sale.source).toLowerCase();
 
-          // Identify if this is a "Recovery" (Collection Only) or "New Sale"
           bool isRecovery =
               source.contains('condition') ||
               source.contains('recovery') ||
               type.contains('courier') ||
               source.contains('payment');
 
-          // --- REVENUE LOGIC (Goods sold today) ---
           if (!isRecovery) {
             if (type.contains('debtor')) {
               revenueDebtor += sale.amount;
@@ -103,7 +93,6 @@ class DailySalesPage extends StatelessWidget {
             }
           }
 
-          // --- COLLECTION LOGIC (Cash received today) ---
           if (isRecovery) {
             if (source.contains('condition') || type.contains('courier')) {
               collectedCondition += sale.paid;
@@ -123,7 +112,6 @@ class DailySalesPage extends StatelessWidget {
 
         return Column(
           children: [
-            // HEADER
             _buildHeader(
               context,
               revenueNormal,
@@ -133,17 +121,14 @@ class DailySalesPage extends StatelessWidget {
               collectedDebtor,
               collectedCondition,
             ),
-
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(20),
                 child: Column(
                   children: [
-                    // --- SECTION 1: REVENUE VS COLLECTION BLOCKS ---
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Revenue Block
                         Expanded(
                           child: _buildDetailedBlock(
                             "REVENUE (INVOICED)",
@@ -159,8 +144,6 @@ class DailySalesPage extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: 20),
-
-                        // Collection Block
                         Expanded(
                           child: _buildDetailedBlock(
                             "CASH COLLECTION",
@@ -177,10 +160,7 @@ class DailySalesPage extends StatelessWidget {
                         ),
                       ],
                     ),
-
                     const SizedBox(height: 30),
-
-                    // --- SECTION 2: TRANSACTION LEDGER WITH SEARCH ---
                     Container(
                       decoration: BoxDecoration(
                         color: Colors.white,
@@ -196,7 +176,6 @@ class DailySalesPage extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Ledger Header + Search Bar
                           Padding(
                             padding: const EdgeInsets.all(15),
                             child: Row(
@@ -210,8 +189,6 @@ class DailySalesPage extends StatelessWidget {
                                   ),
                                 ),
                                 const Spacer(),
-
-                                // --- SEARCH BAR ---
                                 SizedBox(
                                   width: 250,
                                   height: 40,
@@ -250,7 +227,6 @@ class DailySalesPage extends StatelessWidget {
                                   ),
                                 ),
                                 const SizedBox(width: 15),
-
                                 Container(
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 8,
@@ -273,10 +249,7 @@ class DailySalesPage extends StatelessWidget {
                             ),
                           ),
                           const Divider(height: 1),
-
-                          // Ledger Table Header & List
                           _buildTableHead(),
-                          // Pass filtered list here for search to work
                           _buildTransactionList(tableList),
                         ],
                       ),
@@ -354,8 +327,6 @@ class DailySalesPage extends StatelessWidget {
             ],
           ),
           const Spacer(),
-
-          // Refresh
           IconButton(
             onPressed: () {
               dailyCtrl.loadDailySales();
@@ -365,8 +336,6 @@ class DailySalesPage extends StatelessWidget {
             tooltip: "Refresh Data",
           ),
           const SizedBox(width: 8),
-
-          // Date Picker
           OutlinedButton.icon(
             onPressed: () async {
               final p = await showDatePicker(
@@ -384,8 +353,6 @@ class DailySalesPage extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 12),
-
-          // Daily Report PDF Button
           ElevatedButton.icon(
             onPressed: () => _generateDailyReportPDF(rN, rD, rC, cN, cD, cC),
             icon: const Icon(Icons.print, size: 16),
@@ -521,10 +488,6 @@ class DailySalesPage extends StatelessWidget {
     );
   }
 
-  // ==========================================================
-  // 📋 LEDGER TABLE (Updated with Delete)
-  // ==========================================================
-
   Widget _buildTableHead() {
     return Container(
       color: const Color(0xFFF8FAFC),
@@ -554,7 +517,7 @@ class DailySalesPage extends StatelessWidget {
             ),
           ),
           Expanded(
-            flex: 3, // Increased flex for better multi-line method display
+            flex: 3,
             child: Text(
               "METHOD",
               style: TextStyle(
@@ -588,7 +551,6 @@ class DailySalesPage extends StatelessWidget {
               ),
             ),
           ),
-          // Action Column Header
           SizedBox(
             width: 90,
             child: Center(
@@ -643,8 +605,7 @@ class DailySalesPage extends StatelessWidget {
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
           child: Row(
-            crossAxisAlignment:
-                CrossAxisAlignment.start, // Align top for multi-line
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // 1. Details
               Expanded(
@@ -666,7 +627,7 @@ class DailySalesPage extends StatelessWidget {
                         child: Text(
                           sale.transactionId!,
                           style: TextStyle(
-                            fontSize: 11, // Slightly larger for readability
+                            fontSize: 11,
                             color: Colors.grey.shade600,
                             fontWeight: FontWeight.w500,
                           ),
@@ -699,17 +660,21 @@ class DailySalesPage extends StatelessWidget {
                     ),
                   ),
                 ),
-              ), 
+              ),
+              // 3. Payment Method (UPDATED)
               Expanded(
-                flex: 3, // Increased flex
+                flex: 3,
                 child: Text(
-                  dailyCtrl.formatPaymentMethod(sale.paymentMethod),
+                  // FIX: Pass sale.paid here so the controller knows to hide details if paid is 0
+                  dailyCtrl.formatPaymentMethod(sale.paymentMethod, sale.paid),
                   style: const TextStyle(
                     fontSize: 11,
-                    height: 1.3, // Better line spacing for bank info
+                    height: 1.4, // Increased height for readability
                     color: Color(0xFF475569),
+                    fontWeight: FontWeight.w500,
                   ),
-                  maxLines: 4, // Allow more lines for Bank+Info
+                  // FIX: Increased maxLines to 6 to allow 3 methods to show
+                  maxLines: 6,
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -739,14 +704,13 @@ class DailySalesPage extends StatelessWidget {
                   ),
                 ),
               ),
-              // 6. ACTIONS (Print & Delete)
+              // 6. ACTIONS
               SizedBox(
                 width: 90,
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // PRINT
                     IconButton(
                       icon: const Icon(
                         Icons.print_outlined,
@@ -762,7 +726,6 @@ class DailySalesPage extends StatelessWidget {
                           ),
                     ),
                     const SizedBox(width: 15),
-                    // DELETE
                     IconButton(
                       icon: const Icon(
                         Icons.delete_outline,
@@ -801,9 +764,7 @@ class DailySalesPage extends StatelessWidget {
     );
   }
 
-  // =================================================================
-  // 🖨️ PDF GENERATION (Daily Report)
-  // =================================================================
+  // ... [Keep _generateDailyReportPDF, _pdfSummaryItem, _pdfRow exactly the same] ...
   Future<void> _generateDailyReportPDF(
     double rN,
     double rD,
@@ -830,7 +791,6 @@ class DailySalesPage extends StatelessWidget {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
-              // Header
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
@@ -850,8 +810,6 @@ class DailySalesPage extends StatelessWidget {
               ),
               pw.Divider(color: PdfColors.blue900),
               pw.SizedBox(height: 20),
-
-              // Summary Box
               pw.Container(
                 padding: const pw.EdgeInsets.all(15),
                 decoration: pw.BoxDecoration(
@@ -885,12 +843,9 @@ class DailySalesPage extends StatelessWidget {
                 ),
               ),
               pw.SizedBox(height: 30),
-
-              // Details Sections
               pw.Row(
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
-                  // Revenue Column
                   pw.Expanded(
                     child: pw.Container(
                       padding: const pw.EdgeInsets.all(10),
@@ -922,8 +877,6 @@ class DailySalesPage extends StatelessWidget {
                     ),
                   ),
                   pw.SizedBox(width: 20),
-
-                  // Collection Column
                   pw.Expanded(
                     child: pw.Container(
                       padding: const pw.EdgeInsets.all(10),
@@ -956,7 +909,6 @@ class DailySalesPage extends StatelessWidget {
                   ),
                 ],
               ),
-
               pw.Spacer(),
               pw.Divider(),
               pw.Row(
@@ -985,7 +937,6 @@ class DailySalesPage extends StatelessWidget {
         },
       ),
     );
-
     await Printing.layoutPdf(onLayout: (f) => pdf.save());
   }
 

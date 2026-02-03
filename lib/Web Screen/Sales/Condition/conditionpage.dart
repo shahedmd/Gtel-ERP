@@ -18,6 +18,7 @@ class ConditionSalesPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Ensure controller is loaded
     final ConditionSalesController ctrl = Get.put(ConditionSalesController());
 
     return Scaffold(
@@ -27,7 +28,7 @@ class ConditionSalesPage extends StatelessWidget {
           _buildHeader(context, ctrl),
           _buildStatsTicker(ctrl),
           const SizedBox(height: 10),
-          _buildFilters(context, ctrl), // Pass Context for DatePicker
+          _buildFilters(context, ctrl),
           Expanded(child: _buildDataTable(ctrl, context)),
         ],
       ),
@@ -35,7 +36,7 @@ class ConditionSalesPage extends StatelessWidget {
   }
 
   // ==============================================================================
-  // 1. HEADER
+  // 1. HEADER (Updated: Removed Return Button)
   // ==============================================================================
   Widget _buildHeader(BuildContext context, ConditionSalesController ctrl) {
     return Container(
@@ -71,25 +72,14 @@ class ConditionSalesPage extends StatelessWidget {
                 ),
               ),
               Text(
-                "Track shipments, collect due, manage returns and print invoices",
+                "Track shipments, collect due, and print invoices",
                 style: TextStyle(fontSize: 12, color: textMuted),
               ),
             ],
           ),
           const Spacer(),
-          ElevatedButton.icon(
-            onPressed: () => _showReturnInterface(context, ctrl),
-            icon: const Icon(Icons.assignment_return, size: 18),
-            label: const Text("PROCESS RETURN"),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.orange.shade800,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-          ),
+
+          // REMOVED: Process Return Button
           const SizedBox(width: 20),
           Obx(
             () => _headerCard(
@@ -195,7 +185,7 @@ class ConditionSalesPage extends StatelessWidget {
   }
 
   // ==============================================================================
-  // 3. UPDATED FILTERS (With Date Picker)
+  // 3. FILTERS
   // ==============================================================================
   Widget _buildFilters(BuildContext context, ConditionSalesController ctrl) {
     return Container(
@@ -206,16 +196,17 @@ class ConditionSalesPage extends StatelessWidget {
           const SizedBox(width: 8),
           _filterChip(ctrl, "This Month"),
           const SizedBox(width: 8),
-          _filterChip(ctrl, "Last Month"), // New
+          _filterChip(ctrl, "Last Month"),
           const SizedBox(width: 8),
           _filterChip(ctrl, "This Year"),
           const SizedBox(width: 8),
           _filterChip(ctrl, "All Time"),
           const SizedBox(width: 8),
-          _customDateChip(context, ctrl), // New Custom
+          _customDateChip(context, ctrl),
           const Spacer(),
+          // Search Bar
           Container(
-            width: 300,
+            width: 320,
             height: 45,
             padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
@@ -226,7 +217,7 @@ class ConditionSalesPage extends StatelessWidget {
             child: TextField(
               onChanged: (v) => ctrl.searchQuery.value = v,
               decoration: const InputDecoration(
-                hintText: "Search Invoice, Phone, Courier...",
+                hintText: "Search Invoice ID, Phone or Challan...",
                 border: InputBorder.none,
                 icon: Icon(Icons.search, size: 20, color: Colors.grey),
                 isDense: true,
@@ -321,7 +312,7 @@ class ConditionSalesPage extends StatelessWidget {
   }
 
   // ==============================================================================
-  // 4. DATA TABLE (Added Print Icon)
+  // 4. DATA TABLE
   // ==============================================================================
   Widget _buildDataTable(ConditionSalesController ctrl, BuildContext context) {
     return Obx(() {
@@ -431,7 +422,7 @@ class ConditionSalesPage extends StatelessWidget {
                       ),
                       textAlign: TextAlign.center,
                     ),
-                  ), // Widened for Print btn
+                  ),
                 ],
               ),
             ),
@@ -458,7 +449,7 @@ class ConditionSalesPage extends StatelessWidget {
     BuildContext context,
     ConditionSalesController ctrl,
   ) {
-    bool isPaid = order.courierDue <= 0;
+    bool isPaid = order.courierDue <= 1.0; // Tolerance for float
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
@@ -470,7 +461,7 @@ class ConditionSalesPage extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
+                SelectableText(
                   order.invoiceId,
                   style: const TextStyle(
                     fontWeight: FontWeight.bold,
@@ -498,7 +489,7 @@ class ConditionSalesPage extends StatelessWidget {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                Text(
+                SelectableText(
                   order.customerPhone,
                   style: const TextStyle(fontSize: 11, color: textMuted),
                 ),
@@ -573,7 +564,7 @@ class ConditionSalesPage extends StatelessWidget {
               ),
             ),
           ),
-          // 6. Action (Print + Collect)
+          // 6. Action
           Expanded(
             flex: 3,
             child: Row(
@@ -812,304 +803,6 @@ class ConditionSalesPage extends StatelessWidget {
                     ),
                   ),
                 ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _showReturnInterface(
-    BuildContext context,
-    ConditionSalesController ctrl,
-  ) {
-    ctrl.returnSearchCtrl.clear();
-    ctrl.returnOrderData.value = null;
-    ctrl.returnOrderItems.clear();
-
-    Get.dialog(
-      Dialog(
-        backgroundColor: bgGrey,
-        insetPadding: const EdgeInsets.all(20),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: Container(
-          width: 700,
-          height: 600,
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    "Condition Sales Return",
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w900,
-                      color: darkSlate,
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () => Get.back(),
-                    icon: const Icon(Icons.close),
-                  ),
-                ],
-              ),
-              const Divider(height: 30),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: ctrl.returnSearchCtrl,
-                      decoration: const InputDecoration(
-                        hintText: "Enter Invoice ID (e.g. GTEL-24...)",
-                        prefixIcon: Icon(Icons.search),
-                        filled: true,
-                        fillColor: Colors.white,
-                        border: OutlineInputBorder(),
-                      ),
-                      onSubmitted: (val) => ctrl.findInvoiceForReturn(val),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Obx(
-                    () => ElevatedButton(
-                      onPressed:
-                          ctrl.isLoading.value
-                              ? null
-                              : () => ctrl.findInvoiceForReturn(
-                                ctrl.returnSearchCtrl.text,
-                              ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: darkSlate,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 24,
-                          vertical: 20,
-                        ),
-                      ),
-                      child:
-                          ctrl.isLoading.value
-                              ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  color: Colors.white,
-                                ),
-                              )
-                              : const Text(
-                                "Find Invoice",
-                                style: TextStyle(color: Colors.white),
-                              ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              Expanded(
-                child: Obx(() {
-                  if (ctrl.returnOrderData.value == null) {
-                    return Center(
-                      child: Text(
-                        "Search for a condition order to process return.",
-                        style: TextStyle(color: Colors.grey.shade500),
-                      ),
-                    );
-                  }
-                  return Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Column(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: Colors.orange.shade50,
-                            borderRadius: const BorderRadius.vertical(
-                              top: Radius.circular(12),
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                "Customer: ${ctrl.returnOrderData.value!['customerName']}",
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              Text(
-                                "Courier: ${ctrl.returnOrderData.value!['courierName']}",
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.deepOrange,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Expanded(
-                          child: ListView.separated(
-                            padding: const EdgeInsets.all(16),
-                            itemCount: ctrl.returnOrderItems.length,
-                            separatorBuilder: (_, __) => const Divider(),
-                            itemBuilder: (context, index) {
-                              final item = ctrl.returnOrderItems[index];
-                              String pid = item['productId'];
-                              int maxQty = int.parse(item['qty'].toString());
-                              double price = double.parse(
-                                item['saleRate'].toString(),
-                              );
-                              int retQty = ctrl.returnQuantities[pid] ?? 0;
-                              if (maxQty <= 0) return const SizedBox.shrink();
-
-                              return Row(
-                                children: [
-                                  Expanded(
-                                    flex: 3,
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          item['name'],
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                        Text(
-                                          "Rate: ৳$price",
-                                          style: const TextStyle(
-                                            fontSize: 12,
-                                            color: textMuted,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  Container(
-                                    decoration: BoxDecoration(
-                                      border: Border.all(
-                                        color: Colors.grey.shade300,
-                                      ),
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        IconButton(
-                                          icon: const Icon(
-                                            Icons.remove,
-                                            size: 16,
-                                          ),
-                                          onPressed:
-                                              () => ctrl.decrementReturn(pid),
-                                          constraints: const BoxConstraints(),
-                                        ),
-                                        Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 8,
-                                          ),
-                                          child: Text(
-                                            "$retQty",
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                        ),
-                                        IconButton(
-                                          icon: const Icon(
-                                            Icons.add,
-                                            size: 16,
-                                            color: Colors.red,
-                                          ),
-                                          onPressed:
-                                              () => ctrl.incrementReturn(
-                                                pid,
-                                                maxQty,
-                                              ),
-                                          constraints: const BoxConstraints(),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(width: 16),
-                                  SizedBox(
-                                    width: 80,
-                                    child: Text(
-                                      "৳${(retQty * price).toStringAsFixed(0)}",
-                                      textAlign: TextAlign.right,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        color: alertRed,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              );
-                            },
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            border: Border(
-                              top: BorderSide(color: Colors.grey.shade200),
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    "Total Refund Adjustment",
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: textMuted,
-                                    ),
-                                  ),
-                                  Text(
-                                    "৳ ${ctrl.totalRefundValue.toStringAsFixed(0)}",
-                                    style: const TextStyle(
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.bold,
-                                      color: alertRed,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              ElevatedButton.icon(
-                                onPressed: () => ctrl.processConditionReturn(),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: alertRed,
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 24,
-                                    vertical: 16,
-                                  ),
-                                ),
-                                icon: const Icon(
-                                  Icons.check,
-                                  color: Colors.white,
-                                ),
-                                label: const Text(
-                                  "CONFIRM RETURN",
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }),
               ),
             ],
           ),

@@ -2,7 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:gtel_erp/Live%20order/salemodel.dart'; // Ensure this matches your file structure
+import 'package:gtel_erp/Live%20order/salemodel.dart'; 
 import '../Stock/model.dart';
 
 class LiveOrderSalesPage extends StatelessWidget {
@@ -10,17 +10,14 @@ class LiveOrderSalesPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Inject the updated controller
-    final controller = Get.put(LiveSalesController());
 
+
+    final controller = Get.put(LiveSalesController());
     return Scaffold(
-      backgroundColor: const Color(0xFFF1F5F9), // Slate-100 background
+      backgroundColor: const Color(0xFFF1F5F9), 
       body: Row(
         children: [
-          // LEFT: Products Section (Flex 6)
           Expanded(flex: 6, child: _ProductTableSection(controller)),
-
-          // RIGHT: Checkout Panel (Fixed Width)
           Container(
             width: 500,
             decoration: BoxDecoration(
@@ -66,7 +63,7 @@ class LiveOrderSalesPage extends StatelessWidget {
     );
   }
 
-  // --- HEADER ---
+
   Widget _buildHeader(LiveSalesController controller) {
     return Obx(
       () => AnimatedContainer(
@@ -1575,7 +1572,6 @@ class _ProductRow extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
           child: Row(
             children: [
-              // 1. Name
               Expanded(
                 flex: 3,
                 child: Text(
@@ -1587,8 +1583,7 @@ class _ProductRow extends StatelessWidget {
                   ),
                 ),
               ),
-             
-              // 3. Model
+
               Expanded(
                 flex: 2,
                 child: Align(

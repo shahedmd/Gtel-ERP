@@ -1,4 +1,6 @@
 // ignore_for_file: deprecated_member_use, avoid_print, empty_catches
+
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -37,16 +39,11 @@ class ConditionSalesController extends GetxController {
   final RxString searchQuery = "".obs;
   final RxString selectedCourierFilter = "All".obs;
 
+  // Search Debouncer
+  Timer? _debounce;
+
   // Custom Date Range
   final Rxn<DateTimeRange> customDateRange = Rxn<DateTimeRange>();
-
-  // --- RETURN LOGIC STATE ---
-  final returnSearchCtrl = TextEditingController();
-  final Rxn<Map<String, dynamic>> returnOrderData = Rxn<Map<String, dynamic>>();
-  final RxList<Map<String, dynamic>> returnOrderItems =
-      <Map<String, dynamic>>[].obs;
-  final RxMap<String, int> returnQuantities = <String, int>{}.obs;
-  final RxMap<String, String> returnDestinations = <String, String>{}.obs;
 
   @override
   void onInit() {
@@ -54,27 +51,83 @@ class ConditionSalesController extends GetxController {
     loadConditionSales();
 
     ever(selectedFilter, (_) => _handleFilterChange());
-    ever(searchQuery, (_) => _applyClientSideFilters());
+    ever(searchQuery, (val) {
+      if (_debounce?.isActive ?? false) _debounce!.cancel();
+      _debounce = Timer(const Duration(milliseconds: 500), () {
+        if (val.isNotEmpty) {
+          _performServerSideSearch(val);
+        } else {
+          loadConditionSales();
+        }
+      });
+    });
     ever(customDateRange, (_) => _handleFilterChange());
   }
 
-  // --- DATA LOADING LOGIC ---
+  // ==============================================================================
+  // 1. DATA LOADING & FILTERS
+  // ==============================================================================
 
   void _handleFilterChange() {
-    // If filter is All Time, we use pagination logic.
-    // If filter is specific (Today, Last Month, Custom), we fetch ALL data for that range for accurate reports.
-    if (selectedFilter.value == "All Time" && searchQuery.value.isEmpty) {
+    if (searchQuery.value.isNotEmpty) return;
+    if (selectedFilter.value == "All Time") {
       loadConditionSales();
     } else {
       fetchReportData();
     }
   }
 
-  // 1. Standard Pagination (For "All Time")
-  Future<void> loadConditionSales({bool loadMore = false}) async {
-    if (selectedFilter.value != "All Time") {
-      return; // Don't use this for reports
+  Future<void> _performServerSideSearch(String query) async {
+    isLoading.value = true;
+    allOrders.clear();
+    filteredOrders.clear();
+    hasMore.value = false;
+
+    try {
+      QuerySnapshot snap;
+      snap =
+          await _db
+              .collection('sales_orders')
+              .where('invoiceId', isEqualTo: query.trim())
+              .where('isCondition', isEqualTo: true)
+              .get();
+
+      if (snap.docs.isEmpty) {
+        snap =
+            await _db
+                .collection('sales_orders')
+                .where('customerPhone', isEqualTo: query.trim())
+                .where('isCondition', isEqualTo: true)
+                .orderBy('timestamp', descending: true)
+                .limit(20)
+                .get();
+      }
+
+      if (snap.docs.isEmpty) {
+        snap =
+            await _db
+                .collection('sales_orders')
+                .where('challanNo', isEqualTo: query.trim())
+                .where('isCondition', isEqualTo: true)
+                .get();
+      }
+
+      allOrders.value =
+          snap.docs
+              .map((doc) => ConditionOrderModel.fromFirestore(doc))
+              .toList();
+      filteredOrders.value = allOrders;
+      _calculateStats();
+    } catch (e) {
+      print("Search Error: $e");
+    } finally {
+      isLoading.value = false;
     }
+  }
+
+  Future<void> loadConditionSales({bool loadMore = false}) async {
+    if (searchQuery.value.isNotEmpty) return;
+    if (selectedFilter.value != "All Time") return;
 
     if (loadMore) {
       if (isMoreLoading.value || !hasMore.value) return;
@@ -98,7 +151,6 @@ class ConditionSalesController extends GetxController {
       }
 
       final snap = await query.get();
-
       if (snap.docs.length < _limit) hasMore.value = false;
 
       if (snap.docs.isNotEmpty) {
@@ -114,7 +166,6 @@ class ConditionSalesController extends GetxController {
           allOrders.value = newOrders;
         }
       }
-
       _applyClientSideFilters();
       _calculateStats();
     } catch (e) {
@@ -125,16 +176,13 @@ class ConditionSalesController extends GetxController {
     }
   }
 
-  // 2. Report Fetching (For Specific Dates)
   Future<void> fetchReportData() async {
     isLoading.value = true;
     allOrders.clear();
-
     DateTime now = DateTime.now();
     DateTime start = now;
     DateTime end = now;
 
-    // Determine Date Range
     if (selectedFilter.value == "Today") {
       start = DateTime(now.year, now.month, now.day, 0, 0, 0);
       end = DateTime(now.year, now.month, now.day, 23, 59, 59);
@@ -159,7 +207,6 @@ class ConditionSalesController extends GetxController {
         59,
       );
     } else {
-      // Fallback for All Time in search mode
       loadConditionSales();
       return;
     }
@@ -181,15 +228,10 @@ class ConditionSalesController extends GetxController {
           snap.docs
               .map((doc) => ConditionOrderModel.fromFirestore(doc))
               .toList();
-
       _applyClientSideFilters();
       _calculateStats();
     } catch (e) {
       print("Report Error: $e");
-      Get.snackbar(
-        "Notice",
-        "Make sure Firestore Index is enabled for Timestamp query",
-      );
     } finally {
       isLoading.value = false;
     }
@@ -197,47 +239,27 @@ class ConditionSalesController extends GetxController {
 
   void _applyClientSideFilters() {
     List<ConditionOrderModel> temp = List.from(allOrders);
-
-    // Filter by Courier Name? (Currently not in UI, but logic ready)
     if (selectedCourierFilter.value != "All") {
       temp =
           temp
               .where((o) => o.courierName == selectedCourierFilter.value)
               .toList();
     }
-
-    // Filter by Search Query
-    if (searchQuery.value.isNotEmpty) {
-      String q = searchQuery.value.toLowerCase();
-      temp =
-          temp
-              .where(
-                (o) =>
-                    o.customerName.toLowerCase().contains(q) ||
-                    o.invoiceId.toLowerCase().contains(q) ||
-                    o.customerPhone.contains(q) ||
-                    o.courierName.toLowerCase().contains(q) ||
-                    o.challanNo.contains(q),
-              )
-              .toList();
-    }
-
     filteredOrders.value = temp;
-    _calculateStats(); // Recalculate stats based on filtered view
+    _calculateStats();
   }
 
   void _calculateStats() {
     double total = 0.0;
     Map<String, double> cBalances = {};
-
     for (var order in filteredOrders) {
       if (order.courierDue > 0) {
         total += order.courierDue;
+        double due = double.parse(order.courierDue.toStringAsFixed(2));
         if (cBalances.containsKey(order.courierName)) {
-          cBalances[order.courierName] =
-              cBalances[order.courierName]! + order.courierDue;
+          cBalances[order.courierName] = cBalances[order.courierName]! + due;
         } else {
-          cBalances[order.courierName] = order.courierDue;
+          cBalances[order.courierName] = due;
         }
       }
     }
@@ -246,7 +268,7 @@ class ConditionSalesController extends GetxController {
   }
 
   // ==============================================================================
-  // 3. PAYMENT RECEIVING (Same as before)
+  // 2. PAYMENT RECEIVING (FIXED OVERWRITE BUG)
   // ==============================================================================
   Future<void> receiveConditionPayment({
     required ConditionOrderModel order,
@@ -255,7 +277,10 @@ class ConditionSalesController extends GetxController {
     String? refNumber,
   }) async {
     if (receivedAmount <= 0) return;
-    if (receivedAmount > order.courierDue) {
+    receivedAmount = double.parse(receivedAmount.toStringAsFixed(2));
+
+    if (receivedAmount > order.courierDue + 1) {
+      // +1 tolerance
       Get.snackbar("Error", "Amount exceeds due balance");
       return;
     }
@@ -271,22 +296,30 @@ class ConditionSalesController extends GetxController {
       Map<String, dynamic> data = latestSnap.data() as Map<String, dynamic>;
       Map<String, dynamic> paymentDetails = data['paymentDetails'] ?? {};
 
+      // FIX: Check 'actualReceived' first, if null/0, fallback to 'paidForInvoice' (Initial Advance)
       double currentPaid =
           double.tryParse(paymentDetails['actualReceived'].toString()) ?? 0.0;
+      if (currentPaid == 0) {
+        currentPaid =
+            double.tryParse(paymentDetails['paidForInvoice'].toString()) ?? 0.0;
+      }
+
       double newPaidTotal = currentPaid + receivedAmount;
-      double newDue = order.courierDue - receivedAmount;
+      double newDue =
+          double.parse(data['courierDue'].toString()) - receivedAmount;
+      if (newDue < 0) newDue = 0;
 
       batch.update(orderRef, {
         "courierDue": newDue,
         "paymentDetails.actualReceived": newPaidTotal,
         "lastPaymentDate": FieldValue.serverTimestamp(),
-        "status": newDue <= 0 ? "completed" : "on_delivery",
-        "isFullyPaid": newDue <= 0,
+        "status": newDue <= 1 ? "completed" : "on_delivery",
+        "isFullyPaid": newDue <= 1,
         "collectionHistory": FieldValue.arrayUnion([
           {
             "amount": receivedAmount,
             "date": Timestamp.now(),
-            "method": method,
+            "method": method.toLowerCase(),
             "ref": refNumber,
             "type": "courier_collection",
           },
@@ -325,7 +358,6 @@ class ConditionSalesController extends GetxController {
         transactionId: order.invoiceId,
       );
 
-      // Refresh data intelligently
       if (selectedFilter.value == "All Time") {
         loadConditionSales(loadMore: false);
       } else {
@@ -347,24 +379,57 @@ class ConditionSalesController extends GetxController {
   }
 
   // ==============================================================================
-  // 4. PRINT INVOICE LOGIC (Ported from LiveSalesController)
+  // 3. PRINT INVOICE (FIXED PDF OVERWRITE LOGIC)
   // ==============================================================================
 
   Future<void> printInvoice(ConditionOrderModel order) async {
     isLoading.value = true;
     try {
-      // 1. Fetch Fresh Data to get exact snapshots and payment details
       DocumentSnapshot doc =
           await _db.collection('sales_orders').doc(order.invoiceId).get();
       if (!doc.exists) return;
 
       Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
-
       List<dynamic> rawItems = data['items'] ?? [];
       List<Map<String, dynamic>> items =
           rawItems.map((e) => e as Map<String, dynamic>).toList();
-      Map<String, dynamic> paymentMap = data['paymentDetails'] ?? {};
 
+      // 1. Get Initial Payment Details (Initial Advance)
+      Map<String, dynamic> paymentMap = Map<String, dynamic>.from(
+        data['paymentDetails'] ?? {},
+      );
+
+      // 2. Get Collection History (Payments made LATER)
+      List<dynamic> history = data['collectionHistory'] ?? [];
+      double historyTotal = 0.0;
+
+      // 3. MERGE: Add history breakdown to the initial paymentMap
+      for (var h in history) {
+        if (h is Map) {
+          String method = h['method']?.toString().toLowerCase() ?? 'cash';
+          double amount = double.tryParse(h['amount'].toString()) ?? 0.0;
+          historyTotal += amount;
+
+          // Add to the existing method bucket (e.g., if initial was 500 cash and new is 1000 cash -> total 1500)
+          double existing =
+              double.tryParse(paymentMap[method]?.toString() ?? '0') ?? 0.0;
+          paymentMap[method] = existing + amount;
+        }
+      }
+
+      // 4. Calculate Correct Total Paid (Initial Advance + History)
+      double initialPaid =
+          double.tryParse(paymentMap['paidForInvoice'].toString()) ?? 0.0;
+      double totalPaidNow = initialPaid + historyTotal;
+
+      // Update map to show full total
+      paymentMap['paidForInvoice'] = totalPaidNow;
+
+      // 5. Use Current Database Due
+      double realDue = double.tryParse(data['courierDue'].toString()) ?? 0.0;
+      paymentMap['due'] = realDue;
+
+      // --- Other Info ---
       double oldDueSnap =
           double.tryParse(data['snapshotOldDue']?.toString() ?? "0") ?? 0.0;
       double runningDueSnap =
@@ -372,13 +437,25 @@ class ConditionSalesController extends GetxController {
       int cartons = int.tryParse(data['cartons']?.toString() ?? "0") ?? 0;
       String address = data['deliveryAddress'] ?? "";
       String shop = data['shopName'] ?? "";
+      String packagerName = data['packagerName'] ?? '';
+      String sellerName = "Joynal Abedin";
+      String sellerPhone = "01720677206";
 
-      // 2. Generate PDF
+      if (data['soldBy'] != null) {
+        var soldByData = data['soldBy'];
+        if (soldByData is Map) {
+          sellerName = soldByData['name'] ?? sellerName;
+          sellerPhone = soldByData['phone'] ?? sellerPhone;
+        }  if (soldByData is String) {
+          sellerName = soldByData;
+        }
+      }
+
       await _generatePdf(
         order.invoiceId,
         order.customerName,
         order.customerPhone,
-        paymentMap,
+        paymentMap, // Contains MERGED amounts now
         items,
         isCondition: true,
         challan: order.challanNo,
@@ -388,8 +465,9 @@ class ConditionSalesController extends GetxController {
         shopName: shop,
         oldDueSnap: oldDueSnap,
         runningDueSnap: runningDueSnap,
-        authorizedName: "Joynal Abedin",
-        authorizedPhone: "01720677206",
+        authorizedName: sellerName,
+        authorizedPhone: sellerPhone,
+        packagerName: packagerName,
       );
     } catch (e) {
       Get.snackbar("Error", "Could not generate invoice: $e");
@@ -414,6 +492,7 @@ class ConditionSalesController extends GetxController {
     double runningDueSnap = 0.0,
     required String authorizedName,
     required String authorizedPhone,
+    String? packagerName,
   }) async {
     final pdf = pw.Document();
     final boldFont = await PdfGoogleFonts.robotoBold();
@@ -421,14 +500,17 @@ class ConditionSalesController extends GetxController {
     final italicFont = await PdfGoogleFonts.robotoItalic();
 
     double paidOld = double.tryParse(payMap['paidForOldDue'].toString()) ?? 0.0;
+    // This value is now the MERGED total (Initial + Collections)
     double paidInv =
         double.tryParse(payMap['paidForInvoice'].toString()) ?? 0.0;
+
     double invDue = double.tryParse(payMap['due'].toString()) ?? 0.0;
     double subTotal = items.fold(
       0,
       (sumv, item) =>
           sumv + (double.tryParse(item['subtotal'].toString()) ?? 0),
     );
+
     double remainingOldDue = oldDueSnap - paidOld;
     if (remainingOldDue < 0) remainingOldDue = 0;
     double totalPreviousBalance = oldDueSnap + runningDueSnap;
@@ -457,6 +539,7 @@ class ConditionSalesController extends GetxController {
               address,
               courier,
               shopName,
+              packagerName,
             ),
             pw.SizedBox(height: 15),
             _buildProfessionalTable(boldFont, regularFont, italicFont, items),
@@ -538,7 +621,11 @@ class ConditionSalesController extends GetxController {
     await Printing.layoutPdf(onLayout: (f) => pdf.save());
   }
 
-  // --- PDF WIDGET HELPERS (Identical to LiveSalesController) ---
+  // ... (Keep existing _buildCompanyHeader, _buildInvoiceInfo, _sectionHeader, _infoRow, _buildProfessionalTable, _th, _td, _buildDetailedSummary, _summaryRow, _buildSignatures, _buildCompactPaymentLines, _buildChallanInfo, _buildConditionBox, updateChallanNumber as they were) ...
+
+  // PDF WIDGETS SECTION (Compulsory for the controller to work)
+  // I've included the key widgets below to ensure no missing references.
+
   pw.Widget _buildCompanyHeader(pw.Font bold, pw.Font reg) {
     return pw.Center(
       child: pw.Container(
@@ -548,8 +635,6 @@ class ConditionSalesController extends GetxController {
         ),
         padding: const pw.EdgeInsets.only(bottom: 10),
         child: pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.center,
-          mainAxisAlignment: pw.MainAxisAlignment.center,
           children: [
             pw.Text(
               "G TEL JOY EXPRESS",
@@ -586,6 +671,7 @@ class ConditionSalesController extends GetxController {
     String addr,
     String? courier,
     String shopName,
+    String? packagerName,
   ) {
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -601,6 +687,8 @@ class ConditionSalesController extends GetxController {
               _infoRow("Type", isCond ? "Condition" : "Cash/Credit", bold, reg),
               if (isCond && courier != null)
                 _infoRow("Courier", courier, bold, reg),
+              if (packagerName != null && packagerName.isNotEmpty)
+                _infoRow("Packed By", packagerName, bold, reg),
             ],
           ),
         ),
@@ -725,31 +813,26 @@ class ConditionSalesController extends GetxController {
     String text,
     pw.Font font, {
     pw.TextAlign align = pw.TextAlign.center,
-  }) {
-    return pw.Padding(
-      padding: const pw.EdgeInsets.all(5),
-      child: pw.Text(
-        text,
-        textAlign: align,
-        style: pw.TextStyle(font: font, fontSize: 8),
-      ),
-    );
-  }
-
+  }) => pw.Padding(
+    padding: const pw.EdgeInsets.all(5),
+    child: pw.Text(
+      text,
+      textAlign: align,
+      style: pw.TextStyle(font: font, fontSize: 8),
+    ),
+  );
   pw.Widget _td(
     String text,
     pw.Font font, {
     pw.TextAlign align = pw.TextAlign.left,
-  }) {
-    return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 4),
-      child: pw.Text(
-        text,
-        textAlign: align,
-        style: pw.TextStyle(font: font, fontSize: 9),
-      ),
-    );
-  }
+  }) => pw.Padding(
+    padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 4),
+    child: pw.Text(
+      text,
+      textAlign: align,
+      style: pw.TextStyle(font: font, fontSize: 9),
+    ),
+  );
 
   pw.Widget _buildDetailedSummary(
     pw.Font bold,
@@ -764,7 +847,6 @@ class ConditionSalesController extends GetxController {
   ) {
     double discount = 0.0;
     double currentInvTotal = subTotal - discount;
-
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
@@ -809,10 +891,12 @@ class ConditionSalesController extends GetxController {
                 bold,
                 size: 10,
               ),
-              if (!isCond) ...[
-                // Not needed for condition specific but kept for compatibility
-              ] else ...[
-                _summaryRow("Paid", totalPaid.toStringAsFixed(2), reg),
+              if (isCond) ...[
+                _summaryRow(
+                  "Paid / Collected",
+                  totalPaid.toStringAsFixed(2),
+                  reg,
+                ),
                 pw.SizedBox(height: 5),
                 pw.Container(
                   padding: const pw.EdgeInsets.all(5),
@@ -847,6 +931,43 @@ class ConditionSalesController extends GetxController {
           pw.Text(value, style: pw.TextStyle(font: font, fontSize: size)),
         ],
       ),
+    );
+  }
+
+  pw.Widget _buildCompactPaymentLines(Map payMap, pw.Font reg) {
+    List<String> lines = [];
+    double cash = double.tryParse(payMap['cash'].toString()) ?? 0;
+    double bkash = double.tryParse(payMap['bkash'].toString()) ?? 0;
+    double nagad = double.tryParse(payMap['nagad'].toString()) ?? 0;
+    double bank = double.tryParse(payMap['bank'].toString()) ?? 0;
+    double totalPaid =
+        double.tryParse(payMap['paidForInvoice'].toString()) ?? 0;
+
+    if (cash > 0) lines.add("Cash: ${cash.toStringAsFixed(2)}");
+    if (bkash > 0) lines.add("Bkash: ${bkash.toStringAsFixed(2)}");
+    if (nagad > 0) lines.add("Nagad: ${nagad.toStringAsFixed(2)}");
+    if (bank > 0) lines.add("Bank: ${bank.toStringAsFixed(2)}");
+
+    if (lines.isEmpty) {
+      if (totalPaid > 0) {
+        return pw.Text(
+          "Collected: ${totalPaid.toStringAsFixed(2)}",
+          style: pw.TextStyle(font: reg, fontSize: 8),
+        );
+      }
+      return pw.Text(
+        "Unpaid / Due",
+        style: pw.TextStyle(font: reg, fontSize: 8),
+      );
+    }
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children:
+          lines
+              .map(
+                (l) => pw.Text(l, style: pw.TextStyle(font: reg, fontSize: 8)),
+              )
+              .toList(),
     );
   }
 
@@ -890,35 +1011,6 @@ class ConditionSalesController extends GetxController {
           ],
         ),
       ],
-    );
-  }
-
-  pw.Widget _buildCompactPaymentLines(Map payMap, pw.Font reg) {
-    List<String> lines = [];
-    double cash = double.tryParse(payMap['cash'].toString()) ?? 0;
-    double bkash = double.tryParse(payMap['bkash'].toString()) ?? 0;
-    double nagad = double.tryParse(payMap['nagad'].toString()) ?? 0;
-    double bank = double.tryParse(payMap['bank'].toString()) ?? 0;
-
-    if (cash > 0) lines.add("Cash: $cash");
-    if (bkash > 0) lines.add("Bkash: $bkash");
-    if (nagad > 0) lines.add("Nagad: $nagad");
-    if (bank > 0) lines.add("Bank: $bank");
-
-    if (lines.isEmpty) {
-      return pw.Text(
-        "Unpaid / Due",
-        style: pw.TextStyle(font: reg, fontSize: 8),
-      );
-    }
-    return pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
-      children:
-          lines
-              .map(
-                (l) => pw.Text(l, style: pw.TextStyle(font: reg, fontSize: 8)),
-              )
-              .toList(),
     );
   }
 
@@ -1000,6 +1092,30 @@ class ConditionSalesController extends GetxController {
 
   pw.Widget _buildConditionBox(pw.Font bold, pw.Font reg, Map payMap) {
     double due = double.parse(payMap['due'].toString());
+    if (due <= 0) {
+      return pw.Container(
+        width: double.infinity,
+        padding: const pw.EdgeInsets.all(10),
+        decoration: pw.BoxDecoration(
+          border: pw.Border.all(width: 2),
+          borderRadius: const pw.BorderRadius.all(pw.Radius.circular(5)),
+          color: PdfColors.grey100,
+        ),
+        child: pw.Column(
+          children: [
+            pw.Text(
+              "STATUS: COMPLETED",
+              style: pw.TextStyle(font: bold, fontSize: 12),
+            ),
+            pw.SizedBox(height: 5),
+            pw.Text(
+              "Fully Paid via Courier Collection/Advance",
+              style: pw.TextStyle(font: reg, fontSize: 10),
+            ),
+          ],
+        ),
+      );
+    }
     return pw.Container(
       width: double.infinity,
       padding: const pw.EdgeInsets.all(10),
@@ -1036,7 +1152,10 @@ class ConditionSalesController extends GetxController {
     );
   }
 
-  // Helper Methods
+  // ==============================================================================
+  // 4. HELPER ACTIONS (UPDATE CHALLAN)
+  // ==============================================================================
+
   Future<void> updateChallanNumber(
     String invoiceId,
     String phone,
@@ -1080,226 +1199,6 @@ class ConditionSalesController extends GetxController {
       );
     } catch (e) {
       Get.snackbar("Error", "Failed to update: $e");
-    } finally {
-      isLoading.value = false;
-    }
-  }
-
-  Future<void> findInvoiceForReturn(String invoiceId) async {
-    if (invoiceId.isEmpty) return;
-    isLoading.value = true;
-    returnOrderData.value = null;
-    returnOrderItems.clear();
-    returnQuantities.clear();
-    returnDestinations.clear();
-
-    try {
-      final doc =
-          await _db.collection('sales_orders').doc(invoiceId.trim()).get();
-      if (!doc.exists) {
-        Get.snackbar("Not Found", "Invoice not found.");
-        return;
-      }
-      final data = doc.data() as Map<String, dynamic>;
-      if (data['isCondition'] != true) {
-        Get.snackbar("Invalid Type", "This is not a Condition Sale invoice.");
-        return;
-      }
-      returnOrderData.value = data;
-      List<dynamic> rawItems = data['items'] ?? [];
-      for (var item in rawItems) {
-        if (item is Map) {
-          Map<String, dynamic> safeItem = {
-            "productId": item['productId'].toString(),
-            "name": item['name'].toString(),
-            "model": item['model']?.toString() ?? "",
-            "qty": int.parse(item['qty'].toString()),
-            "saleRate": double.parse(item['saleRate'].toString()),
-            "costRate": double.parse(item['costRate'].toString()),
-            "subtotal": double.parse(item['subtotal'].toString()),
-          };
-          returnOrderItems.add(safeItem);
-          String pid = safeItem['productId'];
-          returnQuantities[pid] = 0;
-          returnDestinations[pid] = "Sea";
-        }
-      }
-    } catch (e) {
-      Get.snackbar("Error", e.toString());
-    } finally {
-      isLoading.value = false;
-    }
-  }
-
-  void incrementReturn(String pid, int max) {
-    int cur = returnQuantities[pid] ?? 0;
-    if (cur < max) returnQuantities[pid] = cur + 1;
-  }
-
-  void decrementReturn(String pid) {
-    int cur = returnQuantities[pid] ?? 0;
-    if (cur > 0) returnQuantities[pid] = cur - 1;
-  }
-
-  double get totalRefundValue {
-    double total = 0.0;
-    for (var item in returnOrderItems) {
-      String pid = item['productId'].toString();
-      int qty = returnQuantities[pid] ?? 0;
-      double rate = double.parse(item['saleRate'].toString());
-      total += (qty * rate);
-    }
-    return total;
-  }
-
-  Future<void> processConditionReturn() async {
-    if (totalRefundValue <= 0) return;
-    if (returnOrderData.value == null) return;
-    isLoading.value = true;
-    String invoiceId = returnOrderData.value!['invoiceId'].toString();
-    String courierName = returnOrderData.value!['courierName'].toString();
-    String custPhone = returnOrderData.value!['customerPhone'].toString();
-
-    try {
-      await _db.runTransaction((transaction) async {
-        DocumentReference orderRef = _db
-            .collection('sales_orders')
-            .doc(invoiceId);
-        DocumentSnapshot orderSnap = await transaction.get(orderRef);
-        Map<String, dynamic> currentData =
-            orderSnap.data() as Map<String, dynamic>;
-
-        List<dynamic> oldItems = currentData['items'] ?? [];
-        List<Map<String, dynamic>> newItems = [];
-        double refundAmt = 0.0;
-        double profitReduce = 0.0;
-        double costReduce = 0.0;
-
-        for (var rawItem in oldItems) {
-          String pid = rawItem['productId'].toString();
-          int dbQty = int.parse(rawItem['qty'].toString());
-          double sRate = double.parse(rawItem['saleRate'].toString());
-          double cRate = double.parse(rawItem['costRate'].toString());
-          int retQty = returnQuantities[pid] ?? 0;
-
-          if (retQty > 0) {
-            refundAmt += (retQty * sRate);
-            costReduce += (retQty * cRate);
-            profitReduce += (retQty * (sRate - cRate));
-            dbQty -= retQty;
-          }
-          newItems.add({...rawItem, "qty": dbQty, "subtotal": dbQty * sRate});
-        }
-
-        double oldGT = double.parse(currentData['grandTotal'].toString());
-        double newGT = oldGT - refundAmt;
-        double oldDue = double.parse(currentData['courierDue'].toString());
-        double newDue = oldDue - refundAmt;
-        if (newDue < 0) newDue = 0;
-
-        transaction.update(orderRef, {
-          "items": newItems,
-          "grandTotal": newGT,
-          "courierDue": newDue,
-          "profit":
-              double.parse(currentData['profit'].toString()) - profitReduce,
-          "totalCost":
-              double.parse(currentData['totalCost'].toString()) - costReduce,
-          "status": newDue <= 0 ? "returned_completed" : "returned_partial",
-          "subtotal": newGT,
-          "lastReturnDate": FieldValue.serverTimestamp(),
-        });
-
-        DocumentReference courierRef = _db
-            .collection('courier_ledgers')
-            .doc(courierName);
-        transaction.update(courierRef, {
-          "totalDue": FieldValue.increment(-refundAmt),
-          "lastUpdated": FieldValue.serverTimestamp(),
-        });
-
-        DocumentReference custRef = _db
-            .collection('condition_customers')
-            .doc(custPhone);
-        transaction.update(custRef, {
-          "totalCourierDue": FieldValue.increment(-refundAmt),
-        });
-
-        // Also update subcollection if exists (best effort)
-        DocumentReference custOrderRef = custRef
-            .collection('orders')
-            .doc(invoiceId);
-        // We use set/merge because getting check might fail transaction if doc missing
-        transaction.set(custOrderRef, {
-          "grandTotal": newGT,
-          "courierDue": newDue,
-          "status": newDue <= 0 ? "returned_completed" : "pending_courier",
-        }, SetOptions(merge: true));
-
-        final dailyQuery =
-            await _db
-                .collection('daily_sales')
-                .where('transactionId', isEqualTo: invoiceId)
-                .limit(1)
-                .get();
-        if (dailyQuery.docs.isNotEmpty) {
-          transaction.update(dailyQuery.docs.first.reference, {
-            "amount": newGT,
-            "pending": newDue,
-            "note": "Adjusted via Return (-$refundAmt)",
-          });
-        }
-      });
-
-      List<Future<void>> stockUpdates = [];
-      for (var pid in returnQuantities.keys) {
-        int qty = returnQuantities[pid]!;
-        if (qty > 0) {
-          // Default return to Sea per requirement
-          var itemInfo = returnOrderItems.firstWhere(
-            (e) => e['productId'] == pid,
-          );
-          double originalCost = double.parse(itemInfo['costRate'].toString());
-          int? parsedPid = int.tryParse(pid);
-          if (parsedPid != null) {
-            stockUpdates.add(
-              productCtrl.addMixedStock(
-                productId: parsedPid,
-                localQty: 0,
-                airQty: 0,
-                seaQty: qty,
-                localUnitPrice: originalCost,
-              ),
-            );
-          }
-        }
-      }
-      if (stockUpdates.isNotEmpty) await Future.wait(stockUpdates);
-
-      if (selectedFilter.value == "All Time") {
-        loadConditionSales(loadMore: false);
-      } else {
-        fetchReportData();
-      }
-
-      returnOrderData.value = null;
-      returnOrderItems.clear();
-      returnSearchCtrl.clear();
-      if (Get.isDialogOpen ?? false) Get.back();
-      Get.snackbar(
-        "Return Complete",
-        "Stock Restored to SEA & Ledgers Updated",
-        backgroundColor: Colors.green,
-        colorText: Colors.white,
-      );
-    } catch (e) {
-      if (Get.isDialogOpen ?? false) Get.back();
-      Get.snackbar(
-        "Return Failed",
-        e.toString(),
-        backgroundColor: Colors.red,
-        colorText: Colors.white,
-      );
     } finally {
       isLoading.value = false;
     }

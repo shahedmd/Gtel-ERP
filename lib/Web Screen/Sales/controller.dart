@@ -402,27 +402,29 @@ class DailySalesController extends GetxController {
     }
   }
 
-  // ==========================================
-  // 6. FORMATTING HELPER (FIXED FOR DEBTOR PAYMENTS)
-  // ==========================================
-  /// Now accepts [totalAmount] to handle Debtor payments where amount
-  /// isn't nested inside the map.
-  String formatPaymentMethod(dynamic pm, [double? totalAmount]) {
-    if (pm == null || pm == "") return "CREDIT/DUE";
+  String formatPaymentMethod(
+    dynamic pm,
+    double paidAmount, [
+    double? totalAmount,
+  ]) {
+    // FIX 1: If nothing was paid on this specific invoice, it is DUE.
+    // Even if 'pm' has data (e.g. from a previous default), we ignore it to avoid confusion.
+    if (paidAmount <= 0) return "CREDIT / DUE";
+
+    if (pm == null || pm == "") return "CREDIT / DUE";
     if (pm is! Map) return pm.toString().toUpperCase();
 
     // Helper to format currency
     String toMoney(dynamic val) =>
         double.parse(val.toString()).toStringAsFixed(0);
 
-    // 1. Extract Amounts (Normal Sales)
+    // 1. Extract Amounts
     double cash = double.tryParse(pm['cash'].toString()) ?? 0;
     double bkash = double.tryParse(pm['bkash'].toString()) ?? 0;
     double nagad = double.tryParse(pm['nagad'].toString()) ?? 0;
     double bank = double.tryParse(pm['bank'].toString()) ?? 0;
 
-    // 2. Fallback Logic (Debtor Payments / Single Method)
-    // If specific breakdowns are 0, but we have a totalAmount and a type, assign it.
+    // 2. Fallback Logic
     if (cash == 0 &&
         bank == 0 &&
         bkash == 0 &&
@@ -455,7 +457,8 @@ class DailySalesController extends GetxController {
     if (bkash > 0) {
       String num = (pm['bkashNumber'] ?? pm['number'] ?? "").toString();
       String line = "Bkash: ${toMoney(bkash)}";
-      if (num.isNotEmpty) line += "\n($num)";
+      // Only show number if it's not empty, to save space
+      if (num.isNotEmpty && num.length > 3) line += " ($num)";
       parts.add(line);
     }
 
@@ -463,15 +466,13 @@ class DailySalesController extends GetxController {
     if (nagad > 0) {
       String num = (pm['nagadNumber'] ?? pm['number'] ?? "").toString();
       String line = "Nagad: ${toMoney(nagad)}";
-      if (num.isNotEmpty) line += "\n($num)";
+      if (num.isNotEmpty && num.length > 3) line += " ($num)";
       parts.add(line);
     }
 
-    // --- BANK (Fixed for Debtor Structure) ---
+    // --- BANK ---
     if (bank > 0) {
       String myBankName = (pm['bankName'] ?? "Bank").toString();
-
-      // Check both keys: 'accountNumber' (Sales) and 'accountNo' (Debtor)
       String custTrxInfo =
           (pm['accountNumber'] ?? pm['accountNo'] ?? "").toString();
 
@@ -482,26 +483,27 @@ class DailySalesController extends GetxController {
       parts.add(line);
     }
 
-    // If still empty but type exists (e.g., pure legacy data)
+    // Legacy fallback
     if (parts.isEmpty && pm['type'] != null) {
       String type = pm['type'].toString().toUpperCase();
       if (type == "BANK") {
         String myBankName = (pm['bankName'] ?? "BANK").toString();
-        String acc = (pm['accountNumber'] ?? pm['accountNo'] ?? "").toString();
-        return acc.isNotEmpty ? "$myBankName\n$acc" : myBankName;
+        return myBankName; // Shortened to save space
       }
       return type;
     }
 
-    return parts.isEmpty ? "MULTI-PAY" : parts.join("\n\n");
+    // FIX 2: Use single newline '\n' instead of '\n\n' so 3 methods fit in the UI
+    return parts.isEmpty ? "MULTI-PAY" : parts.join("\n");
   }
 
   // ==========================================
-  // 7. REPRINT LOGIC (PRESERVED)
+  // 7. REPRINT LOGIC (FIXED: Checks Daily Ledger for Updated Payment)
   // ==========================================
   Future<void> reprintInvoice(String invoiceId) async {
     isLoading.value = true;
     try {
+      // 1. Fetch Master Record (For Items, Address, Customer Info)
       DocumentSnapshot doc =
           await _db.collection('sales_orders').doc(invoiceId).get();
       if (!doc.exists) {
@@ -511,7 +513,25 @@ class DailySalesController extends GetxController {
 
       Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
 
-      // Extract Data for Reprint
+      // 2. [NEW LOGIC] Check Daily Sales to see if this invoice was paid LATER
+      // We look for the entry in daily_sales that matches this transactionId
+      double realTimePaid = 0.0;
+      bool foundInDaily = false;
+
+      QuerySnapshot dailySnap =
+          await _db
+              .collection('daily_sales')
+              .where('transactionId', isEqualTo: invoiceId)
+              .limit(1)
+              .get();
+
+      if (dailySnap.docs.isNotEmpty) {
+        var dailyData = dailySnap.docs.first.data() as Map<String, dynamic>;
+        realTimePaid = (dailyData['paid'] as num?)?.toDouble() ?? 0.0;
+        foundInDaily = true;
+      }
+
+      // 3. Extract Data for Reprint
       String name = data['customerName'] ?? "";
       String phone = data['customerPhone'] ?? "";
       String shop = data['shopName'] ?? "";
@@ -524,17 +544,51 @@ class DailySalesController extends GetxController {
       List<Map<String, dynamic>> items = List<Map<String, dynamic>>.from(
         data['items'] ?? [],
       );
-      Map<String, dynamic> payMap = data['paymentDetails'] ?? {};
+
+      // 4. Adjust Payment Details based on Real-Time Data
+      Map<String, dynamic> payMap = Map.from(data['paymentDetails'] ?? {});
+
+      // Calculate Totals to figure out the correct Due
+      double subTotal = items.fold(
+        0.0,
+        (sumv, item) => sumv + (item['subtotal'] ?? 0),
+      );
+      double discountVal = (data['discount'] as num?)?.toDouble() ?? 0.0;
+      double grandTotal = subTotal - discountVal;
+
+      if (foundInDaily) {
+        // If we found the daily record, use its PAID amount as the source of truth
+        payMap['paidForInvoice'] = realTimePaid;
+
+        // Recalculate Due based on the daily sales paid amount
+        // Due = GrandTotal - RealPaid
+        double newDue = grandTotal - realTimePaid;
+        if (newDue < 0) newDue = 0;
+        payMap['due'] = newDue;
+      }
 
       double snapOld = (data['snapshotOldDue'] as num?)?.toDouble() ?? 0.0;
       double snapRun = (data['snapshotRunningDue'] as num?)?.toDouble() ?? 0.0;
-      double discountVal = (data['discount'] as num?)?.toDouble() ?? 0.0;
+
+      // --- EXTRACT SELLER DATA ---
+      String sellerName = "Joynal Abedin";
+      String sellerPhone = "01720677206";
+
+      if (data['soldBy'] != null) {
+        var soldByData = data['soldBy'];
+        if (soldByData is Map) {
+          sellerName = soldByData['name'] ?? sellerName;
+          sellerPhone = soldByData['phone'] ?? sellerPhone;
+        } else if (soldByData is String) {
+          sellerName = soldByData;
+        }
+      }
 
       await _generatePdf(
         invoiceId,
         name,
         phone,
-        payMap,
+        payMap, // This now contains the UPDATED paid/due info
         items,
         isCondition: isCond,
         challan: challan,
@@ -544,8 +598,8 @@ class DailySalesController extends GetxController {
         shopName: shop,
         oldDueSnap: snapOld,
         runningDueSnap: snapRun,
-        authorizedName: "Joynal Abedin",
-        authorizedPhone: "01720677206",
+        authorizedName: sellerName,
+        authorizedPhone: sellerPhone,
         discount: discountVal,
         packager: packagername,
       );

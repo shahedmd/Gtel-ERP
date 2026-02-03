@@ -210,7 +210,7 @@ class SaleReturnController extends GetxController {
   }
 
   // ========================================================================
-  // 3. RETURN PROCESSING (The Critical Part)
+  // 3. RETURN PROCESSING (UPDATED FOR CONDITION FIX)
   // ========================================================================
 
   Future<void> processProductReturn() async {
@@ -225,10 +225,15 @@ class SaleReturnController extends GetxController {
     String invoiceId = toStr(orderData.value!['invoiceId']);
     String debtorId = toStr(orderData.value!['debtorId']);
 
+    // --- Detect Condition Info ---
+    bool isCondition = orderData.value!['isCondition'] == true;
+    String courierName = toStr(orderData.value!['courierName']);
+    String customerPhone = toStr(orderData.value!['customerPhone']);
+
     WriteBatch batch = _db.batch();
 
     try {
-      // B. Fetch Latest Invoice Data (Concurrency Safety)
+      // B. Fetch Latest Invoice Data
       DocumentReference orderRef = _db
           .collection('sales_orders')
           .doc(invoiceId);
@@ -269,11 +274,10 @@ class SaleReturnController extends GetxController {
           costReduce += (retQty * cRate);
           profitReduce += ((sRate - cRate) * retQty);
 
-          dbQty -= retQty; // Reduce qty
+          dbQty -= retQty;
           returnLog.add("$model (Ret x$retQty)");
         }
 
-        // Add (potentially updated) item to new list
         newItemsList.add({
           "productId": pid,
           "name": name,
@@ -296,34 +300,26 @@ class SaleReturnController extends GetxController {
       if (newGT < 0) newGT = 0;
       if (newC < 0) newC = 0;
 
-      // E. Payment Logic Refactoring (Ensures Paid == New Total if fully paid)
+      // E. Payment Logic
       Map<String, dynamic> oldPay = Map<String, dynamic>.from(
         currentOrder['paymentDetails'] ?? {},
       );
 
-      double oldTotalPaid = toDouble(
-        oldPay['actualReceived'],
-      ); // Or 'totalPaidInput' depending on your schema
+      double oldTotalPaid = toDouble(oldPay['actualReceived']);
       if (oldTotalPaid == 0) {
-        oldTotalPaid = toDouble(oldPay['totalPaidInput']); // Fallback
+        oldTotalPaid = toDouble(oldPay['totalPaidInput']);
       }
 
-      // Extract Methods
       double pCash = toDouble(oldPay['cash']);
       double pBkash = toDouble(oldPay['bkash']);
       double pNagad = toDouble(oldPay['nagad']);
       double pBank = toDouble(oldPay['bank']);
 
       double amountToSlash = 0.0;
-
-      // LOGIC:
-      // If (Old Paid > New Bill): We gave cash back. Reduce recorded payment to match New Bill.
-      // If (Old Paid <= New Bill): We just reduced the Due. Recorded payment stays same.
       if (oldTotalPaid > newGT) {
         amountToSlash = oldTotalPaid - newGT;
       }
 
-      // Reduce from methods (Priority: Cash -> Bkash -> Nagad -> Bank)
       if (amountToSlash > 0) {
         if (pCash >= amountToSlash) {
           pCash -= amountToSlash;
@@ -358,10 +354,17 @@ class SaleReturnController extends GetxController {
         }
       }
 
-      // Recalculate Final Payment Status
       double newTotalPaid = pCash + pBkash + pNagad + pBank;
       double newDue = newGT - newTotalPaid;
       if (newDue < 0) newDue = 0;
+
+      // --- CONDITION SPECIFIC CALCULATION ---
+      double newCourierDue = 0.0;
+      if (isCondition) {
+        double oldCourierDue = toDouble(currentOrder['courierDue']);
+        newCourierDue = oldCourierDue - refundAmt;
+        if (newCourierDue < 0) newCourierDue = 0;
+      }
 
       Map<String, dynamic> newPayDetails = {
         ...oldPay,
@@ -372,25 +375,33 @@ class SaleReturnController extends GetxController {
         "actualReceived": newTotalPaid,
         "totalPaidInput": newTotalPaid,
         "due": newDue,
-        "paidForInvoice" : newTotalPaid
+        "paidForInvoice": newTotalPaid,
       };
 
-      // F. Database Updates
+      // G. Database Updates
 
       // 1. Sales Order
-      batch.update(orderRef, {
+      Map<String, dynamic> updateData = {
         'items': newItemsList,
         'grandTotal': newGT,
-        'subtotal':
-            newGT, // Usually subtotal tracks grandTotal closely unless tax involved
+        'subtotal': newGT,
         'profit': newP,
         'totalCost': newC,
         'paymentDetails': newPayDetails,
-        'status': newDue <= 0 ? 'returned_completed' : 'returned_partial',
+        'status':
+            (isCondition ? newCourierDue <= 0 : newDue <= 0)
+                ? 'returned_completed'
+                : 'returned_partial',
         'lastReturnDate': FieldValue.serverTimestamp(),
-      });
+      };
 
-      // 2. Daily Sales (Find & Fix)
+      if (isCondition) {
+        updateData['courierDue'] = newCourierDue;
+      }
+
+      batch.update(orderRef, updateData);
+
+      // 2. Daily Sales
       QuerySnapshot dailySnap =
           await _db
               .collection('daily_sales')
@@ -408,9 +419,8 @@ class SaleReturnController extends GetxController {
         });
       }
 
-      // 3. Debtor Updates (If applicable)
+      // 3. Debtor Updates
       if (debtorId.isNotEmpty) {
-        // Adjust Transaction Log
         DocumentReference debtorTxRef = _db
             .collection('debatorbody')
             .doc(debtorId)
@@ -423,8 +433,6 @@ class SaleReturnController extends GetxController {
             'note': "Inv $invoiceId (Ret: -${refundAmt.toStringAsFixed(0)})",
           });
         }
-
-        // Add History Log
         DocumentReference analyticsRef = _db
             .collection('debtor_transaction_history')
             .doc(invoiceId);
@@ -436,16 +444,45 @@ class SaleReturnController extends GetxController {
         }, SetOptions(merge: true));
       }
 
-      // G. Commit
+      // 4. *** COURIER & CONDITION UPDATES ***
+      if (isCondition && courierName.isNotEmpty) {
+        // Update Courier Ledger
+        DocumentReference courierRef = _db
+            .collection('courier_ledgers')
+            .doc(courierName);
+        batch.update(courierRef, {
+          "totalDue": FieldValue.increment(-refundAmt),
+          "lastUpdated": FieldValue.serverTimestamp(),
+        });
+
+        // Update Customer Ledger
+        DocumentReference custRef = _db
+            .collection('condition_customers')
+            .doc(customerPhone);
+        batch.update(custRef, {
+          "totalCourierDue": FieldValue.increment(-refundAmt),
+        });
+
+        // Update Customer Sub-Order
+        DocumentReference subOrderRef = custRef
+            .collection('orders')
+            .doc(invoiceId);
+        batch.set(subOrderRef, {
+          "grandTotal": newGT,
+          "courierDue": newCourierDue,
+          "status":
+              newCourierDue <= 0 ? 'returned_completed' : 'returned_partial',
+        }, SetOptions(merge: true));
+      }
+
+      // H. Commit
       await batch.commit();
 
-      // H. Stock Restoration (Independent of Batch)
+      // I. Stock Restoration
       for (var pid in returnQuantities.keys) {
         int qty = returnQuantities[pid]!;
         if (qty > 0) {
           String dest = returnDestinations[pid] ?? "Local";
-
-          // Get original cost for WAC accuracy
           var itemInfo = orderItems.firstWhere(
             (e) => toStr(e['productId']) == pid,
           );
@@ -456,12 +493,12 @@ class SaleReturnController extends GetxController {
             localQty: dest == "Local" ? qty : 0,
             airQty: dest == "Air" ? qty : 0,
             seaQty: dest == "Sea" ? qty : 0,
-            localUnitPrice: cost, // Restores using original cost
+            localUnitPrice: cost,
           );
         }
       }
 
-      Get.back(); // Close Dialog/Screen
+      Get.back();
       Get.snackbar(
         "Return Processed",
         "Adjusted Bill: ৳${newGT.toStringAsFixed(0)}\nRecorded Paid: ৳${newTotalPaid.toStringAsFixed(0)}",

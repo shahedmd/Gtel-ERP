@@ -219,7 +219,6 @@ class VendorController extends GetxController {
         colorText: Colors.white,
       );
     } catch (e) {
-      print("Transaction Error: $e"); // Helpful for debugging
       Get.snackbar(
         "Error",
         "Transaction Failed: $e",

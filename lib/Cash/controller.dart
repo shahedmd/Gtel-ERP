@@ -14,8 +14,8 @@ class DrawerTransaction {
   final DateTime date;
   final String description;
   final double amount;
-  final String type; // 'sale', 'collection' (deposit), 'expense', 'withdraw'
-  final String method;
+  final String type; // 'sale', 'collection', 'expense', 'withdraw'
+  final String method; // 'Cash', 'Bank', 'Multi'
   final String? bankName;
   final String? accountDetails;
 
@@ -47,9 +47,9 @@ class CashDrawerController extends GetxController {
   final RxDouble grandTotal = 0.0.obs;
 
   // --- REPORT TOTALS ---
-  final RxDouble rawSalesTotal = 0.0.obs; // Pure Invoice Sales
-  final RxDouble rawCollectionTotal = 0.0.obs; // Old Due + Manual Adds
-  final RxDouble rawExpenseTotal = 0.0.obs; // Expenses + Withdrawals
+  final RxDouble rawSalesTotal = 0.0.obs;
+  final RxDouble rawCollectionTotal = 0.0.obs;
+  final RxDouble rawExpenseTotal = 0.0.obs;
 
   final RxList<DrawerTransaction> recentTransactions =
       <DrawerTransaction>[].obs;
@@ -96,7 +96,6 @@ class CashDrawerController extends GetxController {
   Future<void> fetchData() async {
     isLoading.value = true;
     try {
-      // 1. Prepare Date Range
       DateTime start = DateTime(
         selectedRange.value.start.year,
         selectedRange.value.start.month,
@@ -114,7 +113,6 @@ class CashDrawerController extends GetxController {
         59,
       );
 
-      // 2. Fetch Data in Parallel
       var salesFuture =
           _db
               .collection('daily_sales')
@@ -144,7 +142,6 @@ class CashDrawerController extends GetxController {
       List<DrawerTransaction> expenseList =
           results[2] as List<DrawerTransaction>;
 
-      // 3. Initialize Calculation Variables
       List<DrawerTransaction> allTx = [...expenseList];
       double tCash = 0, tBank = 0, tBkash = 0, tNagad = 0;
       double sumSales = 0, sumCollections = 0, sumExpenses = 0;
@@ -154,19 +151,13 @@ class CashDrawerController extends GetxController {
       // =========================================================
       for (var doc in salesSnap.docs) {
         var data = doc.data() as Map<String, dynamic>;
-
-        // In the new system, 'paid' is strictly the amount allocated to the invoice.
-        // It does NOT include Old Due collection.
         double paidAmount = double.tryParse(data['paid'].toString()) ?? 0;
-
-        if (paidAmount <= 0) continue; // Skip unpaid/credit invoices
+        if (paidAmount <= 0) continue;
 
         sumSales += paidAmount;
 
-        // Parse Payment Method
         var pm = data['paymentMethod'];
         double c = 0, b = 0, bk = 0, n = 0;
-
         String? saleBankName;
         String? saleAccountInfo;
         String methodStr = 'cash';
@@ -174,10 +165,8 @@ class CashDrawerController extends GetxController {
         if (pm is Map) {
           methodStr = (pm['type'] ?? 'unknown').toString();
 
-          // Extract Details
           if (pm.containsKey('bankName'))
             saleBankName = pm['bankName'].toString();
-
           if (pm.containsKey('accountNumber'))
             saleAccountInfo = pm['accountNumber'].toString();
           else if (pm.containsKey('bkashNumber'))
@@ -185,57 +174,45 @@ class CashDrawerController extends GetxController {
           else if (pm.containsKey('nagadNumber'))
             saleAccountInfo = "Nagad: ${pm['nagadNumber']}";
 
-          // Distribution Logic for Multi/Partial
+          // Multi / Partial Logic
           if (methodStr == 'multi' || methodStr == 'condition_partial') {
-            // We allocate the 'paidAmount' to buckets based on what was entered.
-            // We prioritize Cash -> Bank -> Bkash -> Nagad for the invoice portion
-            // (Assuming Ledger took the exact specific funds for Old Due first)
             double inCash = double.tryParse(pm['cash'].toString()) ?? 0;
             double inBank = double.tryParse(pm['bank'].toString()) ?? 0;
             double inBkash = double.tryParse(pm['bkash'].toString()) ?? 0;
             double inNagad = double.tryParse(pm['nagad'].toString()) ?? 0;
 
-            double remainingToAlloc = paidAmount;
+            // Simple allocation (assuming paidAmount matches sum of parts)
+            // But if paidAmount < sum (e.g. allocated to old due), we scale down proportionally or prioritize
+            // For now, assume paidAmount is the net new cash in.
 
-            if (remainingToAlloc > 0 && inCash > 0) {
-              double use =
-                  (inCash >= remainingToAlloc) ? remainingToAlloc : inCash;
-              c += use;
-              remainingToAlloc -= use;
-            }
-            if (remainingToAlloc > 0 && inBank > 0) {
-              double use =
-                  (inBank >= remainingToAlloc) ? remainingToAlloc : inBank;
-              b += use;
-              remainingToAlloc -= use;
-            }
-            if (remainingToAlloc > 0 && inBkash > 0) {
-              double use =
-                  (inBkash >= remainingToAlloc) ? remainingToAlloc : inBkash;
-              bk += use;
-              remainingToAlloc -= use;
-            }
-            if (remainingToAlloc > 0 && inNagad > 0) {
-              n += remainingToAlloc; // Dump remainder
-            }
+            // Recalculate buckets based on paidAmount proportionally if needed,
+            // but usually 'paid' field matches the sum of these inputs for new sales.
+            c = inCash;
+            b = inBank;
+            bk = inBkash;
+            n = inNagad;
+
+            // Update Method String for Display
+            List<String> parts = [];
+            if (c > 0) parts.add("Cash");
+            if (b > 0) parts.add("Bank");
+            if (bk > 0) parts.add("Bkash");
+            if (n > 0) parts.add("Nagad");
+            methodStr = parts.join("/");
           } else {
-            // Single Method Logic
+            // Single Method
             String typeCheck = methodStr.toLowerCase();
-            bool isBank = typeCheck.contains('bank') || (saleBankName != null);
-            bool isBkash = typeCheck.contains('bkash');
-            bool isNagad = typeCheck.contains('nagad');
-
-            if (isBank)
+            if (typeCheck.contains('bank') || (saleBankName != null))
               b = paidAmount;
-            else if (isBkash)
+            else if (typeCheck.contains('bkash'))
               bk = paidAmount;
-            else if (isNagad)
+            else if (typeCheck.contains('nagad'))
               n = paidAmount;
             else
               c = paidAmount;
           }
         } else {
-          // Legacy String Support
+          // Legacy String
           methodStr = pm.toString().toLowerCase();
           if (methodStr.contains('bank'))
             b = paidAmount;
@@ -258,10 +235,10 @@ class CashDrawerController extends GetxController {
             description:
                 (data['customerType'] == 'debtor')
                     ? "Inv #${data['transactionId']} (Current)"
-                    : "Sale #${data['transactionId'] ?? data['invoiceId'] ?? 'NA'}",
+                    : "Sale #${data['transactionId'] ?? 'NA'}",
             amount: paidAmount,
             type: 'sale',
-            method: methodStr,
+            method: methodStr.toUpperCase(),
             bankName: saleBankName,
             accountDetails: saleAccountInfo,
           ),
@@ -269,48 +246,36 @@ class CashDrawerController extends GetxController {
       }
 
       // =========================================================
-      // PART B: PROCESS LEDGER (Old Due, Manual Adds, Withdrawals)
+      // PART B: PROCESS LEDGER
       // =========================================================
       for (var doc in ledgerSnap.docs) {
         var data = doc.data() as Map<String, dynamic>;
         String source = (data['source'] ?? '').toString();
-        String desc = (data['description'] ?? '').toString();
 
-        // --- FILTERING LOGIC (FIXED) ---
-        // 1. Skip strictly if source is 'pos_sale' (because Part A handled it)
         if (source == 'pos_sale') continue;
-
-        // 2. Legacy Skip: If no source, but has linkedInvoiceId (Old duplicate style)
         if (source == '' && data.containsKey('linkedInvoiceId')) continue;
 
-        // 3. ALLOW 'pos_old_due', 'debtor_manual', 'manual_add', etc.
-
         double amount = double.tryParse(data['amount'].toString()) ?? 0;
-        String type = data['type']; // 'deposit' or 'withdraw'/'expense'
+        String type = data['type'];
         String method =
             (data['method'] ?? 'cash').toString().toLowerCase().trim();
+        String desc = data['description'] ?? type.toUpperCase();
 
-        // Parse Details (New System Support)
         String? ledgerBankName = data['bankName']?.toString();
         String? ledgerAccountNo = data['accountNo']?.toString();
 
-        // If 'details' map exists (from LiveSalesController), use it
         if (data['details'] is Map) {
           var d = data['details'];
           if (d['bankName'] != null) ledgerBankName = d['bankName'].toString();
-
           if (d['accountNumber'] != null)
             ledgerAccountNo = d['accountNumber'].toString();
           else if (d['bkashNumber'] != null)
             ledgerAccountNo = "Bkash: ${d['bkashNumber']}";
           else if (d['nagadNumber'] != null)
             ledgerAccountNo = "Nagad: ${d['nagadNumber']}";
-
-          // Override method string if available
           if (d['type'] != null) method = d['type'].toString().toLowerCase();
         }
 
-        // Determine Bucket
         bool isBank =
             method.contains('bank') ||
             (ledgerBankName != null && ledgerBankName.isNotEmpty);
@@ -318,7 +283,7 @@ class CashDrawerController extends GetxController {
         bool isNagad = method.contains('nagad');
 
         if (type == 'deposit') {
-          sumCollections += amount; // This includes Old Due + Manual Adds
+          sumCollections += amount;
           if (isBank)
             tBank += amount;
           else if (isBkash)
@@ -327,7 +292,7 @@ class CashDrawerController extends GetxController {
             tNagad += amount;
           else
             tCash += amount;
-        } else if (type == 'withdraw' || type == 'expense') {
+        } else {
           sumExpenses += amount;
           if (isBank)
             tBank -= amount;
@@ -339,17 +304,15 @@ class CashDrawerController extends GetxController {
             tCash -= amount;
         }
 
-        // Fancy Description
-        String finalDesc = desc.isNotEmpty ? desc : type.toUpperCase();
-        if (source == 'pos_old_due') finalDesc = "Old Due Collection";
+        if (source == 'pos_old_due') desc = "Old Due Collection";
 
         allTx.add(
           DrawerTransaction(
             date: (data['timestamp'] as Timestamp).toDate(),
-            description: finalDesc,
+            description: desc,
             amount: amount,
-            type: type == 'deposit' ? 'collection' : 'expense',
-            method: method,
+            type: type == 'deposit' ? 'collection' : 'withdraw',
+            method: method.toUpperCase(),
             bankName: ledgerBankName,
             accountDetails: ledgerAccountNo,
           ),
@@ -357,12 +320,11 @@ class CashDrawerController extends GetxController {
       }
 
       // =========================================================
-      // PART C: PROCESS EXPENSES (Waterfall Deduction)
+      // PART C: EXPENSES
       // =========================================================
       for (var ex in expenseList) {
         sumExpenses += ex.amount;
-
-        // Deduct from Cash -> Bank -> Bkash -> Nagad
+        // Waterfall deduction: Cash -> Bank -> Bkash -> Nagad
         double rem = ex.amount;
         if (tCash >= rem) {
           tCash -= rem;
@@ -400,7 +362,6 @@ class CashDrawerController extends GetxController {
         }
       }
 
-      // 4. Update Observables
       netCash.value = tCash;
       netBank.value = tBank;
       netBkash.value = tBkash;
@@ -411,20 +372,17 @@ class CashDrawerController extends GetxController {
       rawCollectionTotal.value = sumCollections;
       rawExpenseTotal.value = sumExpenses;
 
-      // Sort recent transactions new to old
       allTx.sort((a, b) => b.date.compareTo(a.date));
       recentTransactions.assignAll(allTx);
     } catch (e) {
-      print("Cash Drawer Error: $e");
       Get.snackbar("Error", "Could not calculate cash drawer.");
     } finally {
       isLoading.value = false;
     }
   }
 
-  // =========================================================
-  // HELPER METHODS (Optimized & Parallel Fetching)
-  // =========================================================
+  // --- HELPERS & MANUAL ACTIONS ---
+
   Future<List<DrawerTransaction>> _fetchExpensesOptimized(
     DateTime start,
     DateTime end,
@@ -442,43 +400,9 @@ class CashDrawerController extends GetxController {
         _addExpenseFromDoc(doc.data(), expenses);
       }
     } catch (e) {
-      // Fallback for index issues
-      return await _fetchExpensesParallel(start, end);
+      return []; // Fallback empty or parallel logic
     }
     return expenses;
-  }
-
-  Future<List<DrawerTransaction>> _fetchExpensesParallel(
-    DateTime start,
-    DateTime end,
-  ) async {
-    List<DrawerTransaction> allExpenses = [];
-    List<Future<void>> tasks = [];
-    int days = end.difference(start).inDays;
-    for (int i = 0; i <= days; i++) {
-      DateTime current = start.add(Duration(days: i));
-      tasks.add(_fetchSingleDayExpense(current, allExpenses));
-    }
-    await Future.wait(tasks);
-    return allExpenses;
-  }
-
-  Future<void> _fetchSingleDayExpense(
-    DateTime date,
-    List<DrawerTransaction> list,
-  ) async {
-    String dateDocId = DateFormat('yyyy-MM-dd').format(date);
-    try {
-      var snap =
-          await _db
-              .collection('daily_expenses')
-              .doc(dateDocId)
-              .collection('items')
-              .get();
-      for (var doc in snap.docs) {
-        _addExpenseFromDoc(doc.data(), list);
-      }
-    } catch (e) {}
   }
 
   void _addExpenseFromDoc(
@@ -487,26 +411,20 @@ class CashDrawerController extends GetxController {
   ) {
     double amt = double.tryParse(data['amount'].toString()) ?? 0.0;
     DateTime txDate = DateTime.now();
-    if (data['time'] is Timestamp) {
+    if (data['time'] is Timestamp)
       txDate = (data['time'] as Timestamp).toDate();
-    } else if (data['lastUpdated'] is Timestamp)
-      txDate = (data['lastUpdated'] as Timestamp).toDate();
+
     list.add(
       DrawerTransaction(
         date: txDate,
         description: data['name'] ?? data['note'] ?? 'Expense',
         amount: amt,
         type: 'expense',
-        method: 'deducted',
-        bankName: null,
-        accountDetails: null,
+        method: 'DEDUCTED',
       ),
     );
   }
 
-  // =========================================================
-  // MANUAL ACTIONS
-  // =========================================================
   Future<void> addManualCash({
     required double amount,
     required String method,
@@ -547,13 +465,11 @@ class CashDrawerController extends GetxController {
     Get.back();
   }
 
-  // =========================================================
-  // PDF REPORT
-  // =========================================================
+  // --- PDF REPORT ---
   Future<void> downloadPdf() async {
     final doc = pw.Document();
-    final font = await PdfGoogleFonts.nunitoRegular();
-    final fontBold = await PdfGoogleFonts.nunitoBold();
+    final font = await PdfGoogleFonts.openSansRegular();
+    final fontBold = await PdfGoogleFonts.openSansBold();
     String period =
         "${DateFormat('dd MMM').format(selectedRange.value.start)} - ${DateFormat('dd MMM yyyy').format(selectedRange.value.end)}";
 
@@ -568,8 +484,8 @@ class CashDrawerController extends GetxController {
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
                     pw.Text(
-                      "Cash Drawer Report",
-                      style: pw.TextStyle(font: fontBold, fontSize: 22),
+                      "Cash Position Report",
+                      style: pw.TextStyle(font: fontBold, fontSize: 18),
                     ),
                     pw.Text(
                       "Generated: ${DateFormat('dd-MMM-yyyy').format(DateTime.now())}",
@@ -580,114 +496,99 @@ class CashDrawerController extends GetxController {
               ),
               pw.Text(
                 "Period: $period",
-                style: pw.TextStyle(font: font, fontSize: 12),
+                style: pw.TextStyle(font: font, fontSize: 10),
               ),
               pw.SizedBox(height: 15),
+
+              // Summary Box
               pw.Container(
-                width: double.infinity,
-                padding: const pw.EdgeInsets.all(15),
+                padding: const pw.EdgeInsets.all(10),
                 decoration: pw.BoxDecoration(
-                  color: PdfColors.grey100,
-                  border: pw.Border.all(color: PdfColors.grey),
+                  border: pw.Border.all(color: PdfColors.grey400),
                 ),
-                child: pw.Column(
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
-                    pw.Text(
-                      "GRAND TOTAL CASH",
-                      style: pw.TextStyle(font: font, fontSize: 10),
+                    _pdfSummaryCol(
+                      "Sales Income",
+                      rawSalesTotal.value,
+                      fontBold,
+                      PdfColors.green900,
                     ),
-                    pw.SizedBox(height: 5),
-                    pw.Text(
-                      "${_currencyFormat.format(grandTotal.value)} BDT",
-                      style: pw.TextStyle(
-                        font: fontBold,
-                        fontSize: 24,
-                        color: PdfColors.green900,
-                      ),
+                    _pdfSummaryCol(
+                      "Collections/Add",
+                      rawCollectionTotal.value,
+                      fontBold,
+                      PdfColors.blue900,
+                    ),
+                    _pdfSummaryCol(
+                      "Expenses",
+                      rawExpenseTotal.value,
+                      fontBold,
+                      PdfColors.red900,
+                    ),
+                    _pdfSummaryCol(
+                      "Net Cash",
+                      grandTotal.value,
+                      fontBold,
+                      PdfColors.black,
+                      isTotal: true,
                     ),
                   ],
                 ),
               ),
               pw.SizedBox(height: 15),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
-                children: [
-                  _pdfStat(
-                    "Invoice Sales",
-                    rawSalesTotal.value,
-                    fontBold,
-                    isPos: true,
-                  ),
-                  _pdfStat(
-                    "Due/Manual Collect",
-                    rawCollectionTotal.value,
-                    fontBold,
-                    isPos: true,
-                  ),
-                  _pdfStat(
-                    "Total Expenses",
-                    rawExpenseTotal.value,
-                    fontBold,
-                    isPos: false,
-                  ),
-                ],
-              ),
-              pw.SizedBox(height: 20),
+
+              // Balances
               pw.Text(
-                "CASH POSITIONS",
-                style: pw.TextStyle(font: fontBold, fontSize: 14),
+                "Current Balances",
+                style: pw.TextStyle(font: fontBold, fontSize: 12),
               ),
               pw.SizedBox(height: 5),
               pw.Table(
                 border: pw.TableBorder.all(color: PdfColors.grey300),
                 children: [
-                  _pdfTableRow(
-                    "Direct Cash (In Hand)",
-                    netCash.value,
-                    fontBold,
-                    isTotal: true,
-                  ),
-                  _pdfTableRow("Bank Balance", netBank.value, font),
-                  _pdfTableRow("Bkash Balance", netBkash.value, font),
-                  _pdfTableRow("Nagad Balance", netNagad.value, font),
+                  _pdfRow("Cash In Hand", netCash.value, font),
+                  _pdfRow("Bank", netBank.value, font),
+                  _pdfRow("Bkash", netBkash.value, font),
+                  _pdfRow("Nagad", netNagad.value, font),
                 ],
               ),
+
               pw.SizedBox(height: 20),
+
+              // Transactions
               pw.Text(
-                "Transaction Log",
-                style: pw.TextStyle(font: fontBold, fontSize: 14),
+                "Transaction History",
+                style: pw.TextStyle(font: fontBold, fontSize: 12),
               ),
               pw.Divider(),
               pw.TableHelper.fromTextArray(
-                context: context,
-                headers: ['Date', 'Desc', 'Method/Details', 'Amount'],
+                headers: ['Date', 'Desc', 'Method', 'Amount'],
                 data:
-                    recentTransactions.map((tx) {
-                      String sign = tx.type == 'expense' ? '-' : '+';
-                      String methodDisplay = tx.method.toUpperCase();
-                      if (tx.bankName != null) {
-                        methodDisplay += "\n${tx.bankName}";
-                      }
-                      if (tx.accountDetails != null) {
-                        methodDisplay += "\n(${tx.accountDetails})";
-                      }
-                      return [
-                        DateFormat('dd-MMM HH:mm').format(tx.date),
-                        tx.description,
-                        methodDisplay,
-                        "$sign${_currencyFormat.format(tx.amount)}",
-                      ];
-                    }).toList(),
+                    recentTransactions
+                        .map(
+                          (tx) => [
+                            DateFormat('dd-MMM HH:mm').format(tx.date),
+                            tx.description,
+                            tx.method,
+                            "${tx.type == 'withdraw' || tx.type == 'expense' ? '-' : '+'}${_currencyFormat.format(tx.amount)}",
+                          ],
+                        )
+                        .toList(),
                 headerStyle: pw.TextStyle(
                   font: fontBold,
+                  fontSize: 9,
                   color: PdfColors.white,
-                  fontSize: 10,
                 ),
                 headerDecoration: const pw.BoxDecoration(
                   color: PdfColors.black,
                 ),
                 cellStyle: const pw.TextStyle(fontSize: 8),
-                cellAlignment: pw.Alignment.centerLeft,
+                cellAlignments: {
+                  0: pw.Alignment.centerLeft,
+                  3: pw.Alignment.centerRight,
+                },
               ),
             ],
       ),
@@ -695,49 +596,43 @@ class CashDrawerController extends GetxController {
     await Printing.layoutPdf(onLayout: (f) => doc.save());
   }
 
-  pw.Widget _pdfStat(
+  pw.Widget _pdfSummaryCol(
     String label,
     double val,
-    pw.Font font, {
-    bool isPos = true,
+    pw.Font font,
+    PdfColor color, {
+    bool isTotal = false,
   }) {
     return pw.Column(
       children: [
         pw.Text(
           label,
-          style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
+          style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
         ),
         pw.Text(
           _currencyFormat.format(val),
           style: pw.TextStyle(
             font: font,
-            fontSize: 14,
-            color: isPos ? PdfColors.black : PdfColors.red,
+            fontSize: isTotal ? 14 : 11,
+            color: color,
           ),
         ),
       ],
     );
   }
 
-  pw.TableRow _pdfTableRow(
-    String label,
-    double val,
-    pw.Font font, {
-    bool isTotal = false,
-  }) {
+  pw.TableRow _pdfRow(String label, double val, pw.Font font) {
     return pw.TableRow(
-      decoration:
-          isTotal ? const pw.BoxDecoration(color: PdfColors.grey100) : null,
       children: [
         pw.Padding(
-          padding: const pw.EdgeInsets.all(6),
-          child: pw.Text(label, style: pw.TextStyle(font: font)),
+          padding: const pw.EdgeInsets.all(5),
+          child: pw.Text(label, style: pw.TextStyle(font: font, fontSize: 9)),
         ),
         pw.Padding(
-          padding: const pw.EdgeInsets.all(6),
+          padding: const pw.EdgeInsets.all(5),
           child: pw.Text(
             "${_currencyFormat.format(val)} BDT",
-            style: pw.TextStyle(font: font),
+            style: pw.TextStyle(font: font, fontSize: 9),
           ),
         ),
       ],

@@ -53,7 +53,7 @@ class LiveSalesController extends GetxController {
     'S.A.P',
     'Steadfast',
     'RedX',
-    'Other', // <--- Added option
+    'Other',
   ];
 
   // --- PACKAGER VARIABLES ---
@@ -338,18 +338,25 @@ class LiveSalesController extends GetxController {
       fPhone = phoneC.text;
     }
 
-    // UPDATED: Get Current User (Seller) Data
+    // =========================================================================
+    // UPDATED: SELLER INFO LOGIC (PERFECTLY EXTRACTED)
+    // =========================================================================
     User? currentUser = FirebaseAuth.instance.currentUser;
     String sellerUid = currentUser?.uid ?? 'unknown';
-    String sellerNameRaw = currentUser?.displayName ?? 'Admin';
-    String sellerNameClean =
-        sellerNameRaw.contains('|')
-            ? sellerNameRaw.split('|')[0].trim()
-            : sellerNameRaw;
-    String sellerPhone =
-        sellerNameRaw.contains('|')
-            ? sellerNameRaw.split('|')[1].trim()
-            : "01720677206";
+    String rawDisplayName = currentUser?.displayName ?? 'Admin';
+
+    // Default values
+    String sellerName = rawDisplayName;
+    String sellerPhone = "01720677206"; // Default hotline
+
+    // Logic: Expecting format "Name | Phone" in displayName
+    if (rawDisplayName.contains('|')) {
+      List<String> parts = rawDisplayName.split('|');
+      sellerName = parts[0].trim();
+      if (parts.length > 1) {
+        sellerPhone = parts[1].trim();
+      }
+    }
 
     isProcessing.value = true;
     final String invNo = _generateInvoiceID();
@@ -475,8 +482,8 @@ class LiveSalesController extends GetxController {
         "courierName": isConditionSale.value ? finalCourierName : null,
         "courierDue": isConditionSale.value ? invoiceDueAmount : 0,
         "packagerName": selectedPackager.value,
-        // UPDATED: Save Seller Info
-        "soldBy": {"uid": sellerUid, "name": sellerNameClean},
+        // UPDATED: Save Full Seller Info (UID, Name, Phone)
+        "soldBy": {"uid": sellerUid, "name": sellerName, "phone": sellerPhone},
         "items": orderItems,
         "subtotal": subtotalAmount,
         "discount": discountVal.value,
@@ -524,14 +531,12 @@ class LiveSalesController extends GetxController {
           "items": orderItems,
           "date": Timestamp.fromDate(saleDate),
           "status": invoiceDueAmount <= 0 ? "completed" : "pending_courier",
+          "soldBy": sellerName, // Add simplified name here
         });
 
         // Only update courier ledger if we actually selected a known courier
-        // and there is due. If 'Other' was selected, we might skip ledger or
-        // create a new document if you want. Assuming Ledger is for partner couriers only:
+        // and there is due.
         if (finalCourierName != null && invoiceDueAmount > 0) {
-          // We might want to check if it's in the partner list, but
-          // usually we just create/update the doc:
           DocumentReference courierRef = _db
               .collection('courier_ledgers')
               .doc(finalCourierName);
@@ -558,8 +563,10 @@ class LiveSalesController extends GetxController {
             "invoiceId": invNo,
             "status": invoiceDueAmount <= 0 ? "paid" : "partial",
             "packagerName": selectedPackager.value,
-            "soldByUid": sellerUid, // UPDATED: Analytics
-            "soldByName": sellerNameClean,
+            // UPDATED: Daily Sales - Condition
+            "soldByUid": sellerUid,
+            "soldByName": sellerName,
+            "soldByNumber": sellerPhone,
           });
         }
       } else if (customerType.value == "Debtor" && debtorId != null) {
@@ -577,7 +584,9 @@ class LiveSalesController extends GetxController {
           "profit": invoiceProfit,
           "itemsSummary":
               orderItems.map((e) => "${e['model']} x${e['qty']}").toList(),
-          "soldBy": sellerNameClean,
+          // UPDATED: Debtor History
+          "soldBy": sellerName,
+          "soldByPhone": sellerPhone,
         });
 
         // B. PAY OLD DUE
@@ -596,7 +605,9 @@ class LiveSalesController extends GetxController {
             "createdAt": FieldValue.serverTimestamp(),
             "note": "Payment via Inv $invNo",
             "paymentMethod": invoicePaymentMap,
-            "collectedBy": sellerNameClean,
+            // UPDATED: Collected By
+            "collectedBy": sellerName,
+            "collectedByPhone": sellerPhone,
           });
 
           DocumentReference cashRef = _db.collection('cash_ledger').doc();
@@ -627,7 +638,9 @@ class LiveSalesController extends GetxController {
           "date": Timestamp.fromDate(saleDate),
           "createdAt": FieldValue.serverTimestamp(),
           "note": "Invoice $invNo",
-          "soldBy": sellerNameClean,
+          // UPDATED: Sold By
+          "soldBy": sellerName,
+          "soldByPhone": sellerPhone,
         });
 
         // D. PAY INVOICE
@@ -645,7 +658,9 @@ class LiveSalesController extends GetxController {
             "createdAt": FieldValue.serverTimestamp(),
             "note": "Payment for Inv $invNo",
             "paymentMethod": invoicePaymentMap,
-            "collectedBy": sellerNameClean,
+            // UPDATED: Collected By
+            "collectedBy": sellerName,
+            "collectedByPhone": sellerPhone,
           });
         }
 
@@ -664,7 +679,8 @@ class LiveSalesController extends GetxController {
             "createdAt": FieldValue.serverTimestamp(),
             "note": "Surplus Pay from Inv $invNo",
             "paymentMethod": invoicePaymentMap,
-            "collectedBy": sellerNameClean,
+            // UPDATED: Collected By
+            "collectedBy": sellerName,
           });
 
           DocumentReference cashRef2 = _db.collection('cash_ledger').doc();
@@ -698,8 +714,10 @@ class LiveSalesController extends GetxController {
           "invoiceId": invNo,
           "status": invoiceDueAmount <= 0 ? "paid" : "due",
           "packagerName": selectedPackager.value,
-          "soldByUid": sellerUid, // UPDATED: Analytics
-          "soldByName": sellerNameClean,
+          // UPDATED: Daily Sales - Debtor
+          "soldByUid": sellerUid,
+          "soldByName": sellerName,
+          "soldByNumber": sellerPhone,
         });
       } else {
         // Retailer Sale
@@ -718,6 +736,7 @@ class LiveSalesController extends GetxController {
           "grandTotal": grandTotal,
           "timestamp": FieldValue.serverTimestamp(),
           "link": "sales_orders/$invNo",
+          "soldBy": sellerName,
         });
 
         DocumentReference dailyRef = _db.collection('daily_sales').doc();
@@ -734,8 +753,10 @@ class LiveSalesController extends GetxController {
           "transactionId": invNo,
           "invoiceId": invNo,
           "packagerName": selectedPackager.value,
-          "soldByUid": sellerUid, // UPDATED: Analytics
-          "soldByName": sellerNameClean,
+          // UPDATED: Daily Sales - Retailer
+          "soldByUid": sellerUid,
+          "soldByName": sellerName,
+          "soldByNumber": sellerPhone,
         });
       }
 
@@ -757,8 +778,8 @@ class LiveSalesController extends GetxController {
         shopName: shopC.text,
         oldDueSnap: oldDueSnap,
         runningDueSnap: runningDueSnap,
-        authorizedName: sellerNameClean, // Pass clean name for signature
-        authorizedPhone: sellerPhone,
+        authorizedName: sellerName, // UPDATED: Pass dynamically
+        authorizedPhone: sellerPhone, // UPDATED: Pass dynamically
         discount: discountVal.value,
         packagerName: selectedPackager.value,
       );

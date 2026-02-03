@@ -189,6 +189,7 @@ class ShipmentController extends GetxController {
           _applyFilters();
           _calculateOnWayTotals(loaded);
           _aggregateOnWayData(loaded);
+        // ignore: avoid_print
         }, onError: (e) => print("Firestore Error: $e"));
   }
 
@@ -482,7 +483,7 @@ class ShipmentController extends GetxController {
       // 3. CALCULATE FINANCIAL DIFFERENCE (Current Received Value vs Original Bill)
       double totalReceivedValue = shipment.items.fold(
         0.0,
-        (sum, item) => sum + item.receivedItemValue,
+        (sumv, item) => sumv + item.receivedItemValue,
       );
       double originalBill = shipment.totalAmount;
       double diff = originalBill - totalReceivedValue;

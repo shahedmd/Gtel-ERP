@@ -3,7 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
-import 'controller.dart'; // Ensure this imports your updated ProfitController
+import 'controller.dart'; // Ensure this imports your ProfitController
 
 class ProfitView extends StatelessWidget {
   final ProfitController controller = Get.put(ProfitController());
@@ -229,9 +229,9 @@ class ProfitView extends StatelessWidget {
                           const SizedBox(height: 5),
                           FittedBox(
                             child: Text(
-                              NumberFormat.compact().format(
-                                controller.profitOnRevenue.value,
-                              ),
+                              NumberFormat(
+                                '#,##0.00',
+                              ).format(controller.profitOnRevenue.value),
                               style: const TextStyle(
                                 fontSize: 22,
                                 fontWeight: FontWeight.bold,
@@ -283,9 +283,9 @@ class ProfitView extends StatelessWidget {
                           const SizedBox(height: 5),
                           FittedBox(
                             child: Text(
-                              NumberFormat.compact().format(
-                                controller.netRealizedProfit.value,
-                              ),
+                              NumberFormat(
+                                '#,##0.00',
+                              ).format(controller.netRealizedProfit.value),
                               style: const TextStyle(
                                 fontSize: 24,
                                 fontWeight: FontWeight.bold,
@@ -343,15 +343,7 @@ class ProfitView extends StatelessWidget {
                   ],
                 ),
               ),
-
               const SizedBox(height: 30),
-
-              // ============================================================
-              // SECTION 4: RECENT HISTORY
-              // ============================================================
-              _buildSectionHeader("RECENT TRANSACTIONS", "Last Inflow"),
-              const SizedBox(height: 10),
-              _buildTransactionList(),
             ],
           ),
         );
@@ -423,7 +415,7 @@ class ProfitView extends StatelessWidget {
               ),
               const SizedBox(height: 5),
               Text(
-                "Tk ${NumberFormat('#,##0').format(value)}",
+                "Tk ${NumberFormat('#,##0.00').format(value)}",
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 26,
@@ -476,7 +468,7 @@ class ProfitView extends StatelessWidget {
           const SizedBox(height: 4),
           FittedBox(
             child: Text(
-              NumberFormat.compact().format(value),
+              NumberFormat('#,##0').format(value), // Removed compact()
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
@@ -495,7 +487,7 @@ class ProfitView extends StatelessWidget {
         Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey)),
         const SizedBox(height: 4),
         Text(
-          NumberFormat.compact().format(value),
+          NumberFormat('#,##0').format(value), // Removed compact()
           style: TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.bold,
@@ -535,7 +527,6 @@ class ProfitView extends StatelessWidget {
   }
 
   Widget _buildYearlyChart() {
-    // Basic Bar Chart Visualizer based on controller.monthlyStats
     double maxProfit = 0;
     if (controller.monthlyStats.isNotEmpty) {
       maxProfit = controller.monthlyStats
@@ -594,56 +585,6 @@ class ProfitView extends StatelessWidget {
                 }).toList(),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildTransactionList() {
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: Colors.grey.shade200),
-      ),
-      child: ListView.separated(
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        itemCount: controller.collectionBreakdown.take(5).length,
-        separatorBuilder: (_, __) => const Divider(height: 1),
-        itemBuilder: (context, index) {
-          var item = controller.collectionBreakdown[index];
-          return ListTile(
-            dense: true,
-            leading: CircleAvatar(
-              backgroundColor: const Color(0xFFF4F7FE),
-              child: Icon(
-                item['type'] == 'Courier'
-                    ? Icons.local_shipping
-                    : (item['type'] == 'Debtor' ? Icons.person : Icons.store),
-                color: const Color(0xFF4318FF),
-                size: 16,
-              ),
-            ),
-            title: Text(
-              item['name'] ?? 'Unknown',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-            subtitle: Text(
-              DateFormat('dd MMM hh:mm a').format(item['date']),
-              style: const TextStyle(fontSize: 10),
-            ),
-            trailing: Text(
-              "+${NumberFormat('#,##0').format(item['amount'])}",
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF05CD99),
-                fontSize: 13,
-              ),
-            ),
-          );
-        },
       ),
     );
   }
