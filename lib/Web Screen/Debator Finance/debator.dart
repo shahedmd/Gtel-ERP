@@ -17,273 +17,219 @@ class Debatorpage extends StatefulWidget {
 
 class _DebatorpageState extends State<Debatorpage> {
   final DebatorController controller = Get.put(DebatorController());
-  final ScrollController _scrollController = ScrollController();
   final TextEditingController _searchController = TextEditingController();
 
-  static const Color darkSlate = Color(0xFF111827);
-  static const Color activeAccent = Color(0xFF3B82F6);
-  static const Color bgGrey = Color(0xFFF9FAFB);
-  static const Color textMuted = Color(0xFF6B7280);
+  // --- ERP COLOR PALETTE (Kept exactly as yours) ---
+  static const Color primaryColor = Color(0xFF4F46E5); // Indigo
+  static const Color scaffoldBg = Color(0xFFF3F4F6); // Cool Grey
+  static const Color surfaceWhite = Colors.white;
+  static const Color textDark = Color(0xFF111827);
+  static const Color textLight = Color(0xFF6B7280);
+  static const Color borderCol = Color(0xFFE5E7EB);
+  static const Color successGreen = Color(0xFF059669);
+  static const Color dangerRed = Color(0xFFDC2626);
 
   final NumberFormat bdCurrency = NumberFormat.currency(
     locale: 'en_IN',
-    symbol: '',
+    symbol: '৳',
     decimalDigits: 2,
   );
 
   @override
-  void initState() {
-    super.initState();
-    _scrollController.addListener(_onScroll);
-  }
-
-  @override
   void dispose() {
-    _scrollController.dispose();
     _searchController.dispose();
     super.dispose();
   }
 
-  void _onScroll() {
-    if (_scrollController.position.pixels >=
-        _scrollController.position.maxScrollExtent - 200) {
-      if (_searchController.text.isEmpty) {
-        controller.loadBodies(loadMore: true);
-      }
-    }
-  }
+  // NOTE: Removed _onScroll and ScrollController because we are using Buttons now.
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: bgGrey,
+      backgroundColor: scaffoldBg,
       body: Column(
         children: [
-          _buildHeader(),
-          _buildTableHead(),
+          // 1. Top Dashboard & Toolbar (Updated Search Logic)
+          _buildDashboardSection(),
+
+          // 2. Data Table Header (Kept Same)
+          _buildTableHeader(),
+
+          // 3. Data Table Body (Updated List Source)
           Expanded(
             child: Obx(() {
               if (controller.isBodiesLoading.value) {
                 return const Center(
-                  child: CircularProgressIndicator(color: activeAccent),
+                  child: CircularProgressIndicator(color: primaryColor),
                 );
               }
-              if (controller.filteredBodies.isEmpty) {
+              // Switch to 'bodies' instead of 'filteredBodies' for server pagination
+              if (controller.bodies.isEmpty) {
                 return _buildEmptyState();
               }
-              return ListView.builder(
-                controller: _scrollController,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 15,
-                ),
-                itemCount:
-                    controller.filteredBodies.length +
-                    (controller.hasMore.value ? 1 : 0),
+
+              return ListView.separated(
+                padding: EdgeInsets.zero,
+                itemCount: controller.bodies.length,
+                separatorBuilder:
+                    (c, i) => const Divider(height: 1, color: borderCol),
                 itemBuilder: (context, index) {
-                  if (index == controller.filteredBodies.length) {
-                    return Obx(
-                      () =>
-                          controller.isMoreLoading.value
-                              ? const Padding(
-                                padding: EdgeInsets.all(20.0),
-                                child: Center(
-                                  child: CircularProgressIndicator(
-                                    color: activeAccent,
-                                  ),
-                                ),
-                              )
-                              : const SizedBox.shrink(),
-                    );
-                  }
-                  final debtor = controller.filteredBodies[index];
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 7),
-                    child: _buildDebtorRow(debtor),
-                  );
+                  final debtor = controller.bodies[index];
+                  return _buildTableRow(debtor);
                 },
               );
             }),
           ),
+
+          // 4. NEW: Pagination Footer
+          _buildPaginationFooter(),
         ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => adddebatorDialog(controller),
+        backgroundColor: primaryColor,
+        icon: const Icon(Icons.add, color: Colors.white),
+        label: const Text("New Debtor", style: TextStyle(color: Colors.white)),
       ),
     );
   }
 
-  Widget _buildHeader() {
+  // ==========================================
+  // 1. DASHBOARD & TOOLBAR
+  // ==========================================
+  Widget _buildDashboardSection() {
     return Container(
-      padding: const EdgeInsets.all(24),
-      color: Colors.white,
+      color: surfaceWhite,
+      padding: const EdgeInsets.all(20),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Title
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    "Debtor Management",
+                    "Debtor Ledger",
                     style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: darkSlate,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      color: textDark,
+                      letterSpacing: -0.5,
                     ),
                   ),
                   Text(
-                    "Track outstanding balances and credit history",
-                    style: TextStyle(fontSize: 14, color: textMuted),
+                    "Manage receivables and customer accounts",
+                    style: TextStyle(fontSize: 13, color: textLight),
                   ),
                 ],
               ),
-              const Spacer(),
-
-              // TOTAL PAYABLE (I Owe Them)
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 10,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.orange.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.orange.shade200),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      "Total Payable (Purchases)",
-                      style: TextStyle(
-                        color: Colors.orange.shade900,
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    Obx(
-                      () => Text(
-                        "${bdCurrency.format(controller.totalMarketPayable.value)} ৳",
-                        style: TextStyle(
-                          color: Colors.orange.shade900,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+              // Reports Dropdown / Buttons
+              Row(
+                children: [
+                  _buildReportButton(
+                    icon: Icons.upload_file,
+                    label: "Payables Rpt",
+                    onTap: controller.downloadAllPayablesReport,
+                    color: Colors.orange,
+                  ),
+                  const SizedBox(width: 10),
+                  _buildReportButton(
+                    icon: Icons.download_for_offline,
+                    label: "Due Report",
+                    onTap: controller.downloadAllDebtorsReport,
+                    color: primaryColor,
+                  ),
+                ],
               ),
-              // Print Payable
-              IconButton(
-                onPressed: () => controller.downloadAllPayablesReport(),
-                icon: Icon(Icons.print, color: Colors.orange.shade900),
-                tooltip: "Download Payable Report",
-                style: IconButton.styleFrom(
-                  backgroundColor: bgGrey,
-                  padding: const EdgeInsets.all(12),
+            ],
+          ),
+          const SizedBox(height: 20),
+
+          // KPI Cards
+          Row(
+            children: [
+              Expanded(
+                child: Obx(
+                  () => _buildKPICard(
+                    title: "Total Receivables (Due)",
+                    value: controller.totalMarketOutstanding.value,
+                    icon: FontAwesomeIcons.handHoldingDollar,
+                    color: dangerRed,
+                  ),
                 ),
               ),
               const SizedBox(width: 15),
-
-              // TOTAL DUE (They Owe Me)
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 10,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.red.shade200),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      "Total Market Due",
-                      style: TextStyle(
-                        color: Colors.red.shade800,
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    Obx(
-                      () => Text(
-                        "${bdCurrency.format(controller.totalMarketOutstanding.value)} ৳",
-                        style: TextStyle(
-                          color: Colors.red.shade900,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              // Print Due
-              IconButton(
-                onPressed: () => controller.downloadAllDebtorsReport(),
-                icon: const Icon(Icons.print, color: darkSlate),
-                tooltip: "Download Total Due Report",
-                style: IconButton.styleFrom(
-                  backgroundColor: bgGrey,
-                  padding: const EdgeInsets.all(12),
+              Expanded(
+                child: Obx(
+                  () => _buildKPICard(
+                    title: "Total Payables (Liabilities)",
+                    value: controller.totalMarketPayable.value,
+                    icon: FontAwesomeIcons.fileInvoiceDollar,
+                    color: Colors.orange.shade800,
+                  ),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 20),
+
+          // Search Bar (UPDATED for Server Search)
           Row(
             children: [
               Expanded(
                 child: Container(
+                  height: 48,
                   decoration: BoxDecoration(
-                    color: bgGrey,
+                    color: scaffoldBg,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.black12),
+                    border: Border.all(color: borderCol),
                   ),
                   child: TextField(
                     controller: _searchController,
-                    onChanged: (val) {
-                      controller.searchDebtors(val);
-                    },
-                    decoration: const InputDecoration(
-                      hintText: "Search by Name, Phone, or NID...",
-                      prefixIcon: Icon(
-                        Icons.search,
-                        size: 20,
-                        color: textMuted,
-                      ),
+                    // TRIGGER SEARCH ON ENTER
+                    onSubmitted: (val) => controller.runServerSearch(val),
+                    decoration: InputDecoration(
+                      hintText: "Search name (Server) or Phone...",
+                      prefixIcon: const Icon(Icons.search, color: textLight),
                       border: InputBorder.none,
-                      contentPadding: EdgeInsets.symmetric(vertical: 12),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                      // ADD CLEAR BUTTON
+                      suffixIcon: IconButton(
+                        icon: const Icon(
+                          Icons.clear,
+                          size: 18,
+                          color: textLight,
+                        ),
+                        onPressed: () {
+                          _searchController.clear();
+                          controller.runServerSearch(
+                            '',
+                          ); // Reset to default list
+                        },
+                      ),
                     ),
                   ),
                 ),
               ),
-              const SizedBox(width: 16),
-              ElevatedButton.icon(
-                onPressed: () => adddebatorDialog(controller),
-                icon: const Icon(
-                  Icons.person_add,
-                  color: Colors.white,
-                  size: 18,
-                ),
-                label: const Text(
-                  "New Debtor",
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+              const SizedBox(width: 10),
+              // ADD SEARCH BUTTON
+              ElevatedButton(
+                onPressed:
+                    () => controller.runServerSearch(_searchController.text),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: activeAccent,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 20,
-                  ),
+                  backgroundColor: primaryColor,
+                  minimumSize: const Size(50, 48),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
                 ),
+                child: const Text(
+                  "Search",
+                  style: TextStyle(color: Colors.white),
+                ),
               ),
             ],
           ),
@@ -292,180 +238,372 @@ class _DebatorpageState extends State<Debatorpage> {
     );
   }
 
-  Widget _buildTableHead() {
-    return Container(
-      margin: const EdgeInsets.only(top: 16, left: 24, right: 24),
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-      decoration: const BoxDecoration(
-        color: darkSlate,
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(8),
-          topRight: Radius.circular(8),
+  // ==========================================
+  // 4. NEW: PAGINATION FOOTER
+  // ==========================================
+  Widget _buildPaginationFooter() {
+    return Obx(() {
+      // Hide pagination if actively searching (server search usually returns specific results)
+      if (controller.isSearching.value) return const SizedBox.shrink();
+
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+        decoration: const BoxDecoration(
+          color: surfaceWhite,
+          border: Border(top: BorderSide(color: borderCol)),
         ),
-      ),
-      child: Row(
-        children: const [
-          Expanded(
-            flex: 3,
-            child: Text(
-              "Customer Name",
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
+        child: Row(
+          children: [
+            // Previous Button
+            ElevatedButton.icon(
+              onPressed:
+                  controller.currentPage.value > 1
+                      ? controller.prevPage
+                      : null, // Disable if on Page 1
+              icon: const Icon(Icons.arrow_back_ios, size: 14),
+              label: const Text("Previous"),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: scaffoldBg,
+                foregroundColor: textDark,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
+                ),
+                disabledBackgroundColor: Colors.grey.shade100,
+                disabledForegroundColor: Colors.grey.shade400,
               ),
             ),
-          ),
-          Expanded(
-            flex: 2,
-            child: Text(
-              "Phone",
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
+
+            // Page Indicator
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: primaryColor.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(20),
               ),
-            ),
-          ),
-          Expanded(
-            flex: 2,
-            child: Text(
-              "Current Due",
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-              ),
-              textAlign: TextAlign.right,
-            ),
-          ),
-          Expanded(
-            flex: 3,
-            child: Padding(
-              padding: EdgeInsets.only(left: 20),
               child: Text(
-                "Address",
-                style: TextStyle(
-                  color: Colors.white,
+                "Page ${controller.currentPage.value}",
+                style: const TextStyle(
                   fontWeight: FontWeight.bold,
+                  color: primaryColor,
                 ),
               ),
             ),
-          ),
-          Expanded(
-            flex: 2,
-            child: Text(
-              "Join Date",
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
+
+            // Next Button
+            ElevatedButton.icon(
+              onPressed:
+                  controller.hasMore.value
+                      ? controller.nextPage
+                      : null, // Disable if no more data
+              icon: const Icon(Icons.arrow_forward_ios, size: 14),
+              label: const Text("Next"),
+              // Use direction: TextDirection.rtl to put icon on right if preferred,
+              // or just keep standard layout
+              style: ElevatedButton.styleFrom(
+                backgroundColor: scaffoldBg,
+                foregroundColor: textDark,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
+                ),
+                disabledBackgroundColor: Colors.grey.shade100,
+                disabledForegroundColor: Colors.grey.shade400,
               ),
-              textAlign: TextAlign.right,
             ),
+          ],
+        ),
+      );
+    });
+  }
+
+  // ==========================================
+  // WIDGET HELPERS (KEPT EXACTLY AS YOURS)
+  // ==========================================
+
+  Widget _buildKPICard({
+    required String title,
+    required double value,
+    required IconData icon,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: surfaceWhite,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: borderCol),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
           ),
-          SizedBox(width: 40),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: FaIcon(icon, color: color, size: 20),
+          ),
+          const SizedBox(width: 15),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: textLight,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                bdCurrency.format(value),
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: textDark,
+                  fontFamily: 'Roboto',
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildDebtorRow(dynamic debtor) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 24),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: Color(0xFFF3F4F6))),
+  Widget _buildReportButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    required Color color,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          border: Border.all(color: color.withOpacity(0.3)),
+          borderRadius: BorderRadius.circular(6),
+          color: color.withOpacity(0.05),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 16, color: color),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
       ),
-      child: InkWell(
-        onTap:
-            () =>
-                Get.to(() => Debatordetails(id: debtor.id, name: debtor.name)),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-          child: Row(
-            children: [
-              Expanded(
-                flex: 3,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      debtor.name,
+    );
+  }
+
+  Widget _buildTableHeader() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+      decoration: const BoxDecoration(
+        color: Color(0xFFE5E7EB),
+        border: Border(bottom: BorderSide(color: Color(0xFFD1D5DB))),
+      ),
+      child: Row(
+        children: [
+          _colHeader("CLIENT DETAILS", flex: 3),
+          _colHeader("CONTACT INFO", flex: 2),
+          _colHeader("BALANCE STATUS", flex: 2, align: TextAlign.right),
+          _colHeader("LOCATION", flex: 2),
+          const SizedBox(width: 50),
+        ],
+      ),
+    );
+  }
+
+  Widget _colHeader(
+    String text, {
+    int flex = 1,
+    TextAlign align = TextAlign.left,
+  }) {
+    return Expanded(
+      flex: flex,
+      child: Text(
+        text,
+        textAlign: align,
+        style: const TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+          color: textLight,
+          letterSpacing: 0.5,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTableRow(dynamic debtor) {
+    return InkWell(
+      onTap:
+          () => Get.to(() => Debatordetails(id: debtor.id, name: debtor.name)),
+      hoverColor: Colors.grey.shade50,
+      child: Container(
+        color: surfaceWhite,
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+        child: Row(
+          children: [
+            // 1. Client Details
+            Expanded(
+              flex: 3,
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 18,
+                    backgroundColor: primaryColor.withOpacity(0.1),
+                    child: Text(
+                      debtor.name.isNotEmpty
+                          ? debtor.name[0].toUpperCase()
+                          : '?',
                       style: const TextStyle(
+                        color: primaryColor,
                         fontWeight: FontWeight.bold,
-                        color: darkSlate,
                         fontSize: 14,
                       ),
                     ),
-                    if (debtor.des.isNotEmpty)
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          debtor.name,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            color: textDark,
+                            fontSize: 14,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if (debtor.des.isNotEmpty)
+                          Text(
+                            debtor.des,
+                            style: const TextStyle(
+                              color: textLight,
+                              fontSize: 11,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // 2. Contact Info
+            Expanded(
+              flex: 2,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.phone, size: 12, color: textLight),
+                      const SizedBox(width: 4),
                       Text(
-                        debtor.des,
-                        style: const TextStyle(color: textMuted, fontSize: 12),
+                        debtor.phone,
+                        style: const TextStyle(color: textDark, fontSize: 13),
                       ),
-                  ],
-                ),
-              ),
-              Expanded(
-                flex: 2,
-                child: Text(
-                  debtor.phone,
-                  style: const TextStyle(color: darkSlate),
-                ),
-              ),
-              Expanded(
-                flex: 2,
-                child: StreamBuilder<double>(
-                  stream: controller.getLiveBalance(debtor.id),
-                  initialData: debtor.balance,
-                  builder: (context, snapshot) {
-                    double bal = snapshot.data ?? 0.0;
-                    return Text(
-                      "${bdCurrency.format(bal)} ৳",
-                      textAlign: TextAlign.right,
-                      style: TextStyle(
-                        color:
-                            bal > 0
-                                ? Colors.red.shade700
-                                : Colors.green.shade700,
-                        fontSize: 13,
-                        fontWeight: FontWeight.bold,
+                    ],
+                  ),
+                  if (debtor.nid.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        "NID: ${debtor.nid}",
+                        style: const TextStyle(color: textLight, fontSize: 11),
                       ),
-                    );
-                  },
-                ),
+                    ),
+                ],
               ),
-              Expanded(
-                flex: 3,
-                child: Padding(
-                  padding: const EdgeInsets.only(left: 20),
-                  child: Text(
-                    debtor.address,
-                    style: const TextStyle(color: textMuted, fontSize: 13),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
+            ),
+
+            // 3. Balance Status (Live Stream)
+            Expanded(
+              flex: 2,
+              child: StreamBuilder<double>(
+                stream: controller.getLiveBalance(debtor.id),
+                initialData: debtor.balance,
+                builder: (context, snapshot) {
+                  double bal = snapshot.data ?? 0.0;
+                  bool isDue = bal > 0;
+
+                  return Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color:
+                              isDue
+                                  ? dangerRed.withOpacity(0.1)
+                                  : successGreen.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          bdCurrency.format(bal),
+                          style: TextStyle(
+                            color: isDue ? dangerRed : successGreen,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                },
               ),
-              Expanded(
-                flex: 2,
+            ),
+
+            // 4. Location
+            Expanded(
+              flex: 2,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 10),
                 child: Text(
-                  debtor.createdAt != null
-                      ? DateFormat('dd MMM yyyy').format(debtor.createdAt)
-                      : "-",
-                  textAlign: TextAlign.right,
-                  style: const TextStyle(color: textMuted, fontSize: 13),
+                  debtor.address.isNotEmpty ? debtor.address : "N/A",
+                  style: const TextStyle(color: textLight, fontSize: 13),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-              const SizedBox(
-                width: 40,
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: Icon(
-                    Icons.arrow_forward_ios,
-                    size: 14,
-                    color: Colors.black12,
-                  ),
-                ),
-              ),
-            ],
-          ),
+            ),
+
+            // 5. Action
+            const SizedBox(
+              width: 50,
+              child: Icon(Icons.chevron_right, color: Colors.grey),
+            ),
+          ],
         ),
       ),
     );
@@ -476,15 +614,31 @@ class _DebatorpageState extends State<Debatorpage> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
-            FontAwesomeIcons.userSlash,
-            size: 60,
-            color: textMuted.withOpacity(0.2),
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade100,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              FontAwesomeIcons.magnifyingGlass,
+              size: 40,
+              color: textLight.withOpacity(0.5),
+            ),
           ),
           const SizedBox(height: 16),
           const Text(
-            "No debtors found matching your search.",
-            style: TextStyle(color: textMuted, fontSize: 16),
+            "No debtors found.",
+            style: TextStyle(
+              color: textDark,
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 5),
+          const Text(
+            "Try adjusting your search query.",
+            style: TextStyle(color: textLight, fontSize: 14),
           ),
         ],
       ),

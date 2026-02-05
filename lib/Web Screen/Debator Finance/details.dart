@@ -1,5 +1,6 @@
-// ignore_for_file: avoid_web_libraries_in_flutter, deprecated_member_use
+// ignore_for_file: avoid_web_libraries_in_flutter, deprecated_member_use, use_build_context_synchronously
 
+import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -8,7 +9,6 @@ import 'package:intl/intl.dart';
 import 'debatorcontroller.dart';
 import 'model.dart';
 import 'dart:js_interop';
-import 'dart:typed_data';
 import 'package:web/web.dart' as web;
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/Debtor%20Purchase/purchasepage.dart';
 
@@ -24,53 +24,105 @@ class Debatordetails extends StatefulWidget {
 
 class _DebatordetailsState extends State<Debatordetails> {
   final controller = Get.find<DebatorController>();
-  final ScrollController _scrollController = ScrollController();
 
+  final TextEditingController _searchCtrl = TextEditingController();
+  final RxString _filterType = 'All'.obs; 
+  final RxInt _currentPage = 1.obs;
+  final int _rowsPerPage = 50;
+
+  // --- COLORS ---
   static const Color darkSlate = Color(0xFF111827);
   static const Color activeAccent = Color(0xFF3B82F6);
   static const Color bgGrey = Color(0xFFF9FAFB);
   static const Color textMuted = Color(0xFF6B7280);
 
-  // Transaction Colors
-  static const Color colCredit = Color(0xFFEF4444);
-  static const Color colDebit = Color(0xFF10B981);
-  static const Color colAdvGiven = Color(0xFFF59E0B);
-  static const Color colAdvRecv = Color(0xFF06B6D4);
-  static const Color colPrevious = Colors.orange;
-  static const Color colLoanPay = Colors.purple;
-
   @override
   void initState() {
     super.initState();
     controller.clearTransactionState();
-    controller.loadDebtorTransactions(widget.id);
-    _scrollController.addListener(_onScroll);
-  }
-
-  void _onScroll() {
-    if (_scrollController.position.pixels >=
-        _scrollController.position.maxScrollExtent - 100) {
-      controller.loadDebtorTransactions(widget.id, loadMore: true);
-    }
+    // Load ALL transactions so we can filter/paginate locally
+    // Note: If you have massive data (>5000 tx), consider server-side pagination instead.
+    // For normal usage, loading all into memory is faster for sorting/filtering.
+    controller.loadDebtorTransactions(widget.id, loadMore: true);
   }
 
   @override
   void dispose() {
-    _scrollController.dispose();
+    _searchCtrl.dispose();
     super.dispose();
+  }
+
+  // --- FILTERING & PAGINATION LOGIC ---
+
+  List<TransactionModel> get _processedTransactions {
+    // 1. Get Base List
+    List<TransactionModel> list = controller.currentTransactions;
+
+    // 2. Apply Type Filter
+    if (_filterType.value == 'Sales') {
+      list =
+          list
+              .where(
+                (t) =>
+                    t.type == 'credit' ||
+                    t.type == 'advance_given' ||
+                    t.type == 'previous_due',
+              )
+              .toList();
+    } else if (_filterType.value == 'Payments') {
+      list =
+          list
+              .where(
+                (t) =>
+                    t.type == 'debit' ||
+                    t.type == 'advance_received' ||
+                    t.type == 'loan_payment',
+              )
+              .toList();
+    }
+
+    // 3. Apply Search (Invoice / Bank / Note)
+    if (_searchCtrl.text.isNotEmpty) {
+      String q = _searchCtrl.text.toLowerCase();
+      list =
+          list.where((t) {
+            String note = (t.note).toLowerCase();
+            String method = "";
+            if (t.paymentMethod != null) {
+              method = t.paymentMethod.toString().toLowerCase();
+            }
+            // Check Note (Invoice ID) OR Method (Bank Acc)
+            return note.contains(q) || method.contains(q);
+          }).toList();
+    }
+    return list;
+  }
+
+  List<TransactionModel> get _paginatedTransactions {
+    List<TransactionModel> filtered = _processedTransactions;
+    int start = (_currentPage.value - 1) * _rowsPerPage;
+    int end = start + _rowsPerPage;
+
+    if (start >= filtered.length) return [];
+    if (end > filtered.length) end = filtered.length;
+
+    return filtered.sublist(start, end);
+  }
+
+  int get _totalPages {
+    if (_processedTransactions.isEmpty) return 1;
+    return (_processedTransactions.length / _rowsPerPage).ceil();
   }
 
   @override
   Widget build(BuildContext context) {
-    // Re-fetch body to ensure we have latest data for profile edit
+    // Re-fetch body safely
     final debtor = controller.bodies.firstWhereOrNull((e) => e.id == widget.id);
 
-    // Fallback if not in list (e.g. direct nav) - rare
     if (debtor == null && controller.bodies.isEmpty) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
-
-    // If debtor is null but bodies loaded, it means debtor deleted or error
+    // Fallback if deleted externally
     if (debtor == null && controller.bodies.isNotEmpty) {
       return const Scaffold(body: Center(child: Text("Debtor Not Found")));
     }
@@ -85,34 +137,35 @@ class _DebatordetailsState extends State<Debatordetails> {
         label: const Text("New Entry", style: TextStyle(color: Colors.white)),
       ),
       body: SingleChildScrollView(
-        controller: _scrollController,
         padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // 1. Top Balance Cards
             _buildLiveBalanceSection(),
             const SizedBox(height: 24),
-            _buildFilterBar(),
+
+            // 2. Advanced Toolbar (Search + Filter)
+            _buildAdvancedToolbar(),
             const SizedBox(height: 16),
+
+            // 3. Data Table
             _buildTableSection(debtor),
-            Obx(() {
-              if (controller.isTxLoading.value &&
-                  controller.currentTransactions.isNotEmpty) {
-                return const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(20),
-                    child: CircularProgressIndicator(),
-                  ),
-                );
-              }
-              return const SizedBox(height: 80);
-            }),
+
+            // 4. Pagination Footer
+            const SizedBox(height: 16),
+            _buildPaginationFooter(),
+
+            const SizedBox(height: 80), // Space for FAB
           ],
         ),
       ),
     );
   }
 
+  // ==========================================
+  // APP BAR & HEADER
+  // ==========================================
   AppBar _buildAppBar(DebtorModel debtor) {
     return AppBar(
       backgroundColor: Colors.white,
@@ -191,6 +244,9 @@ class _DebatordetailsState extends State<Debatordetails> {
     );
   }
 
+  // ==========================================
+  // BALANCE CARDS
+  // ==========================================
   Widget _buildLiveBalanceSection() {
     return StreamBuilder<Map<String, double>>(
       stream: controller.getDebtorBreakdown(widget.id),
@@ -324,58 +380,107 @@ class _DebatordetailsState extends State<Debatordetails> {
     );
   }
 
-  Widget _buildFilterBar() {
+  // ==========================================
+  // TOOLBAR (SEARCH + FILTER)
+  // ==========================================
+  Widget _buildAdvancedToolbar() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.grey.shade200),
       ),
       child: Row(
         children: [
-          const Icon(Icons.filter_list, size: 18, color: textMuted),
-          const SizedBox(width: 12),
-          const Text(
-            "Filter By:",
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-          ),
-          const SizedBox(width: 12),
-          Obx(() {
-            final hasFilter = controller.selectedDateRange.value != null;
-            return ActionChip(
-              label: Text(
-                hasFilter
-                    ? "${DateFormat('dd MMM').format(controller.selectedDateRange.value!.start)} - ${DateFormat('dd MMM').format(controller.selectedDateRange.value!.end)}"
-                    : "Date Range",
+          // Search Box
+          Expanded(
+            flex: 2,
+            child: TextField(
+              controller: _searchCtrl,
+              onChanged: (val) {
+                // Reset to page 1 when searching
+                _currentPage.value = 1;
+                setState(() {}); // Trigger rebuild to filter
+              },
+              decoration: InputDecoration(
+                hintText: "Search Invoice, Note, Bank Acc...",
+                prefixIcon: const Icon(
+                  Icons.search,
+                  size: 18,
+                  color: Colors.grey,
+                ),
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 12,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
               ),
-              avatar:
-                  hasFilter
-                      ? const Icon(Icons.close, size: 14)
-                      : const Icon(Icons.calendar_today, size: 14),
-              backgroundColor:
-                  hasFilter ? activeAccent.withOpacity(0.1) : bgGrey,
-              onPressed:
-                  () =>
-                      hasFilter
-                          ? controller.setDateFilter(null, widget.id)
-                          : _pickDateRange(),
-            );
-          }),
+            ),
+          ),
+          const SizedBox(width: 16),
+
+          // Filter Dropdown
+          Expanded(
+            flex: 1,
+            child: Obx(
+              () => Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  color: bgGrey,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.grey.shade300),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: _filterType.value,
+                    icon: const Icon(
+                      Icons.filter_list,
+                      size: 18,
+                      color: Colors.grey,
+                    ),
+                    isExpanded: true,
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'All',
+                        child: Text("All Transactions"),
+                      ),
+                      DropdownMenuItem(
+                        value: 'Sales',
+                        child: Text("Sales / Bills Only"),
+                      ),
+                      DropdownMenuItem(
+                        value: 'Payments',
+                        child: Text("Payments Only"),
+                      ),
+                    ],
+                    onChanged: (v) {
+                      if (v != null) {
+                        _filterType.value = v;
+                        _currentPage.value = 1;
+                      }
+                    },
+                  ),
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Future<void> _pickDateRange() async {
-    final picked = await showDateRangePicker(
-      context: context,
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2030),
-    );
-    if (picked != null) controller.setDateFilter(picked, widget.id);
-  }
-
+  // ==========================================
+  // DATA TABLE
+  // ==========================================
   Widget _buildTableSection(DebtorModel debtor) {
     return Container(
       decoration: BoxDecoration(
@@ -387,31 +492,38 @@ class _DebatordetailsState extends State<Debatordetails> {
         children: [
           _tableHeader(),
           Obx(() {
-            if (controller.isTxLoading.value &&
-                controller.currentTransactions.isEmpty) {
+            if (controller.isTxLoading.value) {
               return const Padding(
                 padding: EdgeInsets.all(40),
                 child: CircularProgressIndicator(),
               );
             }
-            if (controller.currentTransactions.isEmpty) {
+
+            // Force rebuild when search/filter/page changes
+            // ignore: unused_local_variable
+            final page = _currentPage.value;
+            // ignore: unused_local_variable
+            final search = _searchCtrl.text;
+
+            final txList = _paginatedTransactions;
+
+            if (txList.isEmpty) {
               return const Padding(
                 padding: EdgeInsets.all(40),
                 child: Text(
-                  "No transactions found.",
+                  "No transactions found matching criteria.",
                   style: TextStyle(color: textMuted),
                 ),
               );
             }
+
             return ListView.separated(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              itemCount: controller.currentTransactions.length,
+              itemCount: txList.length,
               separatorBuilder:
                   (_, __) => const Divider(height: 1, color: Color(0xFFF3F4F6)),
-              itemBuilder:
-                  (context, index) =>
-                      _tableRow(controller.currentTransactions[index], debtor),
+              itemBuilder: (context, index) => _tableRow(txList[index], debtor),
             );
           }),
         ],
@@ -431,49 +543,15 @@ class _DebatordetailsState extends State<Debatordetails> {
       ),
       child: Row(
         children: const [
-          Expanded(
-            flex: 2,
-            child: Text(
-              "DATE",
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 11,
-                color: textMuted,
-              ),
-            ),
-          ),
-          Expanded(
-            flex: 2,
-            child: Text(
-              "TYPE",
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 11,
-                color: textMuted,
-              ),
-            ),
-          ),
-          Expanded(
-            flex: 3,
-            child: Text(
-              "DETAILS / METHOD",
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 11,
-                color: textMuted,
-              ),
-            ),
-          ),
+          Expanded(flex: 2, child: Text("DATE", style: _headStyle)),
+          Expanded(flex: 2, child: Text("TYPE", style: _headStyle)),
+          Expanded(flex: 3, child: Text("DETAILS / METHOD", style: _headStyle)),
           Expanded(
             flex: 2,
             child: Text(
               "AMOUNT",
               textAlign: TextAlign.right,
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 11,
-                color: textMuted,
-              ),
+              style: _headStyle,
             ),
           ),
           SizedBox(
@@ -481,11 +559,7 @@ class _DebatordetailsState extends State<Debatordetails> {
             child: Text(
               "ACTION",
               textAlign: TextAlign.center,
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 11,
-                color: textMuted,
-              ),
+              style: _headStyle,
             ),
           ),
         ],
@@ -493,33 +567,40 @@ class _DebatordetailsState extends State<Debatordetails> {
     );
   }
 
+  static const TextStyle _headStyle = TextStyle(
+    fontWeight: FontWeight.bold,
+    fontSize: 11,
+    color: textMuted,
+  );
+
   Widget _tableRow(TransactionModel tx, DebtorModel debtor) {
     Color typeColor = Colors.grey;
     IconData typeIcon = Icons.circle;
     String typeLabel = tx.type;
 
+    // Define styles based on type
     if (tx.type == 'credit') {
-      typeColor = colCredit;
+      typeColor = const Color(0xFFEF4444);
       typeIcon = FontAwesomeIcons.fileInvoiceDollar;
       typeLabel = "BILL / SALE";
     } else if (tx.type == 'debit') {
-      typeColor = colDebit;
+      typeColor = const Color(0xFF10B981);
       typeIcon = FontAwesomeIcons.handHoldingDollar;
       typeLabel = "PAYMENT";
     } else if (tx.type == 'advance_given') {
-      typeColor = colAdvGiven;
+      typeColor = const Color(0xFFF59E0B);
       typeIcon = FontAwesomeIcons.arrowRightFromBracket;
       typeLabel = "ADV GIVEN";
     } else if (tx.type == 'advance_received') {
-      typeColor = colAdvRecv;
+      typeColor = const Color(0xFF06B6D4);
       typeIcon = FontAwesomeIcons.arrowRightToBracket;
       typeLabel = "ADV RECV";
     } else if (tx.type == 'previous_due') {
-      typeColor = colPrevious;
+      typeColor = Colors.orange;
       typeIcon = FontAwesomeIcons.clockRotateLeft;
       typeLabel = "OLD DEBT";
     } else if (tx.type == 'loan_payment') {
-      typeColor = colLoanPay;
+      typeColor = Colors.purple;
       typeIcon = FontAwesomeIcons.moneyBillWave;
       typeLabel = "LOAN COLLECT";
     }
@@ -621,9 +702,67 @@ class _DebatordetailsState extends State<Debatordetails> {
     );
   }
 
-  // --------------------------------------------------------------------------------
-  // UPDATE: DYNAMIC PAYMENT INPUT (Bank, Bkash, etc.)
-  // --------------------------------------------------------------------------------
+  // ==========================================
+  // PAGINATION FOOTER
+  // ==========================================
+  Widget _buildPaginationFooter() {
+    return Obx(() {
+      final totalP = _totalPages;
+      if (totalP <= 1) return const SizedBox.shrink();
+
+      return Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          ElevatedButton.icon(
+            onPressed:
+                _currentPage.value > 1 ? () => _currentPage.value-- : null,
+            icon: const Icon(Icons.chevron_left, size: 16),
+            label: const Text("Previous"),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: darkSlate,
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              side: BorderSide(color: Colors.grey.shade300),
+            ),
+          ),
+          const SizedBox(width: 15),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            decoration: BoxDecoration(
+              color: activeAccent.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              "Page ${_currentPage.value} of $totalP",
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                color: activeAccent,
+              ),
+            ),
+          ),
+          const SizedBox(width: 15),
+          ElevatedButton.icon(
+            onPressed:
+                _currentPage.value < totalP ? () => _currentPage.value++ : null,
+            icon: const Icon(Icons.chevron_right, size: 16),
+            label: const Text("Next"),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: darkSlate,
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              side: BorderSide(color: Colors.grey.shade300),
+            ),
+          ),
+        ],
+      );
+    });
+  }
+
+  // ==========================================
+  // DIALOGS
+  // ==========================================
 
   void _showAddTransactionDialog(DebtorModel debtor) {
     final amountC = TextEditingController();
@@ -631,9 +770,8 @@ class _DebatordetailsState extends State<Debatordetails> {
     final RxString selectedType = 'credit'.obs;
     final Rx<DateTime> selectedDate = DateTime.now().obs;
 
-    // Dynamic Payment States
-    final RxString payMethodType =
-        'cash'.obs; // cash, bank, bkash, nagad, rocket
+    // Payment States
+    final RxString payMethodType = 'cash'.obs;
     final bankNameC = TextEditingController();
     final accountNoC = TextEditingController();
     final mobileNoC = TextEditingController();
@@ -643,171 +781,146 @@ class _DebatordetailsState extends State<Debatordetails> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: Container(
           width: 500,
-          padding: const EdgeInsets.all(0),
+          padding: EdgeInsets.zero,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               _dialogHeader("New Transaction Entry"),
-              Padding(
-                padding: const EdgeInsets.all(24),
-                child: Obx(
-                  () => Column(
-                    children: [
-                      _buildField(
-                        amountC,
-                        "Amount (Tk)",
-                        Icons.attach_money,
-                        isNum: true,
-                      ),
-                      const SizedBox(height: 12),
-                      _buildField(noteC, "Note / Description", Icons.note),
-                      const SizedBox(height: 12),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        decoration: BoxDecoration(
-                          color: bgGrey,
-                          borderRadius: BorderRadius.circular(8),
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(24),
+                  child: Obx(
+                    () => Column(
+                      children: [
+                        _buildField(
+                          amountC,
+                          "Amount (Tk)",
+                          Icons.attach_money,
+                          isNum: true,
                         ),
-                        child: DropdownButtonHideUnderline(
-                          child: DropdownButton<String>(
-                            value: selectedType.value,
-                            isExpanded: true,
-                            items: const [
-                              DropdownMenuItem(
-                                value: 'credit',
-                                child: Text("🧾  New Sale/Bill (Running Due)"),
-                              ),
-                              DropdownMenuItem(
-                                value: 'debit',
-                                child: Text("💵  Receive Payment (Running)"),
-                              ),
-                              DropdownMenuItem(
-                                value: 'div1',
-                                enabled: false,
-                                child: Divider(),
-                              ),
-                              DropdownMenuItem(
-                                value: 'previous_due',
-                                child: Text("🏦  Add Previous/Old Debt"),
-                              ),
-                              DropdownMenuItem(
-                                value: 'loan_payment',
-                                child: Text("💰  Collect Old Debt (Cash In)"),
-                              ),
-                              DropdownMenuItem(
-                                value: 'div2',
-                                enabled: false,
-                                child: Divider(),
-                              ),
-                              DropdownMenuItem(
-                                value: 'advance_received',
-                                child: Text("⬅️  Receive Advance"),
-                              ),
-                              DropdownMenuItem(
-                                value: 'advance_given',
-                                child: Text("➡️  Give Advance"),
-                              ),
-                            ],
-                            onChanged: (v) {
-                              if (v != null && !v.contains('div')) {
-                                selectedType.value = v;
-                              }
-                            },
-                          ),
-                        ),
-                      ),
-
-                      // Payment Method Section (Only for Cash-In Types)
-                      if ([
-                        'debit',
-                        'loan_payment',
-                        'advance_received',
-                      ].contains(selectedType.value)) ...[
-                        const SizedBox(height: 16),
-                        const Divider(),
-                        const Text(
-                          "Payment Method Details",
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                            color: textMuted,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        _buildDynamicPaymentSection(
-                          payMethodType,
-                          bankNameC,
-                          accountNoC,
-                          mobileNoC,
-                        ),
-                      ],
-
-                      const SizedBox(height: 24),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          TextButton(
-                            onPressed: () => Get.back(),
-                            child: const Text("Cancel"),
-                          ),
-                          const SizedBox(width: 12),
-                          ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: darkSlate,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 24,
-                                vertical: 16,
-                              ),
+                        const SizedBox(height: 12),
+                        _buildField(noteC, "Note / Description", Icons.note),
+                        const SizedBox(height: 12),
+                        _buildDropdown<String>(
+                          value: selectedType.value,
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'credit',
+                              child: Text("🧾  New Sale/Bill (Running Due)"),
                             ),
-                            onPressed: () async {
-                              if (amountC.text.isEmpty) return;
-
-                              // Construct Payment Map
-                              Map<String, dynamic> finalPaymentData = {
-                                'type': 'cash',
-                              };
-                              if ([
-                                'debit',
-                                'loan_payment',
-                                'advance_received',
-                              ].contains(selectedType.value)) {
-                                if (payMethodType.value == 'bank') {
-                                  finalPaymentData = {
-                                    'type': 'bank',
-                                    'bankName': bankNameC.text.trim(),
-                                    'accountNo': accountNoC.text.trim(),
-                                  };
-                                } else if ([
-                                  'bkash',
-                                  'nagad',
-                                  'rocket',
-                                ].contains(payMethodType.value)) {
-                                  finalPaymentData = {
-                                    'type': payMethodType.value,
-                                    'number': mobileNoC.text.trim(),
-                                  };
-                                } else {
-                                  finalPaymentData = {'type': 'cash'};
-                                }
-                              }
-
-                              await controller.addTransaction(
-                                debtorId: debtor.id,
-                                amount: double.tryParse(amountC.text) ?? 0,
-                                note: noteC.text,
-                                type: selectedType.value,
-                                date: selectedDate.value,
-                                paymentMethodData: finalPaymentData,
-                              );
-                            },
-                            child: const Text(
-                              "Save Entry",
-                              style: TextStyle(color: Colors.white),
+                            DropdownMenuItem(
+                              value: 'debit',
+                              child: Text("💵  Receive Payment (Running)"),
                             ),
+                            DropdownMenuItem(
+                              value: 'div1',
+                              enabled: false,
+                              child: Divider(),
+                            ),
+                            DropdownMenuItem(
+                              value: 'previous_due',
+                              child: Text("🏦  Add Previous/Old Debt"),
+                            ),
+                            DropdownMenuItem(
+                              value: 'loan_payment',
+                              child: Text("💰  Collect Old Debt (Cash In)"),
+                            ),
+                            DropdownMenuItem(
+                              value: 'div2',
+                              enabled: false,
+                              child: Divider(),
+                            ),
+                            DropdownMenuItem(
+                              value: 'advance_received',
+                              child: Text("⬅️  Receive Advance"),
+                            ),
+                            DropdownMenuItem(
+                              value: 'advance_given',
+                              child: Text("➡️  Give Advance"),
+                            ),
+                          ],
+                          onChanged: (v) {
+                            if (v != null && !v.contains('div'))
+                              selectedType.value = v;
+                          },
+                        ),
+
+                        if ([
+                          'debit',
+                          'loan_payment',
+                          'advance_received',
+                        ].contains(selectedType.value)) ...[
+                          const SizedBox(height: 16),
+                          const Divider(),
+                          _buildDynamicPaymentSection(
+                            payMethodType,
+                            bankNameC,
+                            accountNoC,
+                            mobileNoC,
                           ),
                         ],
-                      ),
-                    ],
+
+                        const SizedBox(height: 24),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            TextButton(
+                              onPressed: () => Get.back(),
+                              child: const Text("Cancel"),
+                            ),
+                            const SizedBox(width: 12),
+                            ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: darkSlate,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 24,
+                                  vertical: 16,
+                                ),
+                              ),
+                              onPressed: () async {
+                                if (amountC.text.isEmpty) return;
+                                // Construct Payment Data
+                                Map<String, dynamic> pm = {'type': 'cash'};
+                                if ([
+                                  'debit',
+                                  'loan_payment',
+                                  'advance_received',
+                                ].contains(selectedType.value)) {
+                                  if (payMethodType.value == 'bank') {
+                                    pm = {
+                                      'type': 'bank',
+                                      'bankName': bankNameC.text.trim(),
+                                      'accountNo': accountNoC.text.trim(),
+                                    };
+                                  } else if ([
+                                    'bkash',
+                                    'nagad',
+                                    'rocket',
+                                  ].contains(payMethodType.value)) {
+                                    pm = {
+                                      'type': payMethodType.value,
+                                      'number': mobileNoC.text.trim(),
+                                    };
+                                  }
+                                }
+                                await controller.addTransaction(
+                                  debtorId: debtor.id,
+                                  amount: double.tryParse(amountC.text) ?? 0,
+                                  note: noteC.text,
+                                  type: selectedType.value,
+                                  date: selectedDate.value,
+                                  paymentMethodData: pm,
+                                );
+                              },
+                              child: const Text(
+                                "Save Entry",
+                                style: TextStyle(color: Colors.white),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -818,7 +931,240 @@ class _DebatordetailsState extends State<Debatordetails> {
     );
   }
 
-  // --- Dynamic Payment Widget ---
+  void _showEditTransactionDialog(TransactionModel tx, DebtorModel debtor) {
+    final amountC = TextEditingController(text: tx.amount.toString());
+    final noteC = TextEditingController(text: tx.note);
+    final RxString selectedType = tx.type.obs;
+    final Rx<DateTime> selectedDate = tx.date.obs;
+
+    final map = tx.paymentMethod ?? {'type': 'cash'};
+    final RxString payMethodType =
+        (map['type'] ?? 'cash').toString().toLowerCase().obs;
+    final bankNameC = TextEditingController(text: map['bankName'] ?? '');
+    final accountNoC = TextEditingController(text: map['accountNo'] ?? '');
+    final mobileNoC = TextEditingController(text: map['number'] ?? '');
+
+    Get.dialog(
+      Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: SizedBox(
+          width: 500,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _dialogHeader("Edit Transaction"),
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(24),
+                  child: Obx(
+                    () => Column(
+                      children: [
+                        _buildField(
+                          amountC,
+                          "Amount",
+                          Icons.money,
+                          isNum: true,
+                        ),
+                        const SizedBox(height: 12),
+                        _buildField(noteC, "Note", Icons.edit),
+                        const SizedBox(height: 12),
+                        _buildDropdown<String>(
+                          value: selectedType.value,
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'credit',
+                              child: Text("CREDIT SALE"),
+                            ),
+                            DropdownMenuItem(
+                              value: 'debit',
+                              child: Text("PAYMENT"),
+                            ),
+                            DropdownMenuItem(
+                              value: 'previous_due',
+                              child: Text("OLD DEBT"),
+                            ),
+                            DropdownMenuItem(
+                              value: 'loan_payment',
+                              child: Text("LOAN PAY"),
+                            ),
+                            DropdownMenuItem(
+                              value: 'advance_received',
+                              child: Text("ADV RECV"),
+                            ),
+                            DropdownMenuItem(
+                              value: 'advance_given',
+                              child: Text("ADV GIVEN"),
+                            ),
+                          ],
+                          onChanged: (v) => selectedType.value = v!,
+                        ),
+                        if ([
+                          'debit',
+                          'loan_payment',
+                          'advance_received',
+                        ].contains(selectedType.value)) ...[
+                          const SizedBox(height: 12),
+                          const Divider(),
+                          _buildDynamicPaymentSection(
+                            payMethodType,
+                            bankNameC,
+                            accountNoC,
+                            mobileNoC,
+                          ),
+                        ],
+                        const SizedBox(height: 24),
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: activeAccent,
+                            minimumSize: const Size(double.infinity, 50),
+                          ),
+                          onPressed: () async {
+                            Map<String, dynamic> pm = {'type': 'cash'};
+                            if ([
+                              'debit',
+                              'loan_payment',
+                              'advance_received',
+                            ].contains(selectedType.value)) {
+                              if (payMethodType.value == 'bank') {
+                                pm = {
+                                  'type': 'bank',
+                                  'bankName': bankNameC.text.trim(),
+                                  'accountNo': accountNoC.text.trim(),
+                                };
+                              } else if ([
+                                'bkash',
+                                'nagad',
+                                'rocket',
+                              ].contains(payMethodType.value)) {
+                                pm = {
+                                  'type': payMethodType.value,
+                                  'number': mobileNoC.text.trim(),
+                                };
+                              }
+                            }
+                            await controller.editTransaction(
+                              debtorId: debtor.id,
+                              transactionId: tx.id,
+                              oldAmount: tx.amount,
+                              newAmount: double.tryParse(amountC.text) ?? 0,
+                              oldType: tx.type,
+                              newType: selectedType.value,
+                              note: noteC.text,
+                              date: selectedDate.value,
+                              paymentMethod: pm,
+                            );
+                          },
+                          child: const Text(
+                            "Update",
+                            style: TextStyle(color: Colors.white),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showEditProfileDialog(DebtorModel debtor) {
+    final nameC = TextEditingController(text: debtor.name);
+    final phoneC = TextEditingController(text: debtor.phone);
+    final nidC = TextEditingController(text: debtor.nid);
+    final addressC = TextEditingController(text: debtor.address);
+    final desC = TextEditingController(text: debtor.des);
+
+    Get.defaultDialog(
+      title: "Edit Profile",
+      content: Column(
+        children: [
+          _buildField(nameC, "Name", Icons.person),
+          const SizedBox(height: 8),
+          _buildField(phoneC, "Phone", Icons.phone),
+          const SizedBox(height: 8),
+          _buildField(nidC, "NID", Icons.badge),
+          const SizedBox(height: 8),
+          _buildField(addressC, "Address", Icons.home),
+          const SizedBox(height: 8),
+          _buildField(desC, "Description", Icons.description),
+        ],
+      ),
+      textConfirm: "Save",
+      onConfirm: () async {
+        await controller.editDebtor(
+          id: debtor.id,
+          oldName: debtor.name,
+          newName: nameC.text,
+          des: desC.text,
+          nid: nidC.text,
+          phone: phoneC.text,
+          address: addressC.text,
+          payments: debtor.payments,
+        );
+      },
+    );
+  }
+
+  void _confirmDelete(TransactionModel tx) {
+    Get.defaultDialog(
+      title: "Confirm Delete",
+      middleText:
+          "Are you sure you want to delete this transaction of Tk ${tx.amount}?",
+      textConfirm: "Delete Forever",
+      confirmTextColor: Colors.white,
+      buttonColor: Colors.red,
+      onConfirm: () async {
+        Get.back();
+        await controller.deleteTransaction(widget.id, tx.id);
+      },
+    );
+  }
+
+  Future<void> _downloadPDF() async {
+    final snap =
+        await controller.db
+            .collection("debatorbody")
+            .doc(widget.id)
+            .collection("transactions")
+            .orderBy("date")
+            .get();
+    List<Map<String, dynamic>> data =
+        snap.docs.map((d) {
+          final map = d.data();
+          return {
+            "date":
+                (map["date"] is Timestamp)
+                    ? (map["date"] as Timestamp).toDate()
+                    : map["date"],
+            "type": map["type"],
+            "amount": (map["amount"] as num).toDouble(),
+            "note": map["note"] ?? "",
+            "paymentMethod": map["paymentMethod"],
+          };
+        }).toList();
+    final List<int> bytes = await controller.generatePDF(widget.name, data);
+    final Uint8List uint8list = Uint8List.fromList(bytes);
+    final JSUint8Array jsBytes = uint8list.toJS;
+    final blob = web.Blob(
+      [jsBytes].toJS as JSArray<web.BlobPart>,
+      web.BlobPropertyBag(type: 'application/pdf'),
+    );
+    final url = web.URL.createObjectURL(blob);
+    final anchor = web.document.createElement('a') as web.HTMLAnchorElement;
+    anchor.href = url;
+    anchor.download = "${widget.name}_Statement.pdf";
+    anchor.click();
+    web.URL.revokeObjectURL(url);
+  }
+
+  // ==========================================
+  // HELPERS (Payment Fields, Headers, etc)
+  // ==========================================
+
   Widget _buildDynamicPaymentSection(
     RxString methodType,
     TextEditingController bankC,
@@ -827,7 +1173,6 @@ class _DebatordetailsState extends State<Debatordetails> {
   ) {
     return Column(
       children: [
-        // Type Selector
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12),
           decoration: BoxDecoration(
@@ -908,7 +1253,6 @@ class _DebatordetailsState extends State<Debatordetails> {
           ),
         ),
         const SizedBox(height: 12),
-        // Dynamic Fields
         if (methodType.value == 'bank') ...[
           _buildField(bankC, "Bank Name (e.g. Islami Bank)", Icons.business),
           const SizedBox(height: 8),
@@ -923,238 +1267,6 @@ class _DebatordetailsState extends State<Debatordetails> {
         ],
       ],
     );
-  }
-
-  void _showEditTransactionDialog(TransactionModel tx, DebtorModel debtor) {
-    final amountC = TextEditingController(text: tx.amount.toString());
-    final noteC = TextEditingController(text: tx.note);
-    final RxString selectedType = tx.type.obs;
-    final Rx<DateTime> selectedDate = tx.date.obs;
-
-    // Init Payment States from Existing
-    final map = tx.paymentMethod ?? {'type': 'cash'};
-    final RxString payMethodType =
-        (map['type'] ?? 'cash').toString().toLowerCase().obs;
-    final bankNameC = TextEditingController(text: map['bankName'] ?? '');
-    final accountNoC = TextEditingController(text: map['accountNo'] ?? '');
-    final mobileNoC = TextEditingController(text: map['number'] ?? '');
-
-    Get.dialog(
-      Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: SizedBox(
-          width: 500,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _dialogHeader("Edit Transaction"),
-              Padding(
-                padding: const EdgeInsets.all(24),
-                child: Obx(
-                  () => Column(
-                    children: [
-                      _buildField(amountC, "Amount", Icons.money, isNum: true),
-                      const SizedBox(height: 12),
-                      _buildField(noteC, "Note", Icons.edit),
-                      const SizedBox(height: 12),
-                      _buildDropdown<String>(
-                        value: selectedType.value,
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'credit',
-                            child: Text("CREDIT SALE"),
-                          ),
-                          DropdownMenuItem(
-                            value: 'debit',
-                            child: Text("PAYMENT"),
-                          ),
-                          DropdownMenuItem(
-                            value: 'previous_due',
-                            child: Text("OLD DEBT"),
-                          ),
-                          DropdownMenuItem(
-                            value: 'loan_payment',
-                            child: Text("LOAN PAY"),
-                          ),
-                          DropdownMenuItem(
-                            value: 'advance_received',
-                            child: Text("ADV RECV"),
-                          ),
-                          DropdownMenuItem(
-                            value: 'advance_given',
-                            child: Text("ADV GIVEN"),
-                          ),
-                        ],
-                        onChanged: (v) => selectedType.value = v!,
-                      ),
-
-                      if ([
-                        'debit',
-                        'loan_payment',
-                        'advance_received',
-                      ].contains(selectedType.value)) ...[
-                        const SizedBox(height: 12),
-                        const Divider(),
-                        _buildDynamicPaymentSection(
-                          payMethodType,
-                          bankNameC,
-                          accountNoC,
-                          mobileNoC,
-                        ),
-                      ],
-
-                      const SizedBox(height: 24),
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: activeAccent,
-                          minimumSize: const Size(double.infinity, 50),
-                        ),
-                        onPressed: () async {
-                          // Construct Payment Map
-                          Map<String, dynamic> finalPaymentData = {
-                            'type': 'cash',
-                          };
-                          if ([
-                            'debit',
-                            'loan_payment',
-                            'advance_received',
-                          ].contains(selectedType.value)) {
-                            if (payMethodType.value == 'bank') {
-                              finalPaymentData = {
-                                'type': 'bank',
-                                'bankName': bankNameC.text.trim(),
-                                'accountNo': accountNoC.text.trim(),
-                              };
-                            } else if ([
-                              'bkash',
-                              'nagad',
-                              'rocket',
-                            ].contains(payMethodType.value)) {
-                              finalPaymentData = {
-                                'type': payMethodType.value,
-                                'number': mobileNoC.text.trim(),
-                              };
-                            }
-                          }
-
-                          await controller.editTransaction(
-                            debtorId: debtor.id,
-                            transactionId: tx.id,
-                            oldAmount: tx.amount,
-                            newAmount: double.tryParse(amountC.text) ?? 0,
-                            oldType: tx.type,
-                            newType: selectedType.value,
-                            note: noteC.text,
-                            date: selectedDate.value,
-                            paymentMethod: finalPaymentData,
-                          );
-                        },
-                        child: const Text(
-                          "Update",
-                          style: TextStyle(color: Colors.white),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _confirmDelete(TransactionModel tx) {
-    Get.defaultDialog(
-      title: "Confirm Delete",
-      middleText:
-          "Are you sure you want to delete this transaction of Tk ${tx.amount}? This will revert the balance.",
-      textConfirm: "Delete Forever",
-      confirmTextColor: Colors.white,
-      buttonColor: Colors.red,
-      onConfirm: () async {
-        Get.back();
-        await controller.deleteTransaction(widget.id, tx.id);
-      },
-    );
-  }
-
-  // --- FIXED PROFILE EDIT ---
-  void _showEditProfileDialog(DebtorModel debtor) {
-    final nameC = TextEditingController(text: debtor.name);
-    final phoneC = TextEditingController(text: debtor.phone);
-    final nidC = TextEditingController(text: debtor.nid);
-    final addressC = TextEditingController(text: debtor.address);
-    final desC = TextEditingController(text: debtor.des);
-
-    Get.defaultDialog(
-      title: "Edit Profile",
-      content: Column(
-        children: [
-          _buildField(nameC, "Name", Icons.person),
-          const SizedBox(height: 8),
-          _buildField(phoneC, "Phone", Icons.phone),
-          const SizedBox(height: 8),
-          _buildField(nidC, "NID", Icons.badge),
-          const SizedBox(height: 8),
-          _buildField(addressC, "Address", Icons.home),
-          const SizedBox(height: 8),
-          _buildField(desC, "Description", Icons.description),
-        ],
-      ),
-      textConfirm: "Save",
-      onConfirm: () async {
-        await controller.editDebtor(
-          id: debtor.id, // Explicit ID passed
-          oldName: debtor.name,
-          newName: nameC.text,
-          des: desC.text,
-          nid: nidC.text,
-          phone: phoneC.text,
-          address: addressC.text,
-          payments: debtor.payments, // Preserve existing saved accounts if any
-        );
-      },
-    );
-  }
-
-  Future<void> _downloadPDF() async {
-    final snap =
-        await controller.db
-            .collection("debatorbody")
-            .doc(widget.id)
-            .collection("transactions")
-            .orderBy("date")
-            .get();
-    List<Map<String, dynamic>> data =
-        snap.docs.map((d) {
-          final map = d.data();
-          return {
-            "date":
-                (map["date"] is Timestamp)
-                    ? (map["date"] as Timestamp).toDate()
-                    : map["date"],
-            "type": map["type"],
-            "amount": (map["amount"] as num).toDouble(),
-            "note": map["note"] ?? "",
-            "paymentMethod": map["paymentMethod"],
-          };
-        }).toList();
-
-    final List<int> bytes = await controller.generatePDF(widget.name, data);
-    final Uint8List uint8list = Uint8List.fromList(bytes);
-    final JSUint8Array jsBytes = uint8list.toJS;
-    final blob = web.Blob(
-      [jsBytes].toJS as JSArray<web.BlobPart>,
-      web.BlobPropertyBag(type: 'application/pdf'),
-    );
-    final url = web.URL.createObjectURL(blob);
-    final anchor = web.document.createElement('a') as web.HTMLAnchorElement;
-    anchor.href = url;
-    anchor.download = "${widget.name}_Statement.pdf";
-    anchor.click();
-    web.URL.revokeObjectURL(url);
   }
 
   Widget _dialogHeader(String title) {
@@ -1224,11 +1336,11 @@ class _DebatordetailsState extends State<Debatordetails> {
   }
 }
 
-// Helper to format map for display
+// Global Helper
 String formatDynamicPayment(Map<String, dynamic> pm) {
   String type = (pm['type'] ?? 'Cash').toString().toUpperCase();
   if (type == 'BANK') {
-    return "BANK: ${pm['bankName'] ?? ''} - ${pm['accountNo'] ?? ''}";
+    return "BANK: ${pm['bankName'] ?? ''}\nACC: ${pm['accountNo'] ?? ''}";
   } else if (['BKASH', 'NAGAD', 'ROCKET'].contains(type)) {
     return "$type: ${pm['number'] ?? ''}";
   }

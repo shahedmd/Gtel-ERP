@@ -17,23 +17,38 @@ import 'model.dart';
 class DebatorController extends GetxController {
   final FirebaseFirestore db = FirebaseFirestore.instance;
 
+  // --- DATA LISTS ---
+  var bodies = <DebtorModel>[].obs; // The list displayed on screen
+
+  // --- LOADING STATES ---
+  RxBool isBodiesLoading = false.obs;
+  RxBool isSearching = false.obs;
+
+  // --- PAGINATION STATE ---
+  final int _limit = 20; // Items per page
+
+  // This list keeps track of the 'startAfter' document for every page.
+  // Index 0 = Page 1 (starts after null), Index 1 = Page 2 (starts after Doc A), etc.
+  List<DocumentSnapshot?> pageCursors = [null];
+
+  RxInt currentPage = 1.obs;
+  RxBool hasMore = true.obs; // Can we go forward?
+
+  // --- MARKET TOTALS ---
+  var totalMarketOutstanding = 0.0.obs;
+  var totalMarketPayable = 0.0.obs;
+
   // --- OBSERVABLES ---
-  var bodies = <DebtorModel>[].obs;
   var filteredBodies = <DebtorModel>[].obs;
 
   // Global Market Debt (Receivable)
-  var totalMarketOutstanding = 0.0.obs;
   // Global Market Payable (We owe them)
-  var totalMarketPayable = 0.0.obs;
 
-  RxBool isBodiesLoading = false.obs;
   RxBool gbIsLoading = false.obs;
   RxBool isAddingBody = false.obs;
 
   // --- PAGINATION STATE ---
-  final int _limit = 20;
   DocumentSnapshot? _lastDocument;
-  final RxBool hasMore = true.obs;
   final RxBool isMoreLoading = false.obs;
 
   // --- TRANSACTIONS STATE ---
@@ -55,8 +70,168 @@ class DebatorController extends GetxController {
   @override
   void onInit() {
     super.onInit();
-    loadBodies();
     _silentAutoRepair();
+    loadPage(1); // Load Page 1 initially
+    loadBodies();
+    calculateTotalOutstanding();
+  }
+
+  void nextPage() {
+    if (!hasMore.value) return;
+    loadPage(currentPage.value + 1);
+  }
+
+  void prevPage() {
+    if (currentPage.value <= 1) return;
+    loadPage(currentPage.value - 1);
+  }
+
+  // =========================================================
+  // 2. SERVER-SIDE SEARCH LOGIC
+  // =========================================================
+
+  Future<void> runServerSearch(String queryText) async {
+    if (queryText.trim().isEmpty) {
+      // If search is cleared, reload the current page of the main list
+      loadPage(currentPage.value);
+      return;
+    }
+
+    isBodiesLoading.value = true;
+    isSearching.value =
+        true; // Mark as search mode (disables pagination buttons)
+
+    try {
+      // NOTE: Firestore text search is case-sensitive and prefix-based.
+      // "Rahim" matches "Rah", but "rahim" does not match "Rah".
+      // Searching by multiple fields (Phone OR Name) requires multiple queries in Firestore.
+
+      String term = queryText.trim();
+
+      // 1. Try finding by Name (Prefix search)
+      // This looks for names starting with the query term
+      QuerySnapshot nameSnap =
+          await db
+              .collection('debatorbody')
+              .where('name', isGreaterThanOrEqualTo: term)
+              .where('name', isLessThan: '$term\uf8ff')
+              .limit(20)
+              .get();
+
+      // 2. Try finding by Phone (Exact match usually, or prefix)
+      // Note: If you want prefix search on phone, use the same logic as name
+      QuerySnapshot phoneSnap =
+          await db
+              .collection('debatorbody')
+              .where('phone', isEqualTo: term)
+              .get();
+
+      // Merge results (removing duplicates based on ID)
+      Map<String, DebtorModel> results = {};
+
+      for (var doc in nameSnap.docs) {
+        var m = DebtorModel.fromFirestore(doc);
+        results[m.id] = m;
+      }
+      for (var doc in phoneSnap.docs) {
+        var m = DebtorModel.fromFirestore(doc);
+        results[m.id] = m;
+      }
+
+      bodies.value = results.values.toList();
+
+      // In search mode, pagination doesn't apply the same way
+      hasMore.value = false;
+    } catch (e) {
+      Get.snackbar("Search Error", e.toString());
+      bodies.clear();
+    } finally {
+      isBodiesLoading.value = false;
+    }
+  }
+
+  Future<void> calculateTotalOutstanding() async {
+    try {
+      // Note: This still requires reading all docs if you want an exact market total.
+      // If you have thousands of debtors, consider running this via a Cloud Function
+      // or maintaining a separate aggregation document.
+      final snap = await db.collection('debatorbody').get();
+      double totalRec = 0;
+      double totalPay = 0;
+
+      for (var doc in snap.docs) {
+        final data = doc.data();
+        totalRec += (data['balance'] as num?)?.toDouble() ?? 0.0;
+        totalPay += (data['purchaseDue'] as num?)?.toDouble() ?? 0.0;
+      }
+      totalMarketOutstanding.value = totalRec;
+      totalMarketPayable.value = totalPay;
+    } catch (e) {
+      print("Calc Error: $e");
+    }
+  }
+
+  Stream<double> getLiveBalance(String debtorId) {
+    return db
+        .collection('debatorbody')
+        .doc(debtorId)
+        .snapshots()
+        .map((doc) => (doc.data()?['balance'] as num?)?.toDouble() ?? 0.0);
+  }
+
+  Future<void> loadPage(int pageIndex) async {
+    // Safety check
+    if (pageIndex < 1) return;
+    if (pageIndex > pageCursors.length) return;
+
+    isBodiesLoading.value = true;
+    isSearching.value = false; // Disable search mode
+
+    try {
+      Query query = db
+          .collection('debatorbody')
+          .orderBy('createdAt', descending: true)
+          .limit(_limit);
+
+      // Get the cursor for this page.
+      // Page 1 cursor is at index 0 (null).
+      // Page 2 cursor is at index 1 (the last doc of page 1).
+      DocumentSnapshot? startAfterDoc = pageCursors[pageIndex - 1];
+
+      if (startAfterDoc != null) {
+        query = query.startAfterDocument(startAfterDoc);
+      }
+
+      final snap = await query.get();
+
+      if (snap.docs.isNotEmpty) {
+        bodies.value =
+            snap.docs.map((d) => DebtorModel.fromFirestore(d)).toList();
+
+        // Determine if we have more data for a NEXT page
+        if (snap.docs.length < _limit) {
+          hasMore.value = false;
+        } else {
+          hasMore.value = true;
+          // If we are on the furthest page reached so far, save the cursor for the next page
+          if (pageCursors.length <= pageIndex) {
+            pageCursors.add(snap.docs.last);
+          } else {
+            // Update existing cursor just in case
+            pageCursors[pageIndex] = snap.docs.last;
+          }
+        }
+        currentPage.value = pageIndex;
+      } else {
+        // No data found for this page (shouldn't happen via buttons, but safe to handle)
+        if (pageIndex == 1) bodies.clear();
+        hasMore.value = false;
+      }
+    } catch (e) {
+      Get.snackbar("Error", "Failed to load page: $e");
+    } finally {
+      isBodiesLoading.value = false;
+    }
   }
 
   Future<void> loadBodies({bool loadMore = false}) async {
@@ -723,23 +898,6 @@ class DebatorController extends GetxController {
     }
   }
 
-  Future<void> calculateTotalOutstanding() async {
-    try {
-      final snap = await db.collection('debatorbody').get();
-      double totalRec = 0;
-      double totalPay = 0;
-
-      for (var doc in snap.docs) {
-        final data = doc.data();
-        totalRec += (data['balance'] as num?)?.toDouble() ?? 0.0;
-        totalPay += (data['purchaseDue'] as num?)?.toDouble() ?? 0.0;
-      }
-      totalMarketOutstanding.value = totalRec;
-      totalMarketPayable.value = totalPay;
-    } catch (e) {
-      print("Calc Error: $e");
-    }
-  }
 
   void searchDebtors(String query) {
     if (query.trim().isEmpty) {
@@ -760,15 +918,8 @@ class DebatorController extends GetxController {
     );
   }
 
-  Stream<double> getLiveBalance(String debtorId) {
-    return db
-        .collection('debatorbody')
-        .doc(debtorId)
-        .snapshots()
-        .map((doc) => (doc.data()?['balance'] as num?)?.toDouble() ?? 0.0);
-  }
 
-  // --- PDF GENERATION LOGIC ---
+
   Future<Uint8List> generatePDF(
     String debtorName,
     List<Map<String, dynamic>> transactions,
