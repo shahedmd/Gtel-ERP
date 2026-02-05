@@ -16,18 +16,13 @@ class ProfitController extends GetxController {
   var endDate = DateTime.now().obs;
   var selectedFilterLabel = "This Month".obs;
 
-  // =========================================================
-  // SECTION 1: SALES OVERVIEW (Source: 'sales_orders')
-  // =========================================================
   var saleDailyCustomer = 0.0.obs;
   var saleDebtor = 0.0.obs;
   var saleCondition = 0.0.obs;
   var totalRevenue = 0.0.obs;
   var totalCostOfGoods = 0.0.obs;
 
-  // =========================================================
-  // SECTION 2: COLLECTIONS OVERVIEW (Source: 'daily_sales')
-  // =========================================================
+
   var collectionCustomer = 0.0.obs;
   var collectionDebtor = 0.0.obs;
   var collectionCondition = 0.0.obs;
@@ -83,7 +78,6 @@ class ProfitController extends GetxController {
     _resetMetrics();
 
     try {
-      // 1. Fetch Sales Data & Calculate PENDING correctly
       await _processSalesData();
 
       // 2. Calculate Margin
@@ -115,7 +109,6 @@ class ProfitController extends GetxController {
     }
   }
 
-  // --- LOGIC 1: SALES & PENDING (FIXED) ---
   Future<void> _processSalesData() async {
     QuerySnapshot invoiceSnap =
         await _db
@@ -139,47 +132,39 @@ class ProfitController extends GetxController {
 
     for (var doc in invoiceSnap.docs) {
       var data = doc.data() as Map<String, dynamic>;
-      if (data['status'] == 'deleted' || data['status'] == 'cancelled') {
-        continue;
-      }
+
+      // 1. Skip deleted/cancelled
+      String status = (data['status'] ?? '').toString().toLowerCase();
+      if (status == 'deleted' || status == 'cancelled') continue;
 
       double amount = double.tryParse(data['grandTotal'].toString()) ?? 0;
       double cost = double.tryParse(data['totalCost'].toString()) ?? 0;
-
       String type = (data['customerType'] ?? '').toString().toLowerCase();
       bool isCondition = data['isCondition'] == true;
 
       tRev += amount;
       tCost += cost;
 
-      // --- PENDING CALCULATION FIX ---
+      // 2. Calculate Pending
       if (isCondition) {
-        // Condition Sale: Pending is explicitly 'courierDue'
+        // Condition: trust 'courierDue'
         tPending += double.tryParse(data['courierDue'].toString()) ?? 0;
         tCondition += amount;
       } else {
-        // Normal/Debtor Sale: Calculate Recieved correctly
-        double received = 0;
 
-        if (data['paymentDetails'] != null) {
-          var pd = data['paymentDetails'];
+        double dueForThisSale = 0.0;
 
-          // 1. Try to get 'totalPaidInput' directly (Best Source)
-          if (pd['totalPaidInput'] != null) {
-            received = double.tryParse(pd['totalPaidInput'].toString()) ?? 0;
-          }
-          // 2. Fallback: Sum up individual methods if totalPaidInput is missing
-          else {
-            double c = double.tryParse(pd['cash'].toString()) ?? 0;
-            double b = double.tryParse(pd['bkash'].toString()) ?? 0;
-            double n = double.tryParse(pd['nagad'].toString()) ?? 0;
-            double bank = double.tryParse(pd['bank'].toString()) ?? 0;
-            received = c + b + n + bank;
-          }
+        if (status == 'completed' || status == 'paid') {
+          dueForThisSale = 0.0;
+        }
+        else if (data.containsKey('due')) {
+          dueForThisSale = double.tryParse(data['due'].toString()) ?? 0.0;
+        }
+        else {
+          double livePaid = double.tryParse(data['paid'].toString()) ?? 0.0;
+          dueForThisSale = amount - livePaid;
         }
 
-        double dueForThisSale = amount - received;
-        // Fix for negative due (change returned)
         if (dueForThisSale < 0) dueForThisSale = 0;
 
         if (type == 'debtor') {
@@ -197,11 +182,9 @@ class ProfitController extends GetxController {
     saleCondition.value = tCondition;
     totalRevenue.value = tRev;
     totalCostOfGoods.value = tCost;
-
     totalPendingGenerated.value = tPending;
   }
 
-  // --- LOGIC 2: COLLECTIONS ---
   Future<double> _processCollectionData() async {
     QuerySnapshot dailySnap =
         await _db

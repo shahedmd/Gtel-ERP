@@ -151,8 +151,13 @@ class CashDrawerController extends GetxController {
       // =========================================================
       for (var doc in salesSnap.docs) {
         var data = doc.data() as Map<String, dynamic>;
-        double paidAmount = double.tryParse(data['paid'].toString()) ?? 0;
-        if (paidAmount <= 0) continue;
+        double totalPaid = double.tryParse(data['paid'].toString()) ?? 0;
+        double ledgerPaid = double.tryParse(data['ledgerPaid'].toString()) ?? 0;
+
+        // We only want to count "Instant Cash/Bank" received at the counter.
+        // We subtract 'ledgerPaid' because that money is already counted in PART B (Ledger Loop).
+        double paidAmount = totalPaid - ledgerPaid;
+        if (paidAmount <= 0.1) continue;
 
         sumSales += paidAmount;
 

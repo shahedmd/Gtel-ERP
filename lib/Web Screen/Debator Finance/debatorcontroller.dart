@@ -324,8 +324,9 @@ class DebatorController extends GetxController {
       final String debtorName = debtorSnap.data()?['name'] ?? 'Unknown';
 
       DocumentReference newTxRef = debtorRef.collection('transactions').doc();
-      if (txid != null && txid.isNotEmpty)
+      if (txid != null && txid.isNotEmpty) {
         newTxRef = debtorRef.collection('transactions').doc(txid);
+      }
       String finalTxId = newTxRef.id;
 
       // 1. Save Transaction (History)
