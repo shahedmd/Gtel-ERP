@@ -2,7 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:gtel_erp/Live%20order/salemodel.dart'; 
+import 'package:gtel_erp/Live%20order/salemodel.dart';
 import '../Stock/model.dart';
 
 class LiveOrderSalesPage extends StatelessWidget {
@@ -10,11 +10,9 @@ class LiveOrderSalesPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-
-
     final controller = Get.put(LiveSalesController());
     return Scaffold(
-      backgroundColor: const Color(0xFFF1F5F9), 
+      backgroundColor: const Color(0xFFF1F5F9),
       body: Row(
         children: [
           Expanded(flex: 6, child: _ProductTableSection(controller)),
@@ -62,7 +60,6 @@ class LiveOrderSalesPage extends StatelessWidget {
       ),
     );
   }
-
 
   Widget _buildHeader(LiveSalesController controller) {
     return Obx(
@@ -173,7 +170,7 @@ class LiveOrderSalesPage extends StatelessWidget {
     );
   }
 
-  // --- 1. CUSTOMER & LOGISTICS INFO (UPDATED) ---
+  // --- 1. CUSTOMER & LOGISTICS INFO ---
   Widget _buildCustomerSection(LiveSalesController controller) {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -363,6 +360,13 @@ class LiveOrderSalesPage extends StatelessWidget {
                         "Shop Name / Reference (Optional)",
                         Icons.store,
                       ),
+                      // --- ADDRESS VISIBLE FOR EVERYONE ---
+                      const SizedBox(height: 12),
+                      _miniTextField(
+                        controller.addressC,
+                        "Customer Address",
+                        Icons.location_on,
+                      ),
                     ],
                   ),
 
@@ -431,7 +435,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                   ),
                 ),
 
-                // --- SECTION C: LOGISTICS (CONDITION/COURIER) ---
+                // --- SECTION C: LOGISTICS (CONDITION ONLY EXTRA FIELDS) ---
                 if (controller.isConditionSale.value) ...[
                   const SizedBox(height: 20),
                   const Divider(thickness: 1, height: 1),
@@ -439,35 +443,13 @@ class LiveOrderSalesPage extends StatelessWidget {
                   const Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      "Logistics & Courier Details",
+                      "Condition Logistics Details",
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
                         color: Colors.deepOrange,
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        flex: 2,
-                        child: _miniTextField(
-                          controller.addressC,
-                          "Delivery Address",
-                          Icons.location_on,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        flex: 1,
-                        child: _miniTextField(
-                          controller.challanC,
-                          "Challan No",
-                          Icons.receipt_long,
-                        ),
-                      ),
-                    ],
                   ),
                   const SizedBox(height: 12),
                   Row(
@@ -519,7 +501,6 @@ class LiveOrderSalesPage extends StatelessWidget {
                                 ),
                               ),
                             ),
-                            // Show existing due only if NOT 'Other'
                             if (controller.selectedCourier.value != null &&
                                 controller.selectedCourier.value != 'Other')
                               Padding(
@@ -540,6 +521,15 @@ class LiveOrderSalesPage extends StatelessWidget {
                       Expanded(
                         flex: 1,
                         child: _miniTextField(
+                          controller.challanC,
+                          "Challan No",
+                          Icons.receipt_long,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        flex: 1,
+                        child: _miniTextField(
                           controller.cartonsC,
                           "Cartons",
                           Icons.inventory_2,
@@ -548,8 +538,6 @@ class LiveOrderSalesPage extends StatelessWidget {
                       ),
                     ],
                   ),
-
-                  // ** UPDATED: "Other" Courier Text Field **
                   if (controller.selectedCourier.value == 'Other')
                     Padding(
                       padding: const EdgeInsets.only(top: 10),
@@ -644,7 +632,7 @@ class LiveOrderSalesPage extends StatelessWidget {
     );
   }
 
-  // --- 2. CART SECTION ---
+  // --- 2. CART SECTION (WITH LOSS INDICATOR) ---
   Widget _buildCartSection(LiveSalesController controller) {
     return Container(
       decoration: BoxDecoration(
@@ -703,6 +691,9 @@ class LiveOrderSalesPage extends StatelessWidget {
               separatorBuilder: (_, __) => const Divider(height: 1),
               itemBuilder: (context, index) {
                 final item = controller.cart[index];
+                // *** LOSS CHECK FOR CART ITEMS ***
+                final bool isLoss = item.isLoss;
+
                 return Padding(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 16,
@@ -725,8 +716,15 @@ class LiveOrderSalesPage extends StatelessWidget {
                             ),
                             Text(
                               "Rate: ৳${item.priceAtSale}",
-                              style: const TextStyle(
-                                color: Colors.grey,
+                              style: TextStyle(
+                                color:
+                                    isLoss
+                                        ? Colors.red
+                                        : Colors.grey, // RED if Loss
+                                fontWeight:
+                                    isLoss
+                                        ? FontWeight.bold
+                                        : FontWeight.normal,
                                 fontSize: 12,
                               ),
                             ),
@@ -766,9 +764,13 @@ class LiveOrderSalesPage extends StatelessWidget {
                         child: Text(
                           "৳${item.subtotal.toStringAsFixed(0)}",
                           textAlign: TextAlign.right,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 14,
+                            color:
+                                isLoss
+                                    ? Colors.red
+                                    : Colors.black87, // RED if Loss
                           ),
                         ),
                       ),
@@ -1634,13 +1636,18 @@ class _ProductRow extends StatelessWidget {
                       (controller.customerType.value == "Retailer")
                           ? product.wholesale
                           : product.agent;
+
+                  // *** LOSS CHECK FOR PRODUCT LIST ***
+                  bool isLoss = price < product.avgPurchasePrice;
+
                   return Text(
                     "৳ ${price.toStringAsFixed(2)}",
                     textAlign: TextAlign.right,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: metaSize,
-                      color: Colors.black87,
+                      color:
+                          isLoss ? Colors.red : Colors.black87, // RED if loss
                     ),
                   );
                 }),

@@ -5,7 +5,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
-import 'model.dart'; // Ensure your Product model matches the server JSON keys
+import 'model.dart';
 
 class ProductController extends GetxController {
   // ==========================================
@@ -17,6 +17,9 @@ class ProductController extends GetxController {
   // STATE VARIABLES
   // ==========================================
   final RxList<Product> allProducts = <Product>[].obs;
+  // NEW: Internal list to hold ALL data when sorting by loss
+  List<Product> _masterList = [];
+
   final RxList<Product> shortListProducts = <Product>[].obs;
   final RxList<Map<String, dynamic>> serviceLogs = <Map<String, dynamic>>[].obs;
   final RxDouble potentialProfitTotal = 0.0.obs;
@@ -31,6 +34,9 @@ class ProductController extends GetxController {
   final RxString searchText = ''.obs;
   final RxDouble currentCurrency = 17.85.obs; // BDT to CNY
 
+  // NEW: Sort State
+  final RxBool sortByLoss = false.obs;
+
   // Loading States
   final RxBool isLoading = false.obs;
   final RxBool isActionLoading = false.obs;
@@ -42,7 +48,7 @@ class ProductController extends GetxController {
   final RxInt shortlistPage = 1.obs;
   final RxInt shortlistLimit = 20.obs;
 
-  // Timers (Separated to prevent conflicts)
+  // Timers
   Timer? _mainSearchDebounce;
   Timer? _shortlistSearchDebounce;
 
@@ -69,7 +75,13 @@ class ProductController extends GetxController {
   // 1. DATA FETCHING (Main List & Dropdowns)
   // =========================================================
 
-  // Used for Autocomplete
+  // NEW: Toggle Sort Method
+  void toggleSortByLoss() {
+    sortByLoss.value = !sortByLoss.value;
+    currentPage.value = 1; // Reset to page 1
+    fetchProducts();
+  }
+
   Future<List<Map<String, dynamic>>> searchProductsForDropdown(
     String query,
   ) async {
@@ -93,9 +105,7 @@ class ProductController extends GetxController {
           };
         }).toList();
       }
-    } catch (e) {
-      // Silent failure for dropdowns
-    }
+    } catch (e) {}
     return [];
   }
 
@@ -103,35 +113,76 @@ class ProductController extends GetxController {
     isLoading.value = true;
     try {
       final current = page ?? currentPage.value;
-      final queryParams = {
-        'page': current.toString(),
-        'limit': pageSize.value.toString(),
-        'search': searchText.value,
-        'brand': selectedBrand.value == 'All' ? '' : selectedBrand.value,
-      };
 
-      final uri = Uri.parse(
-        '$baseUrl/products',
-      ).replace(queryParameters: queryParams);
-      final res = await http.get(uri).timeout(const Duration(seconds: 20));
+      // ============================================================
+      // LOGIC BRANCH: IF SORTING BY LOSS, FETCH ALL DATA FIRST
+      // ============================================================
+      if (sortByLoss.value) {
+        // We request a huge limit to ensure we get products from "Page 16"
+        final queryParams = {
+          'page': '1',
+          'limit': '10000',
+          'search': searchText.value,
+          'brand': selectedBrand.value == 'All' ? '' : selectedBrand.value,
+        };
 
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
+        final uri = Uri.parse(
+          '$baseUrl/products',
+        ).replace(queryParameters: queryParams);
+        final res = await http.get(uri).timeout(const Duration(seconds: 40));
 
-        // 1. List
-        final List productsJson = data['products'] ?? [];
-        allProducts.assignAll(
-          productsJson.map((e) => Product.fromJson(e)).toList(),
-        );
+        if (res.statusCode == 200) {
+          final data = jsonDecode(res.body);
+          final List productsJson = data['products'] ?? [];
 
-        // 2. Count
-        totalProducts.value = int.tryParse(data['total'].toString()) ?? 0;
+          // 1. Parse ALL products
+          _masterList = productsJson.map((e) => Product.fromJson(e)).toList();
 
-        // 3. Total Valuation
-        overallTotalValuation.value =
-            double.tryParse(data['total_value'].toString()) ?? 0.0;
-      } else {
-        _handleErrorResponse(res);
+          // 2. Sort Locally (Lowest Profit / Highest Loss First)
+          _masterList.sort(
+            (a, b) => a.profitWholesale.compareTo(b.profitWholesale),
+          );
+
+          // 3. Update Totals
+          totalProducts.value = _masterList.length;
+          overallTotalValuation.value =
+              double.tryParse(data['total_value'].toString()) ?? 0.0;
+
+          // 4. Slice the master list for the current view (Simulate Pagination)
+          _updateLocalPagination();
+        } else {
+          _handleErrorResponse(res);
+        }
+      }
+      // ============================================================
+      // LOGIC BRANCH: NORMAL SERVER PAGINATION (Standard Mode)
+      // ============================================================
+      else {
+        final queryParams = {
+          'page': current.toString(),
+          'limit': pageSize.value.toString(),
+          'search': searchText.value,
+          'brand': selectedBrand.value == 'All' ? '' : selectedBrand.value,
+        };
+
+        final uri = Uri.parse(
+          '$baseUrl/products',
+        ).replace(queryParameters: queryParams);
+        final res = await http.get(uri).timeout(const Duration(seconds: 20));
+
+        if (res.statusCode == 200) {
+          final data = jsonDecode(res.body);
+          final List productsJson = data['products'] ?? [];
+
+          allProducts.assignAll(
+            productsJson.map((e) => Product.fromJson(e)).toList(),
+          );
+          totalProducts.value = int.tryParse(data['total'].toString()) ?? 0;
+          overallTotalValuation.value =
+              double.tryParse(data['total_value'].toString()) ?? 0.0;
+        } else {
+          _handleErrorResponse(res);
+        }
       }
     } catch (e) {
       _showError('Connection failed: $e');
@@ -140,20 +191,32 @@ class ProductController extends GetxController {
     }
   }
 
+  // Helper to slice the big list into pages
+  void _updateLocalPagination() {
+    if (_masterList.isEmpty) {
+      allProducts.clear();
+      return;
+    }
+    int start = (currentPage.value - 1) * pageSize.value;
+    int end = start + pageSize.value;
+
+    // Safety checks
+    if (start >= _masterList.length) start = 0;
+    if (end > _masterList.length) end = _masterList.length;
+
+    // Update the UI list with just this slice
+    allProducts.assignAll(_masterList.sublist(start, end));
+  }
+
   // ==========================================
-  // 2. SHORTLIST (Low Stock) - UPDATED FOR SEARCH
+  // 2. SHORTLIST (Low Stock)
   // ==========================================
 
   void searchShortlist(String query) {
-    // 1. Update the reactive variable immediately so UI text field matches
     shortlistSearchText.value = query;
-
-    // 2. Cancel any existing timer for the shortlist
     if (_shortlistSearchDebounce?.isActive ?? false) {
       _shortlistSearchDebounce!.cancel();
     }
-
-    // 3. Start a new timer to fetch data after user stops typing
     _shortlistSearchDebounce = Timer(const Duration(milliseconds: 600), () {
       fetchShortList(page: 1);
     });
@@ -167,15 +230,12 @@ class ProductController extends GetxController {
       final Map<String, String> queryParams = {
         'page': page.toString(),
         'limit': shortlistLimit.value.toString(),
-        'search':
-            shortlistSearchText.value
-                .trim(), // Explicitly send trimmed search text
+        'search': shortlistSearchText.value.trim(),
       };
 
       final uri = Uri.parse(
         '$baseUrl/products/shortlist',
       ).replace(queryParameters: queryParams);
-
       final res = await http.get(uri);
 
       if (res.statusCode == 200) {
@@ -199,7 +259,6 @@ class ProductController extends GetxController {
 
   Future<List<Product>> fetchAllShortListForExport() async {
     try {
-      // all=true triggers the server logic: "SELECT * ... WHERE stock <= alert" without limit
       final uri = Uri.parse('$baseUrl/products/shortlist?all=true');
       final res = await http.get(uri).timeout(const Duration(seconds: 60));
 
@@ -219,7 +278,6 @@ class ProductController extends GetxController {
   // 3. PRODUCT CRUD
   // ==========================================
 
-  // Single Insert
   Future<void> createProduct(Map<String, dynamic> data) async {
     await _performAction(
       () => http.post(
@@ -231,7 +289,6 @@ class ProductController extends GetxController {
     );
   }
 
-  // Bulk Insert
   Future<void> bulkCreateProducts(List<Map<String, dynamic>> products) async {
     await _performAction(
       () => http.post(
@@ -243,7 +300,6 @@ class ProductController extends GetxController {
     );
   }
 
-  // Update
   Future<void> updateProduct(int id, Map<String, dynamic> data) async {
     await _performAction(
       () => http.put(
@@ -255,7 +311,6 @@ class ProductController extends GetxController {
     );
   }
 
-  // Delete
   Future<void> deleteProduct(int id) async {
     await _performAction(
       () => http.delete(Uri.parse('$baseUrl/products/$id')),
@@ -264,10 +319,9 @@ class ProductController extends GetxController {
   }
 
   // ==========================================
-  // 4. STOCK MANAGEMENT (Add Stock)
+  // 4. STOCK MANAGEMENT
   // ==========================================
 
-  // Single Product Stock Add
   Future<void> addMixedStock({
     required int productId,
     int seaQty = 0,
@@ -280,7 +334,6 @@ class ProductController extends GetxController {
       _showError("Quantities cannot be negative");
       return;
     }
-
     final Map<String, dynamic> body = {
       'id': productId,
       'sea_qty': seaQty,
@@ -288,7 +341,6 @@ class ProductController extends GetxController {
       'local_qty': localQty,
       'local_price': localUnitPrice,
     };
-
     if (shipmentDate != null) {
       body['shipmentdate'] = shipmentDate.toIso8601String();
     }
@@ -303,7 +355,6 @@ class ProductController extends GetxController {
     );
   }
 
-  // Bulk Stock Add
   Future<bool> bulkAddStockMixed(List<Map<String, dynamic>> items) async {
     isActionLoading.value = true;
     try {
@@ -312,7 +363,6 @@ class ProductController extends GetxController {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(items),
       );
-
       if (res.statusCode == 200) {
         await fetchProducts();
         Get.snackbar(
@@ -335,7 +385,7 @@ class ProductController extends GetxController {
   }
 
   // ==========================================
-  // 5. SALES / BULK UPDATE (Deduct Stock)
+  // 5. SALES / BULK UPDATE
   // ==========================================
   Future<bool> updateStockBulk(List<Map<String, dynamic>> updates) async {
     isActionLoading.value = true;
@@ -347,12 +397,10 @@ class ProductController extends GetxController {
       );
 
       if (res.statusCode == 200) {
-        // Optimistic UI Update
         for (var update in updates) {
           int id = update['id'];
           int qtySold = update['qty'];
           int index = allProducts.indexWhere((p) => p.id == id);
-
           if (index != -1) {
             var product = allProducts[index];
             product.stockQty = (product.stockQty - qtySold).clamp(0, 999999);
@@ -373,9 +421,6 @@ class ProductController extends GetxController {
     }
   }
 
-  // ==========================================
-  // 6. PRICING & CURRENCY
-  // ==========================================
   Future<void> updateCurrencyAndRecalculate(double newCurrency) async {
     await _performAction(
       () => http.put(
@@ -422,7 +467,6 @@ class ProductController extends GetxController {
       'type': type,
       'current_avg_price': currentAvgPrice,
     };
-
     await _performAction(
       () => http.post(
         Uri.parse('$baseUrl/service/add'),
@@ -436,7 +480,6 @@ class ProductController extends GetxController {
 
   Future<void> returnFromService(int logId, int qty) async {
     final body = {'log_id': logId, 'qty': qty};
-
     await _performAction(
       () => http.post(
         Uri.parse('$baseUrl/service/return'),
@@ -462,7 +505,7 @@ class ProductController extends GetxController {
       final res = await action();
       if (res.statusCode == 200) {
         if (onSuccess != null) onSuccess();
-        await fetchProducts(); // Always refresh main list
+        await fetchProducts();
         Get.snackbar(
           'Success',
           successMsg,
@@ -506,7 +549,6 @@ class ProductController extends GetxController {
     searchText.value = text;
     currentPage.value = 1;
 
-    // Use the MAIN debounce timer
     if (_mainSearchDebounce?.isActive ?? false) _mainSearchDebounce!.cancel();
     _mainSearchDebounce = Timer(
       const Duration(milliseconds: 600),
@@ -524,14 +566,22 @@ class ProductController extends GetxController {
   void nextPage() {
     if ((currentPage.value * pageSize.value) < totalProducts.value) {
       currentPage.value++;
-      fetchProducts();
+      if (sortByLoss.value) {
+        _updateLocalPagination(); // Slice local list
+      } else {
+        fetchProducts(); // Call server
+      }
     }
   }
 
   void previousPage() {
     if (currentPage.value > 1) {
       currentPage.value--;
-      fetchProducts();
+      if (sortByLoss.value) {
+        _updateLocalPagination(); // Slice local list
+      } else {
+        fetchProducts(); // Call server
+      }
     }
   }
 
@@ -548,7 +598,10 @@ class ProductController extends GetxController {
     }
   }
 
+  // RESTORED: Brands Getter
   List<String> get brands {
+    // If we are locally sorting (having fetched all), we can technically derive all brands.
+    // However, to keep it simple and consistent with your old code:
     final unique = allProducts.map((e) => e.brand).toSet().toList();
     unique.sort();
     return ['All', ...unique];
@@ -563,7 +616,6 @@ class ProductController extends GetxController {
         );
   }
 
-  // 2. EXPORT FORMATTER
   List<List<String>> formatForPdf(List<Product> products) {
     List<List<String>> rows = [
       ['Product Name', 'Model', 'Stock', 'On Way', 'Alert', 'Shortage'],

@@ -1,6 +1,6 @@
 // ignore_for_file: deprecated_member_use
 
-import 'dart:ui'; // Required for PointerDeviceKind
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Shipment/controller.dart';
@@ -12,7 +12,6 @@ import 'controller.dart';
 import 'edit.dart';
 import 'model.dart';
 
-// THIS CLASS ENABLES MOUSE DRAGGING FOR HORIZONTAL SCROLL
 class MyCustomScrollBehavior extends MaterialScrollBehavior {
   @override
   Set<PointerDeviceKind> get dragDevices => {
@@ -27,7 +26,6 @@ class ProductScreen extends StatelessWidget {
   final ProductController controller = Get.put(ProductController());
   final TextEditingController currencyInput = TextEditingController();
 
-  // Explicit ScrollControllers for the table
   final ScrollController _verticalScrollController = ScrollController();
   final ScrollController _horizontalScrollController = ScrollController();
 
@@ -42,10 +40,7 @@ class ProductScreen extends StatelessWidget {
         behavior: MyCustomScrollBehavior(),
         child: Column(
           children: [
-            // 1. TOP STATS DASHBOARD
             _buildStatsSection(context),
-
-            // 2. MAIN CONTENT AREA (Search + Table)
             Expanded(
               child: Container(
                 margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -63,14 +58,9 @@ class ProductScreen extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // A. CONTROL TOOLBAR (Search, Filter)
                     _buildControlToolbar(),
                     const Divider(height: 1, color: Color(0xFFE5E7EB)),
-
-                    // B. DATA TABLE
                     Expanded(child: _buildDataTable()),
-
-                    // C. PAGINATION FOOTER
                     const Divider(height: 1, color: Color(0xFFE5E7EB)),
                     _buildPaginationFooter(),
                   ],
@@ -94,9 +84,6 @@ class ProductScreen extends StatelessWidget {
     );
   }
 
-  // ==========================================
-  // 1. APP BAR
-  // ==========================================
   PreferredSizeWidget _buildAppBar() {
     return AppBar(
       title: const Row(
@@ -153,15 +140,11 @@ class ProductScreen extends StatelessWidget {
     );
   }
 
-  // ==========================================
-  // 2. STATS DASHBOARD
-  // ==========================================
   Widget _buildStatsSection(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.all(16.0),
       child: Row(
         children: [
-          // TOTAL VALUE CARD
           Expanded(
             flex: 2,
             child: _buildStatCard(
@@ -182,8 +165,6 @@ class ProductScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 16),
-
-          // CURRENCY CARD
           Expanded(
             flex: 3,
             child: Container(
@@ -227,7 +208,6 @@ class ProductScreen extends StatelessWidget {
                     ],
                   ),
                   const Spacer(),
-                  // Currency Edit
                   SizedBox(
                     width: 100,
                     child: TextField(
@@ -307,9 +287,6 @@ class ProductScreen extends StatelessWidget {
     );
   }
 
-  // ==========================================
-  // 3. TOOLBAR (Search, Filter)
-  // ==========================================
   Widget _buildControlToolbar() {
     return Padding(
       padding: const EdgeInsets.all(16),
@@ -339,44 +316,59 @@ class ProductScreen extends StatelessWidget {
           ),
           const SizedBox(width: 16),
 
-          // Brand Filter
-          Expanded(
-            flex: 1,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF8FAFC),
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: const Color(0xFFE2E8F0)),
-              ),
-              child: Obx(
-                () => DropdownButtonHideUnderline(
-                  child: DropdownButton<String>(
-                    value: controller.selectedBrand.value,
-                    icon: const Icon(Icons.filter_list, color: Colors.grey),
-                    isExpanded: true,
-                    items:
-                        controller.brands
-                            .map(
-                              (b) => DropdownMenuItem(value: b, child: Text(b)),
-                            )
-                            .toList(),
-                    onChanged: (v) {
-                      if (v != null) controller.selectBrand(v);
-                    },
+          // --- REPLACED BRAND SELECTION WITH SORT BUTTON ---
+          Obx(() {
+            bool isActive = controller.sortByLoss.value;
+            return InkWell(
+              onTap: () => controller.toggleSortByLoss(),
+              borderRadius: BorderRadius.circular(6),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
+                decoration: BoxDecoration(
+                  color:
+                      isActive
+                          ? const Color(0xFFFEF2F2)
+                          : const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                    color:
+                        isActive
+                            ? const Color(0xFFDC2626)
+                            : const Color(0xFFE2E8F0),
                   ),
                 ),
+                child: Row(
+                  children: [
+                    Icon(
+                      isActive ? Icons.trending_down : Icons.sort,
+                      color:
+                          isActive ? const Color(0xFFDC2626) : Colors.grey[700],
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      "Loss First",
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color:
+                            isActive
+                                ? const Color(0xFFDC2626)
+                                : Colors.grey[700],
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ),
+            );
+          }),
         ],
       ),
     );
   }
 
-  // ==========================================
-  // 4. DATA TABLE (Professional Grid)
-  // ==========================================
   Widget _buildDataTable() {
     return Obx(() {
       if (controller.isLoading.value) {
@@ -476,7 +468,6 @@ class ProductScreen extends StatelessWidget {
       col('Model'),
       col('Status'),
       col('Est. Profit'),
-
       col('Stock', isNumeric: true),
       col('On Way', isNumeric: true),
       col('Sea Qty', isNumeric: true),
@@ -485,10 +476,6 @@ class ProductScreen extends StatelessWidget {
       col('Ship Date'),
       col('Agent', isNumeric: true),
       col('Wholesale', isNumeric: true),
-
-      // --- NEW COLUMN HERE ---
-
-      // -----------------------
       col('Actions'),
     ];
   }
@@ -496,36 +483,28 @@ class ProductScreen extends StatelessWidget {
   List<DataRow> _getRows(BuildContext context) {
     return controller.allProducts.map((p) {
       int onWay = shipmentController.getOnWayQty(p.id);
-
       return DataRow(
         cells: [
-          // 1. Name
           DataCell(
             Text(
               p.name,
               style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
             ),
           ),
-          // 2. Model
           DataCell(
             Text(
               p.model,
               style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
             ),
           ),
-          // 3. Status
           DataCell(_buildStockBadge(p.stockQty, p.alertQty)),
           DataCell(_buildProfitCell(p)),
-
-          // 4. Stock
           DataCell(
             Text(
               p.stockQty.toString(),
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
           ),
-
-          // 5. On Way
           DataCell(
             onWay > 0
                 ? Container(
@@ -549,13 +528,8 @@ class ProductScreen extends StatelessWidget {
                 )
                 : const Text("-", style: TextStyle(color: Colors.grey)),
           ),
-
-          // 6. Sea
           DataCell(Text(p.seaStockQty.toString())),
-          // 7. Air
           DataCell(Text(p.airStockQty.toString())),
-
-          // 8. Avg Cost
           DataCell(
             Text(
               p.avgPurchasePrice.toStringAsFixed(2),
@@ -565,8 +539,6 @@ class ProductScreen extends StatelessWidget {
               ),
             ),
           ),
-
-          // 9. Date
           DataCell(
             Text(
               p.shipmentDate != null
@@ -575,17 +547,8 @@ class ProductScreen extends StatelessWidget {
               style: const TextStyle(fontSize: 12, color: Colors.grey),
             ),
           ),
-
-          // 10. Agent
           DataCell(Text(p.agent.toStringAsFixed(2))),
-
-          // 11. Wholesale
           DataCell(Text(p.wholesale.toStringAsFixed(2))),
-
-          // --- NEW: PROFIT CELL ---
-          // ------------------------
-
-          // 12. Actions
           DataCell(_buildActions(context, p)),
         ],
       );
@@ -707,9 +670,6 @@ class ProductScreen extends StatelessWidget {
     );
   }
 
-  // ==========================================
-  // 5. PAGINATION FOOTER
-  // ==========================================
   Widget _buildPaginationFooter() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -766,10 +726,6 @@ class ProductScreen extends StatelessWidget {
       }),
     );
   }
-
-  // ==========================================
-  // HELPER FUNCTIONS & DIALOGS
-  // ==========================================
 
   void _handleCurrencyUpdate() {
     final val = double.tryParse(currencyInput.text);
@@ -846,29 +802,24 @@ class ProductScreen extends StatelessWidget {
     );
   }
 
-  // UPDATED: Now supports Date Selection & Local WAC Prediction
   void _showAddStockDialog(Product p, ProductController controller) {
     final seaQtyC = TextEditingController(text: '0');
     final airQtyC = TextEditingController(text: '0');
     final localQtyC = TextEditingController(text: '0');
     final localPriceC = TextEditingController(text: '0');
     final Rx<DateTime?> selectedDate = Rx<DateTime?>(null);
-
     final RxDouble predictedAvg = p.avgPurchasePrice.obs;
 
-    // Local Logic to predict price (since controller focuses on server)
     void calculatePrediction() {
       int s = int.tryParse(seaQtyC.text) ?? 0;
       int a = int.tryParse(airQtyC.text) ?? 0;
       int l = int.tryParse(localQtyC.text) ?? 0;
       double lp = double.tryParse(localPriceC.text) ?? 0.0;
-
       double oldValue = p.stockQty * p.avgPurchasePrice;
       double seaUnitCost = (p.yuan * p.currency) + (p.weight * p.shipmentTax);
       double airUnitCost =
           (p.yuan * p.currency) + (p.weight * p.shipmentTaxAir);
       double newBatchValue = (s * seaUnitCost) + (a * airUnitCost) + (l * lp);
-
       int totalNewQty = p.stockQty + s + a + l;
       if (totalNewQty > 0) {
         predictedAvg.value = (oldValue + newBatchValue) / totalNewQty;
@@ -925,7 +876,6 @@ class ProductScreen extends StatelessWidget {
                   Icons.airplanemode_active,
                   calculatePrediction,
                 ),
-
                 const Divider(height: 30),
                 const Text(
                   "Local Purchase",
@@ -954,8 +904,6 @@ class ProductScreen extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 20),
-
-                // DATE PICKER FOR SHIPMENT
                 Obx(
                   () => InkWell(
                     onTap: () async {
@@ -998,8 +946,7 @@ class ProductScreen extends StatelessWidget {
                 airQty: int.tryParse(airQtyC.text) ?? 0,
                 localQty: int.tryParse(localQtyC.text) ?? 0,
                 localUnitPrice: double.tryParse(localPriceC.text) ?? 0.0,
-                shipmentDate:
-                    selectedDate.value, // Passed to updated controller
+                shipmentDate: selectedDate.value,
               );
               Get.back();
             },
@@ -1033,16 +980,10 @@ class ProductScreen extends StatelessWidget {
   }
 }
 
-// ==========================================
-// PROFIT CELL HELPER
-// ==========================================
 Widget _buildProfitCell(Product p) {
-  // Inner helper to style one line (Agent or Wholesale)
   Widget profitLine(String label, double profit) {
     bool isLoss = profit < 0;
-    // Format: "+500" or "-200"
     String valueText = "${profit >= 0 ? '+' : ''}${profit.toStringAsFixed(0)}";
-
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -1055,7 +996,6 @@ Widget _buildProfitCell(Product p) {
           style: TextStyle(
             fontWeight: FontWeight.bold,
             fontSize: 12,
-            // Red for Loss (-), Green for Profit (+)
             color: isLoss ? const Color(0xFFDC2626) : const Color(0xFF16A34A),
           ),
         ),
@@ -1067,9 +1007,9 @@ Widget _buildProfitCell(Product p) {
     crossAxisAlignment: CrossAxisAlignment.start,
     mainAxisAlignment: MainAxisAlignment.center,
     children: [
-      profitLine("A", p.profitAgent), // A = Agent Profit
+      profitLine("A", p.profitAgent),
       const SizedBox(height: 2),
-      profitLine("W", p.profitWholesale), // W = Wholesale Profit
+      profitLine("W", p.profitWholesale),
     ],
   );
 }

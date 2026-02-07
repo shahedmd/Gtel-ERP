@@ -26,6 +26,9 @@ class SalesCartItem {
   }) : quantity = initialQty.obs;
 
   double get subtotal => priceAtSale * quantity.value;
+
+  // --- NEW: Helper to detect Loss for UI (Red Color) ---
+  bool get isLoss => priceAtSale < product.avgPurchasePrice;
 }
 
 class LiveSalesController extends GetxController {
@@ -43,7 +46,6 @@ class LiveSalesController extends GetxController {
   final RxBool isProcessing = false.obs;
   final Rxn<DebtorModel> selectedDebtor = Rxn<DebtorModel>();
 
-  // UPDATED: Added 'Other' to the list
   final List<String> courierList = [
     'A.J.R',
     'Pathao',
@@ -79,12 +81,11 @@ class LiveSalesController extends GetxController {
   final nameC = TextEditingController();
   final phoneC = TextEditingController();
   final shopC = TextEditingController();
-  final addressC = TextEditingController();
+  final addressC = TextEditingController(); // Now used for ALL sales
   final challanC = TextEditingController();
   final cartonsC = TextEditingController();
 
   final RxnString selectedCourier = RxnString();
-  // UPDATED: New controller for custom courier name
   final otherCourierC = TextEditingController();
 
   final discountC = TextEditingController();
@@ -115,7 +116,6 @@ class LiveSalesController extends GetxController {
     ever(customerType, (_) => _handleTypeChange());
     ever(isConditionSale, (_) => updatePaymentCalculations());
 
-    // UPDATED: Logic to fetch due only if not 'Other'
     ever(selectedCourier, (val) {
       if (val != null && val != 'Other') {
         fetchCourierTotalDue(val);
@@ -269,7 +269,7 @@ class LiveSalesController extends GetxController {
   }
 
   // ==============================================================================
-  // FINALIZE SALE (FINAL FIX: No Duplicate Cash Entry)
+  // FINALIZE SALE
   // ==============================================================================
   Future<void> finalizeSale() async {
     // 1. VALIDATION
@@ -282,16 +282,32 @@ class LiveSalesController extends GetxController {
       return;
     }
 
-    String? finalCourierName;
+    // --- UPDATED: Validation logic logic ---
     if (isConditionSale.value) {
       if (addressC.text.isEmpty) {
-        Get.snackbar("Required", "Delivery Address required");
+        Get.snackbar("Required", "Delivery Address required for Condition");
         return;
       }
       if (selectedCourier.value == null) {
         Get.snackbar("Required", "Select Courier");
         return;
       }
+      if (cartonsC.text.isEmpty) {
+        Get.snackbar("Required", "Enter Cartons");
+        return;
+      }
+    }
+    // Note: For Normal Sale, Address is optional but recommended.
+    // If you want it mandatory for all, uncomment below:
+    /*
+    if (addressC.text.isEmpty) {
+       Get.snackbar("Required", "Address is required");
+       return;
+    }
+    */
+
+    String? finalCourierName;
+    if (isConditionSale.value) {
       if (selectedCourier.value == 'Other') {
         if (otherCourierC.text.trim().isEmpty) {
           Get.snackbar("Required", "Enter Other Transport name");
@@ -300,10 +316,6 @@ class LiveSalesController extends GetxController {
         finalCourierName = otherCourierC.text.trim();
       } else {
         finalCourierName = selectedCourier.value;
-      }
-      if (cartonsC.text.isEmpty) {
-        Get.snackbar("Required", "Enter Cartons");
-        return;
       }
     }
 
@@ -453,7 +465,6 @@ class LiveSalesController extends GetxController {
     );
 
     // 4. PRE-CALCULATE AUTO-RECONCILIATION
-    // We calculate this BEFORE the batch to know how much goes to Cash Ledger vs Daily Sales
     double absorbedByDailySales = 0.0;
     List<Map<String, dynamic>> pendingSalesUpdates = [];
 
@@ -463,9 +474,9 @@ class LiveSalesController extends GetxController {
             await _db
                 .collection('daily_sales')
                 .where('customerType', isEqualTo: 'debtor')
-                .where('name', isEqualTo: fName) // Matches Name
+                .where('name', isEqualTo: fName)
                 .where('pending', isGreaterThan: 0)
-                .orderBy('pending') // Required by Firestore for range query
+                .orderBy('pending')
                 .get();
 
         double tempSurplus = allocatedToPrevRunningDue;
@@ -485,7 +496,6 @@ class LiveSalesController extends GetxController {
             absorbedByDailySales += amountToApply;
             tempSurplus = _round(tempSurplus - amountToApply);
 
-            // Add update instruction for later
             pendingSalesUpdates.add({
               'ref': doc.reference,
               'newPaid': _round(currentPaid + amountToApply),
@@ -499,9 +509,6 @@ class LiveSalesController extends GetxController {
       }
     }
 
-    // *** THE FIX ***
-    // If we used 460 to pay old Daily Sales, we record 0 in Cash Ledger.
-    // If we had 500 surplus and used 460, we record 40 in Cash Ledger.
     double amountForCashLedger = _round(
       allocatedToPrevRunningDue - absorbedByDailySales,
     );
@@ -534,10 +541,9 @@ class LiveSalesController extends GetxController {
 
     try {
       WriteBatch batch = _db.batch();
-
-      // ... (Standard Invoice Saving Logic - No Changes) ...
       int cartonsInt = int.tryParse(cartonsC.text) ?? 0;
       DocumentReference orderRef = _db.collection('sales_orders').doc(invNo);
+
       Map<String, dynamic> masterPaymentMap = {
         "type": isConditionSale.value ? "condition_partial" : "multi",
         "cash": double.tryParse(cashC.text) ?? 0,
@@ -556,6 +562,7 @@ class LiveSalesController extends GetxController {
         "currency": "BDT",
       };
 
+      // --- SAVE SALE ---
       batch.set(orderRef, {
         "invoiceId": invNo,
         "timestamp": FieldValue.serverTimestamp(),
@@ -566,7 +573,7 @@ class LiveSalesController extends GetxController {
         "debtorId": debtorId,
         "shopName": shopC.text,
         "isCondition": isConditionSale.value,
-        "deliveryAddress": addressC.text,
+        "deliveryAddress": addressC.text, // Address is saved here for everyone
         "challanNo": finalChallan,
         "cartons": isConditionSale.value ? cartonsInt : 0,
         "courierName": isConditionSale.value ? finalCourierName : null,
@@ -590,7 +597,6 @@ class LiveSalesController extends GetxController {
       });
 
       if (isConditionSale.value) {
-        // ... (Condition Logic Same as before) ...
         DocumentReference condCustRef = _db
             .collection('condition_customers')
             .doc(fPhone);
@@ -655,7 +661,6 @@ class LiveSalesController extends GetxController {
           });
         }
       } else if (customerType.value == "Debtor" && debtorId != null) {
-        // 1. Transaction History
         DocumentReference analyticsRef = _db
             .collection('debtor_transaction_history')
             .doc(invNo);
@@ -673,7 +678,6 @@ class LiveSalesController extends GetxController {
           "soldByPhone": sellerPhone,
         });
 
-        // 2. OLD DUE PAYMENT
         if (allocatedToOldDue > 0) {
           DocumentReference oldPayRef =
               _db
@@ -707,7 +711,6 @@ class LiveSalesController extends GetxController {
           });
         }
 
-        // 3. CREDIT (Invoice Debt)
         DocumentReference creditRef = _db
             .collection('debatorbody')
             .doc(debtorId)
@@ -724,7 +727,6 @@ class LiveSalesController extends GetxController {
           "soldByPhone": sellerPhone,
         });
 
-        // 4. DEBIT (Current Invoice Payment)
         if (allocatedToInvoice > 0) {
           DocumentReference debitRef = _db
               .collection('debatorbody')
@@ -744,9 +746,7 @@ class LiveSalesController extends GetxController {
           });
         }
 
-        // 5. SURPLUS / RUNNING DUE HANDLING
         if (allocatedToPrevRunningDue > 0) {
-          // A. Always Reduce Debtor Balance (This logic is fine)
           DocumentReference surplusRef = _db
               .collection('debatorbody')
               .doc(debtorId)
@@ -763,7 +763,6 @@ class LiveSalesController extends GetxController {
             "collectedBy": sellerName,
           });
 
-          // B. Update Previous Daily Sales (No Cash Ledger Entry created for these)
           for (var update in pendingSalesUpdates) {
             batch.update(update['ref'], {
               "paid": update['newPaid'],
@@ -781,7 +780,6 @@ class LiveSalesController extends GetxController {
             });
           }
 
-          // C. Only Write to Cash Ledger if there is REMAINDER (Unmatched money)
           if (amountForCashLedger > 0) {
             DocumentReference cashRef2 = _db.collection('cash_ledger').doc();
             batch.set(cashRef2, {
@@ -799,7 +797,6 @@ class LiveSalesController extends GetxController {
           }
         }
 
-        // 6. Current Daily Sales Entry
         DocumentReference dailyRef = _db.collection('daily_sales').doc();
         batch.set(dailyRef, {
           "name": fName,
@@ -820,12 +817,14 @@ class LiveSalesController extends GetxController {
           "soldByNumber": sellerPhone,
         });
       } else {
-        // Retailer Logic (Unchanged)
+        // --- RETAILER LOGIC ---
         DocumentReference custRef = _db.collection('customers').doc(fPhone);
         batch.set(custRef, {
           "name": fName,
           "phone": fPhone,
           "shop": shopC.text,
+          // UPDATED: Save Address for Retailer too
+          "address": addressC.text,
           "lastInv": invNo,
           "lastShopDate": FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
@@ -918,7 +917,7 @@ class LiveSalesController extends GetxController {
     challanC.clear();
     cartonsC.clear();
     selectedCourier.value = null;
-    otherCourierC.clear(); // Clear other text
+    otherCourierC.clear();
     discountC.clear();
     cashC.clear();
     bkashC.clear();
@@ -1053,7 +1052,6 @@ class LiveSalesController extends GetxController {
                   child: pw.Text(
                     "DELIVERY CHALLAN",
                     style: pw.TextStyle(
-                      font: boldFont,
                       fontSize: 14,
                       letterSpacing: 2,
                     ),
@@ -1075,7 +1073,6 @@ class LiveSalesController extends GetxController {
               ),
               pw.SizedBox(height: 10),
               pw.Spacer(),
-              // UPDATED: Logic for Non-Condition Paid
               _buildConditionBox(boldFont, regularFont, payMap),
               pw.SizedBox(height: 30),
               _buildSignatures(
@@ -1092,6 +1089,7 @@ class LiveSalesController extends GetxController {
     await Printing.layoutPdf(onLayout: (f) => pdf.save());
   }
 
+  // --- UPDATED: PDF HEADER ---
   pw.Widget _buildCompanyHeader(pw.Font bold, pw.Font reg) {
     return pw.Center(
       child: pw.Container(
@@ -1104,15 +1102,28 @@ class LiveSalesController extends GetxController {
           crossAxisAlignment: pw.CrossAxisAlignment.center,
           mainAxisAlignment: pw.MainAxisAlignment.center,
           children: [
+            // Line 1: Main Title
             pw.Text(
-              "G TEL JOY EXPRESS",
-              style: pw.TextStyle(font: bold, fontSize: 24, letterSpacing: 1),
+              "G TEL",
+              style: pw.TextStyle(font: bold, fontSize: 26, letterSpacing: 2),
             ),
+            // Line 2: Subtitle Line 1
             pw.Text(
-              "Mobile Parts Wholesaler",
-              style: pw.TextStyle(font: reg, fontSize: 10, letterSpacing: 3),
+              "JOY EXPRESS",
+              style: pw.TextStyle(font: bold, fontSize: 16, letterSpacing: 5),
             ),
-            pw.SizedBox(height: 4),
+            // Line 3: Subtitle Line 2
+            pw.SizedBox(height: 2),
+            pw.Text(
+              "MOBILE PARTS WHOLESALER",
+              style: pw.TextStyle(
+                font: reg,
+                fontSize: 10,
+                letterSpacing: 2,
+                color: PdfColors.grey800,
+              ),
+            ),
+            pw.SizedBox(height: 5),
             pw.Text(
               "Gulistan Shopping Complex (Hall Market), 2 Bangabandu Avenue, Dhaka 1000",
               textAlign: pw.TextAlign.center,
@@ -1178,6 +1189,7 @@ class LiveSalesController extends GetxController {
               if (shopName.isNotEmpty)
                 pw.Text(shopName, style: pw.TextStyle(font: reg, fontSize: 10)),
               pw.Text(phone, style: pw.TextStyle(font: reg, fontSize: 10)),
+              // UPDATED: Displays address if available (for both condition and normal)
               if (addr.isNotEmpty)
                 pw.Text(addr, style: pw.TextStyle(font: reg, fontSize: 9)),
             ],
@@ -1324,7 +1336,6 @@ class LiveSalesController extends GetxController {
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        // UPDATED: Extended payment details taking up 50% width
         pw.Expanded(
           flex: 5,
           child: pw.Container(
@@ -1341,7 +1352,6 @@ class LiveSalesController extends GetxController {
                   style: pw.TextStyle(font: bold, fontSize: 8),
                 ),
                 pw.Divider(thickness: 0.5),
-                // Replaced compact lines with professional table
                 _buildProfessionalPaymentDetails(payMap, reg, bold),
                 if (cartons != null && cartons > 0) ...[
                   pw.SizedBox(height: 8),
@@ -1488,7 +1498,6 @@ class LiveSalesController extends GetxController {
     ],
   );
 
-  // UPDATED: NEW Extended Payment Table for PDF
   pw.Widget _buildProfessionalPaymentDetails(
     Map payMap,
     pw.Font reg,
@@ -1638,7 +1647,6 @@ class LiveSalesController extends GetxController {
   pw.Widget _buildConditionBox(pw.Font bold, pw.Font reg, Map payMap) {
     double due = double.tryParse(payMap['due'].toString()) ?? 0;
 
-    // UPDATED: Logic for Paid Condition Sales
     if (due <= 0) {
       return pw.Container(
         width: double.infinity,
