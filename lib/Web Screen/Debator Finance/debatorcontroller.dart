@@ -4,12 +4,13 @@ import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:gtel_erp/Profit&loss/controller.dart';
+import 'package:gtel_erp/Web%20Screen/overviewcontroller.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:gtel_erp/Cash/controller.dart';
-import 'package:gtel_erp/Web%20Screen/Expenses/dailycontroller.dart';
 import '../Sales/controller.dart';
 import 'model.dart';
 
@@ -306,13 +307,12 @@ class DebatorController extends GetxController {
     }
   }
 
-  // --- UPDATED: MANUAL TRANSACTION ADD ---
   Future<void> addTransaction({
     required String debtorId,
     required double amount,
     required String note,
     required String type,
-    required DateTime date,
+    required DateTime date, // <--- Ensure this is FEB 7 (Collection Date)
     required Map<String, dynamic> paymentMethodData,
     String? txid,
   }) async {
@@ -323,129 +323,146 @@ class DebatorController extends GetxController {
       if (!debtorSnap.exists) throw "Debtor not found";
       final String debtorName = debtorSnap.data()?['name'] ?? 'Unknown';
 
-      DocumentReference newTxRef;
-      if (txid != null && txid.isNotEmpty) {
+      DocumentReference newTxRef = debtorRef.collection('transactions').doc();
+      if (txid != null && txid.isNotEmpty)
         newTxRef = debtorRef.collection('transactions').doc(txid);
-      } else {
-        newTxRef = debtorRef.collection('transactions').doc();
-        txid = newTxRef.id;
-      }
+      String finalTxId = newTxRef.id;
 
-      // Save Transaction to Debtor
+      // 1. Save Transaction (History)
       await newTxRef.set({
-        'transactionId': txid,
+        'transactionId': finalTxId,
         'amount': amount,
         'note': note,
         'type': type,
-        'date': Timestamp.fromDate(date),
+        'date': Timestamp.fromDate(date), // FEB 7
         'paymentMethod': paymentMethodData,
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      // --- SYNC LOGIC (CORRECTED) ---
-
-      if (type == 'loan_payment') {
-        // MANUAL OLD DUE PAYMENT -> CASH LEDGER DIRECTLY
-        // Source marked as 'debtor_manual' to distinguish from POS
-        await db.collection('cash_ledger').add({
-          'type': 'deposit',
-          'amount': amount,
-          'method': paymentMethodData['type'] ?? 'cash',
-          'details': paymentMethodData, // Store full details (Bank Name etc)
-          'description': "Previous Due Collected: $debtorName",
-          'timestamp': FieldValue.serverTimestamp(),
-          'linkedDebtorId': debtorId,
-          'linkedTxId': txid,
-          'source': 'debtor_manual',
-        });
-      } else if (type == 'advance_given') {
-        // We gave cash -> Expense
-        await db.collection('cash_ledger').add({
-          'type': 'expense',
-          'amount': amount,
-          'method': 'cash',
-          'description': "Advance Given to $debtorName",
-          'timestamp': FieldValue.serverTimestamp(),
-          'linkedDebtorId': debtorId,
-          'linkedTxId': txid,
-        });
-        if (!Get.isRegistered<DailyExpensesController>()) {
-          Get.put(DailyExpensesController());
-        }
-        try {
-          await Get.find<DailyExpensesController>().addDailyExpense(
-            "Loan to $debtorName",
-            amount.toInt(),
-            note: "Debtor Advance - $note",
-            date: date,
-          );
-        } catch (e) {
-          print(e);
-        }
-      } else if (type == 'advance_received') {
-        // Received Advance -> Deposit
+      // 2. Add to CASH LEDGER (This makes it show up on FEB 7)
+      if (type == 'debit' ||
+          type == 'loan_payment' ||
+          type == 'advance_received') {
         await db.collection('cash_ledger').add({
           'type': 'deposit',
           'amount': amount,
           'method': paymentMethodData['type'] ?? 'cash',
           'details': paymentMethodData,
-          'description': "Advance Received from $debtorName",
-          'timestamp': FieldValue.serverTimestamp(),
+          'description': "Collection from $debtorName",
+          'timestamp': Timestamp.fromDate(date), // FEB 7
           'linkedDebtorId': debtorId,
-          'linkedTxId': txid,
+          'linkedTxId': finalTxId,
+          'source': 'debtor_collection',
         });
-      } else if (type == 'credit' || type == 'debit') {
-        if (!Get.isRegistered<DailySalesController>()) {
-          Get.put(DailySalesController());
-        }
-        final daily = Get.find<DailySalesController>();
-
-        if (type == 'credit') {
-          await daily.addSale(
-            name: debtorName,
-            amount: amount,
-            customerType: 'debtor',
-            isPaid: false,
-            date: date,
-            paymentMethod: null,
-            source: "credit",
-            transactionId: txid,
-          );
-        } else if (type == 'debit') {
-          // INVOICE PAYMENT -> DAILY SALES
-          await daily.applyDebtorPayment(
-            debtorName,
-            amount,
-            paymentMethodData,
-            date: date,
-            transactionId: txid,
-          );
-        }
+      } else if (type == 'advance_given') {
+        await db.collection('cash_ledger').add({
+          'type': 'withdraw',
+          'amount': amount,
+          'method': 'cash',
+          'description': "Given to $debtorName",
+          'timestamp': Timestamp.fromDate(date),
+          'linkedDebtorId': debtorId,
+          'source': 'debtor_payment',
+        });
       }
 
-      await _recalculateSingleDebtorBalance(debtorId);
+      // 3. Update Old Bills (Prevents Double Entry on FEB 6)
+      if (type == 'debit') {
+        double remaining = amount;
 
-      loadDebtorTransactions(debtorId);
-      loadBodies(loadMore: false);
+        // Find unpaid bills
+        QuerySnapshot pendingSnap =
+            await db
+                .collection('daily_sales')
+                .where('customerType', isEqualTo: 'debtor')
+                .where('name', isEqualTo: debtorName)
+                .where('pending', isGreaterThan: 0)
+                .orderBy('pending')
+                .get();
+
+        List<DocumentSnapshot> sortedDocs = pendingSnap.docs.toList();
+        sortedDocs.sort(
+          (a, b) => (a['timestamp'] as Timestamp).compareTo(
+            b['timestamp'] as Timestamp,
+          ),
+        );
+
+        WriteBatch batch = db.batch();
+
+        for (var doc in sortedDocs) {
+          if (remaining <= 0) break;
+          Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+
+          double currentPending =
+              double.tryParse(data['pending'].toString()) ?? 0.0;
+          double currentPaid = double.tryParse(data['paid'].toString()) ?? 0.0;
+          double currentLedgerPaid =
+              double.tryParse(data['ledgerPaid']?.toString() ?? '0') ?? 0.0;
+
+          double take =
+              (remaining >= currentPending) ? currentPending : remaining;
+
+          // Update FEB 6 Document
+          batch.update(doc.reference, {
+            "paid": currentPaid + take,
+            "pending": currentPending - take,
+            "ledgerPaid": currentLedgerPaid + take, // <--- CRITICAL
+            "status": (currentPending - take) <= 0.5 ? "paid" : "partial",
+          });
+
+          // Update Master Sales Order
+          String saleTxId = data['transactionId'] ?? '';
+          if (saleTxId.isNotEmpty) {
+            QuerySnapshot orderSnap =
+                await db
+                    .collection('sales_orders')
+                    .where('transactionId', isEqualTo: saleTxId)
+                    .limit(1)
+                    .get();
+            if (orderSnap.docs.isNotEmpty) {
+              double oPaid =
+                  double.tryParse(orderSnap.docs.first['paid'].toString()) ??
+                  0.0;
+              batch.update(orderSnap.docs.first.reference, {
+                "paid": oPaid + take,
+                "due": (currentPending - take),
+                "status":
+                    (currentPending - take) <= 0.5 ? "completed" : "pending",
+              });
+            }
+          }
+          remaining -= take;
+        }
+        await batch.commit();
+      }
+
+      // 4. *** FORCE REFRESH ALL CONTROLLERS ***
+      // This is why you were stuck. The other controllers didn't know data changed.
+
+      await _recalculateSingleDebtorBalance(debtorId);
+      await loadBodies(loadMore: false);
+
+      if (Get.isRegistered<DailySalesController>()) {
+        await Get.find<DailySalesController>()
+            .loadDailySales(); // RELOAD SALES LIST
+      }
 
       if (Get.isRegistered<CashDrawerController>()) {
         Get.find<CashDrawerController>().fetchData();
       }
-      if (Get.isDialogOpen ?? false) Get.back();
 
-      Get.snackbar(
-        "Success",
-        "Transaction Recorded",
-        backgroundColor: Colors.green,
-        colorText: Colors.white,
-      );
+      if (Get.isRegistered<OverviewController>()) {
+        Get.find<OverviewController>().refreshData(); // RELOAD OVERVIEW
+      }
+
+      if (Get.isRegistered<ProfitController>()) {
+        Get.find<ProfitController>().refreshData();
+      }
+
+      if (Get.isDialogOpen ?? false) Get.back();
+      Get.snackbar("Success", "Transaction Recorded & Controllers Refreshed");
     } catch (e) {
-      Get.snackbar(
-        "Error",
-        e.toString(),
-        backgroundColor: Colors.red,
-        colorText: Colors.white,
-      );
+      Get.snackbar("Error", e.toString());
       print(e);
     } finally {
       gbIsLoading.value = false;

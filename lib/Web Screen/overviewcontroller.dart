@@ -7,8 +7,6 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-
-// Import your existing controllers
 import 'Expenses/dailycontroller.dart';
 import 'Sales/controller.dart';
 
@@ -51,7 +49,6 @@ class OverviewController extends GetxController {
   RxList<LedgerItem> cashInList = <LedgerItem>[].obs;
   RxList<LedgerItem> cashOutList = <LedgerItem>[].obs;
 
-  // Track totals for the specific day
   RxMap<String, double> methodBreakdown =
       <String, double>{
         "Cash": 0.0,
@@ -103,6 +100,7 @@ class OverviewController extends GetxController {
   Future<void> _fetchPreviousBalance() async {
     isLoadingHistory.value = true;
     try {
+      // Use selectedDate (Feb 6) to define "Before Today"
       DateTime startOfDay = DateTime(
         selectedDate.value.year,
         selectedDate.value.month,
@@ -115,12 +113,23 @@ class OverviewController extends GetxController {
               .collection('daily_sales')
               .where('timestamp', isLessThan: startOfDay)
               .get();
+
       double pastSales = 0.0;
       for (var doc in salesSnap.docs) {
-        pastSales += (double.tryParse(doc['paid'].toString()) ?? 0);
+        Map<String, dynamic> data = doc.data();
+        double paid = double.tryParse(data['paid'].toString()) ?? 0;
+
+        // SAFE KEY CHECK (Crucial for old data)
+        double lPaid = 0.0;
+        if (data.containsKey('ledgerPaid')) {
+          lPaid = double.tryParse(data['ledgerPaid'].toString()) ?? 0;
+        }
+
+        // CORRECT LOGIC: 460 (Paid) - 460 (LedgerPaid) = 0 Cash from this sale
+        pastSales += (paid - lPaid);
       }
 
-      // 2. Past Ledger
+      // 2. Past Ledger (Standard)
       var ledgerSnap =
           await _db
               .collection('cash_ledger')
@@ -128,13 +137,10 @@ class OverviewController extends GetxController {
               .get();
       double pastLedgerSum = 0.0;
       for (var doc in ledgerSnap.docs) {
-        var data = doc.data();
-        String src = (data['source'] ?? '').toString();
-        if (src == 'pos_sale') continue;
-        if (src == '' && data.containsKey('linkedInvoiceId')) continue;
-
-        double amt = double.tryParse(doc['amount'].toString()) ?? 0;
-        if (doc['type'] == 'withdraw')
+        var d = doc.data();
+        if (d['source'] == 'pos_sale') continue;
+        double amt = double.tryParse(d['amount'].toString()) ?? 0;
+        if (d['type'] == 'withdraw')
           pastLedgerSum -= amt;
         else
           pastLedgerSum += amt;
@@ -147,13 +153,13 @@ class OverviewController extends GetxController {
               .where('time', isLessThan: startOfDay)
               .get();
       double pastExpenses = 0.0;
-      for (var doc in expenseSnap.docs) {
+      for (var doc in expenseSnap.docs)
         pastExpenses += (double.tryParse(doc['amount'].toString()) ?? 0);
-      }
 
       previousCash.value = (pastSales + pastLedgerSum) - pastExpenses;
       _processLedgerData();
     } catch (e) {
+      print("History Error: $e");
     } finally {
       isLoadingHistory.value = false;
     }
@@ -188,80 +194,67 @@ class OverviewController extends GetxController {
   void _processLedgerData() {
     double tIn = 0;
     double tOut = 0;
-
-    // Reset Breakdown
     Map<String, double> tempBreakdown = {
       "Cash": 0.0,
       "Bkash": 0.0,
       "Nagad": 0.0,
       "Bank": 0.0,
     };
-
     List<LedgerItem> tempIn = [];
     List<LedgerItem> tempOut = [];
 
-    // ========================================================================
-    // 1. SALES (Daily Sales Collection - Retail, Condition Advance, Courier Pay)
-    // ========================================================================
+    // 1. CALCULATE SALES CASH (Subtracting Ledger Payments)
     for (var sale in salesCtrl.salesList) {
-      double paid = double.tryParse(sale.paid.toString()) ?? 0.0;
+      // Logic: If sale.paid is 500 and sale.ledgerPaid is 500, then Real Cash is 0.
+      double realCash = sale.paid - sale.ledgerPaid;
 
-      if (paid > 0) {
-        tIn += paid;
+      // Debug Print to see what's happening in Console
+      print(
+        "OVERVIEW DEBUG: Date:${sale.timestamp} | Paid:${sale.paid} | LedgerPaid:${sale.ledgerPaid} | NetCash:$realCash",
+      );
 
-        // Helper to update breakdown map based on payment method map
-        _addToBreakdown(tempBreakdown, sale.paymentMethod, paid);
-
-        // Generate nice description
-        String desc = _formatPaymentDesc(sale.paymentMethod, paid);
-
+      if (realCash > 0.01) {
+        tIn += realCash;
+        _addToBreakdown(tempBreakdown, sale.paymentMethod, realCash);
         tempIn.add(
           LedgerItem(
             time: sale.timestamp,
             title: sale.name,
-            subtitle: desc,
-            amount: paid,
+            subtitle: "Direct Sale Cash",
+            amount: realCash,
             type: 'income',
           ),
         );
       }
     }
 
-    // ========================================================================
-    // 2. LEDGER (Manual Adds, Loans, Old Due Collection)
-    // ========================================================================
+    // 2. CALCULATE LEDGER CASH
     for (var item in externalLedgerData) {
+      if (item['source'] == 'pos_sale') continue;
+
       double amt = double.tryParse(item['amount'].toString()) ?? 0.0;
       String type = item['type'] ?? 'deposit';
-      String desc = item['description'] ?? 'Manual Entry';
       DateTime time = (item['timestamp'] as Timestamp).toDate();
-      dynamic details = item['details'];
 
       if (type == 'deposit') {
         tIn += amt;
-        // If details map exists (like old due), use it. Otherwise use 'method' string/map
-        _addToBreakdown(tempBreakdown, details ?? item['method'], amt);
-
+        _addToBreakdown(tempBreakdown, item['details'] ?? item['method'], amt);
         tempIn.add(
           LedgerItem(
             time: time,
-            title: desc,
-            subtitle:
-                "Collection - ${_formatPaymentDesc(details ?? item['method'], amt)}",
+            title: item['description'] ?? "Entry",
+            subtitle: "Collection",
             amount: amt,
             type: 'income',
           ),
         );
       } else {
         tOut += amt;
-        // Expense/Withdraw usually doesn't update "Collection Breakdown",
-        // but if you want to track where money went out from, you could add logic here.
         tempOut.add(
           LedgerItem(
             time: time,
-            title: desc,
-            subtitle:
-                "Withdraw - ${_formatPaymentDesc(details ?? item['method'], amt)}",
+            title: item['description'] ?? "Entry",
+            subtitle: "Withdraw",
             amount: amt,
             type: 'expense',
           ),
@@ -269,9 +262,7 @@ class OverviewController extends GetxController {
       }
     }
 
-    // ========================================================================
-    // 3. EXPENSES (Daily Expense Items)
-    // ========================================================================
+    // 3. EXPENSES
     for (var expense in expenseCtrl.dailyList) {
       double amt = expense.amount.toDouble();
       tOut += amt;
@@ -286,29 +277,25 @@ class OverviewController extends GetxController {
       );
     }
 
-    // Sort by Time
+    // SORT AND UPDATE
     tempIn.sort((a, b) => a.time.compareTo(b.time));
     tempOut.sort((a, b) => a.time.compareTo(b.time));
 
-    // Update Observables
     totalCashIn.value = tIn;
     totalCashOut.value = tOut;
     netCashBalance.value = tIn - tOut;
     closingCash.value = previousCash.value + (tIn - tOut);
-
     cashInList.assignAll(tempIn);
     cashOutList.assignAll(tempOut);
     methodBreakdown.value = tempBreakdown;
   }
 
-  // --- UPDATED LOGIC FOR MULTI PAYMENT ---
   void _addToBreakdown(Map<String, double> bd, dynamic pm, double totalAmt) {
     if (pm == null) {
       bd["Cash"] = bd["Cash"]! + totalAmt;
       return;
     }
 
-    // If it's just a string (e.g. "cash"), simple add
     if (pm is String) {
       String m = pm.toLowerCase();
       if (m.contains('bank'))
@@ -325,7 +312,6 @@ class OverviewController extends GetxController {
     if (pm is Map) {
       String type = (pm['type'] ?? '').toString().toLowerCase();
 
-      // CASE: Multi Payment OR Condition Partial (Both use keys for amounts)
       if (type == 'multi' || type == 'condition_partial') {
         bd["Cash"] =
             bd["Cash"]! + (double.tryParse(pm['cash'].toString()) ?? 0);
@@ -335,10 +321,7 @@ class OverviewController extends GetxController {
             bd["Bkash"]! + (double.tryParse(pm['bkash'].toString()) ?? 0);
         bd["Nagad"] =
             bd["Nagad"]! + (double.tryParse(pm['nagad'].toString()) ?? 0);
-      }
-      // CASE: Single Payment via Map (Courier Payment, Standard Retail)
-      else {
-        // If it's a map but not multi, check the 'type' field or fallback to totalAmt
+      } else {
         if (type.contains('bank') || pm.containsKey('bankName')) {
           bd["Bank"] = bd["Bank"]! + totalAmt;
         } else if (type.contains('bkash')) {
@@ -350,52 +333,8 @@ class OverviewController extends GetxController {
         }
       }
     } else {
-      // Fallback
       bd["Cash"] = bd["Cash"]! + totalAmt;
     }
-  }
-
-  // --- UPDATED DESCRIPTION GENERATOR ---
-  String _formatPaymentDesc(dynamic pm, double totalAmount) {
-    if (pm == null) return "Cash";
-
-    if (pm is Map) {
-      String type = (pm['type'] ?? '').toString().toLowerCase();
-
-      // If Multi/Partial, list the breakdown
-      if (type == 'multi' || type == 'condition_partial') {
-        List<String> parts = [];
-        double c = double.tryParse(pm['cash'].toString()) ?? 0;
-        double b = double.tryParse(pm['bank'].toString()) ?? 0;
-        double k = double.tryParse(pm['bkash'].toString()) ?? 0;
-        double n = double.tryParse(pm['nagad'].toString()) ?? 0;
-
-        if (c > 0) parts.add("Cash: ${NumberFormat.compact().format(c)}");
-        if (b > 0) parts.add("Bank: ${NumberFormat.compact().format(b)}");
-        if (k > 0) parts.add("Bkash: ${NumberFormat.compact().format(k)}");
-        if (n > 0) parts.add("Nagad: ${NumberFormat.compact().format(n)}");
-
-        return parts.join(", ");
-      }
-
-      // Single Methods with details
-      if (pm.containsKey('bankName') && pm['bankName'].toString().isNotEmpty) {
-        return "${pm['bankName']} (${pm['accountNumber'] ?? ''})";
-      }
-      if (pm.containsKey('bkashNumber') &&
-          pm['bkashNumber'].toString().isNotEmpty) {
-        return "Bkash (${pm['bkashNumber']})";
-      }
-      if (pm.containsKey('nagadNumber') &&
-          pm['nagadNumber'].toString().isNotEmpty) {
-        return "Nagad (${pm['nagadNumber']})";
-      }
-
-      // Fallback to type
-      return type.toUpperCase();
-    }
-
-    return pm.toString().toUpperCase();
   }
 
   Future<void> generateLedgerPdf() async {
@@ -566,11 +505,7 @@ class OverviewController extends GetxController {
         children: [
           _pdfCell(tFmt.format(item.time), font, size: 8),
           _pdfCell(item.title, font, size: 8),
-          _pdfCell(
-            item.subtitle,
-            font,
-            size: 7,
-          ), // Slightly smaller for details
+          _pdfCell(item.subtitle, font, size: 7),
           _pdfCell(
             isIncome ? mFmt.format(item.amount) : "-",
             font,

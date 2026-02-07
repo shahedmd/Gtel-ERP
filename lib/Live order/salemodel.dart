@@ -269,7 +269,7 @@ class LiveSalesController extends GetxController {
   }
 
   // ==============================================================================
-  // FINALIZE SALE
+  // FINALIZE SALE (FINAL FIX: No Duplicate Cash Entry)
   // ==============================================================================
   Future<void> finalizeSale() async {
     // 1. VALIDATION
@@ -278,16 +278,10 @@ class LiveSalesController extends GetxController {
       return;
     }
     if (selectedPackager.value == null) {
-      Get.snackbar(
-        "Required",
-        "Please select a Packager Name (Packed By)",
-        backgroundColor: Colors.redAccent,
-        colorText: Colors.white,
-      );
+      Get.snackbar("Required", "Select Packager Name");
       return;
     }
 
-    // UPDATED: Courier Validation logic
     String? finalCourierName;
     if (isConditionSale.value) {
       if (addressC.text.isEmpty) {
@@ -298,17 +292,15 @@ class LiveSalesController extends GetxController {
         Get.snackbar("Required", "Select Courier");
         return;
       }
-      // Check Other
       if (selectedCourier.value == 'Other') {
         if (otherCourierC.text.trim().isEmpty) {
-          Get.snackbar("Required", "Please enter the Other Transport name");
+          Get.snackbar("Required", "Enter Other Transport name");
           return;
         }
         finalCourierName = otherCourierC.text.trim();
       } else {
         finalCourierName = selectedCourier.value;
       }
-
       if (cartonsC.text.isEmpty) {
         Get.snackbar("Required", "Enter Cartons");
         return;
@@ -338,31 +330,23 @@ class LiveSalesController extends GetxController {
       fPhone = phoneC.text;
     }
 
-    // =========================================================================
-    // UPDATED: SELLER INFO LOGIC (PERFECTLY EXTRACTED)
-    // =========================================================================
     User? currentUser = FirebaseAuth.instance.currentUser;
     String sellerUid = currentUser?.uid ?? 'unknown';
     String rawDisplayName = currentUser?.displayName ?? 'Admin';
-
-    // Default values
     String sellerName = rawDisplayName;
-    String sellerPhone = "01720677206"; // Default hotline
+    String sellerPhone = "01720677206";
 
-    // Logic: Expecting format "Name | Phone" in displayName
     if (rawDisplayName.contains('|')) {
       List<String> parts = rawDisplayName.split('|');
       sellerName = parts[0].trim();
-      if (parts.length > 1) {
-        sellerPhone = parts[1].trim();
-      }
+      if (parts.length > 1) sellerPhone = parts[1].trim();
     }
 
     isProcessing.value = true;
     final String invNo = _generateInvoiceID();
     final DateTime saleDate = DateTime.now();
 
-    // 2. FINANCIAL LOGIC
+    // 2. FINANCIAL CALCULATIONS
     double totalPaidInputVal = totalPaidInput.value;
     double allocatedToOldDue = 0.0;
     double allocatedToInvoice = 0.0;
@@ -376,7 +360,7 @@ class LiveSalesController extends GetxController {
         debtorId != null) {
       double remaining = totalPaidInputVal;
 
-      // PRIORITY 1: Clear Old Due (Loan)
+      // PRIORITY 1: Old Due
       if (oldDueSnap > 0 && remaining > 0) {
         if (remaining >= oldDueSnap) {
           allocatedToOldDue = oldDueSnap;
@@ -387,7 +371,7 @@ class LiveSalesController extends GetxController {
         }
       }
 
-      // PRIORITY 2: Clear Current Invoice (Sales)
+      // PRIORITY 2: Current Invoice
       if (remaining > 0) {
         if (remaining >= grandTotal) {
           allocatedToInvoice = grandTotal;
@@ -398,8 +382,8 @@ class LiveSalesController extends GetxController {
         }
       }
 
-      // PRIORITY 3: Clear Previous Running Due (Surplus)
-      if (remaining > 0 && runningDueSnap > 0) {
+      // PRIORITY 3: Surplus
+      if (remaining > 0) {
         allocatedToPrevRunningDue = remaining;
       }
     } else {
@@ -410,28 +394,117 @@ class LiveSalesController extends GetxController {
     double invoiceDueAmount = _round(grandTotal - allocatedToInvoice);
     if (invoiceDueAmount < 0) invoiceDueAmount = 0;
 
-    // 3. PREPARE DATA MAPS
-    Map<String, dynamic> rawPaymentDetails = {
-      "type": isConditionSale.value ? "condition_partial" : "multi",
-      "cash": double.tryParse(cashC.text) ?? 0,
-      "bkash": double.tryParse(bkashC.text) ?? 0,
-      "nagad": double.tryParse(nagadC.text) ?? 0,
-      "bank": double.tryParse(bankC.text) ?? 0,
-      "bkashNumber": bkashNumberC.text.trim(),
-      "nagadNumber": nagadNumberC.text.trim(),
-      "bankName": bankNameC.text.trim(),
-      "accountNumber": bankAccC.text.trim(),
-    };
+    // 3. PAYMENT SPLITTING
+    double poolCash = double.tryParse(cashC.text) ?? 0;
+    double poolBkash = double.tryParse(bkashC.text) ?? 0;
+    double poolNagad = double.tryParse(nagadC.text) ?? 0;
+    double poolBank = double.tryParse(bankC.text) ?? 0;
 
-    Map<String, dynamic> invoicePaymentMap = {
-      ...rawPaymentDetails,
-      "totalPaidInput": totalPaidInputVal,
-      "paidForOldDue": allocatedToOldDue,
-      "paidForInvoice": allocatedToInvoice,
-      "paidForPrevRunning": allocatedToPrevRunningDue,
-      "due": invoiceDueAmount,
-      "currency": "BDT",
-    };
+    Map<String, dynamic> extractPaymentFor(double targetAmount) {
+      double remainingNeeded = targetAmount;
+      double usedCash = 0, usedBkash = 0, usedNagad = 0, usedBank = 0;
+
+      if (poolCash > 0 && remainingNeeded > 0) {
+        double take =
+            (poolCash >= remainingNeeded) ? remainingNeeded : poolCash;
+        usedCash = take;
+        poolCash = _round(poolCash - take);
+        remainingNeeded = _round(remainingNeeded - take);
+      }
+      if (poolBkash > 0 && remainingNeeded > 0) {
+        double take =
+            (poolBkash >= remainingNeeded) ? remainingNeeded : poolBkash;
+        usedBkash = take;
+        poolBkash = _round(poolBkash - take);
+        remainingNeeded = _round(remainingNeeded - take);
+      }
+      if (poolNagad > 0 && remainingNeeded > 0) {
+        double take =
+            (poolNagad >= remainingNeeded) ? remainingNeeded : poolNagad;
+        usedNagad = take;
+        poolNagad = _round(poolNagad - take);
+        remainingNeeded = _round(remainingNeeded - take);
+      }
+      if (poolBank > 0 && remainingNeeded > 0) {
+        double take =
+            (poolBank >= remainingNeeded) ? remainingNeeded : poolBank;
+        usedBank = take;
+        poolBank = _round(poolBank - take);
+        remainingNeeded = _round(remainingNeeded - take);
+      }
+
+      return {
+        "cash": usedCash,
+        "bkash": usedBkash,
+        "nagad": usedNagad,
+        "bank": usedBank,
+        "bkashNumber": bkashNumberC.text.trim(),
+        "nagadNumber": nagadNumberC.text.trim(),
+        "bankName": bankNameC.text.trim(),
+        "accountNumber": bankAccC.text.trim(),
+        "currency": "BDT",
+      };
+    }
+
+    Map<String, dynamic> mapForOldDue = extractPaymentFor(allocatedToOldDue);
+    Map<String, dynamic> mapForInvoice = extractPaymentFor(allocatedToInvoice);
+    Map<String, dynamic> mapForSurplus = extractPaymentFor(
+      allocatedToPrevRunningDue,
+    );
+
+    // 4. PRE-CALCULATE AUTO-RECONCILIATION
+    // We calculate this BEFORE the batch to know how much goes to Cash Ledger vs Daily Sales
+    double absorbedByDailySales = 0.0;
+    List<Map<String, dynamic>> pendingSalesUpdates = [];
+
+    if (allocatedToPrevRunningDue > 0 && debtorId != null) {
+      try {
+        QuerySnapshot pendingSnap =
+            await _db
+                .collection('daily_sales')
+                .where('customerType', isEqualTo: 'debtor')
+                .where('name', isEqualTo: fName) // Matches Name
+                .where('pending', isGreaterThan: 0)
+                .orderBy('pending') // Required by Firestore for range query
+                .get();
+
+        double tempSurplus = allocatedToPrevRunningDue;
+
+        for (var doc in pendingSnap.docs) {
+          if (tempSurplus <= 0) break;
+
+          Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+          double currentPending =
+              double.tryParse(data['pending'].toString()) ?? 0.0;
+          double currentPaid = double.tryParse(data['paid'].toString()) ?? 0.0;
+
+          if (currentPending > 0) {
+            double amountToApply =
+                (tempSurplus >= currentPending) ? currentPending : tempSurplus;
+
+            absorbedByDailySales += amountToApply;
+            tempSurplus = _round(tempSurplus - amountToApply);
+
+            // Add update instruction for later
+            pendingSalesUpdates.add({
+              'ref': doc.reference,
+              'newPaid': _round(currentPaid + amountToApply),
+              'newPending': _round(currentPending - amountToApply),
+              'amountApplied': amountToApply,
+            });
+          }
+        }
+      } catch (e) {
+        print("Reconciliation Query Error: $e");
+      }
+    }
+
+    // *** THE FIX ***
+    // If we used 460 to pay old Daily Sales, we record 0 in Cash Ledger.
+    // If we had 500 surplus and used 460, we record 40 in Cash Ledger.
+    double amountForCashLedger = _round(
+      allocatedToPrevRunningDue - absorbedByDailySales,
+    );
 
     List<Map<String, dynamic>> orderItems =
         cart.map((item) {
@@ -452,7 +525,6 @@ class LiveSalesController extends GetxController {
             .map((item) => {'id': item.product.id, 'qty': item.quantity.value})
             .toList();
 
-    // 4. EXECUTE BATCH
     bool stockSuccess = await productCtrl.updateStockBulk(stockUpdates);
     if (!stockSuccess) {
       isProcessing.value = false;
@@ -462,10 +534,28 @@ class LiveSalesController extends GetxController {
 
     try {
       WriteBatch batch = _db.batch();
-      int cartonsInt = int.tryParse(cartonsC.text) ?? 0;
 
-      // Master Sales Order
+      // ... (Standard Invoice Saving Logic - No Changes) ...
+      int cartonsInt = int.tryParse(cartonsC.text) ?? 0;
       DocumentReference orderRef = _db.collection('sales_orders').doc(invNo);
+      Map<String, dynamic> masterPaymentMap = {
+        "type": isConditionSale.value ? "condition_partial" : "multi",
+        "cash": double.tryParse(cashC.text) ?? 0,
+        "bkash": double.tryParse(bkashC.text) ?? 0,
+        "nagad": double.tryParse(nagadC.text) ?? 0,
+        "bank": double.tryParse(bankC.text) ?? 0,
+        "bkashNumber": bkashNumberC.text.trim(),
+        "nagadNumber": nagadNumberC.text.trim(),
+        "bankName": bankNameC.text.trim(),
+        "accountNumber": bankAccC.text.trim(),
+        "totalPaidInput": totalPaidInputVal,
+        "paidForOldDue": allocatedToOldDue,
+        "paidForInvoice": allocatedToInvoice,
+        "paidForPrevRunning": allocatedToPrevRunningDue,
+        "due": invoiceDueAmount,
+        "currency": "BDT",
+      };
+
       batch.set(orderRef, {
         "invoiceId": invNo,
         "timestamp": FieldValue.serverTimestamp(),
@@ -482,7 +572,6 @@ class LiveSalesController extends GetxController {
         "courierName": isConditionSale.value ? finalCourierName : null,
         "courierDue": isConditionSale.value ? invoiceDueAmount : 0,
         "packagerName": selectedPackager.value,
-        // UPDATED: Save Full Seller Info (UID, Name, Phone)
         "soldBy": {"uid": sellerUid, "name": sellerName, "phone": sellerPhone},
         "items": orderItems,
         "subtotal": subtotalAmount,
@@ -490,7 +579,7 @@ class LiveSalesController extends GetxController {
         "grandTotal": grandTotal,
         "totalCost": totalInvoiceCost,
         "profit": invoiceProfit,
-        "paymentDetails": invoicePaymentMap,
+        "paymentDetails": masterPaymentMap,
         "isFullyPaid": invoiceDueAmount <= 0,
         "snapshotOldDue": oldDueSnap,
         "snapshotRunningDue": runningDueSnap,
@@ -500,9 +589,8 @@ class LiveSalesController extends GetxController {
                 : "completed",
       });
 
-      // --- BRANCH LOGIC ---
-
       if (isConditionSale.value) {
+        // ... (Condition Logic Same as before) ...
         DocumentReference condCustRef = _db
             .collection('condition_customers')
             .doc(fPhone);
@@ -512,7 +600,7 @@ class LiveSalesController extends GetxController {
           "address": addressC.text,
           "shop": shopC.text,
           "lastChallan": finalChallan,
-          "lastCourier": finalCourierName, // Use dynamic name
+          "lastCourier": finalCourierName,
           "lastUpdated": FieldValue.serverTimestamp(),
           "totalCourierDue": FieldValue.increment(invoiceDueAmount),
         }, SetOptions(merge: true));
@@ -531,11 +619,9 @@ class LiveSalesController extends GetxController {
           "items": orderItems,
           "date": Timestamp.fromDate(saleDate),
           "status": invoiceDueAmount <= 0 ? "completed" : "pending_courier",
-          "soldBy": sellerName, // Add simplified name here
+          "soldBy": sellerName,
         });
 
-        // Only update courier ledger if we actually selected a known courier
-        // and there is due.
         if (finalCourierName != null && invoiceDueAmount > 0) {
           DocumentReference courierRef = _db
               .collection('courier_ledgers')
@@ -556,21 +642,20 @@ class LiveSalesController extends GetxController {
             "pending": invoiceDueAmount,
             "customerType": "condition_advance",
             "timestamp": Timestamp.fromDate(saleDate),
-            "paymentMethod": invoicePaymentMap,
+            "paymentMethod": mapForInvoice,
             "createdAt": FieldValue.serverTimestamp(),
             "source": "pos_condition_sale",
             "transactionId": invNo,
             "invoiceId": invNo,
             "status": invoiceDueAmount <= 0 ? "paid" : "partial",
             "packagerName": selectedPackager.value,
-            // UPDATED: Daily Sales - Condition
             "soldByUid": sellerUid,
             "soldByName": sellerName,
             "soldByNumber": sellerPhone,
           });
         }
       } else if (customerType.value == "Debtor" && debtorId != null) {
-        // A. Debtor Analytics
+        // 1. Transaction History
         DocumentReference analyticsRef = _db
             .collection('debtor_transaction_history')
             .doc(invNo);
@@ -584,12 +669,11 @@ class LiveSalesController extends GetxController {
           "profit": invoiceProfit,
           "itemsSummary":
               orderItems.map((e) => "${e['model']} x${e['qty']}").toList(),
-          // UPDATED: Debtor History
           "soldBy": sellerName,
           "soldByPhone": sellerPhone,
         });
 
-        // B. PAY OLD DUE
+        // 2. OLD DUE PAYMENT
         if (allocatedToOldDue > 0) {
           DocumentReference oldPayRef =
               _db
@@ -604,18 +688,16 @@ class LiveSalesController extends GetxController {
             "date": Timestamp.fromDate(saleDate),
             "createdAt": FieldValue.serverTimestamp(),
             "note": "Payment via Inv $invNo",
-            "paymentMethod": invoicePaymentMap,
-            // UPDATED: Collected By
+            "paymentMethod": mapForOldDue,
             "collectedBy": sellerName,
             "collectedByPhone": sellerPhone,
           });
-
           DocumentReference cashRef = _db.collection('cash_ledger').doc();
           batch.set(cashRef, {
             'type': 'deposit',
             'amount': allocatedToOldDue,
             'method': 'multi',
-            'details': invoicePaymentMap,
+            'details': mapForOldDue,
             'description': "Loan Repayment: $fName (Inv $invNo)",
             'timestamp': FieldValue.serverTimestamp(),
             'linkedDebtorId': debtorId,
@@ -625,7 +707,7 @@ class LiveSalesController extends GetxController {
           });
         }
 
-        // C. CREATE INVOICE DEBT
+        // 3. CREDIT (Invoice Debt)
         DocumentReference creditRef = _db
             .collection('debatorbody')
             .doc(debtorId)
@@ -638,12 +720,11 @@ class LiveSalesController extends GetxController {
           "date": Timestamp.fromDate(saleDate),
           "createdAt": FieldValue.serverTimestamp(),
           "note": "Invoice $invNo",
-          // UPDATED: Sold By
           "soldBy": sellerName,
           "soldByPhone": sellerPhone,
         });
 
-        // D. PAY INVOICE
+        // 4. DEBIT (Current Invoice Payment)
         if (allocatedToInvoice > 0) {
           DocumentReference debitRef = _db
               .collection('debatorbody')
@@ -657,15 +738,15 @@ class LiveSalesController extends GetxController {
             "date": Timestamp.fromDate(saleDate),
             "createdAt": FieldValue.serverTimestamp(),
             "note": "Payment for Inv $invNo",
-            "paymentMethod": invoicePaymentMap,
-            // UPDATED: Collected By
+            "paymentMethod": mapForInvoice,
             "collectedBy": sellerName,
             "collectedByPhone": sellerPhone,
           });
         }
 
-        // E. PAY PREVIOUS RUNNING DUE
+        // 5. SURPLUS / RUNNING DUE HANDLING
         if (allocatedToPrevRunningDue > 0) {
+          // A. Always Reduce Debtor Balance (This logic is fine)
           DocumentReference surplusRef = _db
               .collection('debatorbody')
               .doc(debtorId)
@@ -678,27 +759,47 @@ class LiveSalesController extends GetxController {
             "date": Timestamp.fromDate(saleDate),
             "createdAt": FieldValue.serverTimestamp(),
             "note": "Surplus Pay from Inv $invNo",
-            "paymentMethod": invoicePaymentMap,
-            // UPDATED: Collected By
+            "paymentMethod": mapForSurplus,
             "collectedBy": sellerName,
           });
 
-          DocumentReference cashRef2 = _db.collection('cash_ledger').doc();
-          batch.set(cashRef2, {
-            'type': 'deposit',
-            'amount': allocatedToPrevRunningDue,
-            'method': 'multi',
-            'details': invoicePaymentMap,
-            'description': "Prev Due Collection: $fName (Inv $invNo)",
-            'timestamp': FieldValue.serverTimestamp(),
-            'linkedDebtorId': debtorId,
-            'linkedTxId': surplusRef.id,
-            'source': 'pos_running_collection',
-            'userUid': sellerUid,
-          });
+          // B. Update Previous Daily Sales (No Cash Ledger Entry created for these)
+          for (var update in pendingSalesUpdates) {
+            batch.update(update['ref'], {
+              "paid": update['newPaid'],
+              "pending": update['newPending'],
+              "status": update['newPending'] <= 0.5 ? "paid" : "partial",
+              "lastUpdated": FieldValue.serverTimestamp(),
+              "paymentHistory": FieldValue.arrayUnion([
+                {
+                  'amount': update['amountApplied'],
+                  'date': Timestamp.now(),
+                  'sourceInv': invNo,
+                  'type': 'surplus_allocation',
+                },
+              ]),
+            });
+          }
+
+          // C. Only Write to Cash Ledger if there is REMAINDER (Unmatched money)
+          if (amountForCashLedger > 0) {
+            DocumentReference cashRef2 = _db.collection('cash_ledger').doc();
+            batch.set(cashRef2, {
+              'type': 'deposit',
+              'amount': amountForCashLedger,
+              'method': 'multi',
+              'details': mapForSurplus,
+              'description': "Unmatched Surplus: $fName (Inv $invNo)",
+              'timestamp': FieldValue.serverTimestamp(),
+              'linkedDebtorId': debtorId,
+              'linkedTxId': surplusRef.id,
+              'source': 'pos_running_collection',
+              'userUid': sellerUid,
+            });
+          }
         }
 
-        // F. DAILY SALES ENTRY
+        // 6. Current Daily Sales Entry
         DocumentReference dailyRef = _db.collection('daily_sales').doc();
         batch.set(dailyRef, {
           "name": fName,
@@ -707,20 +808,19 @@ class LiveSalesController extends GetxController {
           "pending": invoiceDueAmount,
           "customerType": "debtor",
           "timestamp": Timestamp.fromDate(saleDate),
-          "paymentMethod": invoicePaymentMap,
+          "paymentMethod": mapForInvoice,
           "createdAt": FieldValue.serverTimestamp(),
           "source": "pos_sale",
           "transactionId": invNo,
           "invoiceId": invNo,
           "status": invoiceDueAmount <= 0 ? "paid" : "due",
           "packagerName": selectedPackager.value,
-          // UPDATED: Daily Sales - Debtor
           "soldByUid": sellerUid,
           "soldByName": sellerName,
           "soldByNumber": sellerPhone,
         });
       } else {
-        // Retailer Sale
+        // Retailer Logic (Unchanged)
         DocumentReference custRef = _db.collection('customers').doc(fPhone);
         batch.set(custRef, {
           "name": fName,
@@ -747,13 +847,12 @@ class LiveSalesController extends GetxController {
           "pending": 0.0,
           "customerType": "retailer",
           "timestamp": Timestamp.fromDate(saleDate),
-          "paymentMethod": rawPaymentDetails,
+          "paymentMethod": mapForInvoice,
           "createdAt": FieldValue.serverTimestamp(),
           "source": "pos_sale",
           "transactionId": invNo,
           "invoiceId": invNo,
           "packagerName": selectedPackager.value,
-          // UPDATED: Daily Sales - Retailer
           "soldByUid": sellerUid,
           "soldByName": sellerName,
           "soldByNumber": sellerPhone,
@@ -768,7 +867,7 @@ class LiveSalesController extends GetxController {
         invNo,
         fName,
         fPhone,
-        invoicePaymentMap,
+        masterPaymentMap,
         orderItems,
         isCondition: isConditionSale.value,
         challan: finalChallan,
@@ -778,8 +877,8 @@ class LiveSalesController extends GetxController {
         shopName: shopC.text,
         oldDueSnap: oldDueSnap,
         runningDueSnap: runningDueSnap,
-        authorizedName: sellerName, // UPDATED: Pass dynamically
-        authorizedPhone: sellerPhone, // UPDATED: Pass dynamically
+        authorizedName: sellerName,
+        authorizedPhone: sellerPhone,
         discount: discountVal.value,
         packagerName: selectedPackager.value,
       );

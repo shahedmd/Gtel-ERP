@@ -107,7 +107,7 @@ class DailySalesController extends GetxController {
   }
 
   // ==========================================
-  // 2. ADD SALE
+  // 2. ADD SALE (UPDATED)
   // ==========================================
   Future<void> addSale({
     required String name,
@@ -148,6 +148,7 @@ class DailySalesController extends GetxController {
         "name": name,
         "amount": _round(amount),
         "paid": _round(paidPart),
+        "ledgerPaid": 0.0, // <--- NEW: Initialize to 0 for consistency
         "customerType": customerType,
         "timestamp": Timestamp.fromDate(date),
         "paymentMethod": paymentMethod,
@@ -223,6 +224,8 @@ class DailySalesController extends GetxController {
 
           batch.update(doc.reference, {
             "paid": _round(alreadyPaid + toApply),
+            // Note: We do NOT touch ledgerPaid here because this function
+            // represents a "Today" payment collection, not a Ledger allocation.
             "paymentMethod": paymentMethod,
             "lastPaymentAt": FieldValue.serverTimestamp(),
             "appliedDebits": applied,
@@ -282,6 +285,14 @@ class DailySalesController extends GetxController {
         if (remainingToReverse <= 0) break;
         final data = doc.data();
         double currentPaid = _round((data['paid'] as num).toDouble());
+        // Also check if any part was ledger paid to avoid reversing ledger allocations incorrectly
+        double ledgerPart = _round(
+          (data['ledgerPaid'] as num?)?.toDouble() ?? 0.0,
+        );
+
+        // We can only reverse "Cash Paid" here, ideally.
+        // If a transaction was fully Ledger Paid, reversing it here is tricky.
+        // For now, standard reversal logic applies to the 'paid' total.
 
         if (currentPaid > 0) {
           double toSubtract =
@@ -290,8 +301,18 @@ class DailySalesController extends GetxController {
                   : remainingToReverse;
           toSubtract = _round(toSubtract);
 
+          double newPaid = _round(currentPaid - toSubtract);
+          double newLedgerPaid = ledgerPart;
+
+          // If we are reversing more than what was 'cash paid' (meaning we eat into ledger paid),
+          // we should update ledgerPaid too so stats stay correct.
+          if (newPaid < ledgerPart) {
+            newLedgerPaid = newPaid;
+          }
+
           batch.update(doc.reference, {
-            'paid': _round(currentPaid - toSubtract),
+            'paid': newPaid,
+            'ledgerPaid': newLedgerPaid, // Keep consistent
             'lastReversalAt': FieldValue.serverTimestamp(),
             'reversalHistory': FieldValue.arrayUnion([
               {
@@ -407,8 +428,6 @@ class DailySalesController extends GetxController {
     double paidAmount, [
     double? totalAmount,
   ]) {
-    // FIX 1: If nothing was paid on this specific invoice, it is DUE.
-    // Even if 'pm' has data (e.g. from a previous default), we ignore it to avoid confusion.
     if (paidAmount <= 0) return "CREDIT / DUE";
 
     if (pm == null || pm == "") return "CREDIT / DUE";
@@ -448,29 +467,21 @@ class DailySalesController extends GetxController {
 
     List<String> parts = [];
 
-    // --- CASH ---
     if (cash > 0) {
       parts.add("Cash: ${toMoney(cash)}");
     }
-
-    // --- BKASH ---
     if (bkash > 0) {
       String num = (pm['bkashNumber'] ?? pm['number'] ?? "").toString();
       String line = "Bkash: ${toMoney(bkash)}";
-      // Only show number if it's not empty, to save space
       if (num.isNotEmpty && num.length > 3) line += " ($num)";
       parts.add(line);
     }
-
-    // --- NAGAD ---
     if (nagad > 0) {
       String num = (pm['nagadNumber'] ?? pm['number'] ?? "").toString();
       String line = "Nagad: ${toMoney(nagad)}";
       if (num.isNotEmpty && num.length > 3) line += " ($num)";
       parts.add(line);
     }
-
-    // --- BANK ---
     if (bank > 0) {
       String myBankName = (pm['bankName'] ?? "Bank").toString();
       String custTrxInfo =
@@ -483,27 +494,24 @@ class DailySalesController extends GetxController {
       parts.add(line);
     }
 
-    // Legacy fallback
     if (parts.isEmpty && pm['type'] != null) {
       String type = pm['type'].toString().toUpperCase();
       if (type == "BANK") {
         String myBankName = (pm['bankName'] ?? "BANK").toString();
-        return myBankName; // Shortened to save space
+        return myBankName;
       }
       return type;
     }
 
-    // FIX 2: Use single newline '\n' instead of '\n\n' so 3 methods fit in the UI
     return parts.isEmpty ? "MULTI-PAY" : parts.join("\n");
   }
 
   // ==========================================
-  // 7. REPRINT LOGIC (FIXED: Checks Daily Ledger for Updated Payment)
+  // 7. REPRINT LOGIC (SAME AS BEFORE)
   // ==========================================
   Future<void> reprintInvoice(String invoiceId) async {
     isLoading.value = true;
     try {
-      // 1. Fetch Master Record (For Items, Address, Customer Info)
       DocumentSnapshot doc =
           await _db.collection('sales_orders').doc(invoiceId).get();
       if (!doc.exists) {
@@ -513,8 +521,6 @@ class DailySalesController extends GetxController {
 
       Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
 
-      // 2. [NEW LOGIC] Check Daily Sales to see if this invoice was paid LATER
-      // We look for the entry in daily_sales that matches this transactionId
       double realTimePaid = 0.0;
       bool foundInDaily = false;
 
@@ -531,7 +537,6 @@ class DailySalesController extends GetxController {
         foundInDaily = true;
       }
 
-      // 3. Extract Data for Reprint
       String name = data['customerName'] ?? "";
       String phone = data['customerPhone'] ?? "";
       String shop = data['shopName'] ?? "";
@@ -545,10 +550,8 @@ class DailySalesController extends GetxController {
         data['items'] ?? [],
       );
 
-      // 4. Adjust Payment Details based on Real-Time Data
       Map<String, dynamic> payMap = Map.from(data['paymentDetails'] ?? {});
 
-      // Calculate Totals to figure out the correct Due
       double subTotal = items.fold(
         0.0,
         (sumv, item) => sumv + (item['subtotal'] ?? 0),
@@ -557,11 +560,7 @@ class DailySalesController extends GetxController {
       double grandTotal = subTotal - discountVal;
 
       if (foundInDaily) {
-        // If we found the daily record, use its PAID amount as the source of truth
         payMap['paidForInvoice'] = realTimePaid;
-
-        // Recalculate Due based on the daily sales paid amount
-        // Due = GrandTotal - RealPaid
         double newDue = grandTotal - realTimePaid;
         if (newDue < 0) newDue = 0;
         payMap['due'] = newDue;
@@ -570,7 +569,6 @@ class DailySalesController extends GetxController {
       double snapOld = (data['snapshotOldDue'] as num?)?.toDouble() ?? 0.0;
       double snapRun = (data['snapshotRunningDue'] as num?)?.toDouble() ?? 0.0;
 
-      // --- EXTRACT SELLER DATA ---
       String sellerName = "Joynal Abedin";
       String sellerPhone = "01720677206";
 
@@ -588,7 +586,7 @@ class DailySalesController extends GetxController {
         invoiceId,
         name,
         phone,
-        payMap, // This now contains the UPDATED paid/due info
+        payMap,
         items,
         isCondition: isCond,
         challan: challan,
