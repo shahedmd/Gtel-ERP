@@ -31,7 +31,7 @@ Future<void> main() async {
   Get.put(ProductController());
   Get.put(CashDrawerController());
   Get.put(ShipmentController());
-  Get.put(StaffController());
+  Get.put(StaffController()); 
   Get.put(DebtorPurchaseController());
   Get.put(OverviewController());
   runApp(const MyApp());

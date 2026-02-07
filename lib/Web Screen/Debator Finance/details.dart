@@ -840,11 +840,11 @@ class _DebatordetailsState extends State<Debatordetails> {
                             ),
                           ],
                           onChanged: (v) {
-                            if (v != null && !v.contains('div'))
+                            if (v != null && !v.contains('div')) {
                               selectedType.value = v;
+                            }
                           },
                         ),
-
                         if ([
                           'debit',
                           'loan_payment',

@@ -455,9 +455,6 @@ class ProductScreen extends StatelessWidget {
     );
   }
 
-  // ------------------------------------
-  // COLUMNS DEFINITION
-  // ------------------------------------
   List<DataColumn> _getColumns() {
     DataColumn col(String name, {bool isNumeric = false}) {
       return DataColumn(
@@ -478,45 +475,49 @@ class ProductScreen extends StatelessWidget {
       col('Name'),
       col('Model'),
       col('Status'),
+      col('Est. Profit'),
+
       col('Stock', isNumeric: true),
-      col('On Way', isNumeric: true), // <--- NEW COLUMN
+      col('On Way', isNumeric: true),
       col('Sea Qty', isNumeric: true),
       col('Air Qty', isNumeric: true),
       col('Avg Cost', isNumeric: true),
       col('Ship Date'),
       col('Agent', isNumeric: true),
       col('Wholesale', isNumeric: true),
+
+      // --- NEW COLUMN HERE ---
+
+      // -----------------------
       col('Actions'),
     ];
   }
 
-  // ------------------------------------
-  // ROWS DEFINITION
-  // ------------------------------------
   List<DataRow> _getRows(BuildContext context) {
     return controller.allProducts.map((p) {
-      // NEW: Get OTW value from ShipmentController
-      // Obx is technically not needed inside DataRow builder if the parent widget refreshes,
-      // but to be reactive to JUST shipment changes, we rely on the stream updates.
-      // Since GetX rebuilds the table when variables change, we can just access the map.
       int onWay = shipmentController.getOnWayQty(p.id);
 
       return DataRow(
         cells: [
+          // 1. Name
           DataCell(
             Text(
               p.name,
               style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
             ),
           ),
+          // 2. Model
           DataCell(
             Text(
               p.model,
               style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
             ),
           ),
+          // 3. Status
           DataCell(_buildStockBadge(p.stockQty, p.alertQty)),
+          DataCell(_buildProfitCell(p)),
 
+          // 4. Stock
           DataCell(
             Text(
               p.stockQty.toString(),
@@ -524,7 +525,7 @@ class ProductScreen extends StatelessWidget {
             ),
           ),
 
-          // --- NEW: ON WAY CELL ---
+          // 5. On Way
           DataCell(
             onWay > 0
                 ? Container(
@@ -549,9 +550,12 @@ class ProductScreen extends StatelessWidget {
                 : const Text("-", style: TextStyle(color: Colors.grey)),
           ),
 
-          // ------------------------
+          // 6. Sea
           DataCell(Text(p.seaStockQty.toString())),
+          // 7. Air
           DataCell(Text(p.airStockQty.toString())),
+
+          // 8. Avg Cost
           DataCell(
             Text(
               p.avgPurchasePrice.toStringAsFixed(2),
@@ -561,6 +565,8 @@ class ProductScreen extends StatelessWidget {
               ),
             ),
           ),
+
+          // 9. Date
           DataCell(
             Text(
               p.shipmentDate != null
@@ -569,8 +575,17 @@ class ProductScreen extends StatelessWidget {
               style: const TextStyle(fontSize: 12, color: Colors.grey),
             ),
           ),
+
+          // 10. Agent
           DataCell(Text(p.agent.toStringAsFixed(2))),
+
+          // 11. Wholesale
           DataCell(Text(p.wholesale.toStringAsFixed(2))),
+
+          // --- NEW: PROFIT CELL ---
+          // ------------------------
+
+          // 12. Actions
           DataCell(_buildActions(context, p)),
         ],
       );
@@ -1016,4 +1031,45 @@ class ProductScreen extends StatelessWidget {
       ),
     );
   }
+}
+
+// ==========================================
+// PROFIT CELL HELPER
+// ==========================================
+Widget _buildProfitCell(Product p) {
+  // Inner helper to style one line (Agent or Wholesale)
+  Widget profitLine(String label, double profit) {
+    bool isLoss = profit < 0;
+    // Format: "+500" or "-200"
+    String valueText = "${profit >= 0 ? '+' : ''}${profit.toStringAsFixed(0)}";
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          "$label: ",
+          style: const TextStyle(fontSize: 11, color: Colors.grey),
+        ),
+        Text(
+          valueText,
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 12,
+            // Red for Loss (-), Green for Profit (+)
+            color: isLoss ? const Color(0xFFDC2626) : const Color(0xFF16A34A),
+          ),
+        ),
+      ],
+    );
+  }
+
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    mainAxisAlignment: MainAxisAlignment.center,
+    children: [
+      profitLine("A", p.profitAgent), // A = Agent Profit
+      const SizedBox(height: 2),
+      profitLine("W", p.profitWholesale), // W = Wholesale Profit
+    ],
+  );
 }

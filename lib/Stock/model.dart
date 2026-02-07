@@ -8,20 +8,20 @@ class Product {
   final double yuan;
   final double air;
   final double sea;
-  final double agent;
-  final double wholesale;
-  final double shipmentTax; // 'shipmenttax'
+  final double agent; // Selling Price (Agent)
+  final double wholesale; // Selling Price (Wholesale)
+  final double shipmentTax;
   final int shipmentNo;
   final double currency;
-  int stockQty; // Total Stock
+  int stockQty;
 
-  // --- New Fields (Updated) ---
-  final double shipmentTaxAir; // Maps to 'shipmenttaxair'
-  final DateTime? shipmentDate; // Maps to 'shipmentdate'
-  final int alertQty; // <--- NEW: Maps to 'alert_qty' (Low Stock Limit)
+  // --- New Fields ---
+  final double shipmentTaxAir;
+  final DateTime? shipmentDate;
+  final int alertQty;
 
   // --- Inventory Breakdown Fields ---
-  final double avgPurchasePrice;
+  final double avgPurchasePrice; // Cost Price
   final int seaStockQty;
   final int airStockQty;
   final int localQty;
@@ -43,10 +43,10 @@ class Product {
     required this.currency,
     required this.stockQty,
 
-    // Updated Constructor
+    // Updated Constructor Defaults
     this.shipmentTaxAir = 0.0,
     this.shipmentDate,
-    this.alertQty = 5, // <--- Default to 5
+    this.alertQty = 5,
 
     required this.avgPurchasePrice,
     required this.seaStockQty,
@@ -134,12 +134,9 @@ class Product {
       'shipmentno': shipmentNo,
       'currency': currency,
       'stock_qty': stockQty,
-
-      // --- New Fields ---
       'shipmenttaxair': shipmentTaxAir,
       'shipmentdate': shipmentDate?.toIso8601String(),
-      'alert_qty': alertQty, // <--- Added to JSON
-
+      'alert_qty': alertQty,
       'avg_purchase_price': avgPurchasePrice,
       'sea_stock_qty': seaStockQty,
       'air_stock_qty': airStockQty,
@@ -149,4 +146,16 @@ class Product {
 
   // Optional Helper: Check if this specific product is low stock
   bool get isLowStock => stockQty <= alertQty;
+
+  // ==========================================
+  // PROFIT CALCULATIONS (Added)
+  // ==========================================
+
+  /// Calculate Profit for Agent Price
+  /// (Selling Price - Average Purchase Price)
+  double get profitAgent => agent - avgPurchasePrice;
+
+  /// Calculate Profit for Wholesale Price
+  /// (Selling Price - Average Purchase Price)
+  double get profitWholesale => wholesale - avgPurchasePrice;
 }

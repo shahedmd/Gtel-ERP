@@ -19,6 +19,7 @@ class ProductController extends GetxController {
   final RxList<Product> allProducts = <Product>[].obs;
   final RxList<Product> shortListProducts = <Product>[].obs;
   final RxList<Map<String, dynamic>> serviceLogs = <Map<String, dynamic>>[].obs;
+  final RxDouble potentialProfitTotal = 0.0.obs;
 
   // Statistics
   final RxDouble overallTotalValuation = 0.0.obs;
@@ -561,8 +562,6 @@ class ProductController extends GetxController {
           (Match m) => '${m[1]},',
         );
   }
-
-
 
   // 2. EXPORT FORMATTER
   List<List<String>> formatForPdf(List<Product> products) {
