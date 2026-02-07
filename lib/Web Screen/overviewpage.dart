@@ -6,7 +6,7 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
 
-import 'overviewcontroller.dart';
+import 'overviewcontroller.dart'; // Ensure this import points to your controller file
 
 class DailyOverviewPage extends StatelessWidget {
   DailyOverviewPage({super.key});
@@ -39,7 +39,16 @@ class DailyOverviewPage extends StatelessWidget {
       appBar: _buildAppBar(context),
       body: Obx(() {
         if (ctrl.isLoadingHistory.value) {
-          return const Center(child: CircularProgressIndicator());
+          return const Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 10),
+                Text("Calculating Balance History..."),
+              ],
+            ),
+          );
         }
 
         return SingleChildScrollView(
@@ -75,9 +84,12 @@ class DailyOverviewPage extends StatelessWidget {
                       letterSpacing: 1.0,
                     ),
                   ),
-                  const Text(
-                    "Sorted by Time",
-                    style: TextStyle(color: slateMedium, fontSize: 10),
+                  Text(
+                    "Sorted by Time (Newest First)",
+                    style: TextStyle(
+                      color: slateMedium.withOpacity(0.7),
+                      fontSize: 10,
+                    ),
                   ),
                 ],
               ),
@@ -86,7 +98,7 @@ class DailyOverviewPage extends StatelessWidget {
               LayoutBuilder(
                 builder: (context, constraints) {
                   // Responsive switching
-                  if (constraints.maxWidth > 600) {
+                  if (constraints.maxWidth > 800) {
                     return Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -211,7 +223,7 @@ class DailyOverviewPage extends StatelessWidget {
             ),
             onPressed: () => ctrl.generateLedgerPdf(),
             icon: const Icon(Icons.print, size: 16),
-            label: const Text("Print PDF"),
+            label: const Text("PDF"),
           ),
         ),
       ],
@@ -447,14 +459,14 @@ class DailyOverviewPage extends StatelessWidget {
       ),
       child: Column(
         children: [
-          Row(
+          const Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
+              Text(
                 "Source Breakdown",
                 style: TextStyle(fontWeight: FontWeight.bold, color: slateDark),
               ),
-              const Text(
+              Text(
                 "Income Sources",
                 style: TextStyle(fontSize: 11, color: slateMedium),
               ),
@@ -472,8 +484,9 @@ class DailyOverviewPage extends StatelessWidget {
                     PieChart(
                       PieChartData(
                         sectionsSpace: 3,
-                        centerSpaceRadius: 45,
+                        centerSpaceRadius: 40,
                         sections: _generateChartData(),
+                        borderData: FlBorderData(show: false),
                       ),
                     ),
                     Center(
@@ -525,6 +538,7 @@ class DailyOverviewPage extends StatelessWidget {
     );
   }
 
+  // --- CHART DATA GENERATOR ---
   List<PieChartSectionData> _generateChartData() {
     double cash = ctrl.methodBreakdown['Cash'] ?? 0;
     double bkash = ctrl.methodBreakdown['Bkash'] ?? 0;
@@ -532,6 +546,7 @@ class DailyOverviewPage extends StatelessWidget {
     double bank = ctrl.methodBreakdown['Bank'] ?? 0;
     double total = cash + bkash + nagad + bank;
 
+    // Handle empty state
     if (total == 0) {
       return [
         PieChartSectionData(
@@ -709,12 +724,15 @@ class DailyOverviewPage extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       // Time
-                      Text(
-                        DateFormat('hh:mm a').format(item.time),
-                        style: const TextStyle(
-                          fontSize: 10,
-                          color: slateMedium,
-                          fontWeight: FontWeight.w500,
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(
+                          DateFormat('hh:mm a').format(item.time),
+                          style: const TextStyle(
+                            fontSize: 10,
+                            color: slateMedium,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -734,9 +752,21 @@ class DailyOverviewPage extends StatelessWidget {
                                 color: slateDark,
                               ),
                             ),
-                            const SizedBox(height: 2),
-                            // Updated subtitle badge logic
-                            _buildSubtitleWithBadges(item.subtitle, colorTheme),
+                            if (item.subtitle.isNotEmpty) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                item.subtitle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: slateMedium,
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: 4),
+                            // Use the controller's 'method' field for the badge
+                            _createMethodBadge(item.method),
                           ],
                         ),
                       ),
@@ -761,31 +791,13 @@ class DailyOverviewPage extends StatelessWidget {
     );
   }
 
-  // --- NEW MULTI-BADGE GENERATOR ---
-  // Parses strings like "Cash: 500, Bkash: 200" or simple "Cash"
-  Widget _buildSubtitleWithBadges(String subtitle, Color baseColor) {
-    // If it's a multi-payment string (contains comma)
-    if (subtitle.contains(',')) {
-      List<String> parts = subtitle.split(', ');
-      return Wrap(
-        spacing: 4,
-        runSpacing: 4,
-        children:
-            parts.map((part) {
-              return _createSingleBadge(part);
-            }).toList(),
-      );
-    } else {
-      // Single Payment
-      return _createSingleBadge(subtitle);
-    }
-  }
-
-  Widget _createSingleBadge(String text) {
+  // --- BADGE GENERATOR ---
+  Widget _createMethodBadge(String method) {
     Color bg = slateLight;
     Color fg = slateMedium;
-
+    String text = method.isEmpty ? "Cash" : method;
     String upper = text.toUpperCase();
+
     if (upper.contains("BKASH")) {
       bg = colBkash.withOpacity(0.1);
       fg = colBkash;
@@ -798,6 +810,10 @@ class DailyOverviewPage extends StatelessWidget {
     } else if (upper.contains("CASH")) {
       bg = colCash.withOpacity(0.05);
       fg = slateMedium;
+    } else {
+      // Default / Mixed
+      bg = Colors.purple.withOpacity(0.05);
+      fg = Colors.purple;
     }
 
     return Container(
@@ -808,7 +824,7 @@ class DailyOverviewPage extends StatelessWidget {
         border: Border.all(color: fg.withOpacity(0.2)),
       ),
       child: Text(
-        text, // keep original text (e.g. "Cash: 500")
+        text,
         style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: fg),
       ),
     );

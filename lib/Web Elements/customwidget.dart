@@ -282,19 +282,23 @@ class SidebarMenu extends StatelessWidget {
                       isSubItem: true,
                     ),
                     _NavTile(
-                      id: '/profit', // Example of a standalone route
-                      icon: FontAwesomeIcons.gears,
+                      id: '/profit',
                       title: "Sale Overview",
+                      isSubItem: true,
                     ),
                     _NavTile(
                       id: Routes.CUSTOMEROVERVIEW,
                       title: "Customer Overview",
                       isSubItem: true,
                     ),
+                    _NavTile(
+                      id: Routes.STAFFSALEREPORT,
+                      title: "Staff Overview",
+                      isSubItem: true,
+                    ),
                   ],
                 ),
 
-                // --- INVENTORY ---
                 _NavGroup(
                   title: "Products & Stock",
                   icon: FontAwesomeIcons.boxesStacked,
@@ -357,10 +361,10 @@ class SidebarMenu extends StatelessWidget {
           ),
           const SizedBox(width: 15),
           const Text(
-            "GTEL ERP",
+            "G Tel ERP",
             style: TextStyle(
               color: Colors.white,
-              fontSize: 18,
+              fontSize: 16,
               fontWeight: FontWeight.bold,
               letterSpacing: 1.2,
             ),

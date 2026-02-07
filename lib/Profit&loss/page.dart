@@ -1,9 +1,9 @@
-// ignore_for_file: deprecated_member_use, non_constant_identifier_names
+// ignore_for_file: deprecated_member_use
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
-import 'controller.dart'; // Ensure this imports your ProfitController
+import 'controller.dart'; 
 
 class ProfitView extends StatelessWidget {
   final ProfitController controller = Get.put(ProfitController());
@@ -52,11 +52,14 @@ class ProfitView extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // ------------------------------------------------
-              // FILTERS & CHART
+              // FILTERS
               // ------------------------------------------------
               _buildFilterChips(),
               const SizedBox(height: 25),
 
+              // ------------------------------------------------
+              // YEARLY CHART (Only visible if 'This Year' selected)
+              // ------------------------------------------------
               if (controller.selectedFilterLabel.value == 'This Year') ...[
                 _buildYearlyChart(),
                 const SizedBox(height: 25),
@@ -68,7 +71,6 @@ class ProfitView extends StatelessWidget {
               _buildSectionHeader("1. SALES OVERVIEW", "Invoiced Amount"),
               const SizedBox(height: 10),
 
-              // A. The 3 Breakdown Items
               Row(
                 children: [
                   Expanded(
@@ -101,7 +103,7 @@ class ProfitView extends StatelessWidget {
               ),
               const SizedBox(height: 15),
 
-              // B. Total Revenue Tile
+              // Total Revenue Tile
               _buildHighlightTile(
                 "TOTAL REVENUE",
                 controller.totalRevenue.value,
@@ -120,7 +122,6 @@ class ProfitView extends StatelessWidget {
               ),
               const SizedBox(height: 10),
 
-              // A. The 3 Breakdown Items
               Row(
                 children: [
                   Expanded(
@@ -153,7 +154,7 @@ class ProfitView extends StatelessWidget {
               ),
               const SizedBox(height: 15),
 
-              // B. Breakdown: Revenue vs Collected vs Pending
+              // Breakdown Bar: Revenue vs Collected vs Pending
               Container(
                 padding: const EdgeInsets.symmetric(
                   vertical: 20,
@@ -173,22 +174,28 @@ class ProfitView extends StatelessWidget {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    _buildTextStat(
-                      "Total Revenue",
-                      controller.totalRevenue.value,
-                      Colors.black87,
+                    Expanded(
+                      child: _buildTextStat(
+                        "Total Revenue",
+                        controller.totalRevenue.value,
+                        Colors.black87,
+                      ),
                     ),
                     Container(width: 1, height: 40, color: Colors.grey[300]),
-                    _buildTextStat(
-                      "Total Collected",
-                      controller.totalCollected.value,
-                      const Color(0xFF05CD99), // Green
+                    Expanded(
+                      child: _buildTextStat(
+                        "Total Collected",
+                        controller.totalCollected.value,
+                        const Color(0xFF05CD99), // Green
+                      ),
                     ),
                     Container(width: 1, height: 40, color: Colors.grey[300]),
-                    _buildTextStat(
-                      "Pending (Due)",
-                      controller.totalPendingGenerated.value,
-                      Colors.redAccent,
+                    Expanded(
+                      child: _buildTextStat(
+                        "Pending (Due)",
+                        controller.totalPendingGenerated.value,
+                        Colors.redAccent,
+                      ),
                     ),
                   ],
                 ),
@@ -228,9 +235,10 @@ class ProfitView extends StatelessWidget {
                           ),
                           const SizedBox(height: 5),
                           FittedBox(
+                            fit: BoxFit.scaleDown,
                             child: Text(
                               NumberFormat(
-                                '#,##0.00',
+                                '#,##0',
                               ).format(controller.profitOnRevenue.value),
                               style: const TextStyle(
                                 fontSize: 22,
@@ -282,9 +290,10 @@ class ProfitView extends StatelessWidget {
                           ),
                           const SizedBox(height: 5),
                           FittedBox(
+                            fit: BoxFit.scaleDown,
                             child: Text(
                               NumberFormat(
-                                '#,##0.00',
+                                '#,##0',
                               ).format(controller.netRealizedProfit.value),
                               style: const TextStyle(
                                 fontSize: 24,
@@ -344,6 +353,57 @@ class ProfitView extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 30),
+
+              // ============================================================
+              // SECTION 4: TRANSACTION LIST
+              // ============================================================
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  _buildSectionHeader("4. TRANSACTIONS", "Details"),
+
+                  // SORT DROPDOWN
+                  Container(
+                    height: 35,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: controller.sortOption.value,
+                        icon: const Icon(Icons.sort, size: 16),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.black87,
+                        ),
+                        items:
+                            [
+                              'Date (Newest)',
+                              'Profit (High > Low)',
+                              'Loss (High > Low)',
+                            ].map((String value) {
+                              return DropdownMenuItem<String>(
+                                value: value,
+                                child: Text(value),
+                              );
+                            }).toList(),
+                        onChanged: (newValue) {
+                          if (newValue != null) {
+                            controller.sortTransactions(newValue);
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 15),
+
+              _buildTransactionList(),
+              const SizedBox(height: 50),
             ],
           ),
         );
@@ -356,8 +416,8 @@ class ProfitView extends StatelessWidget {
   // --------------------------------------------------------------------------
 
   Widget _buildSectionHeader(String title, String subtitle) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           title,
@@ -415,7 +475,7 @@ class ProfitView extends StatelessWidget {
               ),
               const SizedBox(height: 5),
               Text(
-                "Tk ${NumberFormat('#,##0.00').format(value)}",
+                "Tk ${NumberFormat('#,##0').format(value)}",
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 26,
@@ -468,7 +528,7 @@ class ProfitView extends StatelessWidget {
           const SizedBox(height: 4),
           FittedBox(
             child: Text(
-              NumberFormat('#,##0').format(value), // Removed compact()
+              NumberFormat('#,##0').format(value),
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
@@ -486,12 +546,14 @@ class ProfitView extends StatelessWidget {
       children: [
         Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey)),
         const SizedBox(height: 4),
-        Text(
-          NumberFormat('#,##0').format(value), // Removed compact()
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-            color: valueColor,
+        FittedBox(
+          child: Text(
+            NumberFormat('#,##0').format(value),
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: valueColor,
+            ),
           ),
         ),
       ],
@@ -586,6 +648,112 @@ class ProfitView extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildTransactionList() {
+    if (controller.transactionList.isEmpty) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: const Center(child: Text("No transactions in this period")),
+      );
+    }
+
+    return ListView.builder(
+      physics: const NeverScrollableScrollPhysics(),
+      shrinkWrap: true,
+      itemCount: controller.transactionList.length,
+      itemBuilder: (context, index) {
+        final item = controller.transactionList[index];
+        bool isLoss = (item['profit'] as double) < 0;
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.grey.shade100),
+          ),
+          child: Row(
+            children: [
+              // Icon
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: isLoss ? Colors.red[50] : Colors.green[50],
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  isLoss ? Icons.trending_down : Icons.trending_up,
+                  color: isLoss ? Colors.red : Colors.green,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+
+              // Name & Date
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item['name'] ?? 'Unknown',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      DateFormat('dd MMM - hh:mm a').format(item['date']),
+                      style: const TextStyle(color: Colors.grey, fontSize: 11),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Amounts
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    "Sale: ${NumberFormat('#,##0').format(item['total'])}",
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      Text(
+                        "P: ",
+                        style: TextStyle(color: Colors.grey[600], fontSize: 11),
+                      ),
+                      Text(
+                        NumberFormat('#,##0').format(item['profit']),
+                        style: TextStyle(
+                          color: isLoss ? Colors.red : Colors.green,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 import 'package:gtel_erp/Account%20Overview/aopage.dart';
 import 'package:gtel_erp/Cash/page.dart';
 import 'package:gtel_erp/Customer/cusotmerpage.dart';
+import 'package:gtel_erp/Staff%20Sale%20Report/ui.dart';
 import 'package:gtel_erp/Stock/Service/servicepage.dart';
 import 'package:gtel_erp/Vendor/vendorpage.dart';
 import 'package:gtel_erp/Web%20Screen/Sales/Condition/conditionpage.dart';
@@ -96,6 +97,9 @@ class _AdminHomepageState extends State<AdminHomepage> {
                   }
                   if (settings.name == Routes.CUSTOMEROVERVIEW) {
                     return GetPageRoute(page: () => CustomerAnalyticsPage());
+                  }
+                  if (settings.name == Routes.STAFFSALEREPORT) {
+                    return GetPageRoute(page: () => StaffReportScreen());
                   }
                   return GetPageRoute(
                     page: () => const Center(child: Text("Not Found")),

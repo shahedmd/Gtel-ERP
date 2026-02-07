@@ -1,4 +1,4 @@
-// ignore_for_file: empty_catches, curly_braces_in_flow_control_structures
+// ignore_for_file: empty_catches, curly_braces_in_flow_control_structures, deprecated_member_use
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:get/get.dart';
@@ -10,12 +10,13 @@ import 'package:printing/printing.dart';
 
 enum DateFilter { daily, monthly, yearly, custom }
 
+// --- MODEL ---
 class DrawerTransaction {
   final DateTime date;
   final String description;
   final double amount;
   final String type; // 'sale', 'collection', 'expense', 'withdraw'
-  final String method; // 'Cash', 'Bank', 'Multi'
+  final String method; // 'Cash', 'Bank', 'Bkash', 'Nagad', 'Mixed'
   final String? bankName;
   final String? accountDetails;
 
@@ -30,6 +31,7 @@ class DrawerTransaction {
   });
 }
 
+// --- CONTROLLER ---
 class CashDrawerController extends GetxController {
   static CashDrawerController get to => Get.find();
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -39,14 +41,14 @@ class CashDrawerController extends GetxController {
   final Rx<DateTimeRange> selectedRange =
       DateTimeRange(start: DateTime.now(), end: DateTime.now()).obs;
 
-  // --- LIVE BALANCES ---
+  // --- LIVE BALANCES (NET) ---
   final RxDouble netCash = 0.0.obs;
   final RxDouble netBank = 0.0.obs;
   final RxDouble netBkash = 0.0.obs;
   final RxDouble netNagad = 0.0.obs;
   final RxDouble grandTotal = 0.0.obs;
 
-  // --- REPORT TOTALS ---
+  // --- REPORT TOTALS (GROSS) ---
   final RxDouble rawSalesTotal = 0.0.obs;
   final RxDouble rawCollectionTotal = 0.0.obs;
   final RxDouble rawExpenseTotal = 0.0.obs;
@@ -93,6 +95,9 @@ class CashDrawerController extends GetxController {
     fetchData();
   }
 
+  // =========================================================
+  // CORE CALCULATION LOGIC
+  // =========================================================
   Future<void> fetchData() async {
     isLoading.value = true;
     try {
@@ -113,6 +118,7 @@ class CashDrawerController extends GetxController {
         59,
       );
 
+      // 1. Fetch Sales
       var salesFuture =
           _db
               .collection('daily_sales')
@@ -121,6 +127,7 @@ class CashDrawerController extends GetxController {
               .orderBy('timestamp', descending: true)
               .get();
 
+      // 2. Fetch Ledger (Manual Add/Withdraw/Collection)
       var ledgerFuture =
           _db
               .collection('cash_ledger')
@@ -129,7 +136,8 @@ class CashDrawerController extends GetxController {
               .orderBy('timestamp', descending: true)
               .get();
 
-      var expensesFuture = _fetchExpensesOptimized(start, end);
+      // 3. Fetch Expenses
+      var expensesFuture = _fetchExpensesList(start, end);
 
       var results = await Future.wait([
         salesFuture,
@@ -142,93 +150,80 @@ class CashDrawerController extends GetxController {
       List<DrawerTransaction> expenseList =
           results[2] as List<DrawerTransaction>;
 
-      List<DrawerTransaction> allTx = [...expenseList];
+      // --- Accumulators ---
       double tCash = 0, tBank = 0, tBkash = 0, tNagad = 0;
       double sumSales = 0, sumCollections = 0, sumExpenses = 0;
+      List<DrawerTransaction> allTx = [...expenseList];
 
-      // =========================================================
-      // PART A: PROCESS DAILY SALES (Current Invoice Payments)
-      // =========================================================
+      // --- A. PROCESS SALES (Robust Map Parsing) ---
       for (var doc in salesSnap.docs) {
         var data = doc.data() as Map<String, dynamic>;
+
         double totalPaid = double.tryParse(data['paid'].toString()) ?? 0;
         double ledgerPaid = double.tryParse(data['ledgerPaid'].toString()) ?? 0;
 
-        // We only want to count "Instant Cash/Bank" received at the counter.
-        // We subtract 'ledgerPaid' because that money is already counted in PART B (Ledger Loop).
-        double paidAmount = totalPaid - ledgerPaid;
-        if (paidAmount <= 0.1) continue;
+        // Actual money received now = Paid - Ledger Usage
+        double actualReceived = totalPaid - ledgerPaid;
 
-        sumSales += paidAmount;
+        if (actualReceived <= 0.01) continue; // Skip if no new money came in
 
+        sumSales += actualReceived;
+
+        // Parse Payment Method
         var pm = data['paymentMethod'];
         double c = 0, b = 0, bk = 0, n = 0;
-        String? saleBankName;
-        String? saleAccountInfo;
-        String methodStr = 'cash';
+        String displayMethod = "Cash";
+        String? displayBank;
+        String? displayAcc;
 
         if (pm is Map) {
-          methodStr = (pm['type'] ?? 'unknown').toString();
+          // 1. Extract Exact Amounts
+          c = double.tryParse(pm['cash'].toString()) ?? 0;
+          b = double.tryParse(pm['bank'].toString()) ?? 0;
+          bk = double.tryParse(pm['bkash'].toString()) ?? 0;
+          n = double.tryParse(pm['nagad'].toString()) ?? 0;
 
-          if (pm.containsKey('bankName'))
-            saleBankName = pm['bankName'].toString();
-          if (pm.containsKey('accountNumber'))
-            saleAccountInfo = pm['accountNumber'].toString();
-          else if (pm.containsKey('bkashNumber'))
-            saleAccountInfo = "Bkash: ${pm['bkashNumber']}";
-          else if (pm.containsKey('nagadNumber'))
-            saleAccountInfo = "Nagad: ${pm['nagadNumber']}";
+          // 2. Extract Details
+          if (b > 0) {
+            displayBank = pm['bankName']?.toString();
+            displayAcc = pm['accountNumber']?.toString();
+          }
+          if (bk > 0 && displayAcc == null)
+            displayAcc = "Bkash: ${pm['bkashNumber']}";
+          if (n > 0 && displayAcc == null)
+            displayAcc = "Nagad: ${pm['nagadNumber']}";
 
-          // Multi / Partial Logic
-          if (methodStr == 'multi' || methodStr == 'condition_partial') {
-            double inCash = double.tryParse(pm['cash'].toString()) ?? 0;
-            double inBank = double.tryParse(pm['bank'].toString()) ?? 0;
-            double inBkash = double.tryParse(pm['bkash'].toString()) ?? 0;
-            double inNagad = double.tryParse(pm['nagad'].toString()) ?? 0;
+          // 3. Determine Display Label (Mixed or Single)
+          List<String> used = [];
+          if (c > 0) used.add("Cash");
+          if (b > 0) used.add("Bank");
+          if (bk > 0) used.add("Bkash");
+          if (n > 0) used.add("Nagad");
 
-            // Simple allocation (assuming paidAmount matches sum of parts)
-            // But if paidAmount < sum (e.g. allocated to old due), we scale down proportionally or prioritize
-            // For now, assume paidAmount is the net new cash in.
-
-            // Recalculate buckets based on paidAmount proportionally if needed,
-            // but usually 'paid' field matches the sum of these inputs for new sales.
-            c = inCash;
-            b = inBank;
-            bk = inBkash;
-            n = inNagad;
-
-            // Update Method String for Display
-            List<String> parts = [];
-            if (c > 0) parts.add("Cash");
-            if (b > 0) parts.add("Bank");
-            if (bk > 0) parts.add("Bkash");
-            if (n > 0) parts.add("Nagad");
-            methodStr = parts.join("/");
-          } else {
-            // Single Method
-            String typeCheck = methodStr.toLowerCase();
-            if (typeCheck.contains('bank') || (saleBankName != null))
-              b = paidAmount;
-            else if (typeCheck.contains('bkash'))
-              bk = paidAmount;
-            else if (typeCheck.contains('nagad'))
-              n = paidAmount;
-            else
-              c = paidAmount;
+          if (used.length > 1) {
+            displayMethod = "Mixed (${used.join('+')})";
+          } else if (used.isNotEmpty) {
+            displayMethod = used.first;
           }
         } else {
-          // Legacy String
-          methodStr = pm.toString().toLowerCase();
-          if (methodStr.contains('bank'))
-            b = paidAmount;
-          else if (methodStr.contains('bkash'))
-            bk = paidAmount;
-          else if (methodStr.contains('nagad'))
-            n = paidAmount;
-          else
-            c = paidAmount;
+          // Legacy String Fallback
+          String s = pm.toString().toLowerCase();
+          if (s.contains('bank')) {
+            b = actualReceived;
+            displayMethod = "Bank";
+          } else if (s.contains('bkash')) {
+            bk = actualReceived;
+            displayMethod = "Bkash";
+          } else if (s.contains('nagad')) {
+            n = actualReceived;
+            displayMethod = "Nagad";
+          } else {
+            c = actualReceived;
+            displayMethod = "Cash";
+          }
         }
 
+        // Add to Accumulators
         tCash += c;
         tBank += b;
         tBkash += bk;
@@ -237,136 +232,135 @@ class CashDrawerController extends GetxController {
         allTx.add(
           DrawerTransaction(
             date: (data['timestamp'] as Timestamp).toDate(),
-            description:
-                (data['customerType'] == 'debtor')
-                    ? "Inv #${data['transactionId']} (Current)"
-                    : "Sale #${data['transactionId'] ?? 'NA'}",
-            amount: paidAmount,
+            description: "Sale #${data['transactionId'] ?? 'NA'}",
+            amount: actualReceived,
             type: 'sale',
-            method: methodStr.toUpperCase(),
-            bankName: saleBankName,
-            accountDetails: saleAccountInfo,
+            method: displayMethod,
+            bankName: displayBank,
+            accountDetails: displayAcc,
           ),
         );
       }
 
-      // =========================================================
-      // PART B: PROCESS LEDGER
-      // =========================================================
+      // --- B. PROCESS LEDGER (Manual & Collections) ---
       for (var doc in ledgerSnap.docs) {
         var data = doc.data() as Map<String, dynamic>;
         String source = (data['source'] ?? '').toString();
 
+        // Skip POS sales (handled in Part A)
         if (source == 'pos_sale') continue;
-        if (source == '' && data.containsKey('linkedInvoiceId')) continue;
 
-        double amount = double.tryParse(data['amount'].toString()) ?? 0;
-        String type = data['type'];
-        String method =
-            (data['method'] ?? 'cash').toString().toLowerCase().trim();
-        String desc = data['description'] ?? type.toUpperCase();
+        double amt = double.tryParse(data['amount'].toString()) ?? 0;
+        String type = data['type'] ?? 'deposit'; // 'deposit' or 'withdraw'
 
-        String? ledgerBankName = data['bankName']?.toString();
-        String? ledgerAccountNo = data['accountNo']?.toString();
+        // Parse Details
+        String methodStr = (data['method'] ?? 'Cash').toString();
+        String? lBank, lAcc;
 
         if (data['details'] is Map) {
           var d = data['details'];
-          if (d['bankName'] != null) ledgerBankName = d['bankName'].toString();
-          if (d['accountNumber'] != null)
-            ledgerAccountNo = d['accountNumber'].toString();
-          else if (d['bkashNumber'] != null)
-            ledgerAccountNo = "Bkash: ${d['bkashNumber']}";
-          else if (d['nagadNumber'] != null)
-            ledgerAccountNo = "Nagad: ${d['nagadNumber']}";
-          if (d['type'] != null) method = d['type'].toString().toLowerCase();
+          methodStr = d['method'] ?? methodStr;
+          lBank = d['bankName'];
+          lAcc = d['accountNo'] ?? d['accountNumber'];
+        } else {
+          lBank = data['bankName'];
+          lAcc = data['accountNo'];
         }
 
         bool isBank =
-            method.contains('bank') ||
-            (ledgerBankName != null && ledgerBankName.isNotEmpty);
-        bool isBkash = method.contains('bkash');
-        bool isNagad = method.contains('nagad');
+            methodStr.toLowerCase().contains('bank') ||
+            (lBank != null && lBank.isNotEmpty);
+        bool isBkash = methodStr.toLowerCase().contains('bkash');
+        bool isNagad = methodStr.toLowerCase().contains('nagad');
 
         if (type == 'deposit') {
-          sumCollections += amount;
+          sumCollections += amt;
           if (isBank)
-            tBank += amount;
+            tBank += amt;
           else if (isBkash)
-            tBkash += amount;
+            tBkash += amt;
           else if (isNagad)
-            tNagad += amount;
+            tNagad += amt;
           else
-            tCash += amount;
+            tCash += amt;
         } else {
-          sumExpenses += amount;
+          // Withdrawal
+          sumExpenses += amt; // Count withdrawal as "Money Out" for reports
           if (isBank)
-            tBank -= amount;
+            tBank -= amt;
           else if (isBkash)
-            tBkash -= amount;
+            tBkash -= amt;
           else if (isNagad)
-            tNagad -= amount;
+            tNagad -= amt;
           else
-            tCash -= amount;
+            tCash -= amt;
         }
-
-        if (source == 'pos_old_due') desc = "Old Due Collection";
 
         allTx.add(
           DrawerTransaction(
             date: (data['timestamp'] as Timestamp).toDate(),
-            description: desc,
-            amount: amount,
+            description: data['description'] ?? source.replaceAll('_', ' '),
+            amount: amt,
             type: type == 'deposit' ? 'collection' : 'withdraw',
-            method: method.toUpperCase(),
-            bankName: ledgerBankName,
-            accountDetails: ledgerAccountNo,
+            method: methodStr.capitalizeFirst ?? "Cash",
+            bankName: lBank,
+            accountDetails: lAcc,
           ),
         );
       }
 
-      // =========================================================
-      // PART C: EXPENSES
-      // =========================================================
+      // --- C. PROCESS EXPENSES (Waterfall Deduction) ---
+      // Note: Daily Expenses usually don't have source info in simple schemas.
+      // We assume standard deduction order: Cash -> Bank -> Bkash -> Nagad
       for (var ex in expenseList) {
         sumExpenses += ex.amount;
-        // Waterfall deduction: Cash -> Bank -> Bkash -> Nagad
-        double rem = ex.amount;
-        if (tCash >= rem) {
-          tCash -= rem;
-          rem = 0;
+
+        double remaining = ex.amount;
+
+        // 1. Try Cash
+        if (tCash >= remaining) {
+          tCash -= remaining;
+          remaining = 0;
         } else {
-          rem -= tCash;
+          remaining -= tCash;
           tCash = 0;
         }
-        if (rem > 0) {
-          if (tBank >= rem) {
-            tBank -= rem;
-            rem = 0;
+
+        // 2. Try Bank
+        if (remaining > 0) {
+          if (tBank >= remaining) {
+            tBank -= remaining;
+            remaining = 0;
           } else {
-            rem -= tBank;
+            remaining -= tBank;
             tBank = 0;
           }
         }
-        if (rem > 0) {
-          if (tBkash >= rem) {
-            tBkash -= rem;
-            rem = 0;
+
+        // 3. Try Bkash
+        if (remaining > 0) {
+          if (tBkash >= remaining) {
+            tBkash -= remaining;
+            remaining = 0;
           } else {
-            rem -= tBkash;
+            remaining -= tBkash;
             tBkash = 0;
           }
         }
-        if (rem > 0) {
-          if (tNagad >= rem) {
-            tNagad -= rem;
-            rem = 0;
+
+        // 4. Try Nagad
+        if (remaining > 0) {
+          if (tNagad >= remaining) {
+            tNagad -= remaining;
+            remaining = 0;
           } else {
-            rem -= tNagad;
+            remaining -= tNagad;
             tNagad = 0;
           }
         }
       }
 
+      // --- FINAL UPDATES ---
       netCash.value = tCash;
       netBank.value = tBank;
       netBkash.value = tBkash;
@@ -386,13 +380,12 @@ class CashDrawerController extends GetxController {
     }
   }
 
-  // --- HELPERS & MANUAL ACTIONS ---
-
-  Future<List<DrawerTransaction>> _fetchExpensesOptimized(
+  // --- HELPER: Fetch Expenses ---
+  Future<List<DrawerTransaction>> _fetchExpensesList(
     DateTime start,
     DateTime end,
   ) async {
-    List<DrawerTransaction> expenses = [];
+    List<DrawerTransaction> list = [];
     try {
       var snap =
           await _db
@@ -401,34 +394,30 @@ class CashDrawerController extends GetxController {
               .where('time', isLessThanOrEqualTo: end)
               .orderBy('time', descending: true)
               .get();
+
       for (var doc in snap.docs) {
-        _addExpenseFromDoc(doc.data(), expenses);
+        var d = doc.data();
+        double amt = double.tryParse(d['amount'].toString()) ?? 0.0;
+        DateTime time =
+            d['time'] is Timestamp
+                ? (d['time'] as Timestamp).toDate()
+                : DateTime.now();
+
+        list.add(
+          DrawerTransaction(
+            date: time,
+            description: d['name'] ?? d['note'] ?? 'Expense',
+            amount: amt,
+            type: 'expense',
+            method: 'Auto-Deduct',
+          ),
+        );
       }
-    } catch (e) {
-      return []; // Fallback empty or parallel logic
-    }
-    return expenses;
+    } catch (_) {}
+    return list;
   }
 
-  void _addExpenseFromDoc(
-    Map<String, dynamic> data,
-    List<DrawerTransaction> list,
-  ) {
-    double amt = double.tryParse(data['amount'].toString()) ?? 0.0;
-    DateTime txDate = DateTime.now();
-    if (data['time'] is Timestamp)
-      txDate = (data['time'] as Timestamp).toDate();
-
-    list.add(
-      DrawerTransaction(
-        date: txDate,
-        description: data['name'] ?? data['note'] ?? 'Expense',
-        amount: amt,
-        type: 'expense',
-        method: 'DEDUCTED',
-      ),
-    );
-  }
+  // --- MANUAL ACTIONS ---
 
   Future<void> addManualCash({
     required double amount,
@@ -505,7 +494,7 @@ class CashDrawerController extends GetxController {
               ),
               pw.SizedBox(height: 15),
 
-              // Summary Box
+              // Summary
               pw.Container(
                 padding: const pw.EdgeInsets.all(10),
                 decoration: pw.BoxDecoration(
@@ -521,13 +510,13 @@ class CashDrawerController extends GetxController {
                       PdfColors.green900,
                     ),
                     _pdfSummaryCol(
-                      "Collections/Add",
+                      "Collections",
                       rawCollectionTotal.value,
                       fontBold,
                       PdfColors.blue900,
                     ),
                     _pdfSummaryCol(
-                      "Expenses",
+                      "Expenses/Out",
                       rawExpenseTotal.value,
                       fontBold,
                       PdfColors.red900,
@@ -544,9 +533,9 @@ class CashDrawerController extends GetxController {
               ),
               pw.SizedBox(height: 15),
 
-              // Balances
+              // Detailed Balances
               pw.Text(
-                "Current Balances",
+                "Breakdown by Source",
                 style: pw.TextStyle(font: fontBold, fontSize: 12),
               ),
               pw.SizedBox(height: 5),
@@ -554,15 +543,15 @@ class CashDrawerController extends GetxController {
                 border: pw.TableBorder.all(color: PdfColors.grey300),
                 children: [
                   _pdfRow("Cash In Hand", netCash.value, font),
-                  _pdfRow("Bank", netBank.value, font),
-                  _pdfRow("Bkash", netBkash.value, font),
-                  _pdfRow("Nagad", netNagad.value, font),
+                  _pdfRow("Bank Balance", netBank.value, font),
+                  _pdfRow("Bkash Balance", netBkash.value, font),
+                  _pdfRow("Nagad Balance", netNagad.value, font),
                 ],
               ),
 
               pw.SizedBox(height: 20),
 
-              // Transactions
+              // Transactions List
               pw.Text(
                 "Transaction History",
                 style: pw.TextStyle(font: fontBold, fontSize: 12),
@@ -577,7 +566,7 @@ class CashDrawerController extends GetxController {
                             DateFormat('dd-MMM HH:mm').format(tx.date),
                             tx.description,
                             tx.method,
-                            "${tx.type == 'withdraw' || tx.type == 'expense' ? '-' : '+'}${_currencyFormat.format(tx.amount)}",
+                            "${(tx.type == 'withdraw' || tx.type == 'expense') ? '-' : '+'}${_currencyFormat.format(tx.amount)}",
                           ],
                         )
                         .toList(),
