@@ -7,6 +7,7 @@ import 'package:get/get.dart';
 import 'package:gtel_erp/Stock/controller.dart';
 import 'package:gtel_erp/Web%20Screen/Sales/Condition/cmodel.dart';
 import 'package:gtel_erp/Web%20Screen/Sales/controller.dart';
+import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -379,7 +380,7 @@ class ConditionSalesController extends GetxController {
   }
 
   // ==============================================================================
-  // 3. PRINT INVOICE (FIXED PDF OVERWRITE LOGIC)
+  // 3. PRINT INVOICE (CONDITION REPRINT - PROFESSIONAL LAYOUT)
   // ==============================================================================
 
   Future<void> printInvoice(ConditionOrderModel order) async {
@@ -404,20 +405,21 @@ class ConditionSalesController extends GetxController {
       double historyTotal = 0.0;
 
       // 3. MERGE: Add history breakdown to the initial paymentMap
+      // This ensures the PDF shows the TOTAL collected per method (Initial + History)
       for (var h in history) {
         if (h is Map) {
           String method = h['method']?.toString().toLowerCase() ?? 'cash';
           double amount = double.tryParse(h['amount'].toString()) ?? 0.0;
           historyTotal += amount;
 
-          // Add to the existing method bucket (e.g., if initial was 500 cash and new is 1000 cash -> total 1500)
+          // Add to the existing method bucket
           double existing =
               double.tryParse(paymentMap[method]?.toString() ?? '0') ?? 0.0;
           paymentMap[method] = existing + amount;
         }
       }
 
-      // 4. Calculate Correct Total Paid (Initial Advance + History)
+      // 4. Calculate Correct Total Paid
       double initialPaid =
           double.tryParse(paymentMap['paidForInvoice'].toString()) ?? 0.0;
       double totalPaidNow = initialPaid + historyTotal;
@@ -425,9 +427,11 @@ class ConditionSalesController extends GetxController {
       // Update map to show full total
       paymentMap['paidForInvoice'] = totalPaidNow;
 
-      // 5. Use Current Database Due
+      // 5. Use Current Database Due and Discount
       double realDue = double.tryParse(data['courierDue'].toString()) ?? 0.0;
       paymentMap['due'] = realDue;
+
+      double discountVal = (data['discount'] as num?)?.toDouble() ?? 0.0;
 
       // --- Other Info ---
       double oldDueSnap =
@@ -437,7 +441,9 @@ class ConditionSalesController extends GetxController {
       int cartons = int.tryParse(data['cartons']?.toString() ?? "0") ?? 0;
       String address = data['deliveryAddress'] ?? "";
       String shop = data['shopName'] ?? "";
+      // Match key name with first file logic
       String packagerName = data['packagerName'] ?? '';
+
       String sellerName = "Joynal Abedin";
       String sellerPhone = "01720677206";
 
@@ -446,16 +452,17 @@ class ConditionSalesController extends GetxController {
         if (soldByData is Map) {
           sellerName = soldByData['name'] ?? sellerName;
           sellerPhone = soldByData['phone'] ?? sellerPhone;
-        }  if (soldByData is String) {
+        } else if (soldByData is String) {
           sellerName = soldByData;
         }
       }
 
+      // Generate PDF using the Professional Layout
       await _generatePdf(
         order.invoiceId,
         order.customerName,
         order.customerPhone,
-        paymentMap, // Contains MERGED amounts now
+        paymentMap, // Contains MERGED amounts
         items,
         isCondition: true,
         challan: order.challanNo,
@@ -467,6 +474,7 @@ class ConditionSalesController extends GetxController {
         runningDueSnap: runningDueSnap,
         authorizedName: sellerName,
         authorizedPhone: sellerPhone,
+        discount: discountVal,
         packagerName: packagerName,
       );
     } catch (e) {
@@ -476,6 +484,9 @@ class ConditionSalesController extends GetxController {
     }
   }
 
+  // ==========================================
+  // PROFESSIONAL PDF GENERATOR (Unified)
+  // ==========================================
   Future<void> _generatePdf(
     String invId,
     String name,
@@ -492,6 +503,7 @@ class ConditionSalesController extends GetxController {
     double runningDueSnap = 0.0,
     required String authorizedName,
     required String authorizedPhone,
+    double discount = 0.0,
     String? packagerName,
   }) async {
     final pdf = pw.Document();
@@ -500,9 +512,10 @@ class ConditionSalesController extends GetxController {
     final italicFont = await PdfGoogleFonts.robotoItalic();
 
     double paidOld = double.tryParse(payMap['paidForOldDue'].toString()) ?? 0.0;
-    // This value is now the MERGED total (Initial + Collections)
     double paidInv =
         double.tryParse(payMap['paidForInvoice'].toString()) ?? 0.0;
+    double paidPrevRun =
+        double.tryParse(payMap['paidForPrevRunning'].toString()) ?? 0.0;
 
     double invDue = double.tryParse(payMap['due'].toString()) ?? 0.0;
     double subTotal = items.fold(
@@ -513,15 +526,20 @@ class ConditionSalesController extends GetxController {
 
     double remainingOldDue = oldDueSnap - paidOld;
     if (remainingOldDue < 0) remainingOldDue = 0;
+
+    double remainingPrevRunning = runningDueSnap - paidPrevRun;
+    if (remainingPrevRunning < 0) remainingPrevRunning = 0;
+
+    double netTotalDue = remainingOldDue + remainingPrevRunning + invDue;
+    double totalPaidCurrent = paidOld + paidInv + paidPrevRun;
     double totalPreviousBalance = oldDueSnap + runningDueSnap;
-    double netTotalDue = remainingOldDue + runningDueSnap + invDue;
-    double totalPaidCurrent = paidOld + paidInv;
 
     final pageTheme = pw.PageTheme(
       pageFormat: PdfPageFormat.a5,
       margin: const pw.EdgeInsets.all(20),
     );
 
+    // PAGE 1: INVOICE
     pdf.addPage(
       pw.MultiPage(
         pageTheme: pageTheme,
@@ -554,6 +572,7 @@ class ConditionSalesController extends GetxController {
               totalPaidCurrent,
               netTotalDue,
               subTotal,
+              discount,
             ),
             pw.SizedBox(height: 25),
             _buildSignatures(
@@ -567,6 +586,7 @@ class ConditionSalesController extends GetxController {
       ),
     );
 
+    // PAGE 2: CHALLAN (Only if Condition)
     if (isCondition) {
       pdf.addPage(
         pw.MultiPage(
@@ -582,11 +602,7 @@ class ConditionSalesController extends GetxController {
                 child: pw.Center(
                   child: pw.Text(
                     "DELIVERY CHALLAN",
-                    style: pw.TextStyle(
-                      font: boldFont,
-                      fontSize: 14,
-                      letterSpacing: 2,
-                    ),
+                    style: pw.TextStyle(fontSize: 14, letterSpacing: 2),
                   ),
                 ),
               ),
@@ -621,11 +637,7 @@ class ConditionSalesController extends GetxController {
     await Printing.layoutPdf(onLayout: (f) => pdf.save());
   }
 
-  // ... (Keep existing _buildCompanyHeader, _buildInvoiceInfo, _sectionHeader, _infoRow, _buildProfessionalTable, _th, _td, _buildDetailedSummary, _summaryRow, _buildSignatures, _buildCompactPaymentLines, _buildChallanInfo, _buildConditionBox, updateChallanNumber as they were) ...
-
-  // PDF WIDGETS SECTION (Compulsory for the controller to work)
-  // I've included the key widgets below to ensure no missing references.
-
+  // --- UPDATED: PDF HEADER ---
   pw.Widget _buildCompanyHeader(pw.Font bold, pw.Font reg) {
     return pw.Center(
       child: pw.Container(
@@ -635,16 +647,31 @@ class ConditionSalesController extends GetxController {
         ),
         padding: const pw.EdgeInsets.only(bottom: 10),
         child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.center,
+          mainAxisAlignment: pw.MainAxisAlignment.center,
           children: [
+            // Line 1: Main Title
             pw.Text(
-              "G TEL JOY EXPRESS",
-              style: pw.TextStyle(font: bold, fontSize: 24, letterSpacing: 1),
+              "G TEL",
+              style: pw.TextStyle(font: bold, fontSize: 26, letterSpacing: 2),
             ),
+            // Line 2: Subtitle Line 1
             pw.Text(
-              "Mobile Parts Wholesaler",
-              style: pw.TextStyle(font: reg, fontSize: 10, letterSpacing: 3),
+              "JOY EXPRESS",
+              style: pw.TextStyle(font: bold, fontSize: 16, letterSpacing: 5),
             ),
-            pw.SizedBox(height: 4),
+            // Line 3: Subtitle Line 2
+            pw.SizedBox(height: 2),
+            pw.Text(
+              "MOBILE PARTS WHOLESALER",
+              style: pw.TextStyle(
+                font: reg,
+                fontSize: 10,
+                letterSpacing: 2,
+                color: PdfColors.grey800,
+              ),
+            ),
+            pw.SizedBox(height: 5),
             pw.Text(
               "Gulistan Shopping Complex (Hall Market), 2 Bangabandu Avenue, Dhaka 1000",
               textAlign: pw.TextAlign.center,
@@ -684,6 +711,12 @@ class ConditionSalesController extends GetxController {
               _sectionHeader("INVOICE DETAILS", bold),
               pw.SizedBox(height: 5),
               _infoRow("Invoice #", invId, bold, reg),
+              _infoRow(
+                "Date",
+                DateFormat('dd-MMM-yyyy').format(DateTime.now()),
+                bold,
+                reg,
+              ),
               _infoRow("Type", isCond ? "Condition" : "Cash/Credit", bold, reg),
               if (isCond && courier != null)
                 _infoRow("Courier", courier, bold, reg),
@@ -787,9 +820,9 @@ class ConditionSalesController extends GetxController {
                       item['name'],
                       style: pw.TextStyle(font: bold, fontSize: 9),
                     ),
-                    if (item['brand'] != null || item['model'] != null)
+                    if (item['model'] != null)
                       pw.Text(
-                        "${item['brand'] ?? ''} ${item['model'] ?? ''}",
+                        "${item['model'] ?? ''}",
                         style: pw.TextStyle(
                           font: italic,
                           fontSize: 8,
@@ -844,8 +877,8 @@ class ConditionSalesController extends GetxController {
     double totalPaid,
     double netDue,
     double subTotal,
+    double discount,
   ) {
-    double discount = 0.0;
     double currentInvTotal = subTotal - discount;
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -862,13 +895,13 @@ class ConditionSalesController extends GetxController {
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
                 pw.Text(
-                  "PAYMENT METHOD",
+                  "PAYMENT DETAILS",
                   style: pw.TextStyle(font: bold, fontSize: 8),
                 ),
                 pw.Divider(thickness: 0.5),
-                _buildCompactPaymentLines(payMap, reg),
+                _buildProfessionalPaymentDetails(payMap, reg, bold),
                 if (cartons != null && cartons > 0) ...[
-                  pw.SizedBox(height: 5),
+                  pw.SizedBox(height: 8),
                   pw.Text(
                     "Packaged: $cartons Cartons",
                     style: pw.TextStyle(font: bold, fontSize: 8),
@@ -884,6 +917,12 @@ class ConditionSalesController extends GetxController {
           child: pw.Column(
             children: [
               _summaryRow("Subtotal", subTotal.toStringAsFixed(2), reg),
+              if (discount > 0)
+                _summaryRow(
+                  "Discount",
+                  "- ${discount.toStringAsFixed(2)}",
+                  reg,
+                ),
               pw.Divider(),
               _summaryRow(
                 "INVOICE TOTAL",
@@ -891,9 +930,46 @@ class ConditionSalesController extends GetxController {
                 bold,
                 size: 10,
               ),
-              if (isCond) ...[
+              if (!isCond) ...[
+                pw.SizedBox(height: 5),
+                _summaryRow("Prev. Balance", prevDue.toStringAsFixed(2), reg),
+                pw.Divider(borderStyle: pw.BorderStyle.dashed),
                 _summaryRow(
-                  "Paid / Collected",
+                  "TOTAL PAYABLE",
+                  (prevDue + currentInvTotal).toStringAsFixed(2),
+                  bold,
+                ),
+                if (totalPaid > 0)
+                  _summaryRow("Paid", "(${totalPaid.toStringAsFixed(2)})", reg),
+                pw.Container(
+                  margin: const pw.EdgeInsets.only(top: 5),
+                  padding: const pw.EdgeInsets.all(5),
+                  color: PdfColors.black,
+                  child: pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Text(
+                        "NET DUE",
+                        style: pw.TextStyle(
+                          font: bold,
+                          color: PdfColors.white,
+                          fontSize: 11,
+                        ),
+                      ),
+                      pw.Text(
+                        netDue.toStringAsFixed(2),
+                        style: pw.TextStyle(
+                          font: bold,
+                          color: PdfColors.white,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ] else ...[
+                _summaryRow(
+                  "Paid / Advance",
                   totalPaid.toStringAsFixed(2),
                   reg,
                 ),
@@ -921,96 +997,126 @@ class ConditionSalesController extends GetxController {
     String value,
     pw.Font font, {
     double size = 9,
-  }) {
-    return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(vertical: 1),
-      child: pw.Row(
-        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-        children: [
-          pw.Text(label, style: pw.TextStyle(font: font, fontSize: size)),
-          pw.Text(value, style: pw.TextStyle(font: font, fontSize: size)),
-        ],
-      ),
-    );
-  }
-
-  pw.Widget _buildCompactPaymentLines(Map payMap, pw.Font reg) {
-    List<String> lines = [];
-    double cash = double.tryParse(payMap['cash'].toString()) ?? 0;
-    double bkash = double.tryParse(payMap['bkash'].toString()) ?? 0;
-    double nagad = double.tryParse(payMap['nagad'].toString()) ?? 0;
-    double bank = double.tryParse(payMap['bank'].toString()) ?? 0;
-    double totalPaid =
-        double.tryParse(payMap['paidForInvoice'].toString()) ?? 0;
-
-    if (cash > 0) lines.add("Cash: ${cash.toStringAsFixed(2)}");
-    if (bkash > 0) lines.add("Bkash: ${bkash.toStringAsFixed(2)}");
-    if (nagad > 0) lines.add("Nagad: ${nagad.toStringAsFixed(2)}");
-    if (bank > 0) lines.add("Bank: ${bank.toStringAsFixed(2)}");
-
-    if (lines.isEmpty) {
-      if (totalPaid > 0) {
-        return pw.Text(
-          "Collected: ${totalPaid.toStringAsFixed(2)}",
-          style: pw.TextStyle(font: reg, fontSize: 8),
-        );
-      }
-      return pw.Text(
-        "Unpaid / Due",
-        style: pw.TextStyle(font: reg, fontSize: 8),
-      );
-    }
-    return pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
-      children:
-          lines
-              .map(
-                (l) => pw.Text(l, style: pw.TextStyle(font: reg, fontSize: 8)),
-              )
-              .toList(),
-    );
-  }
+  }) => pw.Padding(
+    padding: const pw.EdgeInsets.symmetric(vertical: 1),
+    child: pw.Row(
+      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+      children: [
+        pw.Text(label, style: pw.TextStyle(font: font, fontSize: size)),
+        pw.Text(value, style: pw.TextStyle(font: font, fontSize: size)),
+      ],
+    ),
+  );
 
   pw.Widget _buildSignatures(
     pw.Font reg,
     pw.Font bold,
     String authName,
     String authPhone,
+  ) => pw.Row(
+    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+    crossAxisAlignment: pw.CrossAxisAlignment.end,
+    children: [
+      pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(authName, style: pw.TextStyle(font: bold, fontSize: 10)),
+          pw.Text(authPhone, style: pw.TextStyle(font: reg, fontSize: 9)),
+          pw.Container(
+            width: 120,
+            height: 1,
+            color: PdfColors.black,
+            margin: const pw.EdgeInsets.only(top: 2),
+          ),
+          pw.SizedBox(height: 2),
+          pw.Text(
+            "Authorized Signature",
+            style: pw.TextStyle(font: reg, fontSize: 7),
+          ),
+        ],
+      ),
+      pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.end,
+        children: [
+          pw.Container(width: 120, height: 1, color: PdfColors.black),
+          pw.SizedBox(height: 2),
+          pw.Text(
+            "Receiver Signature",
+            style: pw.TextStyle(font: reg, fontSize: 7),
+          ),
+        ],
+      ),
+    ],
+  );
+
+  pw.Widget _buildProfessionalPaymentDetails(
+    Map payMap,
+    pw.Font reg,
+    pw.Font bold,
   ) {
-    return pw.Row(
-      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-      crossAxisAlignment: pw.CrossAxisAlignment.end,
-      children: [
-        pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            pw.Text(authName, style: pw.TextStyle(font: bold, fontSize: 10)),
-            pw.Text(authPhone, style: pw.TextStyle(font: reg, fontSize: 9)),
-            pw.Container(
-              width: 120,
-              height: 1,
-              color: PdfColors.black,
-              margin: const pw.EdgeInsets.only(top: 2),
-            ),
-            pw.SizedBox(height: 2),
-            pw.Text(
-              "Authorized Signature",
-              style: pw.TextStyle(font: reg, fontSize: 7),
-            ),
-          ],
-        ),
-        pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.end,
-          children: [
-            pw.Container(width: 120, height: 1, color: PdfColors.black),
-            pw.SizedBox(height: 2),
-            pw.Text(
-              "Receiver Signature",
-              style: pw.TextStyle(font: reg, fontSize: 7),
-            ),
-          ],
-        ),
-      ],
+    double cash = double.tryParse(payMap['cash'].toString()) ?? 0;
+    double bkash = double.tryParse(payMap['bkash'].toString()) ?? 0;
+    double nagad = double.tryParse(payMap['nagad'].toString()) ?? 0;
+    double bank = double.tryParse(payMap['bank'].toString()) ?? 0;
+
+    String bkNum = payMap['bkashNumber'] ?? '';
+    String ngNum = payMap['nagadNumber'] ?? '';
+    String bankName = payMap['bankName'] ?? '';
+    String accNum = payMap['accountNumber'] ?? '';
+
+    List<List<String>> data = [];
+
+    if (cash > 0) data.add(['Cash', '-', cash.toStringAsFixed(2)]);
+    if (bkash > 0) data.add(['Bkash', bkNum, bkash.toStringAsFixed(2)]);
+    if (nagad > 0) data.add(['Nagad', ngNum, nagad.toStringAsFixed(2)]);
+    if (bank > 0) {
+      data.add(['Bank', '$bankName\n$accNum', bank.toStringAsFixed(2)]);
+    }
+
+    if (data.isEmpty) {
+      // Logic for conditions where advance might be 0 but courier collecting everything
+      return pw.Text(
+        "Payment on Delivery",
+        style: pw.TextStyle(font: reg, fontSize: 8),
+      );
+    }
+
+    return pw.Table(
+      columnWidths: {
+        0: const pw.FixedColumnWidth(40),
+        1: const pw.FlexColumnWidth(),
+        2: const pw.FixedColumnWidth(50),
+      },
+      children:
+          data.map((row) {
+            return pw.TableRow(
+              verticalAlignment: pw.TableCellVerticalAlignment.middle,
+              children: [
+                pw.Padding(
+                  padding: const pw.EdgeInsets.only(bottom: 2, top: 2),
+                  child: pw.Text(
+                    row[0],
+                    style: pw.TextStyle(font: bold, fontSize: 7),
+                  ),
+                ),
+                pw.Padding(
+                  padding: const pw.EdgeInsets.only(bottom: 2, top: 2),
+                  child: pw.Text(
+                    row[1],
+                    style: pw.TextStyle(font: reg, fontSize: 7),
+                  ),
+                ),
+                pw.Padding(
+                  padding: const pw.EdgeInsets.only(bottom: 2, top: 2),
+                  child: pw.Text(
+                    row[2],
+                    textAlign: pw.TextAlign.right,
+                    style: pw.TextStyle(font: bold, fontSize: 7),
+                  ),
+                ),
+              ],
+            );
+          }).toList(),
     );
   }
 
@@ -1091,7 +1197,8 @@ class ConditionSalesController extends GetxController {
   }
 
   pw.Widget _buildConditionBox(pw.Font bold, pw.Font reg, Map payMap) {
-    double due = double.parse(payMap['due'].toString());
+    double due = double.tryParse(payMap['due'].toString()) ?? 0;
+
     if (due <= 0) {
       return pw.Container(
         width: double.infinity,
@@ -1104,18 +1211,23 @@ class ConditionSalesController extends GetxController {
         child: pw.Column(
           children: [
             pw.Text(
-              "STATUS: COMPLETED",
-              style: pw.TextStyle(font: bold, fontSize: 12),
+              "PAYMENT STATUS",
+              style: pw.TextStyle(font: reg, fontSize: 8),
             ),
             pw.SizedBox(height: 5),
             pw.Text(
-              "Fully Paid via Courier Collection/Advance",
-              style: pw.TextStyle(font: reg, fontSize: 10),
+              "NON CONDITION",
+              style: pw.TextStyle(font: bold, fontSize: 18),
+            ),
+            pw.Text(
+              "ONLY COURIER CHARGES APPLY",
+              style: pw.TextStyle(font: bold, fontSize: 10),
             ),
           ],
         ),
       );
     }
+
     return pw.Container(
       width: double.infinity,
       padding: const pw.EdgeInsets.all(10),
@@ -1142,7 +1254,7 @@ class ConditionSalesController extends GetxController {
                 style: pw.TextStyle(font: bold, fontSize: 18),
               ),
               pw.Text(
-                "+CHARGES",
+                "+ CHARGES",
                 style: pw.TextStyle(font: bold, fontSize: 18),
               ),
             ],
@@ -1151,10 +1263,6 @@ class ConditionSalesController extends GetxController {
       ),
     );
   }
-
-  // ==============================================================================
-  // 4. HELPER ACTIONS (UPDATE CHALLAN)
-  // ==============================================================================
 
   Future<void> updateChallanNumber(
     String invoiceId,

@@ -4,8 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:intl/intl.dart';
-import 'details.dart'; // Ensure this matches your file structure
-import 'salescontroller.dart'; // Ensure this points to MonthlySalesController
+import 'salescontroller.dart'; // Ensure this points to your new MonthlySalesController file
 
 class MonthlySalesPage extends StatelessWidget {
   MonthlySalesPage({super.key});
@@ -15,168 +14,125 @@ class MonthlySalesPage extends StatelessWidget {
   // Professional ERP Theme Colors
   static const Color darkSlate = Color(0xFF111827);
   static const Color activeAccent = Color(0xFF3B82F6);
-  static const Color bgGrey = Color(0xFFF9FAFB);
+  static const Color bgGrey = Color(0xFFF3F4F6);
   static const Color textMuted = Color(0xFF6B7280);
   static const Color successGreen = Color(0xFF059669);
   static const Color warningOrange = Color(0xFFD97706);
+  static const Color errorRed = Color(0xFFDC2626);
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: bgGrey,
-      body: Obx(() {
-        if (controller.isLoading.value &&
-            controller.monthlyData.value.isEmpty) {
-          return const Center(
-            child: CircularProgressIndicator(color: activeAccent),
-          );
-        }
-
-        return Column(
-          children: [
-            _buildHeader(),
-            _buildSummaryOverview(),
-            _buildTableHead(),
-            Expanded(child: _buildMainContent()),
-          ],
-        );
-      }),
+      appBar: _buildAppBar(),
+      body: Column(
+        children: [
+          _buildMonthSelector(),
+          _buildSummaryOverview(),
+          _buildTableHead(),
+          Expanded(child: _buildMainContent()),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => controller.generateMonthlyReportPDF(),
+        backgroundColor: darkSlate,
+        icon: const Icon(FontAwesomeIcons.filePdf, color: Colors.white),
+        label: const Text(
+          "Download Report",
+          style: TextStyle(color: Colors.white),
+        ),
+      ),
     );
   }
 
-  // --- 1. HEADER (Title & Refresh) ---
-  Widget _buildHeader() {
+  // --- 1. APP BAR ---
+  PreferredSizeWidget _buildAppBar() {
+    return AppBar(
+      backgroundColor: Colors.white,
+      elevation: 0,
+      titleSpacing: 24,
+      title: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: const [
+          Text(
+            "Monthly Sales Analytics",
+            style: TextStyle(
+              color: darkSlate,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          Text(
+            "Daily breakdown of Sales vs Collections",
+            style: TextStyle(color: textMuted, fontSize: 12),
+          ),
+        ],
+      ),
+      actions: [
+        IconButton(
+          onPressed:
+              () => controller.loadMonthlyData(controller.selectedDate.value),
+          icon: const Icon(Icons.refresh, color: activeAccent),
+          tooltip: "Refresh Data",
+        ),
+        const SizedBox(width: 16),
+      ],
+    );
+  }
+
+  // --- 2. MONTH SELECTOR ---
+  Widget _buildMonthSelector() {
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
       color: Colors.white,
       child: Row(
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                "Monthly Sales Analytics",
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: darkSlate,
-                ),
-              ),
-              Text(
-                "Consolidated financial performance by month",
-                style: TextStyle(fontSize: 14, color: textMuted),
-              ),
-            ],
+          const Text(
+            "Select Period:",
+            style: TextStyle(fontWeight: FontWeight.bold, color: darkSlate),
           ),
-          const Spacer(),
-          // Refresh Button
-          IconButton(
-            onPressed: () => controller.fetchSales(),
-            icon: const Icon(Icons.refresh, color: activeAccent),
-            tooltip: "Sync Data",
-          ),
-        ],
-      ),
-    );
-  }
-
-  // --- 2. YEARLY SUMMARY OVERVIEW ---
-  Widget _buildSummaryOverview() {
-    // Calculate aggregate totals from all months
-    double grandTotalRevenue = 0;
-    double grandTotalCollected = 0;
-
-    for (var m in controller.monthlyData.value.values) {
-      grandTotalRevenue += m.total;
-      grandTotalCollected += m.paid;
-    }
-
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withOpacity(0.05)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.02),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          // Revenue Icon
+          const SizedBox(width: 12),
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
-              color: activeAccent.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.grey.shade300),
+              borderRadius: BorderRadius.circular(8),
             ),
-            child: const Icon(
-              FontAwesomeIcons.chartLine,
-              color: activeAccent,
-              size: 20,
-            ),
-          ),
-          const SizedBox(width: 20),
+            child: DropdownButtonHideUnderline(
+              child: Obx(() {
+                // Ensure the currently selected date is normalized to the 1st of the month
+                DateTime current = DateTime(
+                  controller.selectedDate.value.year,
+                  controller.selectedDate.value.month,
+                  1,
+                );
 
-          // Yearly Revenue
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  "TOTAL YEARLY REVENUE",
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    color: textMuted,
-                    letterSpacing: 1.1,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  "৳ ${NumberFormat('#,##0').format(grandTotalRevenue)}",
-                  style: const TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: darkSlate,
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          Container(width: 1, height: 50, color: Colors.grey.shade200),
-          const SizedBox(width: 20),
-
-          // Yearly Collection
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  "TOTAL YEARLY COLLECTED",
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    color: textMuted,
-                    letterSpacing: 1.1,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  "৳ ${NumberFormat('#,##0').format(grandTotalCollected)}",
-                  style: const TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: successGreen,
-                  ),
-                ),
-              ],
+                return DropdownButton<DateTime>(
+                  value: current,
+                  icon: const Icon(Icons.arrow_drop_down, color: activeAccent),
+                  items: List.generate(12, (index) {
+                    // Generate last 12 months
+                    DateTime date = DateTime(
+                      DateTime.now().year,
+                      DateTime.now().month - index,
+                      1,
+                    );
+                    return DropdownMenuItem(
+                      value: date,
+                      child: Text(
+                        DateFormat('MMMM yyyy').format(date),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: darkSlate,
+                        ),
+                      ),
+                    );
+                  }),
+                  onChanged: (val) {
+                    if (val != null) controller.loadMonthlyData(val);
+                  },
+                );
+              }),
             ),
           ),
         ],
@@ -184,11 +140,99 @@ class MonthlySalesPage extends StatelessWidget {
     );
   }
 
-  // --- 3. TABLE HEADER ---
+  // --- 3. DASHBOARD SUMMARY ---
+  Widget _buildSummaryOverview() {
+    return Obx(
+      () => Container(
+        margin: const EdgeInsets.all(24),
+        child: Row(
+          children: [
+            _buildSummaryCard(
+              "TOTAL SALES",
+              controller.totalMonthlySales.value,
+              FontAwesomeIcons.fileInvoiceDollar,
+              activeAccent,
+            ),
+            const SizedBox(width: 16),
+            _buildSummaryCard(
+              "COLLECTED",
+              controller.totalMonthlyCollection.value,
+              FontAwesomeIcons.handHoldingDollar,
+              successGreen,
+            ),
+            const SizedBox(width: 16),
+            _buildSummaryCard(
+              "BALANCE DUE",
+              controller.totalMonthlyDue.value,
+              FontAwesomeIcons.scaleUnbalanced,
+              controller.totalMonthlyDue.value > 0 ? warningOrange : textMuted,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSummaryCard(
+    String title,
+    double amount,
+    IconData icon,
+    Color color,
+  ) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.03),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+          border: Border(left: BorderSide(color: color, width: 4)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: textMuted,
+                  ),
+                ),
+                Icon(icon, size: 16, color: color.withOpacity(0.5)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              NumberFormat('#,##0').format(amount),
+              style: TextStyle(
+                fontSize:
+                    18, // Responsive sizing might be needed for small screens
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // --- 4. TABLE HEADERS ---
   Widget _buildTableHead() {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 24),
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 15),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: const BoxDecoration(
         color: darkSlate,
         borderRadius: BorderRadius.only(
@@ -201,7 +245,7 @@ class MonthlySalesPage extends StatelessWidget {
           Expanded(
             flex: 3,
             child: Text(
-              "Billing Month",
+              "Date",
               style: TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
@@ -211,7 +255,8 @@ class MonthlySalesPage extends StatelessWidget {
           Expanded(
             flex: 2,
             child: Text(
-              "Status",
+              "Sales",
+              textAlign: TextAlign.right,
               style: TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
@@ -222,32 +267,22 @@ class MonthlySalesPage extends StatelessWidget {
             flex: 2,
             child: Text(
               "Collected",
+              textAlign: TextAlign.right,
               style: TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
               ),
-              textAlign: TextAlign.right,
             ),
           ),
           Expanded(
             flex: 2,
             child: Text(
-              "Revenue",
+              "Balance",
+              textAlign: TextAlign.right,
               style: TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
               ),
-              textAlign: TextAlign.right,
-            ),
-          ),
-          SizedBox(
-            width: 50,
-            child: Center(
-              child: Icon(
-                Icons.arrow_forward_ios,
-                size: 12,
-                color: Colors.transparent,
-              ),
             ),
           ),
         ],
@@ -255,161 +290,123 @@ class MonthlySalesPage extends StatelessWidget {
     );
   }
 
-  // --- 4. MAIN LIST CONTENT ---
+  // --- 5. MAIN LIST ---
   Widget _buildMainContent() {
-    if (controller.monthlyData.value.isEmpty) {
-      return _buildEmptyState();
-    }
+    return Obx(() {
+      if (controller.isLoading.value) {
+        return const Center(
+          child: CircularProgressIndicator(color: activeAccent),
+        );
+      }
 
-    final monthKeys = controller.monthlyData.value.keys.toList();
-    // Sort descending (newest month first) if not already sorted by controller
-    // monthKeys.sort((a, b) => b.compareTo(a));
-
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
-      itemCount: monthKeys.length,
-      itemBuilder: (context, index) {
-        final key = monthKeys[index];
-        final data = controller.monthlyData.value[key]!;
-        return _buildMonthRow(context, key, data);
-      },
-    );
-  }
-
-  Widget _buildMonthRow(BuildContext context, String key, dynamic data) {
-    bool hasDues = data.pending > 0;
-
-    return Container(
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: Color(0xFFF3F4F6))),
-      ),
-      child: InkWell(
-        onTap:
-            () => Get.to(
-              () => MonthlySalesDetailPage(monthKey: key, summary: data),
-            ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
-          child: Row(
-            children: [
-              // Month Title
-              Expanded(
-                flex: 3,
-                child: Row(
-                  children: [
-                    const Icon(
-                      FontAwesomeIcons.calendarCheck,
-                      size: 14,
-                      color: activeAccent,
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      _formatMonthKey(key),
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: darkSlate,
-                        fontSize: 15,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              // Status Badge
-              Expanded(
-                flex: 2,
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color:
-                          hasDues
-                              ? warningOrange.withOpacity(0.1)
-                              : successGreen.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      hasDues ? "OUTSTANDING" : "SETTLED",
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        color: hasDues ? warningOrange : successGreen,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              // Collected (Paid)
-              Expanded(
-                flex: 2,
-                child: Text(
-                  "৳ ${NumberFormat('#,##0').format(data.paid)}",
-                  textAlign: TextAlign.right,
-                  style: const TextStyle(
-                    color: successGreen,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              // Total Revenue
-              Expanded(
-                flex: 2,
-                child: Text(
-                  "৳ ${NumberFormat('#,##0').format(data.total)}",
-                  textAlign: TextAlign.right,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: darkSlate,
-                    fontSize: 15,
-                  ),
-                ),
-              ),
-              // Arrow
-              const SizedBox(
-                width: 50,
-                child: Center(
-                  child: Icon(
-                    Icons.arrow_forward_ios,
-                    size: 14,
-                    color: Colors.grey,
-                  ),
-                ),
+      if (controller.dailyStats.value.isEmpty) {
+        return Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: const [
+              Icon(FontAwesomeIcons.calendarXmark, size: 40, color: textMuted),
+              SizedBox(height: 16),
+              Text(
+                "No transactions found for this month",
+                style: TextStyle(color: textMuted),
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
+        );
+      }
 
-  // --- HELPERS ---
+      // Convert map entries to list for ListView
+      final dailyList = controller.dailyStats.value.entries.toList();
 
-  String _formatMonthKey(String key) {
-    try {
-      DateTime date = DateTime.parse("$key-01");
-      return DateFormat('MMMM yyyy').format(date);
-    } catch (e) {
-      return key;
-    }
-  }
+      return ListView.separated(
+        padding: const EdgeInsets.fromLTRB(
+          24,
+          0,
+          24,
+          80,
+        ), // Bottom padding for FAB
+        itemCount: dailyList.length,
+        separatorBuilder:
+            (_, __) => const Divider(height: 1, color: Color(0xFFE5E7EB)),
+        itemBuilder: (context, index) {
+          final stat = dailyList[index].value;
+          final isNegative =
+              stat.netDifference <
+              0; // Negative means Collected > Sales (e.g. paying old debts)
 
-  Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: const [
-          Icon(FontAwesomeIcons.folderOpen, size: 50, color: Colors.black12),
-          SizedBox(height: 16),
-          Text(
-            "No sales data available for reports",
-            style: TextStyle(color: textMuted),
-          ),
-        ],
-      ),
-    );
+          return Container(
+            color: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: Row(
+              children: [
+                // Date & Invoice Count
+                Expanded(
+                  flex: 3,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        DateFormat('dd MMM (EEEE)').format(stat.date),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: darkSlate,
+                        ),
+                      ),
+                      Text(
+                        "${stat.invoiceCount} invoices",
+                        style: const TextStyle(fontSize: 11, color: textMuted),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Sales Amount
+                Expanded(
+                  flex: 2,
+                  child: Text(
+                    NumberFormat('#,##0').format(stat.totalSales),
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(color: darkSlate),
+                  ),
+                ),
+
+                // Collected Amount
+                Expanded(
+                  flex: 2,
+                  child: Text(
+                    NumberFormat('#,##0').format(stat.totalCollected),
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(
+                      color: successGreen,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+
+                // Balance (Difference)
+                Expanded(
+                  flex: 2,
+                  child: Text(
+                    NumberFormat('#,##0').format(stat.netDifference),
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      // If netDifference is positive, it's Due (Orange/Red).
+                      // If negative, it means we collected more than we sold (Green - paying back).
+                      color:
+                          isNegative
+                              ? successGreen
+                              : (stat.netDifference > 0
+                                  ? warningOrange
+                                  : textMuted),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+    });
   }
 }

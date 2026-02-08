@@ -1,208 +1,431 @@
-// ignore_for_file: deprecated_member_use
+// ignore_for_file: deprecated_member_use, avoid_print, empty_catches
 
 import 'dart:collection';
-import 'package:get/get.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:gtel_erp/Web%20Screen/Sales/model.dart';
+import 'package:get/get.dart';
 import 'package:intl/intl.dart';
-import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
-class MonthlySalesController extends GetxController {
-  final isLoading = false.obs;
+/// Holds the daily breakdown
+class DailyStat {
+  DateTime date;
+  double totalSales; // Invoiced Amount
+  double totalCollected; // Cash Received
+  int invoiceCount;
 
-  // SplayTreeMap keeps keys sorted automatically (e.g., 2025-01, 2025-02)
-  final monthlyData = SplayTreeMap<String, MonthlySummary>().obs;
+  DailyStat({
+    required this.date,
+    this.totalSales = 0.0,
+    this.totalCollected = 0.0,
+    this.invoiceCount = 0,
+  });
+
+  double get netDifference => totalSales - totalCollected;
+}
+
+class MonthlySalesController extends GetxController {
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
+
+  var isLoading = false.obs;
+
+  // --- SELECTION STATE ---
+  var selectedDate = DateTime.now().obs;
+
+  // --- AGGREGATE METRICS ---
+  var totalMonthlySales = 0.0.obs;
+  var totalMonthlyCollection = 0.0.obs;
+  var totalMonthlyDue = 0.0.obs;
+
+  // --- DAILY BREAKDOWN ---
+  final dailyStats = Rx<SplayTreeMap<int, DailyStat>>(SplayTreeMap());
 
   @override
   void onInit() {
     super.onInit();
-    fetchSales();
+    loadMonthlyData(DateTime.now());
   }
 
-  Future<void> fetchSales() async {
-    try {
-      isLoading.value = true;
+  // Call this from your Dropdown
+  void loadMonthlyData(DateTime date) {
+    selectedDate.value = date;
+    _fetchData();
+  }
 
-      final snapshot =
-          await FirebaseFirestore.instance
-              .collection('daily_sales')
-              .orderBy('timestamp', descending: true)
+  Future<void> _fetchData() async {
+    isLoading.value = true;
+
+    // Reset Metrics
+    totalMonthlySales.value = 0.0;
+    totalMonthlyCollection.value = 0.0;
+    totalMonthlyDue.value = 0.0;
+
+    // Clear Map
+    dailyStats.value.clear();
+
+    // Define Time Range
+    DateTime startOfMonth = DateTime(
+      selectedDate.value.year,
+      selectedDate.value.month,
+      1,
+    );
+    DateTime endOfMonth = DateTime(
+      selectedDate.value.year,
+      selectedDate.value.month + 1,
+      0,
+      23,
+      59,
+      59,
+    );
+
+    try {
+      // 1. FETCH SALES (From 'sales_orders')
+      QuerySnapshot salesSnap =
+          await _db
+              .collection('sales_orders')
+              .where(
+                'timestamp',
+                isGreaterThanOrEqualTo: Timestamp.fromDate(startOfMonth),
+              )
+              .where(
+                'timestamp',
+                isLessThanOrEqualTo: Timestamp.fromDate(endOfMonth),
+              )
               .get();
 
-      // 1. Create your temporary sorted map
-      final tempMap = SplayTreeMap<String, MonthlySummary>(
-        (a, b) => b.compareTo(a),
-      );
+      for (var doc in salesSnap.docs) {
+        var data = doc.data() as Map<String, dynamic>;
 
-      for (var doc in snapshot.docs) {
-        final sale = SaleModel.fromFirestore(doc);
+        // Skip deleted
+        if ((data['status'] ?? '') == 'deleted') continue;
 
-        final monthKey = DateFormat('yyyy-MM').format(sale.timestamp);
-        final dayKey = DateFormat('yyyy-MM-dd').format(sale.timestamp);
+        double amount = double.tryParse(data['grandTotal'].toString()) ?? 0.0;
+        DateTime date = (data['timestamp'] as Timestamp).toDate();
+        int day = date.day;
 
-        tempMap.putIfAbsent(monthKey, () => MonthlySummary());
+        // Update Total
+        totalMonthlySales.value += amount;
 
-        final month = tempMap[monthKey]!;
-        month.total += sale.amount;
-        month.paid += sale.paid;
-
-        month.daily.putIfAbsent(dayKey, () => DailySummary());
-        month.daily[dayKey]!.total += sale.amount;
-        month.daily[dayKey]!.paid += sale.paid;
+        // Update Daily Stat
+        _updateDailyStat(day, date, salesAmount: amount, count: 1);
       }
 
-      // 2. Assign the whole map to the observable .value
-      monthlyData.value = tempMap;
+      // 2. FETCH COLLECTIONS (From 'daily_sales')
+      QuerySnapshot collectionSnap =
+          await _db
+              .collection('daily_sales')
+              .where(
+                'timestamp',
+                isGreaterThanOrEqualTo: Timestamp.fromDate(startOfMonth),
+              )
+              .where(
+                'timestamp',
+                isLessThanOrEqualTo: Timestamp.fromDate(endOfMonth),
+              )
+              .get();
+
+      for (var doc in collectionSnap.docs) {
+        var data = doc.data() as Map<String, dynamic>;
+
+        double collected = double.tryParse(data['paid'].toString()) ?? 0.0;
+
+        DateTime date = (data['timestamp'] as Timestamp).toDate();
+        int day = date.day;
+
+        // Update Total
+        totalMonthlyCollection.value += collected;
+
+        // Update Daily Stat
+        _updateDailyStat(day, date, collectionAmount: collected);
+      }
+
+      // 3. Final Calculation
+      totalMonthlyDue.value =
+          totalMonthlySales.value - totalMonthlyCollection.value;
+
+      // Force UI update
+      dailyStats.refresh();
     } catch (e) {
-      Get.snackbar("Error", "Failed to fetch sales: $e");
+      Get.snackbar("Error", "Failed to load monthly data: $e");
+      print(e);
     } finally {
       isLoading.value = false;
     }
   }
-}
 
-class MonthlySummary {
-  double total = 0;
-  double paid = 0;
-  // Nested map for daily breakdown within the month
-  Map<String, DailySummary> daily = SplayTreeMap<String, DailySummary>(
-    (a, b) => b.compareTo(a),
-  );
+  void _updateDailyStat(
+    int day,
+    DateTime fullDate, {
+    double salesAmount = 0.0,
+    double collectionAmount = 0.0,
+    int count = 0,
+  }) {
+    if (!dailyStats.value.containsKey(day)) {
+      dailyStats.value[day] = DailyStat(date: fullDate);
+    }
 
-  double get pending => total - paid;
-}
+    dailyStats.value[day]!.totalSales += salesAmount;
+    dailyStats.value[day]!.totalCollected += collectionAmount;
+    dailyStats.value[day]!.invoiceCount += count;
+  }
 
-class DailySummary {
-  double total = 0;
-  double paid = 0;
-  double get pending => total - paid;
-}
+  // ==========================================
+  //  MISSING METHOD ADDED HERE
+  // ==========================================
+  Future<List<Map<String, dynamic>>> fetchTransactionsForDay(
+    DateTime date,
+  ) async {
+    // Define start and end of the selected day
+    DateTime start = DateTime(date.year, date.month, date.day);
+    DateTime end = DateTime(date.year, date.month, date.day, 23, 59, 59);
 
-Future<void> generateMonthlyPdf(String monthKey, MonthlySummary summary) async {
-  final pdf = pw.Document();
-  final primaryColor = PdfColors.blue900;
-  final secondaryColor = PdfColors.blueGrey800;
+    try {
+      QuerySnapshot snap =
+          await _db
+              .collection('sales_orders')
+              .where(
+                'timestamp',
+                isGreaterThanOrEqualTo: Timestamp.fromDate(start),
+              )
+              .where('timestamp', isLessThanOrEqualTo: Timestamp.fromDate(end))
+              .orderBy('timestamp', descending: true)
+              .get();
 
-  pdf.addPage(
-    pw.MultiPage(
-      // MultiPage is essential for long lists
-      pageFormat: PdfPageFormat.a4,
-      margin: const pw.EdgeInsets.all(32),
-      header:
-          (context) => pw.Column(
-            children: [
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text(
-                    "G-TEL ERP: MONTHLY SALES",
-                    style: pw.TextStyle(
-                      fontSize: 18,
-                      fontWeight: pw.FontWeight.bold,
-                      color: primaryColor,
-                    ),
-                  ),
-                  pw.Text(
-                    "Month: $monthKey",
-                    style: const pw.TextStyle(fontSize: 12),
-                  ),
-                ],
-              ),
-              pw.SizedBox(height: 5),
-              pw.Divider(thickness: 1, color: primaryColor),
-            ],
-          ),
-      build: (context) {
-        return [
-          pw.SizedBox(height: 20),
+      return snap.docs.map((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        return {
+          'id': doc.id,
+          'invoiceId': data['invoiceId'] ?? doc.id,
+          'customerName': data['customerName'] ?? 'Unknown',
+          'customerPhone': data['customerPhone'] ?? '',
+          'grandTotal': double.tryParse(data['grandTotal'].toString()) ?? 0.0,
+          'customerType': data['customerType'] ?? 'General',
+          'isCondition': data['isCondition'] == true,
+          'courierName': data['courierName'] ?? '',
+        };
+      }).toList();
+    } catch (e) {
+      print("Error fetching daily transactions: $e");
+      return [];
+    }
+  }
 
-          // SUMMARY SECTION
-          pw.Container(
-            padding: const pw.EdgeInsets.all(15),
-            decoration: pw.BoxDecoration(
-              color: PdfColors.grey100,
-              borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
-            ),
-            child: pw.Row(
+  // ==========================================
+  // PDF GENERATION
+  // ==========================================
+  Future<void> generateMonthlyReportPDF() async {
+    final pdf = pw.Document();
+    final fontBold = await PdfGoogleFonts.nunitoBold();
+    final fontRegular = await PdfGoogleFonts.nunitoRegular();
+
+    final String monthName = DateFormat('MMMM yyyy').format(selectedDate.value);
+    final primaryColor = PdfColors.blue900;
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(30),
+        build: (context) {
+          return [
+            // HEADER
+            pw.Row(
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
               children: [
-                _pdfStatItem("Total Revenue", summary.total, PdfColors.black),
-                _pdfStatItem(
-                  "Total Collected",
-                  summary.paid,
-                  PdfColors.green800,
+                pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text(
+                      "MONTHLY BUSINESS REPORT",
+                      style: pw.TextStyle(
+                        font: fontBold,
+                        fontSize: 18,
+                        color: primaryColor,
+                      ),
+                    ),
+                    pw.Text(
+                      "Period: $monthName",
+                      style: pw.TextStyle(font: fontRegular, fontSize: 12),
+                    ),
+                  ],
                 ),
-                _pdfStatItem(
-                  "Total Pending",
-                  summary.pending,
-                  PdfColors.red800,
+                pw.Text(
+                  "G-TEL ERP",
+                  style: pw.TextStyle(font: fontBold, fontSize: 14),
                 ),
               ],
             ),
-          ),
+            pw.SizedBox(height: 20),
 
-          pw.SizedBox(height: 30),
-
-          // TABLE BREAKDOWN
-          pw.Table.fromTextArray(
-            headers: ["Transaction Date", "Daily Sales (BDT)", "Status"],
-            headerStyle: pw.TextStyle(
-              color: PdfColors.white,
-              fontWeight: pw.FontWeight.bold,
+            // SUMMARY CARDS
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                _buildSummaryCard(
+                  "TOTAL SALES",
+                  totalMonthlySales.value,
+                  PdfColors.blue100,
+                  fontBold,
+                ),
+                _buildSummaryCard(
+                  "TOTAL COLLECTED",
+                  totalMonthlyCollection.value,
+                  PdfColors.green100,
+                  fontBold,
+                ),
+                _buildSummaryCard(
+                  "BALANCE / DUE",
+                  totalMonthlyDue.value,
+                  totalMonthlyDue.value > 0
+                      ? PdfColors.orange100
+                      : PdfColors.grey200,
+                  fontBold,
+                ),
+              ],
             ),
-            headerDecoration: pw.BoxDecoration(color: secondaryColor),
-            cellHeight: 25,
-            cellAlignments: {
-              0: pw.Alignment.centerLeft,
-              1: pw.Alignment.centerRight,
-              2: pw.Alignment.center,
-            },
-            data:
-                summary.daily.entries.map((e) {
-                  final d = e.value;
-                  return [
-                    DateFormat(
-                      'dd MMM yyyy (EEEE)',
-                    ).format(DateTime.parse(e.key)),
-                    d.total.toStringAsFixed(2),
-                    d.pending <= 0 ? "CLEARED" : "DUE",
-                  ];
-                }).toList(),
-          ),
 
-          pw.SizedBox(height: 30),
-          pw.Divider(color: PdfColors.grey300),
-          pw.Center(
-            child: pw.Text(
-              "End of Monthly Statement",
-              style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey600),
+            pw.SizedBox(height: 30),
+            pw.Text(
+              "DAILY BREAKDOWN",
+              style: pw.TextStyle(font: fontBold, fontSize: 12),
             ),
-          ),
-        ];
-      },
-    ),
-  );
+            pw.SizedBox(height: 10),
 
-  await Printing.layoutPdf(onLayout: (format) async => pdf.save());
-}
+            // TABLE
+            pw.Table(
+              border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
+              columnWidths: {
+                0: const pw.FlexColumnWidth(2), // Date
+                1: const pw.FlexColumnWidth(1), // Count
+                2: const pw.FlexColumnWidth(2), // Sales
+                3: const pw.FlexColumnWidth(2), // Collection
+                4: const pw.FlexColumnWidth(2), // Difference
+              },
+              children: [
+                // Table Header
+                pw.TableRow(
+                  decoration: const pw.BoxDecoration(color: PdfColors.grey200),
+                  children: [
+                    _th("Date", fontBold, align: pw.TextAlign.left),
+                    _th("Bills", fontBold),
+                    _th("Sales (Inv)", fontBold, align: pw.TextAlign.right),
+                    _th("Collected", fontBold, align: pw.TextAlign.right),
+                    _th("Balance", fontBold, align: pw.TextAlign.right),
+                  ],
+                ),
+                // Table Data
+                ...dailyStats.value.entries.map((entry) {
+                  final stat = entry.value;
+                  final isNegative = stat.netDifference < 0;
 
-pw.Widget _pdfStatItem(String label, double value, PdfColor color) {
-  return pw.Column(
-    children: [
-      pw.Text(
-        label,
-        style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
+                  return pw.TableRow(
+                    children: [
+                      _td(
+                        DateFormat('dd MMM (EEE)').format(stat.date),
+                        fontRegular,
+                        align: pw.TextAlign.left,
+                      ),
+                      _td(stat.invoiceCount.toString(), fontRegular),
+                      _td(
+                        stat.totalSales.toStringAsFixed(0),
+                        fontRegular,
+                        align: pw.TextAlign.right,
+                      ),
+                      _td(
+                        stat.totalCollected.toStringAsFixed(0),
+                        fontRegular,
+                        align: pw.TextAlign.right,
+                        color: PdfColors.green800,
+                      ),
+                      _td(
+                        stat.netDifference.toStringAsFixed(0),
+                        fontBold,
+                        align: pw.TextAlign.right,
+                        color:
+                            isNegative ? PdfColors.green900 : PdfColors.red900,
+                      ),
+                    ],
+                  );
+                }),
+              ],
+            ),
+          ];
+        },
       ),
-      pw.Text(
-        "Tk ${value.toStringAsFixed(2)}",
-        style: pw.TextStyle(
-          fontSize: 14,
-          fontWeight: pw.FontWeight.bold,
-          color: color,
+    );
+
+    await Printing.layoutPdf(onLayout: (f) => pdf.save());
+  }
+
+  pw.Widget _buildSummaryCard(
+    String title,
+    double value,
+    PdfColor bg,
+    pw.Font font,
+  ) {
+    return pw.Expanded(
+      child: pw.Container(
+        margin: const pw.EdgeInsets.symmetric(horizontal: 5),
+        padding: const pw.EdgeInsets.all(12),
+        decoration: pw.BoxDecoration(
+          color: bg,
+          borderRadius: const pw.BorderRadius.all(pw.Radius.circular(5)),
+          border: pw.Border.all(color: PdfColors.grey400, width: 0.5),
+        ),
+        child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Text(
+              title,
+              style: pw.TextStyle(
+                font: font,
+                fontSize: 8,
+                color: PdfColors.grey800,
+              ),
+            ),
+            pw.SizedBox(height: 5),
+            pw.Text(
+              "Tk ${value.toStringAsFixed(0)}",
+              style: pw.TextStyle(
+                font: font,
+                fontSize: 14,
+                color: PdfColors.black,
+              ),
+            ),
+          ],
         ),
       ),
-    ],
-  );
+    );
+  }
+
+  pw.Widget _th(
+    String text,
+    pw.Font font, {
+    pw.TextAlign align = pw.TextAlign.center,
+  }) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.all(6),
+      child: pw.Text(
+        text,
+        textAlign: align,
+        style: pw.TextStyle(font: font, fontSize: 9),
+      ),
+    );
+  }
+
+  pw.Widget _td(
+    String text,
+    pw.Font font, {
+    pw.TextAlign align = pw.TextAlign.center,
+    PdfColor color = PdfColors.black,
+  }) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(vertical: 6, horizontal: 6),
+      child: pw.Text(
+        text,
+        textAlign: align,
+        style: pw.TextStyle(font: font, fontSize: 9, color: color),
+      ),
+    );
+  }
 }

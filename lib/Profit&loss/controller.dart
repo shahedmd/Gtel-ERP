@@ -93,28 +93,32 @@ class ProfitController extends GetxController {
     _resetMetrics();
 
     try {
-      // 1. Process Sales (Revenue, Cost, and Generated Pending)
+      // STEP 1: Process Sales (Revenue & Cost & Pending)
+      // This populates totalRevenue and totalCostOfGoods
       await _processSalesData();
 
-      // FIX #1: Calculate Margin BEFORE Collections.
-      // If Revenue is 0 (e.g., Sunday), fetch Historical Margin so Net Profit isn't 0.
+      // STEP 2: Calculate Margin IMMEDIATELY
+      // We must do this BEFORE processing collections, otherwise collections
+      // will use a 0% margin and Net Profit will be wrong.
       if (totalRevenue.value > 0) {
         effectiveProfitMargin.value =
             (totalRevenue.value - totalCostOfGoods.value) / totalRevenue.value;
       } else {
+        // If no sales today, use historical average
         await _fetchHistoricalMargin();
       }
 
-      // 2. Process Collections (Apply Margin to get Gross Cash Profit)
+      // STEP 3: Process Collections
+      // Now effectiveProfitMargin has a value, so this will work correctly.
       double realizedGrossProfit = await _processCollectionData();
 
-      // 3. Process Expenses
+      // STEP 4: Process Expenses
       await _calculateExpenses();
 
-      // 4. Final Totals
+      // STEP 5: Final Totals
       profitOnRevenue.value = totalRevenue.value - totalCostOfGoods.value;
 
-      // Net Profit = (Collected Cash * Margin) - Expenses
+      // Net Profit = (Gross Profit from Cash Collected) - Expenses
       netRealizedProfit.value =
           realizedGrossProfit - totalOperatingExpenses.value;
 
@@ -127,10 +131,6 @@ class ProfitController extends GetxController {
     }
   }
 
-  // =========================================================================
-  // LOGIC: Calculates Bills Generated in this period.
-  // PENDING = GrandTotal - Amount Paid AT THE MOMENT OF SALE.
-  // =========================================================================
   Future<void> _processSalesData() async {
     QuerySnapshot invoiceSnap =
         await _db
@@ -150,7 +150,7 @@ class ProfitController extends GetxController {
     double tDaily = 0;
     double tDebtor = 0;
     double tCondition = 0;
-    double tPending = 0;
+    double tPendingGenerated = 0;
 
     List<Map<String, dynamic>> tempTransactions = [];
 
@@ -172,51 +172,38 @@ class ProfitController extends GetxController {
       tRev += amount;
       tCost += cost;
 
-      double pendingForThisInv = 0.0;
+      // --- PENDING CALCULATION FIX ---
+      double currentRemainingDue = 0.0;
 
       if (isCondition) {
-        // Condition Sale: Payment is expected later.
-        // Pending = The full courier due amount.
-        pendingForThisInv = double.tryParse(data['courierDue'].toString()) ?? 0;
-        tCondition += amount;
+        // For Condition: Trust 'courierDue'.
+        // If you received money, this is 0. If not, it is 56,500.
+        currentRemainingDue =
+            double.tryParse(data['courierDue']?.toString() ?? '0') ?? 0;
       } else {
-        // Debtor/Cash Sale:
-        // We strictly check: How much did they pay RIGHT NOW?
-        double paidInput = 0.0;
+        // For Debtor/Cash: Calculate strictly based on Paid amount.
+        // Pending = Total - Paid
+        double paid = double.tryParse(data['paid']?.toString() ?? '0') ?? 0;
 
-        if (data['paymentDetails'] != null &&
-            data['paymentDetails']['totalPaidInput'] != null) {
-          paidInput =
-              double.tryParse(
-                data['paymentDetails']['totalPaidInput'].toString(),
-              ) ??
-              0;
-        } else {
-          // Fallback for old data or manual sum
-          var pd = data['paymentDetails'] ?? {};
-          double c = double.tryParse(pd['cash']?.toString() ?? '0') ?? 0;
-          double b = double.tryParse(pd['bkash']?.toString() ?? '0') ?? 0;
-          double n = double.tryParse(pd['nagad']?.toString() ?? '0') ?? 0;
-          double bank = double.tryParse(pd['bank']?.toString() ?? '0') ?? 0;
-          // Fallback to root 'paid' if all else fails
-          if (c + b + n + bank == 0) {
-            paidInput = double.tryParse(data['paid']?.toString() ?? '0') ?? 0;
-          } else {
-            paidInput = c + b + n + bank;
-          }
+        // Auto-fix: If it's a Cash sale and 'paid' is 0, assume it was fully paid.
+        if (paid == 0 && type != 'debtor' && !isCondition) {
+          paid = amount;
         }
 
-        double calc = amount - paidInput;
-        pendingForThisInv = calc > 0 ? calc : 0.0;
-
-        if (type == 'debtor') {
-          tDebtor += amount;
-        } else {
-          tDaily += amount;
-        }
+        double calc = amount - paid;
+        currentRemainingDue = calc > 0 ? calc : 0;
       }
 
-      tPending += pendingForThisInv;
+      tPendingGenerated += currentRemainingDue;
+
+      // Categorize Revenue
+      if (isCondition) {
+        tCondition += amount;
+      } else if (type == 'debtor') {
+        tDebtor += amount;
+      } else {
+        tDaily += amount;
+      }
 
       tempTransactions.add({
         'invoiceId': invId,
@@ -227,7 +214,7 @@ class ProfitController extends GetxController {
         'total': amount,
         'cost': cost,
         'profit': profit,
-        'pending': pendingForThisInv,
+        'pending': currentRemainingDue,
         'isLoss': profit < 0,
       });
     }
@@ -238,9 +225,8 @@ class ProfitController extends GetxController {
     totalRevenue.value = tRev;
     totalCostOfGoods.value = tCost;
 
-    // FIX: This is now purely "Unpaid New Bills".
-    // Collecting money for old bills will NOT affect this number.
-    totalPendingGenerated.value = tPending;
+    // Assign correct pending
+    totalPendingGenerated.value = tPendingGenerated;
 
     transactionList.value = tempTransactions;
   }

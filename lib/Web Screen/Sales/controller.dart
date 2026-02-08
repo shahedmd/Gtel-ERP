@@ -507,11 +507,12 @@ class DailySalesController extends GetxController {
   }
 
   // ==========================================
-  // 7. REPRINT LOGIC (SAME AS BEFORE)
+  // REPRINT LOGIC (Updated with Professional PDF)
   // ==========================================
   Future<void> reprintInvoice(String invoiceId) async {
     isLoading.value = true;
     try {
+      // 1. Fetch Master Record
       DocumentSnapshot doc =
           await _db.collection('sales_orders').doc(invoiceId).get();
       if (!doc.exists) {
@@ -521,6 +522,7 @@ class DailySalesController extends GetxController {
 
       Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
 
+      // 2. Check Daily Sales for real-time payment updates
       double realTimePaid = 0.0;
       bool foundInDaily = false;
 
@@ -537,6 +539,7 @@ class DailySalesController extends GetxController {
         foundInDaily = true;
       }
 
+      // 3. Extract Data
       String name = data['customerName'] ?? "";
       String phone = data['customerPhone'] ?? "";
       String shop = data['shopName'] ?? "";
@@ -545,11 +548,14 @@ class DailySalesController extends GetxController {
       int cartons = data['cartons'] ?? 0;
       bool isCond = data['isCondition'] ?? false;
       String challan = data['challanNo'] ?? "";
-      String packagername = data['packagerName'] ?? '';
+      // Note: First file used 'packagerName', second used 'packagerName' key.
+      String packagerName = data['packagerName'] ?? '';
+
       List<Map<String, dynamic>> items = List<Map<String, dynamic>>.from(
         data['items'] ?? [],
       );
 
+      // 4. Prepare Payment Map
       Map<String, dynamic> payMap = Map.from(data['paymentDetails'] ?? {});
 
       double subTotal = items.fold(
@@ -559,6 +565,8 @@ class DailySalesController extends GetxController {
       double discountVal = (data['discount'] as num?)?.toDouble() ?? 0.0;
       double grandTotal = subTotal - discountVal;
 
+      // If found in daily sales, update the 'paidForInvoice' and 'due'
+      // to reflect the actual transaction status
       if (foundInDaily) {
         payMap['paidForInvoice'] = realTimePaid;
         double newDue = grandTotal - realTimePaid;
@@ -569,6 +577,7 @@ class DailySalesController extends GetxController {
       double snapOld = (data['snapshotOldDue'] as num?)?.toDouble() ?? 0.0;
       double snapRun = (data['snapshotRunningDue'] as num?)?.toDouble() ?? 0.0;
 
+      // 5. Get Seller Info
       String sellerName = "Joynal Abedin";
       String sellerPhone = "01720677206";
 
@@ -582,6 +591,7 @@ class DailySalesController extends GetxController {
         }
       }
 
+      // 6. Generate PDF using the Professional Layout
       await _generatePdf(
         invoiceId,
         name,
@@ -599,7 +609,7 @@ class DailySalesController extends GetxController {
         authorizedName: sellerName,
         authorizedPhone: sellerPhone,
         discount: discountVal,
-        packager: packagername,
+        packagerName: packagerName,
       );
     } catch (e) {
       Get.snackbar("Error", "Could not reprint: $e");
@@ -608,6 +618,9 @@ class DailySalesController extends GetxController {
     }
   }
 
+  // ==========================================
+  // PROFESSIONAL PDF GENERATOR (From First File)
+  // ==========================================
   Future<void> _generatePdf(
     String invId,
     String name,
@@ -625,16 +638,20 @@ class DailySalesController extends GetxController {
     required String authorizedName,
     required String authorizedPhone,
     double discount = 0.0,
-    String packager = '',
+    String? packagerName,
   }) async {
     final pdf = pw.Document();
     final boldFont = await PdfGoogleFonts.robotoBold();
     final regularFont = await PdfGoogleFonts.robotoRegular();
     final italicFont = await PdfGoogleFonts.robotoItalic();
 
+    // Calculations to match first file logic
     double paidOld = double.tryParse(payMap['paidForOldDue'].toString()) ?? 0.0;
     double paidInv =
         double.tryParse(payMap['paidForInvoice'].toString()) ?? 0.0;
+    double paidPrevRun =
+        double.tryParse(payMap['paidForPrevRunning'].toString()) ?? 0.0;
+
     double invDue = double.tryParse(payMap['due'].toString()) ?? 0.0;
     double subTotal = items.fold(
       0,
@@ -644,15 +661,20 @@ class DailySalesController extends GetxController {
 
     double remainingOldDue = oldDueSnap - paidOld;
     if (remainingOldDue < 0) remainingOldDue = 0;
+
+    double remainingPrevRunning = runningDueSnap - paidPrevRun;
+    if (remainingPrevRunning < 0) remainingPrevRunning = 0;
+
+    double netTotalDue = remainingOldDue + remainingPrevRunning + invDue;
+    double totalPaidCurrent = paidOld + paidInv + paidPrevRun;
     double totalPreviousBalance = oldDueSnap + runningDueSnap;
-    double netTotalDue = remainingOldDue + runningDueSnap + invDue;
-    double totalPaidCurrent = paidOld + paidInv;
 
     final pageTheme = pw.PageTheme(
       pageFormat: PdfPageFormat.a5,
       margin: const pw.EdgeInsets.all(20),
     );
 
+    // --- PAGE 1: INVOICE ---
     pdf.addPage(
       pw.MultiPage(
         pageTheme: pageTheme,
@@ -670,7 +692,7 @@ class DailySalesController extends GetxController {
               address,
               courier,
               shopName,
-              packager,
+              packagerName,
             ),
             pw.SizedBox(height: 15),
             _buildProfessionalTable(boldFont, regularFont, italicFont, items),
@@ -699,6 +721,7 @@ class DailySalesController extends GetxController {
       ),
     );
 
+    // --- PAGE 2: CHALLAN (Only if Condition) ---
     if (isCondition) {
       pdf.addPage(
         pw.MultiPage(
@@ -749,6 +772,8 @@ class DailySalesController extends GetxController {
     await Printing.layoutPdf(onLayout: (f) => pdf.save());
   }
 
+  // --- UPDATED PDF WIDGETS (Matching First File) ---
+
   pw.Widget _buildCompanyHeader(pw.Font bold, pw.Font reg) {
     return pw.Center(
       child: pw.Container(
@@ -762,14 +787,24 @@ class DailySalesController extends GetxController {
           mainAxisAlignment: pw.MainAxisAlignment.center,
           children: [
             pw.Text(
-              "G TEL JOY EXPRESS",
-              style: pw.TextStyle(font: bold, fontSize: 24, letterSpacing: 1),
+              "G TEL",
+              style: pw.TextStyle(font: bold, fontSize: 26, letterSpacing: 2),
             ),
             pw.Text(
-              "Mobile Parts Wholesaler",
-              style: pw.TextStyle(font: reg, fontSize: 10, letterSpacing: 3),
+              "JOY EXPRESS",
+              style: pw.TextStyle(font: bold, fontSize: 16, letterSpacing: 5),
             ),
-            pw.SizedBox(height: 4),
+            pw.SizedBox(height: 2),
+            pw.Text(
+              "MOBILE PARTS WHOLESALER",
+              style: pw.TextStyle(
+                font: reg,
+                fontSize: 10,
+                letterSpacing: 2,
+                color: PdfColors.grey800,
+              ),
+            ),
+            pw.SizedBox(height: 5),
             pw.Text(
               "Gulistan Shopping Complex (Hall Market), 2 Bangabandu Avenue, Dhaka 1000",
               textAlign: pw.TextAlign.center,
@@ -796,7 +831,7 @@ class DailySalesController extends GetxController {
     String addr,
     String? courier,
     String shopName,
-    String packager,
+    String? packagerName,
   ) {
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -818,8 +853,8 @@ class DailySalesController extends GetxController {
               _infoRow("Type", isCond ? "Condition" : "Cash/Credit", bold, reg),
               if (isCond && courier != null)
                 _infoRow("Courier", courier, bold, reg),
-
-              _infoRow("Packed By", packager, bold, reg),
+              if (packagerName != null && packagerName.isNotEmpty)
+                _infoRow("Packed By", packagerName, bold, reg),
             ],
           ),
         ),
@@ -944,31 +979,26 @@ class DailySalesController extends GetxController {
     String text,
     pw.Font font, {
     pw.TextAlign align = pw.TextAlign.center,
-  }) {
-    return pw.Padding(
-      padding: const pw.EdgeInsets.all(5),
-      child: pw.Text(
-        text,
-        textAlign: align,
-        style: pw.TextStyle(font: font, fontSize: 8),
-      ),
-    );
-  }
-
+  }) => pw.Padding(
+    padding: const pw.EdgeInsets.all(5),
+    child: pw.Text(
+      text,
+      textAlign: align,
+      style: pw.TextStyle(font: font, fontSize: 8),
+    ),
+  );
   pw.Widget _td(
     String text,
     pw.Font font, {
     pw.TextAlign align = pw.TextAlign.left,
-  }) {
-    return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 4),
-      child: pw.Text(
-        text,
-        textAlign: align,
-        style: pw.TextStyle(font: font, fontSize: 9),
-      ),
-    );
-  }
+  }) => pw.Padding(
+    padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 4),
+    child: pw.Text(
+      text,
+      textAlign: align,
+      style: pw.TextStyle(font: font, fontSize: 9),
+    ),
+  );
 
   pw.Widget _buildDetailedSummary(
     pw.Font bold,
@@ -983,7 +1013,6 @@ class DailySalesController extends GetxController {
     double discount,
   ) {
     double currentInvTotal = subTotal - discount;
-
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
@@ -999,13 +1028,14 @@ class DailySalesController extends GetxController {
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
                 pw.Text(
-                  "PAYMENT METHOD",
+                  "PAYMENT DETAILS",
                   style: pw.TextStyle(font: bold, fontSize: 8),
                 ),
                 pw.Divider(thickness: 0.5),
-                _buildCompactPaymentLines(payMap, reg),
+                // Replaced compact lines with professional table
+                _buildProfessionalPaymentDetails(payMap, reg, bold),
                 if (cartons != null && cartons > 0) ...[
-                  pw.SizedBox(height: 5),
+                  pw.SizedBox(height: 8),
                   pw.Text(
                     "Packaged: $cartons Cartons",
                     style: pw.TextStyle(font: bold, fontSize: 8),
@@ -1044,11 +1074,7 @@ class DailySalesController extends GetxController {
                   bold,
                 ),
                 if (totalPaid > 0)
-                  _summaryRow(
-                    "Less Paid",
-                    "(${totalPaid.toStringAsFixed(2)})",
-                    reg,
-                  ),
+                  _summaryRow("Paid", "(${totalPaid.toStringAsFixed(2)})", reg),
                 pw.Container(
                   margin: const pw.EdgeInsets.only(top: 5),
                   padding: const pw.EdgeInsets.all(5),
@@ -1101,88 +1127,126 @@ class DailySalesController extends GetxController {
     String value,
     pw.Font font, {
     double size = 9,
-  }) {
-    return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(vertical: 1),
-      child: pw.Row(
-        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-        children: [
-          pw.Text(label, style: pw.TextStyle(font: font, fontSize: size)),
-          pw.Text(value, style: pw.TextStyle(font: font, fontSize: size)),
-        ],
-      ),
-    );
-  }
+  }) => pw.Padding(
+    padding: const pw.EdgeInsets.symmetric(vertical: 1),
+    child: pw.Row(
+      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+      children: [
+        pw.Text(label, style: pw.TextStyle(font: font, fontSize: size)),
+        pw.Text(value, style: pw.TextStyle(font: font, fontSize: size)),
+      ],
+    ),
+  );
 
   pw.Widget _buildSignatures(
     pw.Font reg,
     pw.Font bold,
     String authName,
     String authPhone,
-  ) {
-    return pw.Row(
-      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-      crossAxisAlignment: pw.CrossAxisAlignment.end,
-      children: [
-        pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            pw.Text(authName, style: pw.TextStyle(font: bold, fontSize: 10)),
-            pw.Text(authPhone, style: pw.TextStyle(font: reg, fontSize: 9)),
-            pw.Container(
-              width: 120,
-              height: 1,
-              color: PdfColors.black,
-              margin: const pw.EdgeInsets.only(top: 2),
-            ),
-            pw.SizedBox(height: 2),
-            pw.Text(
-              "Authorized Signature",
-              style: pw.TextStyle(font: reg, fontSize: 7),
-            ),
-          ],
-        ),
-        pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.end,
-          children: [
-            pw.Container(width: 120, height: 1, color: PdfColors.black),
-            pw.SizedBox(height: 2),
-            pw.Text(
-              "Receiver Signature",
-              style: pw.TextStyle(font: reg, fontSize: 7),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
+  ) => pw.Row(
+    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+    crossAxisAlignment: pw.CrossAxisAlignment.end,
+    children: [
+      pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(authName, style: pw.TextStyle(font: bold, fontSize: 10)),
+          pw.Text(authPhone, style: pw.TextStyle(font: reg, fontSize: 9)),
+          pw.Container(
+            width: 120,
+            height: 1,
+            color: PdfColors.black,
+            margin: const pw.EdgeInsets.only(top: 2),
+          ),
+          pw.SizedBox(height: 2),
+          pw.Text(
+            "Authorized Signature",
+            style: pw.TextStyle(font: reg, fontSize: 7),
+          ),
+        ],
+      ),
+      pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.end,
+        children: [
+          pw.Container(width: 120, height: 1, color: PdfColors.black),
+          pw.SizedBox(height: 2),
+          pw.Text(
+            "Receiver Signature",
+            style: pw.TextStyle(font: reg, fontSize: 7),
+          ),
+        ],
+      ),
+    ],
+  );
 
-  pw.Widget _buildCompactPaymentLines(Map payMap, pw.Font reg) {
-    List<String> lines = [];
+  // THIS IS THE KEY FIX FOR PAYMENT METHODS
+  pw.Widget _buildProfessionalPaymentDetails(
+    Map payMap,
+    pw.Font reg,
+    pw.Font bold,
+  ) {
     double cash = double.tryParse(payMap['cash'].toString()) ?? 0;
     double bkash = double.tryParse(payMap['bkash'].toString()) ?? 0;
     double nagad = double.tryParse(payMap['nagad'].toString()) ?? 0;
     double bank = double.tryParse(payMap['bank'].toString()) ?? 0;
 
-    if (cash > 0) lines.add("Cash: $cash");
-    if (bkash > 0) lines.add("Bkash: $bkash");
-    if (nagad > 0) lines.add("Nagad: $nagad");
-    if (bank > 0) lines.add("Bank: $bank");
+    String bkNum = payMap['bkashNumber'] ?? '';
+    String ngNum = payMap['nagadNumber'] ?? '';
+    String bankName = payMap['bankName'] ?? '';
+    String accNum = payMap['accountNumber'] ?? '';
 
-    if (lines.isEmpty) {
+    List<List<String>> data = [];
+
+    if (cash > 0) data.add(['Cash', '-', cash.toStringAsFixed(2)]);
+    if (bkash > 0) data.add(['Bkash', bkNum, bkash.toStringAsFixed(2)]);
+    if (nagad > 0) data.add(['Nagad', ngNum, nagad.toStringAsFixed(2)]);
+    if (bank > 0) {
+      data.add(['Bank', '$bankName\n$accNum', bank.toStringAsFixed(2)]);
+    }
+
+    if (data.isEmpty) {
       return pw.Text(
-        "Unpaid / Due",
+        "Unpaid / Credit",
         style: pw.TextStyle(font: reg, fontSize: 8),
       );
     }
-    return pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
+
+    return pw.Table(
+      columnWidths: {
+        0: const pw.FixedColumnWidth(40),
+        1: const pw.FlexColumnWidth(),
+        2: const pw.FixedColumnWidth(50),
+      },
       children:
-          lines
-              .map(
-                (l) => pw.Text(l, style: pw.TextStyle(font: reg, fontSize: 8)),
-              )
-              .toList(),
+          data.map((row) {
+            return pw.TableRow(
+              verticalAlignment: pw.TableCellVerticalAlignment.middle,
+              children: [
+                pw.Padding(
+                  padding: const pw.EdgeInsets.only(bottom: 2, top: 2),
+                  child: pw.Text(
+                    row[0],
+                    style: pw.TextStyle(font: bold, fontSize: 7),
+                  ),
+                ),
+                pw.Padding(
+                  padding: const pw.EdgeInsets.only(bottom: 2, top: 2),
+                  child: pw.Text(
+                    row[1],
+                    style: pw.TextStyle(font: reg, fontSize: 7),
+                  ),
+                ),
+                pw.Padding(
+                  padding: const pw.EdgeInsets.only(bottom: 2, top: 2),
+                  child: pw.Text(
+                    row[2],
+                    textAlign: pw.TextAlign.right,
+                    style: pw.TextStyle(font: bold, fontSize: 7),
+                  ),
+                ),
+              ],
+            );
+          }).toList(),
     );
   }
 
@@ -1263,7 +1327,37 @@ class DailySalesController extends GetxController {
   }
 
   pw.Widget _buildConditionBox(pw.Font bold, pw.Font reg, Map payMap) {
-    double due = double.parse(payMap['due'].toString());
+    double due = double.tryParse(payMap['due'].toString()) ?? 0;
+
+    if (due <= 0) {
+      return pw.Container(
+        width: double.infinity,
+        padding: const pw.EdgeInsets.all(10),
+        decoration: pw.BoxDecoration(
+          border: pw.Border.all(width: 2),
+          borderRadius: const pw.BorderRadius.all(pw.Radius.circular(5)),
+          color: PdfColors.grey100,
+        ),
+        child: pw.Column(
+          children: [
+            pw.Text(
+              "PAYMENT STATUS",
+              style: pw.TextStyle(font: reg, fontSize: 8),
+            ),
+            pw.SizedBox(height: 5),
+            pw.Text(
+              "NON CONDITION",
+              style: pw.TextStyle(font: bold, fontSize: 18),
+            ),
+            pw.Text(
+              "ONLY COURIER CHARGES APPLY",
+              style: pw.TextStyle(font: bold, fontSize: 10),
+            ),
+          ],
+        ),
+      );
+    }
+
     return pw.Container(
       width: double.infinity,
       padding: const pw.EdgeInsets.all(10),
@@ -1290,7 +1384,7 @@ class DailySalesController extends GetxController {
                 style: pw.TextStyle(font: bold, fontSize: 18),
               ),
               pw.Text(
-                "+ Charges",
+                "+ CHARGES",
                 style: pw.TextStyle(font: bold, fontSize: 18),
               ),
             ],

@@ -95,9 +95,6 @@ class CashDrawerController extends GetxController {
     fetchData();
   }
 
-  // =========================================================
-  // CORE CALCULATION LOGIC
-  // =========================================================
   Future<void> fetchData() async {
     isLoading.value = true;
     try {
@@ -127,7 +124,7 @@ class CashDrawerController extends GetxController {
               .orderBy('timestamp', descending: true)
               .get();
 
-      // 2. Fetch Ledger (Manual Add/Withdraw/Collection)
+      // 2. Fetch Ledger
       var ledgerFuture =
           _db
               .collection('cash_ledger')
@@ -155,7 +152,7 @@ class CashDrawerController extends GetxController {
       double sumSales = 0, sumCollections = 0, sumExpenses = 0;
       List<DrawerTransaction> allTx = [...expenseList];
 
-      // --- A. PROCESS SALES (Robust Map Parsing) ---
+      // --- A. PROCESS SALES (FIXED FOR CONDITION RECOVERY) ---
       for (var doc in salesSnap.docs) {
         var data = doc.data() as Map<String, dynamic>;
 
@@ -165,7 +162,7 @@ class CashDrawerController extends GetxController {
         // Actual money received now = Paid - Ledger Usage
         double actualReceived = totalPaid - ledgerPaid;
 
-        if (actualReceived <= 0.01) continue; // Skip if no new money came in
+        if (actualReceived <= 0.01) continue;
 
         sumSales += actualReceived;
 
@@ -177,33 +174,52 @@ class CashDrawerController extends GetxController {
         String? displayAcc;
 
         if (pm is Map) {
-          // 1. Extract Exact Amounts
-          c = double.tryParse(pm['cash'].toString()) ?? 0;
-          b = double.tryParse(pm['bank'].toString()) ?? 0;
-          bk = double.tryParse(pm['bkash'].toString()) ?? 0;
-          n = double.tryParse(pm['nagad'].toString()) ?? 0;
+          // --- FIX: Check for 'type' (Condition/Single) vs keys (POS Mixed) ---
+          if (pm.containsKey('type')) {
+            // Condition Recovery Format: {type: 'bkash', details: '...'}
+            String type = (pm['type'] ?? 'cash').toString().toLowerCase();
 
-          // 2. Extract Details
-          if (b > 0) {
-            displayBank = pm['bankName']?.toString();
-            displayAcc = pm['accountNumber']?.toString();
-          }
-          if (bk > 0 && displayAcc == null)
-            displayAcc = "Bkash: ${pm['bkashNumber']}";
-          if (n > 0 && displayAcc == null)
-            displayAcc = "Nagad: ${pm['nagadNumber']}";
+            if (type.contains('bank')) {
+              b = actualReceived;
+              displayMethod = "Bank";
+              displayBank = pm['bankName']?.toString();
+            } else if (type.contains('bkash')) {
+              bk = actualReceived;
+              displayMethod = "Bkash";
+              displayAcc = pm['details']?.toString();
+            } else if (type.contains('nagad')) {
+              n = actualReceived;
+              displayMethod = "Nagad";
+              displayAcc = pm['details']?.toString();
+            } else {
+              c = actualReceived;
+              displayMethod = "Cash";
+            }
+          } else {
+            // POS Mixed Format: {cash: 100, bank: 50...}
+            c = double.tryParse(pm['cash'].toString()) ?? 0;
+            b = double.tryParse(pm['bank'].toString()) ?? 0;
+            bk = double.tryParse(pm['bkash'].toString()) ?? 0;
+            n = double.tryParse(pm['nagad'].toString()) ?? 0;
 
-          // 3. Determine Display Label (Mixed or Single)
-          List<String> used = [];
-          if (c > 0) used.add("Cash");
-          if (b > 0) used.add("Bank");
-          if (bk > 0) used.add("Bkash");
-          if (n > 0) used.add("Nagad");
+            // Details
+            if (b > 0) {
+              displayBank = pm['bankName']?.toString();
+              displayAcc = pm['accountNumber']?.toString();
+            }
+            if (bk > 0 && displayAcc == null)
+              displayAcc = "Bkash: ${pm['bkashNumber']}";
 
-          if (used.length > 1) {
-            displayMethod = "Mixed (${used.join('+')})";
-          } else if (used.isNotEmpty) {
-            displayMethod = used.first;
+            // Label
+            List<String> used = [];
+            if (c > 0) used.add("Cash");
+            if (b > 0) used.add("Bank");
+            if (bk > 0) used.add("Bkash");
+            if (n > 0) used.add("Nagad");
+            if (used.length > 1)
+              displayMethod = "Mixed";
+            else if (used.isNotEmpty)
+              displayMethod = used.first;
           }
         } else {
           // Legacy String Fallback
@@ -232,7 +248,7 @@ class CashDrawerController extends GetxController {
         allTx.add(
           DrawerTransaction(
             date: (data['timestamp'] as Timestamp).toDate(),
-            description: "Sale #${data['transactionId'] ?? 'NA'}",
+            description: "Sale/Rec: ${data['name'] ?? 'NA'}",
             amount: actualReceived,
             type: 'sale',
             method: displayMethod,
@@ -247,11 +263,10 @@ class CashDrawerController extends GetxController {
         var data = doc.data() as Map<String, dynamic>;
         String source = (data['source'] ?? '').toString();
 
-        // Skip POS sales (handled in Part A)
         if (source == 'pos_sale') continue;
 
         double amt = double.tryParse(data['amount'].toString()) ?? 0;
-        String type = data['type'] ?? 'deposit'; // 'deposit' or 'withdraw'
+        String type = data['type'] ?? 'deposit';
 
         // Parse Details
         String methodStr = (data['method'] ?? 'Cash').toString();
@@ -284,8 +299,7 @@ class CashDrawerController extends GetxController {
           else
             tCash += amt;
         } else {
-          // Withdrawal
-          sumExpenses += amt; // Count withdrawal as "Money Out" for reports
+          sumExpenses += amt;
           if (isBank)
             tBank -= amt;
           else if (isBkash)
@@ -310,14 +324,10 @@ class CashDrawerController extends GetxController {
       }
 
       // --- C. PROCESS EXPENSES (Waterfall Deduction) ---
-      // Note: Daily Expenses usually don't have source info in simple schemas.
-      // We assume standard deduction order: Cash -> Bank -> Bkash -> Nagad
       for (var ex in expenseList) {
         sumExpenses += ex.amount;
-
         double remaining = ex.amount;
 
-        // 1. Try Cash
         if (tCash >= remaining) {
           tCash -= remaining;
           remaining = 0;
@@ -326,7 +336,6 @@ class CashDrawerController extends GetxController {
           tCash = 0;
         }
 
-        // 2. Try Bank
         if (remaining > 0) {
           if (tBank >= remaining) {
             tBank -= remaining;
@@ -337,7 +346,6 @@ class CashDrawerController extends GetxController {
           }
         }
 
-        // 3. Try Bkash
         if (remaining > 0) {
           if (tBkash >= remaining) {
             tBkash -= remaining;
@@ -348,7 +356,6 @@ class CashDrawerController extends GetxController {
           }
         }
 
-        // 4. Try Nagad
         if (remaining > 0) {
           if (tNagad >= remaining) {
             tNagad -= remaining;

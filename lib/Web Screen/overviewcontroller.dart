@@ -208,7 +208,7 @@ class OverviewController extends GetxController {
         });
   }
 
-  // --- 3. PROCESS DATA FOR UI (THE CORE LOGIC - FIXED) ---
+  // --- 3. PROCESS DATA FOR UI (FIXED FOR CONDITION & BREAKDOWN) ---
   void _processLedgerData() {
     double tIn = 0;
     double tOut = 0;
@@ -224,63 +224,70 @@ class OverviewController extends GetxController {
     List<LedgerItem> tempIn = [];
     List<LedgerItem> tempOut = [];
 
-    // --- A. PROCESS SALES (FIXED LOGIC FOR MAP STRUCTURE) ---
+    // --- A. PROCESS SALES (INCLUDES CONDITION RECOVERY) ---
     for (var sale in salesCtrl.salesList) {
+      // For Condition Recovery/Debtor, paid is the full amount, ledgerPaid usually 0
       double realCash = sale.paid - sale.ledgerPaid;
+
       if (realCash > 0.01) {
         tIn += realCash;
 
-        // ** NEW LOGIC: Handle Map Payment Method **
         String methodLabel = "Cash";
         String displaySubtitle = "Direct Sale";
         dynamic pm = sale.paymentMethod;
 
         if (pm is Map) {
-          // Extract specific amounts from the map
-          double c = double.tryParse(pm['cash'].toString()) ?? 0;
-          double b = double.tryParse(pm['bank'].toString()) ?? 0;
-          double bk = double.tryParse(pm['bkash'].toString()) ?? 0;
-          double n = double.tryParse(pm['nagad'].toString()) ?? 0;
+          // --- FIX START: Handle Condition/Single Type Map vs POS Mixed Map ---
+          if (pm.containsKey('type')) {
+            // Case 1: Condition Recovery or Simple Payment (e.g. {type: 'bkash', details: '...'})
+            String type = (pm['type'] ?? 'cash').toString().toLowerCase();
 
-          // 1. Add precise amounts to Breakdown
-          tempBreakdown['Cash'] = (tempBreakdown['Cash'] ?? 0) + c;
-          tempBreakdown['Bank'] = (tempBreakdown['Bank'] ?? 0) + b;
-          tempBreakdown['Bkash'] = (tempBreakdown['Bkash'] ?? 0) + bk;
-          tempBreakdown['Nagad'] = (tempBreakdown['Nagad'] ?? 0) + n;
+            if (type.contains('bank')) {
+              tempBreakdown['Bank'] = (tempBreakdown['Bank'] ?? 0) + realCash;
+              methodLabel = "Bank";
+              displaySubtitle = "Bank: ${pm['bankName'] ?? ''}";
+            } else if (type.contains('bkash')) {
+              tempBreakdown['Bkash'] = (tempBreakdown['Bkash'] ?? 0) + realCash;
+              methodLabel = "Bkash";
+              displaySubtitle = pm['details'] ?? "Bkash Ref";
+            } else if (type.contains('nagad')) {
+              tempBreakdown['Nagad'] = (tempBreakdown['Nagad'] ?? 0) + realCash;
+              methodLabel = "Nagad";
+              displaySubtitle = pm['details'] ?? "Nagad Ref";
+            } else {
+              tempBreakdown['Cash'] = (tempBreakdown['Cash'] ?? 0) + realCash;
+              methodLabel = "Cash";
+              displaySubtitle = "Cash Recovery";
+            }
+          } else {
+            // Case 2: POS Sale Mixed Payment (e.g. {cash: 100, bkash: 50})
+            double c = double.tryParse(pm['cash'].toString()) ?? 0;
+            double b = double.tryParse(pm['bank'].toString()) ?? 0;
+            double bk = double.tryParse(pm['bkash'].toString()) ?? 0;
+            double n = double.tryParse(pm['nagad'].toString()) ?? 0;
 
-          // 2. Determine Display Label (Method)
-          List<String> used = [];
-          if (c > 0) used.add("Cash");
-          if (b > 0) used.add("Bank");
-          if (bk > 0) used.add("Bkash");
-          if (n > 0) used.add("Nagad");
+            tempBreakdown['Cash'] = (tempBreakdown['Cash'] ?? 0) + c;
+            tempBreakdown['Bank'] = (tempBreakdown['Bank'] ?? 0) + b;
+            tempBreakdown['Bkash'] = (tempBreakdown['Bkash'] ?? 0) + bk;
+            tempBreakdown['Nagad'] = (tempBreakdown['Nagad'] ?? 0) + n;
 
-          if (used.length > 1) {
-            methodLabel = "Mixed";
-            // e.g. "Cash, Bank"
-            displaySubtitle = used.join(", ");
-          } else if (used.isNotEmpty) {
-            methodLabel = used.first;
+            // Determine Label
+            List<String> used = [];
+            if (c > 0) used.add("Cash");
+            if (b > 0) used.add("Bank");
+            if (bk > 0) used.add("Bkash");
+            if (n > 0) used.add("Nagad");
 
-            // 3. Extract Details (Subtitle) based on method
-            if (methodLabel == "Bank") {
-              String bName = pm['bankName'] ?? '';
-              String acc = pm['accountNumber'] ?? '';
-              if (bName.isNotEmpty) {
-                displaySubtitle = bName + (acc.isNotEmpty ? " ($acc)" : "");
-              }
-            } else if (methodLabel == "Bkash") {
-              if (pm['bkashNumber'] != null &&
-                  pm['bkashNumber'].toString().isNotEmpty) {
-                displaySubtitle = "Bkash: ${pm['bkashNumber']}";
-              }
-            } else if (methodLabel == "Nagad") {
-              if (pm['nagadNumber'] != null &&
-                  pm['nagadNumber'].toString().isNotEmpty) {
-                displaySubtitle = "Nagad: ${pm['nagadNumber']}";
-              }
+            if (used.length > 1) {
+              methodLabel = "Mixed";
+              displaySubtitle = used.join(", ");
+            } else if (used.isNotEmpty) {
+              methodLabel = used.first;
+              if (methodLabel == "Bank")
+                displaySubtitle = pm['bankName'] ?? "Bank";
             }
           }
+          // --- FIX END ---
         } else {
           // Fallback for old string data
           _addToBreakdown(tempBreakdown, pm, realCash);
@@ -291,7 +298,7 @@ class OverviewController extends GetxController {
           LedgerItem(
             time: sale.timestamp,
             title: "Sale: ${sale.name}",
-            subtitle: displaySubtitle, // Now contains Bank details
+            subtitle: displaySubtitle,
             amount: realCash,
             type: 'income',
             method: methodLabel,
@@ -300,60 +307,54 @@ class OverviewController extends GetxController {
       }
     }
 
-    // --- B. PROCESS LEDGER (External - Original Logic Restored) ---
+    // --- B. PROCESS LEDGER (External) ---
     for (var item in externalLedgerData) {
       double amt = double.tryParse(item['amount'].toString()) ?? 0.0;
       String type = item['type'] ?? 'deposit';
       DateTime time = (item['timestamp'] as Timestamp).toDate();
       String source = item['source'] ?? '';
       String description = item['description'] ?? "Entry";
-      String methodRaw = item['method'] ?? 'cash';
 
       String displaySubtitle = "";
       String displayMethod = "Cash";
 
-      if (source == 'manual_add') {
-        String bank = item['bankName'] ?? '';
-        String acc = item['accountNo'] ?? '';
+      // Helper to handle manual bank/details
+      Map<String, dynamic> detailsMap = {};
+      if (item['details'] is Map) detailsMap = item['details'];
 
-        if (bank.isNotEmpty) {
-          displaySubtitle = "$bank - $acc";
-          displayMethod = "Bank";
-        } else {
-          displaySubtitle = "Manual Cash In";
-          displayMethod = "Cash";
-        }
-        _addToBreakdown(tempBreakdown, item, amt);
-      } else if (source == 'debtor_collection' || item.containsKey('details')) {
-        Map<String, dynamic> det =
-            item['details'] != null
-                ? item['details'] as Map<String, dynamic>
-                : {};
+      // Determine Method & Subtitle
+      String effMethod =
+          (detailsMap['method'] ?? item['method'] ?? 'cash')
+              .toString()
+              .toLowerCase();
+      String bankName = detailsMap['bankName'] ?? item['bankName'] ?? '';
 
-        String bank = det['bankName'] ?? item['bankName'] ?? '';
-        String acc = det['accountNo'] ?? item['accountNo'] ?? '';
-        String met = det['method'] ?? item['method'] ?? 'cash';
-
-        if (bank.isNotEmpty) {
-          displaySubtitle = "$bank ($acc)";
-          displayMethod = "Bank";
-        } else if (met.toLowerCase() == 'bkash') {
-          displaySubtitle = "Bkash Pmt";
-          displayMethod = "Bkash";
-        } else if (met.toLowerCase() == 'nagad') {
-          displaySubtitle = "Nagad Pmt";
-          displayMethod = "Nagad";
-        } else {
-          displaySubtitle = "Collection";
-          displayMethod = "Cash";
-        }
-
-        _addToBreakdown(tempBreakdown, det.isNotEmpty ? det : item, amt);
+      if (effMethod.contains('bank') || bankName.isNotEmpty) {
+        displayMethod = "Bank";
+        displaySubtitle = bankName;
+      } else if (effMethod.contains('bkash')) {
+        displayMethod = "Bkash";
+      } else if (effMethod.contains('nagad')) {
+        displayMethod = "Nagad";
       } else {
-        // GENERIC FALLBACK
-        displaySubtitle = source.replaceAll('_', ' ').capitalizeFirst ?? source;
-        displayMethod = methodRaw.capitalizeFirst ?? "Cash";
-        _addToBreakdown(tempBreakdown, item, amt);
+        displayMethod = "Cash";
+      }
+
+      if (displaySubtitle.isEmpty)
+        displaySubtitle = source.replaceAll('_', ' ');
+
+      // Add to Breakdown (Only Deposits usually count for breakdown chart in simple view, or net)
+      if (type == 'deposit') {
+        // Reuse the generic adder or specific map logic if available
+        _addToBreakdown(
+          tempBreakdown,
+          detailsMap.isNotEmpty ? detailsMap : item,
+          amt,
+        );
+      } else {
+        // Ideally subtract for breakdown if you want NET, but usually Charts show Income Source
+        // If you want Net Liquid Assets, you subtract.
+        // For Source Breakdown Chart (Income), we usually don't subtract expenses.
       }
 
       if (type == 'deposit') {
@@ -374,7 +375,7 @@ class OverviewController extends GetxController {
           LedgerItem(
             time: time,
             title: description,
-            subtitle: displaySubtitle.isEmpty ? "Withdrawal" : displaySubtitle,
+            subtitle: displaySubtitle,
             amount: amt,
             type: 'expense',
             method: displayMethod,
@@ -394,12 +395,12 @@ class OverviewController extends GetxController {
           subtitle: expense.note,
           amount: amt,
           type: 'expense',
-          method: "Cash", // Default to Cash for expenses
+          method: "Cash",
         ),
       );
     }
 
-    // Sort Lists (Newest First)
+    // Sort Lists
     tempIn.sort((a, b) => b.time.compareTo(a.time));
     tempOut.sort((a, b) => b.time.compareTo(a.time));
 
