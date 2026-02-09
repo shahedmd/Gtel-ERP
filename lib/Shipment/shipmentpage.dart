@@ -4,7 +4,7 @@ import 'package:get/get.dart';
 import 'package:gtel_erp/Shipment/controller.dart';
 import 'package:gtel_erp/Shipment/details.dart';
 import 'package:gtel_erp/Shipment/onhold.dart';
-import 'package:gtel_erp/Shipment/shipmentdialog.dart';
+import 'package:gtel_erp/Shipment/shipmentdialog.dart'; // Ensure your fixed dialog is here
 import 'package:gtel_erp/Vendor/vendorcontroller.dart';
 import 'package:intl/intl.dart';
 import 'package:gtel_erp/Stock/controller.dart';
@@ -232,8 +232,6 @@ class ShipmentPage extends StatelessWidget {
                                                     () => controller
                                                         .generatePdf(item),
                                               ),
-                                              // Note: We primarily use the Detail Screen for receiving now,
-                                              // but this quick action is kept for convenience.
                                               if (!item.isReceived)
                                                 IconButton(
                                                   icon: const Icon(
@@ -384,7 +382,7 @@ class ShipmentPage extends StatelessWidget {
     ctrl.totalCartonCtrl.text = "0";
     ctrl.totalWeightCtrl.text = "0";
     ctrl.globalExchangeRateCtrl.text = "0.0";
-    ctrl.purchaseDateInput.value = DateTime.now(); // Only Purchase Date now
+    ctrl.purchaseDateInput.value = DateTime.now();
     ctrl.selectedVendorId.value = null;
     ctrl.selectedVendorName.value = null;
     ctrl.selectedCarrier.value = null;
@@ -558,7 +556,7 @@ class ShipmentPage extends StatelessWidget {
               ),
             ),
 
-            // RIGHT: PRODUCT CATALOG
+            // RIGHT: PRODUCT CATALOG & CREATION
             Expanded(
               flex: 7,
               child: Container(
@@ -569,7 +567,7 @@ class ShipmentPage extends StatelessWidget {
                       padding: const EdgeInsets.all(16),
                       color: kDarkSlate,
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           const Text(
                             "PRODUCT CATALOG",
@@ -578,6 +576,40 @@ class ShipmentPage extends StatelessWidget {
                               fontWeight: FontWeight.bold,
                             ),
                           ),
+                          const SizedBox(height: 10),
+
+                          // --- NEW: CREATE PRODUCT BUTTON ---
+                          ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: kSuccess,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
+                            icon: const Icon(
+                              Icons.add_circle_outline,
+                              size: 20,
+                            ),
+                            label: const Text(
+                              "CREATE NEW PRODUCT",
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            onPressed: () {
+                              // Pass null for NEW product creation
+                              double globalRate =
+                                  double.tryParse(
+                                    ctrl.globalExchangeRateCtrl.text,
+                                  ) ??
+                                  0.0;
+                              showShipmentEntryDialog(
+                                null,
+                                ctrl,
+                                prodCtrl,
+                                globalRate,
+                              );
+                            },
+                          ),
+
+                          // ----------------------------------
                           const SizedBox(height: 10),
                           TextField(
                             controller: ctrl.searchCtrl,
@@ -615,8 +647,28 @@ class ShipmentPage extends StatelessWidget {
                             child: CircularProgressIndicator(),
                           );
                         }
-                        return ListView.builder(
+                        if (prodCtrl.allProducts.isEmpty) {
+                          return const Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.search_off,
+                                  size: 40,
+                                  color: Colors.grey,
+                                ),
+                                SizedBox(height: 10),
+                                Text(
+                                  "No products found",
+                                  style: TextStyle(color: Colors.grey),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
+                        return ListView.separated(
                           itemCount: prodCtrl.allProducts.length,
+                          separatorBuilder: (_, __) => const Divider(height: 1),
                           itemBuilder: (ctx, i) {
                             final p = prodCtrl.allProducts[i];
                             return ListTile(
@@ -641,7 +693,7 @@ class ShipmentPage extends StatelessWidget {
                                   ),
                                 ),
                                 onPressed: () {
-                                  // Pass global rate to dialog
+                                  // Pass existing product to dialog (Edit Mode)
                                   double globalRate =
                                       double.tryParse(
                                         ctrl.globalExchangeRateCtrl.text,
@@ -672,7 +724,7 @@ class ShipmentPage extends StatelessWidget {
     );
   }
 
-  // --- EXTENDED HEADER (Updated without Departure Date) ---
+  // --- EXTENDED HEADER ---
   Widget _buildExtendedManifestFormHeader(
     BuildContext context,
     ShipmentController ctrl,
@@ -700,7 +752,7 @@ class ShipmentPage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          // ROW 1: Name, Purchase Date (Departure Date Removed)
+          // ROW 1
           Row(
             children: [
               Expanded(
@@ -745,7 +797,7 @@ class ShipmentPage extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 16),
-          // ROW 2: Vendor, Carrier, Global Rate
+          // ROW 2
           Row(
             children: [
               Expanded(
@@ -765,7 +817,6 @@ class ShipmentPage extends StatelessWidget {
                         }).toList(),
                     onChanged: (val) {
                       ctrl.selectedVendorId.value = val;
-                      // Update name for storage
                       try {
                         ctrl.selectedVendorName.value =
                             vendorCtrl.vendors
@@ -813,7 +864,7 @@ class ShipmentPage extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 16),
-          // ROW 3: Totals
+          // ROW 3
           Row(
             children: [
               Expanded(

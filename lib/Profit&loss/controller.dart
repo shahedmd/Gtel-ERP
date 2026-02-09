@@ -1,4 +1,5 @@
 // ignore_for_file: deprecated_member_use, avoid_print, empty_catches
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
@@ -16,29 +17,30 @@ class ProfitController extends GetxController {
   var endDate = DateTime.now().obs;
   var selectedFilterLabel = "This Month".obs;
 
-  // --- SALES METRICS (The Bills You Created) ---
+  // --- SALES METRICS (The Bills You Created / Paper Performance) ---
   var saleDailyCustomer = 0.0.obs;
   var saleDebtor = 0.0.obs;
   var saleCondition = 0.0.obs;
-  var totalRevenue = 0.0.obs;
-  var totalCostOfGoods = 0.0.obs;
 
-  // FIX #2: This now tracks "Unpaid Bills Generated in this Period" only.
-  // Collecting old money will NOT lower this number.
-  var totalPendingGenerated = 0.0.obs;
+  var totalRevenue = 0.0.obs; // Total Invoiced Amount
+  var totalCostOfGoods = 0.0.obs; // Total Cost of items sold
+  var profitOnRevenue = 0.0.obs; // Revenue - Cost (Paper Profit)
+  var effectiveProfitMargin = 0.0.obs; // (Revenue - Cost) / Revenue %
 
-  // --- CASH FLOW METRICS (The Money You Received) ---
+  // --- CASH FLOW METRICS (The Money You Actually Received) ---
   var collectionCustomer = 0.0.obs;
   var collectionDebtor = 0.0.obs;
   var collectionCondition = 0.0.obs;
-  var totalCollected = 0.0.obs;
+  var totalCollected = 0.0.obs; // Total Cash In Hand
 
-  // --- PROFIT METRICS ---
+  // --- PROFIT & ANALYSIS METRICS ---
   var totalOperatingExpenses = 0.0.obs;
-  var profitOnRevenue = 0.0.obs; // Paper Profit (Sales - Cost)
-  var netRealizedProfit = 0.0.obs; // Cash Profit (Collection Profit - Expenses)
-  var effectiveProfitMargin =
-      0.0.obs; // Used to calculate profit on collections
+  var netRealizedProfit = 0.0.obs; // (Collections * Margin) - Expenses
+
+  // FIX: This replaces "Pending Generated".
+  // It calculates: Total Revenue - Total Collected.
+  // Positive = Market Debt Increased. Negative = Debt Recovered.
+  var netPendingChange = 0.0.obs;
 
   // --- LISTS ---
   var monthlyStats = <Map<String, dynamic>>[].obs;
@@ -88,39 +90,47 @@ class ProfitController extends GetxController {
     fetchProfitAndLoss();
   }
 
+  // =========================================================================
+  // MAIN CALCULATION LOGIC
+  // =========================================================================
   Future<void> fetchProfitAndLoss() async {
     isLoading.value = true;
     _resetMetrics();
 
     try {
-      // STEP 1: Process Sales (Revenue & Cost & Pending)
-      // This populates totalRevenue and totalCostOfGoods
+      // STEP 1: Process Sales Orders (Revenue, Cost, Paper Profit)
       await _processSalesData();
 
-      // STEP 2: Calculate Margin IMMEDIATELY
-      // We must do this BEFORE processing collections, otherwise collections
-      // will use a 0% margin and Net Profit will be wrong.
+      // STEP 2: Calculate Margin
       if (totalRevenue.value > 0) {
         effectiveProfitMargin.value =
             (totalRevenue.value - totalCostOfGoods.value) / totalRevenue.value;
       } else {
-        // If no sales today, use historical average
-        await _fetchHistoricalMargin();
+        effectiveProfitMargin.value = 0.0; // Safe default if no sales
       }
 
-      // STEP 3: Process Collections
-      // Now effectiveProfitMargin has a value, so this will work correctly.
-      double realizedGrossProfit = await _processCollectionData();
+      // STEP 3: Process Collections (Actual Cash In)
+      // This populates totalCollected
+      await _processCollectionData();
 
       // STEP 4: Process Expenses
       await _calculateExpenses();
 
-      // STEP 5: Final Totals
+      // STEP 5: Final Calculations
+
+      // A. Paper Profit (If everyone paid today)
       profitOnRevenue.value = totalRevenue.value - totalCostOfGoods.value;
 
-      // Net Profit = (Gross Profit from Cash Collected) - Expenses
-      netRealizedProfit.value =
-          realizedGrossProfit - totalOperatingExpenses.value;
+      // B. Realized Profit (Actual Cash Profit)
+      // We assume collected money carries the same profit margin as sales
+      double grossRealized = totalCollected.value * effectiveProfitMargin.value;
+      netRealizedProfit.value = grossRealized - totalOperatingExpenses.value;
+
+      // C. Net Pending Change (The Fix)
+      // Sales - Collections.
+      // If Positive: You gave more credit than you collected.
+      // If Negative: You collected old dues.
+      netPendingChange.value = totalRevenue.value - totalCollected.value;
 
       sortTransactions(null);
     } catch (e) {
@@ -131,6 +141,9 @@ class ProfitController extends GetxController {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // 1. SALES DATA (INVOICES)
+  // -------------------------------------------------------------------------
   Future<void> _processSalesData() async {
     QuerySnapshot invoiceSnap =
         await _db
@@ -147,10 +160,10 @@ class ProfitController extends GetxController {
 
     double tRev = 0;
     double tCost = 0;
+
     double tDaily = 0;
     double tDebtor = 0;
     double tCondition = 0;
-    double tPendingGenerated = 0;
 
     List<Map<String, dynamic>> tempTransactions = [];
 
@@ -163,38 +176,16 @@ class ProfitController extends GetxController {
       double amount = double.tryParse(data['grandTotal'].toString()) ?? 0;
       double cost = double.tryParse(data['totalCost'].toString()) ?? 0;
       double profit = amount - cost;
+
       String type = (data['customerType'] ?? '').toString().toLowerCase();
       bool isCondition = data['isCondition'] == true;
       String invId = data['invoiceId'] ?? 'N/A';
       String name = data['customerName'] ?? 'Unknown';
       DateTime date = (data['timestamp'] as Timestamp).toDate();
 
+      // Aggregate Totals
       tRev += amount;
       tCost += cost;
-
-      // --- PENDING CALCULATION FIX ---
-      double currentRemainingDue = 0.0;
-
-      if (isCondition) {
-        // For Condition: Trust 'courierDue'.
-        // If you received money, this is 0. If not, it is 56,500.
-        currentRemainingDue =
-            double.tryParse(data['courierDue']?.toString() ?? '0') ?? 0;
-      } else {
-        // For Debtor/Cash: Calculate strictly based on Paid amount.
-        // Pending = Total - Paid
-        double paid = double.tryParse(data['paid']?.toString() ?? '0') ?? 0;
-
-        // Auto-fix: If it's a Cash sale and 'paid' is 0, assume it was fully paid.
-        if (paid == 0 && type != 'debtor' && !isCondition) {
-          paid = amount;
-        }
-
-        double calc = amount - paid;
-        currentRemainingDue = calc > 0 ? calc : 0;
-      }
-
-      tPendingGenerated += currentRemainingDue;
 
       // Categorize Revenue
       if (isCondition) {
@@ -205,6 +196,17 @@ class ProfitController extends GetxController {
         tDaily += amount;
       }
 
+      // Calculate individual pending for list display only (Visual Aid)
+      double paid = double.tryParse(data['paid']?.toString() ?? '0') ?? 0;
+      if (isCondition) {
+        // Condition Logic: If unpaid, due is courierDue. If paid, 0.
+        // Simplified for list:
+        double cDue =
+            double.tryParse(data['courierDue']?.toString() ?? '0') ?? 0;
+        paid = amount - cDue;
+      }
+      double currentRemainingDue = (amount - paid) > 0 ? (amount - paid) : 0;
+
       tempTransactions.add({
         'invoiceId': invId,
         'name': name,
@@ -214,7 +216,7 @@ class ProfitController extends GetxController {
         'total': amount,
         'cost': cost,
         'profit': profit,
-        'pending': currentRemainingDue,
+        'pending': currentRemainingDue, // Visual only
         'isLoss': profit < 0,
       });
     }
@@ -224,28 +226,18 @@ class ProfitController extends GetxController {
     saleCondition.value = tCondition;
     totalRevenue.value = tRev;
     totalCostOfGoods.value = tCost;
-
-    // Assign correct pending
-    totalPendingGenerated.value = tPendingGenerated;
-
     transactionList.value = tempTransactions;
   }
 
-  // =========================================================================
-  // LOGIC: Sums up ACTUAL CASH Received (Daily Sales + Cash Ledger)
-  // =========================================================================
-  Future<double> _processCollectionData() async {
-    double tRealizedGross = 0;
+  // -------------------------------------------------------------------------
+  // 2. COLLECTION DATA (ACTUAL CASH RECEIVED)
+  // -------------------------------------------------------------------------
+  Future<void> _processCollectionData() async {
     double tColCust = 0;
     double tColDebtor = 0;
     double tColCond = 0;
 
-    Map<int, double> monthlyProfitMap = {};
-    for (int i = 1; i <= 12; i++) {
-      monthlyProfitMap[i] = 0.0;
-    }
-
-    // 1. Daily Sales Collection (New Bills + Some Condition Payments)
+    // A. Daily Sales Collection (Includes today's sales + today's recoveries)
     QuerySnapshot dailySnap =
         await _db
             .collection('daily_sales')
@@ -264,42 +256,19 @@ class ProfitController extends GetxController {
       double amount = double.tryParse(data['paid'].toString()) ?? 0;
       if (amount <= 0) continue;
 
-      DateTime date = (data['timestamp'] as Timestamp).toDate();
       String type = (data['customerType'] ?? '').toString().toLowerCase();
       String source = (data['source'] ?? '').toString().toLowerCase();
 
-      String category = "Customer";
-
       if (source.contains('condition') || type == 'courier_payment') {
         tColCond += amount;
-        category = "Courier";
       } else if (type == 'debtor' || source.contains('payment')) {
         tColDebtor += amount;
-        category = "Debtor";
       } else {
         tColCust += amount;
       }
-
-      // Calculate Profit on this Cash
-      double txProfit = amount * effectiveProfitMargin.value;
-      tRealizedGross += txProfit;
-
-      collectionBreakdown.add({
-        'date': date,
-        'name': data['name'],
-        'amount': amount,
-        'profit': txProfit,
-        'type': category,
-      });
-
-      if (selectedFilterLabel.value == 'This Year') {
-        monthlyProfitMap[date.month] =
-            (monthlyProfitMap[date.month] ?? 0) + txProfit;
-      }
     }
 
-    // 2. Cash Ledger Collection (Old Debtor Dues)
-    // This ensures we catch money that didn't go through 'daily_sales'
+    // B. Cash Ledger (For separate manual old due deposits)
     try {
       QuerySnapshot ledgerSnap =
           await _db
@@ -319,21 +288,11 @@ class ProfitController extends GetxController {
         var data = doc.data() as Map<String, dynamic>;
         String source = (data['source'] ?? '').toString().toLowerCase();
 
-        // Only count specific ledger entries to avoid double counting with daily_sales
-        if (source == 'pos_old_due' || source == 'pos_running_collection') {
+        // Explicitly target old due collections that might not be in daily_sales
+        if (source == 'pos_old_due' || source == 'manual_deposit') {
           double amount = double.tryParse(data['amount'].toString()) ?? 0;
           if (amount > 0) {
             tColDebtor += amount;
-
-            // Calculate Profit on this Cash
-            double txProfit = amount * effectiveProfitMargin.value;
-            tRealizedGross += txProfit;
-
-            DateTime date = (data['timestamp'] as Timestamp).toDate();
-            if (selectedFilterLabel.value == 'This Year') {
-              monthlyProfitMap[date.month] =
-                  (monthlyProfitMap[date.month] ?? 0) + txProfit;
-            }
           }
         }
       }
@@ -345,37 +304,11 @@ class ProfitController extends GetxController {
     collectionDebtor.value = tColDebtor;
     collectionCondition.value = tColCond;
     totalCollected.value = tColCust + tColDebtor + tColCond;
-
-    if (selectedFilterLabel.value == 'This Year') {
-      List<String> months = [
-        "Jan",
-        "Feb",
-        "Mar",
-        "Apr",
-        "May",
-        "Jun",
-        "Jul",
-        "Aug",
-        "Sep",
-        "Oct",
-        "Nov",
-        "Dec",
-      ];
-      monthlyStats.value =
-          months.asMap().entries.map((entry) {
-            return {
-              "month": entry.value,
-              "profit": monthlyProfitMap[entry.key + 1] ?? 0.0,
-            };
-          }).toList();
-    } else {
-      monthlyStats.clear();
-    }
-
-    return tRealizedGross;
   }
 
-  // --- Expenses ---
+  // -------------------------------------------------------------------------
+  // 3. EXPENSES
+  // -------------------------------------------------------------------------
   Future<void> _calculateExpenses() async {
     double totalExp = 0.0;
     DateTime iterator = startDate.value;
@@ -409,63 +342,39 @@ class ProfitController extends GetxController {
     totalOperatingExpenses.value = totalExp;
   }
 
-  // --- Historical Margin Fallback (Fixes "Net Profit 0" on no-sale days) ---
-  Future<void> _fetchHistoricalMargin() async {
-    DateTime historyStart = DateTime.now().subtract(const Duration(days: 30));
-    QuerySnapshot historySnap =
-        await _db
-            .collection('sales_orders')
-            .where(
-              'timestamp',
-              isGreaterThanOrEqualTo: Timestamp.fromDate(historyStart),
-            )
-            .limit(100)
-            .get();
-
-    double hRev = 0, hCost = 0;
-    for (var doc in historySnap.docs) {
-      var data = doc.data() as Map<String, dynamic>;
-      if (data['status'] == 'deleted') continue;
-      hRev += double.tryParse(data['grandTotal'].toString()) ?? 0;
-      hCost += double.tryParse(data['totalCost'].toString()) ?? 0;
-    }
-
-    if (hRev > 0) {
-      effectiveProfitMargin.value = (hRev - hCost) / hRev;
-    } else {
-      effectiveProfitMargin.value = 0.15; // Default safety fallback
-    }
-  }
-
   void _resetMetrics() {
     saleDailyCustomer.value = 0;
     saleDebtor.value = 0;
     saleCondition.value = 0;
     totalRevenue.value = 0;
     totalCostOfGoods.value = 0;
-    totalPendingGenerated.value = 0;
+
     collectionCustomer.value = 0;
     collectionDebtor.value = 0;
     collectionCondition.value = 0;
     totalCollected.value = 0;
+
     totalOperatingExpenses.value = 0;
     profitOnRevenue.value = 0;
     netRealizedProfit.value = 0;
+    netPendingChange.value = 0; // Reset new metric
     effectiveProfitMargin.value = 0;
+
     monthlyStats.clear();
     collectionBreakdown.clear();
     transactionList.clear();
   }
 
-  // ==========================================
+  // =========================================================================
   // PDF REPORT
-  // ==========================================
+  // =========================================================================
   Future<void> generateProfitLossPDF() async {
     final pdf = pw.Document();
     final fontBold = await PdfGoogleFonts.nunitoBold();
     final fontRegular = await PdfGoogleFonts.nunitoRegular();
     final dateRangeStr =
         "${DateFormat('dd MMM').format(startDate.value)} - ${DateFormat('dd MMM yyyy').format(endDate.value)}";
+    final primaryColor = PdfColors.blue900;
 
     List<Map<String, dynamic>> pdfList = List.from(transactionList);
 
@@ -475,12 +384,17 @@ class ProfitController extends GetxController {
         margin: const pw.EdgeInsets.all(30),
         build:
             (context) => [
+              // HEADER
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
                   pw.Text(
                     "PROFIT & LOSS STATEMENT",
-                    style: pw.TextStyle(font: fontBold, fontSize: 18),
+                    style: pw.TextStyle(
+                      font: fontBold,
+                      fontSize: 18,
+                      color: primaryColor,
+                    ),
                   ),
                   pw.Column(
                     crossAxisAlignment: pw.CrossAxisAlignment.end,
@@ -503,83 +417,127 @@ class ProfitController extends GetxController {
               ),
               pw.SizedBox(height: 20),
 
-              pw.Row(
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: [
-                  pw.Expanded(
-                    child: pw.Container(
-                      padding: const pw.EdgeInsets.all(10),
-                      decoration: pw.BoxDecoration(
-                        border: pw.Border.all(color: PdfColors.grey300),
-                      ),
-                      child: pw.Column(
-                        crossAxisAlignment: pw.CrossAxisAlignment.start,
-                        children: [
-                          _buildPdfSectionHeader(
-                            "Sales Overview (Invoiced)",
-                            fontBold,
+              // SECTION 1: TRADING ACCOUNT (INVOICES)
+              pw.Container(
+                padding: const pw.EdgeInsets.all(10),
+                color: PdfColors.grey100,
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    _buildPdfSectionHeader(
+                      "Trading Account (Invoiced Sales)",
+                      fontBold,
+                    ),
+                    _buildPdfRow(
+                      "Total Sales Revenue",
+                      totalRevenue.value,
+                      fontBold,
+                    ),
+                    _buildPdfRow(
+                      "Cost of Goods Sold",
+                      -totalCostOfGoods.value,
+                      fontRegular,
+                    ),
+                    pw.Divider(),
+                    _buildPdfRow(
+                      "GROSS PROFIT (PAPER)",
+                      profitOnRevenue.value,
+                      fontBold,
+                      color: PdfColors.blue900,
+                    ),
+                  ],
+                ),
+              ),
+              pw.SizedBox(height: 15),
+
+              // SECTION 2: CASH FLOW (REALIZED)
+              pw.Container(
+                padding: const pw.EdgeInsets.all(10),
+                decoration: pw.BoxDecoration(
+                  border: pw.Border.all(color: PdfColors.grey300),
+                ),
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    _buildPdfSectionHeader(
+                      "Cash Flow & Realized Profit",
+                      fontBold,
+                    ),
+                    _buildPdfRow(
+                      "Total Collections (Cash In)",
+                      totalCollected.value,
+                      fontBold,
+                    ),
+                    _buildPdfRow(
+                      "Est. Margin on Collection",
+                      effectiveProfitMargin.value * 100,
+                      fontRegular,
+                      isPercent: true,
+                    ),
+                    _buildPdfRow(
+                      "Realized Gross Profit",
+                      totalCollected.value * effectiveProfitMargin.value,
+                      fontBold,
+                    ),
+                    _buildPdfRow(
+                      "Operating Expenses",
+                      -totalOperatingExpenses.value,
+                      fontRegular,
+                    ),
+                    pw.Divider(),
+                    _buildPdfRow(
+                      "NET REALIZED PROFIT",
+                      netRealizedProfit.value,
+                      fontBold,
+                      color: PdfColors.green900,
+                    ),
+                  ],
+                ),
+              ),
+              pw.SizedBox(height: 15),
+
+              // SECTION 3: RECEIVABLES ANALYSIS (PENDING FIX)
+              pw.Container(
+                padding: const pw.EdgeInsets.all(10),
+                color:
+                    netPendingChange.value > 0
+                        ? PdfColors.orange50
+                        : PdfColors.green50,
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Text(
+                          "NET RECEIVABLES CHANGE",
+                          style: pw.TextStyle(font: fontBold, fontSize: 10),
+                        ),
+                        pw.Text(
+                          netPendingChange.value > 0
+                              ? "(Sales exceeded Collections - Market Debt Grew)"
+                              : "(Collections exceeded Sales - Debt Recovered)",
+                          style: pw.TextStyle(
+                            font: fontRegular,
+                            fontSize: 8,
+                            color: PdfColors.grey700,
                           ),
-                          _buildPdfRow(
-                            "Total Revenue",
-                            totalRevenue.value,
-                            fontBold,
-                          ),
-                          _buildPdfRow(
-                            "Cost of Goods",
-                            totalCostOfGoods.value,
-                            fontRegular,
-                          ),
-                          pw.Divider(),
-                          _buildPdfRow(
-                            "Profit on Revenue",
-                            profitOnRevenue.value,
-                            fontBold,
-                            color: PdfColors.blue900,
-                          ),
-                          pw.SizedBox(height: 5),
-                          _buildPdfRow(
-                            "Pending (New Bill)",
-                            totalPendingGenerated.value,
-                            fontRegular,
-                            color: PdfColors.red900,
-                          ),
-                        ],
+                        ),
+                      ],
+                    ),
+                    pw.Text(
+                      "Tk ${netPendingChange.value.toStringAsFixed(0)}",
+                      style: pw.TextStyle(
+                        font: fontBold,
+                        fontSize: 14,
+                        color:
+                            netPendingChange.value > 0
+                                ? PdfColors.orange900
+                                : PdfColors.green900,
                       ),
                     ),
-                  ),
-                  pw.SizedBox(width: 20),
-                  pw.Expanded(
-                    child: pw.Container(
-                      padding: const pw.EdgeInsets.all(10),
-                      decoration: pw.BoxDecoration(
-                        border: pw.Border.all(color: PdfColors.grey300),
-                      ),
-                      child: pw.Column(
-                        crossAxisAlignment: pw.CrossAxisAlignment.start,
-                        children: [
-                          _buildPdfSectionHeader("Cash & Realized", fontBold),
-                          _buildPdfRow(
-                            "Total Collected",
-                            totalCollected.value,
-                            fontBold,
-                          ),
-                          _buildPdfRow(
-                            "Operating Expenses",
-                            totalOperatingExpenses.value,
-                            fontRegular,
-                          ),
-                          pw.Divider(),
-                          _buildPdfRow(
-                            "Net Realized Profit",
-                            netRealizedProfit.value,
-                            fontBold,
-                            color: PdfColors.green900,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
 
               pw.SizedBox(height: 25),
@@ -589,6 +547,7 @@ class ProfitController extends GetxController {
               ),
               pw.SizedBox(height: 5),
 
+              // TABLE
               pw.Table(
                 border: pw.TableBorder.all(
                   color: PdfColors.grey300,
@@ -680,6 +639,7 @@ class ProfitController extends GetxController {
     double val,
     pw.Font font, {
     PdfColor color = PdfColors.black,
+    bool isPercent = false,
   }) {
     return pw.Container(
       margin: const pw.EdgeInsets.only(bottom: 2),
@@ -691,7 +651,9 @@ class ProfitController extends GetxController {
             style: pw.TextStyle(font: font, fontSize: 9, color: color),
           ),
           pw.Text(
-            "Tk ${val.toStringAsFixed(0)}",
+            isPercent
+                ? "${val.toStringAsFixed(1)}%"
+                : "Tk ${val.toStringAsFixed(0)}",
             style: pw.TextStyle(font: font, fontSize: 9, color: color),
           ),
         ],

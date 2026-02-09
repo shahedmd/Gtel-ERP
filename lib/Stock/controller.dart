@@ -121,7 +121,7 @@ class ProductController extends GetxController {
         // We request a huge limit to ensure we get products from "Page 16"
         final queryParams = {
           'page': '1',
-          'limit': '10000',
+          'limit': '10000', // Fetch all to sort locally
           'search': searchText.value,
           'brand': selectedBrand.value == 'All' ? '' : selectedBrand.value,
         };
@@ -129,6 +129,8 @@ class ProductController extends GetxController {
         final uri = Uri.parse(
           '$baseUrl/products',
         ).replace(queryParameters: queryParams);
+
+        // Increased timeout for large data fetch
         final res = await http.get(uri).timeout(const Duration(seconds: 40));
 
         if (res.statusCode == 200) {
@@ -138,10 +140,37 @@ class ProductController extends GetxController {
           // 1. Parse ALL products
           _masterList = productsJson.map((e) => Product.fromJson(e)).toList();
 
-          // 2. Sort Locally (Lowest Profit / Highest Loss First)
-          _masterList.sort(
-            (a, b) => a.profitWholesale.compareTo(b.profitWholesale),
-          );
+          // 2. Sort Locally (Worst Loss First)
+          // Checks both Agent and Wholesale prices.
+          _masterList.sort((a, b) {
+            // --- CALCULATION FOR PRODUCT A ---
+            // Safety check: ensure values default to 0.0 if null
+            double buyPriceA = (a.avgPurchasePrice).toDouble();
+            double agentPriceA = (a.agent).toDouble();
+            double wholePriceA = (a.wholesale).toDouble();
+
+            double agentProfitA = agentPriceA - buyPriceA;
+            double wholeProfitA = wholePriceA - buyPriceA;
+
+            // Get the "worst case" for A (whichever is lower/more negative)
+            double worstScenarioA =
+                agentProfitA < wholeProfitA ? agentProfitA : wholeProfitA;
+
+            // --- CALCULATION FOR PRODUCT B ---
+            double buyPriceB = (b.avgPurchasePrice).toDouble();
+            double agentPriceB = (b.agent).toDouble();
+            double wholePriceB = (b.wholesale).toDouble();
+
+            double agentProfitB = agentPriceB - buyPriceB;
+            double wholeProfitB = wholePriceB - buyPriceB;
+
+            // Get the "worst case" for B
+            double worstScenarioB =
+                agentProfitB < wholeProfitB ? agentProfitB : wholeProfitB;
+
+            // Sort Ascending (Lowest negative numbers first)
+            return worstScenarioA.compareTo(worstScenarioB);
+          });
 
           // 3. Update Totals
           totalProducts.value = _masterList.length;
@@ -632,5 +661,66 @@ class ProductController extends GetxController {
       ]);
     }
     return rows;
+  }
+
+  // ==========================================
+  // ADD THIS NEW METHOD TO ProductController
+  // ==========================================
+  Future<int?> createProductReturnId(Map<String, dynamic> data) async {
+    isActionLoading.value = true;
+    try {
+      // 1. Send POST request
+      final res = await http.post(
+        Uri.parse('$baseUrl/products/add'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(data),
+      );
+
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        // Refresh the main list in background so UI updates
+        fetchProducts();
+
+        final body = jsonDecode(res.body);
+
+        // 2. ATTEMPT 1: Check if Server returned the ID directly
+        if (body is Map) {
+          if (body.containsKey('id')) return body['id'];
+          if (body.containsKey('productId')) return body['productId'];
+          if (body.containsKey('product') && body['product'] is Map) {
+            return body['product']['id'];
+          }
+        }
+
+        // 3. ATTEMPT 2: Fallback - Search specifically for this model via API
+        // We bypass local list pagination issues by asking the server directly.
+        final String model = data['model'];
+        final searchUri = Uri.parse('$baseUrl/products').replace(
+          queryParameters: {'page': '1', 'limit': '5', 'search': model},
+        );
+
+        final searchRes = await http.get(searchUri);
+        if (searchRes.statusCode == 200) {
+          final searchData = jsonDecode(searchRes.body);
+          final List products = searchData['products'] ?? [];
+
+          // Find exact match on model
+          final match = products.firstWhere(
+            (p) => p['model'].toString().toLowerCase() == model.toLowerCase(),
+            orElse: () => null,
+          );
+
+          if (match != null) {
+            return match['id'];
+          }
+        }
+      } else {
+        _handleErrorResponse(res);
+      }
+    } catch (e) {
+      _showError('Creation Failed: $e');
+    } finally {
+      isActionLoading.value = false;
+    }
+    return null; // ID not found
   }
 }

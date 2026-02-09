@@ -1,51 +1,79 @@
-// ignore_for_file: deprecated_member_use
+// ignore_for_file: deprecated_member_use, avoid_print
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Shipment/controller.dart';
 import 'package:gtel_erp/Stock/controller.dart';
 import 'package:gtel_erp/Stock/model.dart';
-import 'shipmodel.dart'; // Import the model for ShipmentItem
+import 'shipmodel.dart'; // Ensure this matches your project structure
 
-// Modified to accept a callback for custom logic (Details Page)
+// --- SHOW SHIPMENT ENTRY DIALOG (UPDATED WITH LOCAL QTY) ---
+
 void showShipmentEntryDialog(
-  Product p,
+  Product? p, // Nullable: Pass null to CREATE NEW PRODUCT
   ShipmentController shipCtrl,
   ProductController prodCtrl,
   double globalRate, {
-  Function(ShipmentItem)? onSubmit, // Optional callback
+  Function(ShipmentItem)? onSubmit,
 }) {
-  final nameC = TextEditingController(text: p.name);
-  final categoryC = TextEditingController(text: p.category);
-  final brandC = TextEditingController(text: p.brand);
-  final modelC = TextEditingController(text: p.model);
+  // Flag to check if we are creating a new product or editing existing one
+  final isNewProduct = p == null;
 
-  double effectiveRate = (globalRate > 0) ? globalRate : p.currency;
+  // -- CONTROLLERS --
+  final nameC = TextEditingController(text: p?.name ?? '');
+  final categoryC = TextEditingController(
+    text: p?.category ?? 'Mobile Accessories',
+  );
+  final brandC = TextEditingController(text: p?.brand ?? '');
+  final modelC = TextEditingController(text: p?.model ?? '');
 
-  final weightC = TextEditingController(text: p.weight.toString());
-  final yuanC = TextEditingController(text: p.yuan.toString());
+  // Rates & Weights
+  double effectiveRate = (globalRate > 0) ? globalRate : (p?.currency ?? 18.20);
+  final weightC = TextEditingController(text: (p?.weight ?? 0.0).toString());
+  final yuanC = TextEditingController(text: (p?.yuan ?? 0.0).toString());
   final currencyC = TextEditingController(text: effectiveRate.toString());
-  final seaTaxC = TextEditingController(text: p.shipmentTax.toString());
-  final airTaxC = TextEditingController(text: p.shipmentTaxAir.toString());
 
-  double initSea = (p.yuan * effectiveRate) + (p.weight * p.shipmentTax);
-  double initAir = (p.yuan * effectiveRate) + (p.weight * p.shipmentTaxAir);
+  // Tax
+  final seaTaxC = TextEditingController(
+    text: (p?.shipmentTax ?? 550.0).toString(),
+  );
+  final airTaxC = TextEditingController(
+    text: (p?.shipmentTaxAir ?? 1200.0).toString(),
+  );
+
+  // Prices (Calculated)
+  double initSea =
+      isNewProduct
+          ? 0.0
+          : (p.yuan * effectiveRate) + (p.weight * p.shipmentTax);
+  double initAir =
+      isNewProduct
+          ? 0.0
+          : (p.yuan * effectiveRate) + (p.weight * p.shipmentTaxAir);
 
   final seaPriceC = TextEditingController(text: initSea.toStringAsFixed(2));
   final airPriceC = TextEditingController(text: initAir.toStringAsFixed(2));
 
-  final agentC = TextEditingController(text: p.agent.toString());
-  final wholesaleC = TextEditingController(text: p.wholesale.toString());
+  // Sales
+  final agentC = TextEditingController(text: (p?.agent ?? 0).toString());
+  final wholesaleC = TextEditingController(
+    text: (p?.wholesale ?? 0).toString(),
+  );
 
-  final oldSeaStockC = TextEditingController(text: p.seaStockQty.toString());
-  final oldAirStockC = TextEditingController(text: p.airStockQty.toString());
-  final oldLocalStockC = TextEditingController(text: p.localQty.toString());
+  // Alert Qty
+  final alertQtyC = TextEditingController(text: (p?.alertQty ?? 5).toString());
 
+  // Shipment Quantity
   final addSeaQtyC = TextEditingController(text: '0');
   final addAirQtyC = TextEditingController(text: '0');
   final cartonNoC = TextEditingController();
 
-  int onWayQty = shipCtrl.getOnWayQty(p.id);
+  // Stock Reference (Only for existing)
+  final oldSeaStock = p?.seaStockQty ?? 0;
+  final oldAirStock = p?.airStockQty ?? 0;
+  final oldLocalStock = p?.localQty ?? 0; // <--- ADDED LOCAL STOCK REFERENCE
+  final onWayQty = isNewProduct ? 0 : shipCtrl.getOnWayQty(p.id);
 
+  // -- LOGIC: Auto Calculate Prices --
   void recalculatePrices() {
     double yuan = double.tryParse(yuanC.text) ?? 0.0;
     double weight = double.tryParse(weightC.text) ?? 0.0;
@@ -53,36 +81,42 @@ void showShipmentEntryDialog(
     double sTax = double.tryParse(seaTaxC.text) ?? 0.0;
     double aTax = double.tryParse(airTaxC.text) ?? 0.0;
 
-    if (yuan > 0) {
-      double calculatedSea = (yuan * curr) + (weight * sTax);
-      double calculatedAir = (yuan * curr) + (weight * aTax);
-      seaPriceC.text = calculatedSea.toStringAsFixed(2);
-      airPriceC.text = calculatedAir.toStringAsFixed(2);
-    }
+    double calculatedSea = (yuan * curr) + (weight * sTax);
+    double calculatedAir = (yuan * curr) + (weight * aTax);
+
+    seaPriceC.text = calculatedSea.toStringAsFixed(2);
+    airPriceC.text = calculatedAir.toStringAsFixed(2);
   }
 
+  // Bind Listeners
   yuanC.addListener(recalculatePrices);
   weightC.addListener(recalculatePrices);
   currencyC.addListener(recalculatePrices);
   seaTaxC.addListener(recalculatePrices);
   airTaxC.addListener(recalculatePrices);
 
+  // If new, trigger once to set zeros or defaults
+  if (isNewProduct) recalculatePrices();
+
   Get.dialog(
     Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      elevation: 5,
-      backgroundColor: Colors.grey[50],
-      insetPadding: const EdgeInsets.all(16),
+      elevation: 0,
+      backgroundColor: Colors.transparent,
       child: Container(
-        width: 600,
-        constraints: const BoxConstraints(maxHeight: 800),
+        width: 800,
+        constraints: const BoxConstraints(maxHeight: 900),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+        ),
         child: Column(
           children: [
-            // HEADER
+            // --- HEADER ---
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
               decoration: BoxDecoration(
-                color: Colors.blue[900],
+                color: isNewProduct ? Colors.teal[800] : Colors.blue[900],
                 borderRadius: const BorderRadius.only(
                   topLeft: Radius.circular(12),
                   topRight: Radius.circular(12),
@@ -90,234 +124,316 @@ void showShipmentEntryDialog(
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.inventory_2_outlined, color: Colors.white),
-                  const SizedBox(width: 12),
+                  Icon(
+                    isNewProduct ? Icons.add_circle_outline : Icons.edit_note,
+                    color: Colors.white,
+                    size: 28,
+                  ),
+                  const SizedBox(width: 16),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        onSubmit != null ? "ADD EXTRA ITEM" : "ADD TO MANIFEST",
+                        isNewProduct
+                            ? "CREATE NEW PRODUCT"
+                            : "EDIT & ADD TO MANIFEST",
                         style: const TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.bold,
-                          fontSize: 16,
+                          fontSize: 18,
                         ),
                       ),
                       Text(
-                        p.model.toUpperCase(),
-                        style: TextStyle(color: Colors.blue[100], fontSize: 12),
+                        isNewProduct
+                            ? "Enter details to create and add to shipment"
+                            : "Model: ${p.model.toUpperCase()}",
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.8),
+                          fontSize: 13,
+                        ),
                       ),
                     ],
                   ),
                   const Spacer(),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.orange,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      "On Way: $onWayQty",
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
+                  if (!isNewProduct)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        "On Way: $onWayQty",
+                        style: const TextStyle(color: Colors.white),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  InkWell(
-                    onTap: () => Get.back(),
-                    child: const Icon(Icons.close, color: Colors.white),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    onPressed: () => Get.back(),
+                    icon: const Icon(Icons.close, color: Colors.white),
                   ),
                 ],
               ),
             ),
 
+            // --- BODY (Scrollable) ---
             Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.all(24),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _posHeader("PRODUCT IDENTITY"),
-                    Row(
-                      children: [
-                        Expanded(child: _posInput(nameC, "Product Name")),
-                        const SizedBox(width: 12),
-                        Expanded(child: _posInput(brandC, "Brand")),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(child: _posInput(modelC, "Model")),
-                        const SizedBox(width: 12),
-                        Expanded(child: _posInput(categoryC, "Category")),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    _posHeader("COST CALCULATION (AUTO UPDATES)"),
+                    // ROW 1: BASIC INFO
+                    _sectionTitle("PRODUCT IDENTITY"),
                     Row(
                       children: [
                         Expanded(
-                          child: _posInput(yuanC, "Yuan (¥)", isNum: true),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _posInput(weightC, "Weight (KG)", isNum: true),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _posInput(currencyC, "Ex. Rate", isNum: true),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _posInput(seaTaxC, "Sea Tax/KG", isNum: true),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _posInput(airTaxC, "Air Tax/KG", isNum: true),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _posReadOnly(
-                            seaPriceC,
-                            "Sea Price",
-                            icon: Icons.waves,
-                            color: Colors.blue[700]!,
-                            bgColor: Colors.blue[50]!,
+                          child: _erpInput(
+                            modelC,
+                            "Model No.",
+                            autoFocus: isNewProduct,
                           ),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _posReadOnly(
-                            airPriceC,
-                            "Air Price",
-                            icon: Icons.air,
-                            color: Colors.orange[800]!,
-                            bgColor: Colors.orange[50]!,
-                          ),
-                        ),
+                        const SizedBox(width: 16),
+                        Expanded(child: _erpInput(nameC, "Product Name")),
+                        const SizedBox(width: 16),
+                        Expanded(child: _erpInput(brandC, "Brand")),
+                        const SizedBox(width: 16),
+                        Expanded(child: _erpInput(categoryC, "Category")),
                       ],
                     ),
-                    const SizedBox(height: 20),
-                    _posHeader("SALES PRICING (UPDATE)"),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _posInput(agentC, "Agent Price", isNum: true),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _posInput(
-                            wholesaleC,
-                            "Wholesale",
-                            isNum: true,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    _posHeader("CURRENT WAREHOUSE STOCK (REF ONLY)"),
+                    const SizedBox(height: 24),
+
+                    // ROW 2: COSTING
+                    _sectionTitle("COSTING & WEIGHT"),
                     Container(
-                      padding: const EdgeInsets.all(10),
+                      padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey[300]!),
+                        color: Colors.grey[50],
                         borderRadius: BorderRadius.circular(8),
-                        color: Colors.grey[100],
+                        border: Border.all(color: Colors.grey[200]!),
                       ),
                       child: Row(
                         children: [
                           Expanded(
-                            child: _stockBadge("Sea Stock", oldSeaStockC.text),
+                            child: _erpInput(
+                              yuanC,
+                              "Yuan (¥)",
+                              isNum: true,
+                              prefix: "¥ ",
+                            ),
                           ),
-                          _vDivider(),
+                          const SizedBox(width: 16),
                           Expanded(
-                            child: _stockBadge("Air Stock", oldAirStockC.text),
+                            child: _erpInput(
+                              currencyC,
+                              "Ex. Rate",
+                              isNum: true,
+                            ),
                           ),
-                          _vDivider(),
+                          const SizedBox(width: 16),
                           Expanded(
-                            child: _stockBadge("Local", oldLocalStockC.text),
+                            child: _erpInput(
+                              weightC,
+                              "Weight (KG)",
+                              isNum: true,
+                              suffix: " kg",
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: _erpInput(
+                              seaTaxC,
+                              "Sea Tax/KG",
+                              isNum: true,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: _erpInput(
+                              airTaxC,
+                              "Air Tax/KG",
+                              isNum: true,
+                            ),
                           ),
                         ],
                       ),
                     ),
-                    const SizedBox(height: 25),
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.blue[50],
-                        border: Border.all(
-                          color: Colors.blue[200]!,
-                          width: 1.5,
+                    const SizedBox(height: 24),
+
+                    // ROW 3: CALCULATED COSTS & SALES
+                    Row(
+                      children: [
+                        // Calculated Costs
+                        Expanded(
+                          flex: 4,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _sectionTitle("LANDING COST (AUTO)"),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: _erpReadOnly(
+                                      seaPriceC,
+                                      "Sea Cost",
+                                      Colors.blue,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    child: _erpReadOnly(
+                                      airPriceC,
+                                      "Air Cost",
+                                      Colors.orange,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
                         ),
+                        const SizedBox(width: 24),
+                        // Sales Prices
+                        Expanded(
+                          flex: 3,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _sectionTitle("SALES PRICING"),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: _erpInput(
+                                      agentC,
+                                      "Agent",
+                                      isNum: true,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    child: _erpInput(
+                                      wholesaleC,
+                                      "Wholesale",
+                                      isNum: true,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+
+                    // ROW 4: SHIPMENT ENTRY & SETTINGS
+                    _sectionTitle("SHIPMENT QUANTITY & SETTINGS"),
+                    Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.withOpacity(0.05),
                         borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.blue.withOpacity(0.2)),
                       ),
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Row(
+                            crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
-                              Icon(
-                                Icons.local_shipping,
-                                size: 20,
-                                color: Colors.blue[800],
+                              Expanded(
+                                flex: 2,
+                                child: _erpInput(
+                                  addSeaQtyC,
+                                  "Sea Quantity",
+                                  isNum: true,
+                                  bgColor: Colors.white,
+                                  hasBorder: true,
+                                ),
                               ),
-                              const SizedBox(width: 8),
-                              Text(
-                                onSubmit != null
-                                    ? "ADD EXTRA QUANTITY"
-                                    : "SHIPMENT QUANTITY",
-                                style: TextStyle(
-                                  color: Colors.blue[900],
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 13,
+                              const SizedBox(width: 16),
+                              Expanded(
+                                flex: 2,
+                                child: _erpInput(
+                                  addAirQtyC,
+                                  "Air Quantity",
+                                  isNum: true,
+                                  bgColor: Colors.white,
+                                  hasBorder: true,
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                flex: 3,
+                                child: _erpInput(
+                                  cartonNoC,
+                                  "Carton Number(s)",
+                                  bgColor: Colors.white,
+                                  hasBorder: true,
+                                  hint: "e.g. 1-5",
                                 ),
                               ),
                             ],
                           ),
-                          const SizedBox(height: 12),
+                          const SizedBox(height: 15),
                           Row(
                             children: [
+                              // Added Alert Qty Field
                               Expanded(
-                                child: _posInput(
-                                  addSeaQtyC,
-                                  "Sea Qty",
+                                flex: 2,
+                                child: _erpInput(
+                                  alertQtyC,
+                                  "Alert Qty",
                                   isNum: true,
-                                  borderColor: Colors.blue[300],
-                                  filledColor: Colors.white,
+                                  bgColor: Colors.white,
+                                  hasBorder: true,
                                 ),
                               ),
-                              const SizedBox(width: 12),
+                              const SizedBox(width: 16),
+                              // Mini Summary for Existing
                               Expanded(
-                                child: _posInput(
-                                  addAirQtyC,
-                                  "Air Qty",
-                                  isNum: true,
-                                  borderColor: Colors.blue[300],
-                                  filledColor: Colors.white,
-                                ),
+                                flex: 5,
+                                child:
+                                    !isNewProduct
+                                        ? Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              "Current Stock (Preserved)",
+                                              style: TextStyle(
+                                                fontSize: 10,
+                                                color: Colors.grey[600],
+                                              ),
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Row(
+                                              children: [
+                                                _miniStockTag(
+                                                  "Sea",
+                                                  oldSeaStock,
+                                                ),
+                                                const SizedBox(width: 8),
+                                                _miniStockTag(
+                                                  "Air",
+                                                  oldAirStock,
+                                                ),
+                                                const SizedBox(width: 8),
+                                                // --- ADDED LOCAL QTY ---
+                                                _miniStockTag(
+                                                  "Loc",
+                                                  oldLocalStock,
+                                                ),
+                                              ],
+                                            ),
+                                          ],
+                                        )
+                                        : Container(),
                               ),
                             ],
-                          ),
-                          const SizedBox(height: 12),
-                          _posInput(
-                            cartonNoC,
-                            "Carton Number (e.g. 1-10)",
-                            borderColor: Colors.blue[300],
-                            filledColor: Colors.white,
                           ),
                         ],
                       ),
@@ -326,6 +442,8 @@ void showShipmentEntryDialog(
                 ),
               ),
             ),
+
+            // --- FOOTER ---
             Container(
               padding: const EdgeInsets.all(16),
               decoration: const BoxDecoration(
@@ -337,84 +455,117 @@ void showShipmentEntryDialog(
                 children: [
                   TextButton(
                     onPressed: () => Get.back(),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 16,
+                      ),
+                    ),
                     child: Text(
                       "Cancel",
                       style: TextStyle(color: Colors.grey[600]),
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 16),
                   ElevatedButton.icon(
                     onPressed: () {
-                      final updates = {
+                      // 1. Validation
+                      if (modelC.text.isEmpty || nameC.text.isEmpty) {
+                        Get.snackbar(
+                          "Missing Info",
+                          "Name and Model are required",
+                        );
+                        return;
+                      }
+
+                      // 2. Prepare Data Map
+                      final Map<String, dynamic> data = {
                         'name': nameC.text,
                         'category': categoryC.text,
                         'brand': brandC.text,
                         'model': modelC.text,
-                        'yuan': double.tryParse(yuanC.text) ?? p.yuan,
-                        'weight': double.tryParse(weightC.text) ?? p.weight,
-                        'currency':
-                            double.tryParse(currencyC.text) ?? p.currency,
-                        'shipmenttax':
-                            double.tryParse(seaTaxC.text) ?? p.shipmentTax,
-                        'shipmenttaxair':
-                            double.tryParse(airTaxC.text) ?? p.shipmentTaxAir,
-                        'sea': double.tryParse(seaPriceC.text) ?? p.sea,
-                        'air': double.tryParse(airPriceC.text) ?? p.air,
-                        'agent': double.tryParse(agentC.text) ?? p.agent,
-                        'wholesale':
-                            double.tryParse(wholesaleC.text) ?? p.wholesale,
+                        'yuan': double.tryParse(yuanC.text) ?? 0.0,
+                        'weight': double.tryParse(weightC.text) ?? 0.0,
+                        'currency': double.tryParse(currencyC.text) ?? 0.0,
+                        'shipmenttax': double.tryParse(seaTaxC.text) ?? 0.0,
+                        'shipmenttaxair': double.tryParse(airTaxC.text) ?? 0.0,
+                        'sea': double.tryParse(seaPriceC.text) ?? 0.0,
+                        'air': double.tryParse(airPriceC.text) ?? 0.0,
+                        'agent': double.tryParse(agentC.text) ?? 0.0,
+                        'wholesale': double.tryParse(wholesaleC.text) ?? 0.0,
+                        'alert_qty': int.tryParse(alertQtyC.text) ?? 5,
                       };
 
-                      int seaQ = int.tryParse(addSeaQtyC.text) ?? 0;
-                      int airQ = int.tryParse(addAirQtyC.text) ?? 0;
+                      // --- PRESERVE ALL STOCK FOR EXISTING PRODUCTS ---
+                      if (!isNewProduct) {
+                        data['stock_qty'] = p.stockQty;
+                        data['sea_stock_qty'] = p.seaStockQty;
+                        data['air_stock_qty'] = p.airStockQty;
+                        data['local_qty'] =
+                            p.localQty; // Ensure Local Qty is sent back
+                      } else {
+                        // For NEW products, start with 0 stock
+                        data['stock_qty'] = 0;
+                        data['sea_stock_qty'] = 0;
+                        data['air_stock_qty'] = 0;
+                        data['local_qty'] = 0;
+                      }
+
+                      int sQty = int.tryParse(addSeaQtyC.text) ?? 0;
+                      int aQty = int.tryParse(addAirQtyC.text) ?? 0;
 
                       if (onSubmit != null) {
-                        // Create item for Details page
+                        // For editing items already in manifest or details
                         final newItem = ShipmentItem(
-                          productId: p.id,
+                          productId: isNewProduct ? 0 : p.id,
                           productName: nameC.text,
                           productModel: modelC.text,
                           productBrand: brandC.text,
                           productCategory: categoryC.text,
                           unitWeightSnapshot:
                               double.tryParse(weightC.text) ?? 0,
-                          seaQty: 0, // Ordered is 0 for extra items
+                          seaQty: 0,
                           airQty: 0,
-                          receivedSeaQty: seaQ,
-                          receivedAirQty: airQ,
+                          receivedSeaQty: sQty,
+                          receivedAirQty: aQty,
                           cartonNo: cartonNoC.text,
                           seaPriceSnapshot:
                               double.tryParse(seaPriceC.text) ?? 0,
                           airPriceSnapshot:
                               double.tryParse(airPriceC.text) ?? 0,
-                          ignoreMissing:
-                              true, // Auto ignore missing since ordered is 0
+                          ignoreMissing: true,
                         );
                         onSubmit(newItem);
-                        Get.back(); // Smooth close
+                        Get.back();
                       } else {
-                        // Original Create flow
+                        // MAIN FLOW: Add to Controller
                         shipCtrl.addToManifestAndVerify(
-                          product: p,
-                          updates: updates,
-                          seaQty: seaQ,
-                          airQty: airQ,
+                          productId: isNewProduct ? null : p.id,
+                          productData: data,
+                          seaQty: sQty,
+                          airQty: aQty,
                           cartonNo: cartonNoC.text,
                         );
-                        // addToManifestAndVerify calls Get.back() internally
                       }
                     },
-                    icon: const Icon(Icons.check, size: 18),
-                    label: Text(
-                      onSubmit != null ? "ADD ITEM" : "ADD TO MANIFEST",
-                    ),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.blue[800],
+                      backgroundColor:
+                          isNewProduct ? Colors.teal[700] : Colors.blue[800],
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 24,
-                        vertical: 14,
+                        horizontal: 32,
+                        vertical: 16,
                       ),
+                      elevation: 2,
+                    ),
+                    icon: Icon(
+                      isNewProduct ? Icons.save : Icons.add_shopping_cart,
+                      size: 20,
+                    ),
+                    label: Text(
+                      isNewProduct
+                          ? "CREATE & ADD TO SHIPMENT"
+                          : "UPDATE & ADD TO SHIPMENT",
                     ),
                   ),
                 ],
@@ -428,131 +579,136 @@ void showShipmentEntryDialog(
   );
 }
 
-// ... include the _posInput, _posHeader, etc. helper widgets here (same as before) ...
-Widget _posHeader(String title) => Padding(
-  padding: const EdgeInsets.only(bottom: 8),
-  child: Text(
-    title,
-    style: TextStyle(
-      fontSize: 11,
-      fontWeight: FontWeight.bold,
-      color: Colors.grey[600],
-      letterSpacing: 0.5,
+// --- ERP UI COMPONENTS ---
+
+Widget _sectionTitle(String title) {
+  return Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Text(
+      title,
+      style: TextStyle(
+        fontSize: 11,
+        fontWeight: FontWeight.bold,
+        color: Colors.grey[600],
+        letterSpacing: 0.8,
+      ),
     ),
-  ),
-);
-Widget _posInput(
+  );
+}
+
+Widget _erpInput(
   TextEditingController ctrl,
   String label, {
   bool isNum = false,
-  Color? borderColor,
-  Color? filledColor,
-}) => Column(
-  crossAxisAlignment: CrossAxisAlignment.start,
-  children: [
-    Text(
-      label,
-      style: TextStyle(
-        fontSize: 12,
-        color: Colors.grey[700],
-        fontWeight: FontWeight.w500,
-      ),
-    ),
-    const SizedBox(height: 4),
-    SizedBox(
-      height: 40,
-      child: TextField(
-        controller: ctrl,
-        keyboardType:
-            isNum
-                ? const TextInputType.numberWithOptions(decimal: true)
-                : TextInputType.text,
-        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-        decoration: InputDecoration(
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 10,
-            vertical: 0,
-          ),
-          filled: true,
-          fillColor: filledColor ?? Colors.white,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(6),
-            borderSide: BorderSide(color: borderColor ?? Colors.grey[300]!),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(6),
-            borderSide: BorderSide(color: borderColor ?? Colors.grey[300]!),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(6),
-            borderSide: const BorderSide(color: Colors.blue, width: 2),
-          ),
-        ),
-      ),
-    ),
-  ],
-);
-Widget _posReadOnly(
-  TextEditingController ctrl,
-  String label, {
-  required IconData icon,
-  required Color color,
-  required Color bgColor,
-}) => Container(
-  padding: const EdgeInsets.all(8),
-  decoration: BoxDecoration(
-    color: bgColor,
-    borderRadius: BorderRadius.circular(8),
-    border: Border.all(color: color.withOpacity(0.3)),
-  ),
-  child: Column(
+  bool autoFocus = false,
+  String? prefix,
+  String? suffix,
+  Color? bgColor,
+  bool hasBorder = false,
+  String? hint,
+}) {
+  return Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      Row(
-        children: [
-          Icon(icon, size: 14, color: color),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.bold,
-              color: color,
+      Text(
+        label,
+        style: const TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+          color: Colors.black87,
+        ),
+      ),
+      const SizedBox(height: 6),
+      SizedBox(
+        height: 42,
+        child: TextField(
+          controller: ctrl,
+          autofocus: autoFocus,
+          keyboardType:
+              isNum
+                  ? const TextInputType.numberWithOptions(decimal: true)
+                  : TextInputType.text,
+          style: const TextStyle(fontSize: 13),
+          decoration: InputDecoration(
+            hintText: hint,
+            prefixText: prefix,
+            suffixText: suffix,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 0,
+            ),
+            filled: true,
+            fillColor: bgColor ?? Colors.grey[50],
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide:
+                  hasBorder
+                      ? const BorderSide(color: Colors.black12)
+                      : BorderSide.none,
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide:
+                  hasBorder
+                      ? const BorderSide(color: Colors.black12)
+                      : BorderSide.none,
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: const BorderSide(color: Colors.blue, width: 1.5),
             ),
           ),
-        ],
-      ),
-      const SizedBox(height: 4),
-      TextField(
-        controller: ctrl,
-        readOnly: true,
-        decoration: const InputDecoration.collapsed(hintText: ""),
-        style: TextStyle(
-          fontSize: 16,
-          fontWeight: FontWeight.w900,
-          color: color,
         ),
       ),
     ],
-  ),
-);
-Widget _stockBadge(String label, String value) => Column(
-  children: [
-    Text(label, style: TextStyle(fontSize: 10, color: Colors.grey[600])),
-    const SizedBox(height: 2),
-    Text(
-      value,
-      style: const TextStyle(
-        fontSize: 14,
-        fontWeight: FontWeight.bold,
-        color: Colors.black87,
-      ),
+  );
+}
+
+Widget _erpReadOnly(TextEditingController ctrl, String label, Color color) {
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    decoration: BoxDecoration(
+      color: color.withOpacity(0.08),
+      borderRadius: BorderRadius.circular(6),
+      border: Border.all(color: color.withOpacity(0.2)),
     ),
-  ],
-);
-Widget _vDivider() => Container(
-  height: 30,
-  width: 1,
-  color: Colors.grey[300],
-  margin: const EdgeInsets.symmetric(horizontal: 4),
-);
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+            color: color,
+          ),
+        ),
+        const SizedBox(height: 2),
+        TextField(
+          controller: ctrl,
+          readOnly: true,
+          decoration: const InputDecoration.collapsed(hintText: ""),
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.bold,
+            color: color.withOpacity(0.8),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+Widget _miniStockTag(String type, int qty) {
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+    decoration: BoxDecoration(
+      color: Colors.grey[200],
+      borderRadius: BorderRadius.circular(4),
+    ),
+    child: Text(
+      "$type: $qty",
+      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+    ),
+  );
+}

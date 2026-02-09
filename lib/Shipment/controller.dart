@@ -1,4 +1,4 @@
-// ignore_for_file: deprecated_member_use
+// ignore_for_file: deprecated_member_use, avoid_print
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -7,11 +7,12 @@ import 'package:get/get.dart';
 import 'package:gtel_erp/Vendor/vendorcontroller.dart';
 import 'package:intl/intl.dart';
 import 'package:gtel_erp/Stock/controller.dart';
-import 'package:gtel_erp/Stock/model.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-import 'shipmodel.dart';
+import 'shipmodel.dart'; // Ensure this matches your project structure
+
+// --- MODELS ---
 
 class IncomingDetail {
   final String shipmentName;
@@ -38,7 +39,6 @@ class AggregatedOnWayProduct {
   int get totalQty => incomingDetails.fold(0, (sumv, item) => sumv + item.qty);
 }
 
-// --- MODEL FOR MISSING ITEMS ---
 class OnHoldItem {
   final String docId;
   final String shipmentName;
@@ -75,6 +75,8 @@ class OnHoldItem {
   }
 }
 
+// --- CONTROLLER ---
+
 class ShipmentController extends GetxController {
   final ProductController productController = Get.find<ProductController>();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -86,10 +88,9 @@ class ShipmentController extends GetxController {
   final RxList<AggregatedOnWayProduct> aggregatedList =
       <AggregatedOnWayProduct>[].obs;
 
-  // NEW: ON HOLD LIST & FILTERED LIST
+  // ON HOLD & FILTERED LIST
   final RxList<OnHoldItem> onHoldItems = <OnHoldItem>[].obs;
-  final RxList<OnHoldItem> filteredOnHoldItems =
-      <OnHoldItem>[].obs; // Added for sorting
+  final RxList<OnHoldItem> filteredOnHoldItems = <OnHoldItem>[].obs;
 
   // --- CONFIG ---
   final List<String> carrierList = [
@@ -103,7 +104,7 @@ class ShipmentController extends GetxController {
   ];
   final RxString filterCarrier = ''.obs;
   final RxString filterVendor = ''.obs;
-  final RxString filterOnHoldCarrier = ''.obs; // Added filter for On Hold
+  final RxString filterOnHoldCarrier = ''.obs;
 
   // --- MANIFEST INPUTS ---
   final RxList<ShipmentItem> currentManifestItems = <ShipmentItem>[].obs;
@@ -115,6 +116,7 @@ class ShipmentController extends GetxController {
   final TextEditingController totalCartonCtrl = TextEditingController(
     text: '0',
   );
+  // Manual weight control is removed from calculation but kept for UI binding if needed
   final TextEditingController totalWeightCtrl = TextEditingController(
     text: '0',
   );
@@ -135,14 +137,25 @@ class ShipmentController extends GetxController {
       "BDT ${_currencyFormatter.format(amount)}";
 
   // --- GETTERS ---
+
+  // REQUIRED: Auto-calculate Total Weight from Manifest Items
+  double get calculatedTotalWeight => currentManifestItems.fold(
+    0.0,
+    (sumv, item) =>
+        sumv + (item.unitWeightSnapshot * (item.seaQty + item.airQty)),
+  );
+
   double get totalOnWayValue => allShipments
       .where((s) => !s.isReceived)
       .fold(0.0, (sumv, item) => sumv + item.totalAmount);
+
   double get totalCompletedValue => allShipments
       .where((s) => s.isReceived)
       .fold(0.0, (sumv, item) => sumv + item.totalAmount);
+
   double get currentManifestTotalCost =>
       currentManifestItems.fold(0.0, (sumv, item) => sumv + item.totalItemCost);
+
   String get totalOnWayDisplay => formatMoney(totalOnWayValue);
   String get totalCompletedDisplay => formatMoney(totalCompletedValue);
   String get currentManifestTotalDisplay =>
@@ -155,10 +168,7 @@ class ShipmentController extends GetxController {
     bindOnHoldStream();
     ever(filterCarrier, (_) => _applyFilters());
     ever(filterVendor, (_) => _applyFilters());
-    ever(
-      filterOnHoldCarrier,
-      (_) => _applyOnHoldFilters(),
-    ); // Listener for On Hold Sort
+    ever(filterOnHoldCarrier, (_) => _applyOnHoldFilters());
   }
 
   @override
@@ -189,7 +199,6 @@ class ShipmentController extends GetxController {
           _applyFilters();
           _calculateOnWayTotals(loaded);
           _aggregateOnWayData(loaded);
-        // ignore: avoid_print
         }, onError: (e) => print("Firestore Error: $e"));
   }
 
@@ -201,7 +210,7 @@ class ShipmentController extends GetxController {
         .listen((event) {
           onHoldItems.value =
               event.docs.map((e) => OnHoldItem.fromSnapshot(e)).toList();
-          _applyOnHoldFilters(); // Apply filter initially
+          _applyOnHoldFilters();
         });
   }
 
@@ -216,7 +225,6 @@ class ShipmentController extends GetxController {
     filteredShipments.value = temp;
   }
 
-  // NEW: Filter logic for On Hold Items
   void _applyOnHoldFilters() {
     if (filterOnHoldCarrier.value.isEmpty) {
       filteredOnHoldItems.assignAll(onHoldItems);
@@ -272,76 +280,92 @@ class ShipmentController extends GetxController {
 
   int getOnWayQty(int productId) => onWayStockMap[productId] ?? 0;
 
-  // --- ADD TO MANIFEST ---
+  // --- ADD TO MANIFEST (HANDLES BOTH NEW & EXISTING) ---
   Future<void> addToManifestAndVerify({
-    required Product product,
-    required Map<String, dynamic> updates,
+    required int? productId, // NULL means CREATE NEW PRODUCT
+    required Map<String, dynamic> productData,
     required int seaQty,
     required int airQty,
     required String cartonNo,
   }) async {
     isLoading.value = true;
     try {
-      dynamic val(String key, dynamic current) => updates[key] ?? current;
-      final Map<String, dynamic> serverBody = {
-        'name': val('name', product.name),
-        'category': product.category,
-        'brand': product.brand,
-        'model': product.model,
-        'weight': (val('weight', product.weight) as num).toDouble(),
-        'yuan': (val('yuan', product.yuan) as num).toDouble(),
-        'currency': (val('currency', product.currency) as num).toDouble(),
-        'sea': (val('sea', product.sea) as num).toDouble(),
-        'air': (val('air', product.air) as num).toDouble(),
-        'agent': (val('agent', product.agent) as num).toDouble(),
-        'wholesale': (val('wholesale', product.wholesale) as num).toDouble(),
-        'shipmenttax':
-            (val('shipmenttax', product.shipmentTax) as num).toDouble(),
-        'shipmenttaxair':
-            (val('shipmenttaxair', product.shipmentTaxAir) as num).toDouble(),
-        'shipmentno': int.tryParse(product.shipmentNo.toString()) ?? 0,
-        'shipmentdate': product.shipmentDate?.toIso8601String(),
-        'stock_qty': product.stockQty,
-        'sea_stock_qty': product.seaStockQty,
-        'air_stock_qty': product.airStockQty,
-        'local_qty': product.localQty,
-      };
+      int finalProductId = productId ?? 0;
 
-      await productController.updateProduct(product.id, serverBody);
+      // 1. IF NEW PRODUCT: Create it and wait for ID
+      if (productId == null || productId == 0) {
+        // Construct creation body
+        final createBody = {
+          ...productData,
+          'stock_qty': 0,
+          'sea_stock_qty': 0,
+          'air_stock_qty': 0,
+          'local_qty': 0,
+        };
 
+        // --- UPDATED LOGIC HERE ---
+        // Use the new method that returns an Integer ID
+        int? newId = await productController.createProductReturnId(createBody);
+
+        if (newId != null && newId != 0) {
+          finalProductId = newId;
+        } else {
+          throw "Product created, but ID could not be retrieved. Please go back, refresh the catalog, and search for the model manually.";
+        }
+      } else {
+        // 2. IF EXISTING: Update details normally
+        await productController.updateProduct(finalProductId, productData);
+      }
+
+      // 3. Add to Local Manifest List
       final item = ShipmentItem(
-        productId: product.id,
-        productName: serverBody['name'],
-        productModel: product.model,
-        productBrand: product.brand,
-        productCategory: product.category,
-        unitWeightSnapshot: (serverBody['weight'] as num).toDouble(),
+        productId: finalProductId,
+        productName: productData['name'],
+        productModel: productData['model'],
+        productBrand: productData['brand'],
+        productCategory: productData['category'],
+        unitWeightSnapshot: (productData['weight'] as num).toDouble(),
         seaQty: seaQty,
         airQty: airQty,
         receivedSeaQty: seaQty,
         receivedAirQty: airQty,
         cartonNo: cartonNo,
-        seaPriceSnapshot: (serverBody['sea'] as num).toDouble(),
-        airPriceSnapshot: (serverBody['air'] as num).toDouble(),
+        seaPriceSnapshot: (productData['sea'] as num).toDouble(),
+        airPriceSnapshot: (productData['air'] as num).toDouble(),
       );
 
       currentManifestItems.add(item);
-      Get.back();
-      Get.snackbar("Success", "Added to Manifest");
+
+      // Update the totalWeight controller for UI display immediately
+      totalWeightCtrl.text = calculatedTotalWeight.toStringAsFixed(2);
+
+      Get.back(); // Close Dialog
+      Get.snackbar(
+        "Success",
+        "Added ${item.productModel} to Manifest",
+        backgroundColor: Colors.green,
+        colorText: Colors.white,
+      );
     } catch (e) {
       Get.snackbar(
         "Error",
-        "Update failed: $e",
+        "Operation failed: $e",
         backgroundColor: Colors.redAccent,
         colorText: Colors.white,
+        duration: const Duration(seconds: 5),
       );
     } finally {
       isLoading.value = false;
     }
   }
 
-  void removeFromManifest(int index) => currentManifestItems.removeAt(index);
+  void removeFromManifest(int index) {
+    currentManifestItems.removeAt(index);
+    // Recalculate display weight
+    totalWeightCtrl.text = calculatedTotalWeight.toStringAsFixed(2);
+  }
 
+  // --- SAVE FINAL MANIFEST ---
   Future<void> saveShipmentToFirestore() async {
     if (currentManifestItems.isEmpty) {
       Get.snackbar("Error", "No items to ship");
@@ -364,7 +388,10 @@ class ShipmentController extends GetxController {
         carrier: selectedCarrier.value!,
         exchangeRate: double.tryParse(globalExchangeRateCtrl.text) ?? 0.0,
         totalCartons: int.tryParse(totalCartonCtrl.text) ?? 0,
-        totalWeight: double.tryParse(totalWeightCtrl.text) ?? 0.0,
+
+        // HERE IS YOUR REQUIREMENT: Auto-calculated weight
+        totalWeight: calculatedTotalWeight,
+
         totalAmount: currentManifestTotalCost,
         items: currentManifestItems.toList(),
         isReceived: false,
@@ -372,7 +399,6 @@ class ShipmentController extends GetxController {
 
       await _firestore.collection('shipments').add(newShipment.toMap());
 
-      // Credit Vendor
       await vendorController.addAutomatedShipmentCredit(
         vendorId: newShipment.vendorId!,
         amount: newShipment.totalAmount,
@@ -411,7 +437,6 @@ class ShipmentController extends GetxController {
     if (shipment.docId == null) return;
     isLoading.value = true;
     try {
-      // NOTE: We do NOT update 'totalAmount'. Vendor bill is locked to original order.
       await _firestore.collection('shipments').doc(shipment.docId).update({
         'items': updatedItems.map((e) => e.toMap()).toList(),
         'carrierReport': report,
@@ -424,7 +449,7 @@ class ShipmentController extends GetxController {
     }
   }
 
-  // --- RECEIVE SHIPMENT (UPDATED LOGIC: IGNORE MISSING + FINANCIAL CALC) ---
+  // --- RECEIVE SHIPMENT ---
   Future<void> receiveShipmentFast(
     ShipmentModel shipment,
     DateTime arrivalDate,
@@ -452,7 +477,7 @@ class ShipmentController extends GetxController {
       bool success = await productController.bulkAddStockMixed(bulkItems);
       if (!success) throw "Stock update failed";
 
-      // 2. CHECK FOR MISSING ITEMS (LOSS) -> ADD TO ON HOLD
+      // 2. CHECK FOR MISSING ITEMS
       WriteBatch batch = _firestore.batch();
       bool hasLoss = false;
 
@@ -461,7 +486,6 @@ class ShipmentController extends GetxController {
         int received = item.receivedSeaQty + item.receivedAirQty;
         int missing = ordered - received;
 
-        // UPDATED: Only send to On Hold if missing > 0 AND ignoreMissing is false
         if (missing > 0 && !item.ignoreMissing) {
           hasLoss = true;
           DocumentReference ref = _firestore.collection('on_hold_items').doc();
@@ -480,23 +504,19 @@ class ShipmentController extends GetxController {
 
       if (hasLoss) await batch.commit();
 
-      // 3. CALCULATE FINANCIAL DIFFERENCE (Current Received Value vs Original Bill)
+      // 3. FINANCIAL DIFFERENCE
       double totalReceivedValue = shipment.items.fold(
         0.0,
         (sumv, item) => sumv + item.receivedItemValue,
       );
       double originalBill = shipment.totalAmount;
       double diff = originalBill - totalReceivedValue;
-
-      // If diff is positive, it means we received LESS value than we billed.
-      // This amount is saved as a "Loss Note" but does NOT deduct from vendor balance automatically.
       double vendorLoss = (diff > 0) ? diff : 0.0;
 
-      // 4. CLOSE SHIPMENT
       await _firestore.collection('shipments').doc(shipment.docId).update({
         'isReceived': true,
         'arrivalDate': Timestamp.fromDate(arrivalDate),
-        'vendorLossAmount': vendorLoss, // Save the note amount
+        'vendorLossAmount': vendorLoss,
       });
 
       Get.back();
@@ -518,12 +538,11 @@ class ShipmentController extends GetxController {
   Future<void> resolveOnHoldItem(OnHoldItem item) async {
     isLoading.value = true;
     try {
-      // 1. Add to stock
       List<Map<String, dynamic>> singleItem = [
         {
           'id': item.productId,
           'sea_qty': 0,
-          'air_qty': item.missingQty, // Default to Air for recovery
+          'air_qty': item.missingQty,
           'local_qty': 0,
           'local_price': 0.0,
           'shipmentdate': DateFormat('yyyy-MM-dd').format(DateTime.now()),
@@ -533,7 +552,6 @@ class ShipmentController extends GetxController {
       bool success = await productController.bulkAddStockMixed(singleItem);
       if (!success) throw "Stock update failed";
 
-      // 2. Remove from On Hold list
       await _firestore.collection('on_hold_items').doc(item.docId).delete();
 
       Get.snackbar(
@@ -553,13 +571,12 @@ class ShipmentController extends GetxController {
     }
   }
 
-  // --- UPDATED PROFESSIONAL PDF GENERATION ---
+  // --- PDF GENERATION ---
   Future<void> generatePdf(ShipmentModel shipment) async {
     final doc = pw.Document();
     final font = await PdfGoogleFonts.robotoRegular();
     final fontBold = await PdfGoogleFonts.robotoBold();
 
-    // Prepare Table Data
     final tableHeaders = [
       'Carton',
       'Model',
@@ -572,7 +589,6 @@ class ShipmentController extends GetxController {
 
     final tableData =
         shipment.items.map((e) {
-          // Determine cost used (Snapshot)
           double cost =
               (e.seaPriceSnapshot > 0)
                   ? e.seaPriceSnapshot
@@ -595,7 +611,6 @@ class ShipmentController extends GetxController {
         theme: pw.ThemeData.withFont(base: font, bold: fontBold),
         build:
             (context) => [
-              // 1. HEADER SECTION
               pw.Container(
                 padding: const pw.EdgeInsets.only(bottom: 20),
                 decoration: const pw.BoxDecoration(
@@ -649,8 +664,6 @@ class ShipmentController extends GetxController {
                 ),
               ),
               pw.SizedBox(height: 20),
-
-              // 2. REPORT SECTION (If exists)
               if (shipment.carrierReport != null &&
                   shipment.carrierReport!.isNotEmpty)
                 pw.Container(
@@ -682,8 +695,6 @@ class ShipmentController extends GetxController {
                     ],
                   ),
                 ),
-
-              // 3. PRODUCT TABLE
               pw.Table.fromTextArray(
                 headers: tableHeaders,
                 data: tableData,
@@ -702,11 +713,11 @@ class ShipmentController extends GetxController {
                 cellStyle: const pw.TextStyle(fontSize: 9),
                 cellAlignment: pw.Alignment.centerLeft,
                 cellAlignments: {
-                  0: pw.Alignment.center, // Carton
-                  3: pw.Alignment.center, // Qty Ord
-                  4: pw.Alignment.center, // Qty Recv
-                  5: pw.Alignment.centerRight, // Cost
-                  6: pw.Alignment.centerRight, // Total
+                  0: pw.Alignment.center,
+                  3: pw.Alignment.center,
+                  4: pw.Alignment.center,
+                  5: pw.Alignment.centerRight,
+                  6: pw.Alignment.centerRight,
                 },
                 columnWidths: {
                   0: const pw.FlexColumnWidth(0.8),
@@ -718,10 +729,7 @@ class ShipmentController extends GetxController {
                   6: const pw.FlexColumnWidth(1.2),
                 },
               ),
-
               pw.SizedBox(height: 10),
-
-              // 4. TOTALS
               pw.Container(
                 alignment: pw.Alignment.centerRight,
                 child: pw.Column(
