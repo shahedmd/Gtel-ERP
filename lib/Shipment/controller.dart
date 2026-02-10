@@ -1,7 +1,6 @@
 // ignore_for_file: deprecated_member_use, avoid_print
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Vendor/vendorcontroller.dart';
@@ -10,9 +9,9 @@ import 'package:gtel_erp/Stock/controller.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-import 'shipmodel.dart'; // Ensure this matches your project structure
+import 'shipmodel.dart';
 
-// --- MODELS ---
+// --- INTERNAL MODELS ---
 
 class IncomingDetail {
   final String shipmentName;
@@ -85,28 +84,30 @@ class ShipmentController extends GetxController {
   // --- STATE ---
   final RxList<ShipmentModel> allShipments = <ShipmentModel>[].obs;
   final RxList<ShipmentModel> filteredShipments = <ShipmentModel>[].obs;
+
+  // PAGINATION
+  final RxInt shipmentPage = 1.obs;
+  final RxInt shipmentPageSize = 20.obs;
+
   final RxList<AggregatedOnWayProduct> aggregatedList =
       <AggregatedOnWayProduct>[].obs;
-
-  // ON HOLD & FILTERED LIST
   final RxList<OnHoldItem> onHoldItems = <OnHoldItem>[].obs;
   final RxList<OnHoldItem> filteredOnHoldItems = <OnHoldItem>[].obs;
 
-  // --- CONFIG ---
+  // CONFIG
   final List<String> carrierList = [
-    "SAJ Express",
-    "SF Express",
-    "DHL",
-    "FedEx",
-    "Cosco Shipping",
-    "Local Cargo",
-    "Other",
+    "RH",
+    "TRT",
+    "GREEN",
+    "DIAMOND",
+    "RS"
+        "Other",
   ];
   final RxString filterCarrier = ''.obs;
   final RxString filterVendor = ''.obs;
   final RxString filterOnHoldCarrier = ''.obs;
 
-  // --- MANIFEST INPUTS ---
+  // MANIFEST INPUTS
   final RxList<ShipmentItem> currentManifestItems = <ShipmentItem>[].obs;
   final Rx<DateTime> purchaseDateInput = DateTime.now().obs;
   final Rxn<String> selectedVendorId = Rxn<String>();
@@ -116,10 +117,17 @@ class ShipmentController extends GetxController {
   final TextEditingController totalCartonCtrl = TextEditingController(
     text: '0',
   );
-  // Manual weight control is removed from calculation but kept for UI binding if needed
   final TextEditingController totalWeightCtrl = TextEditingController(
     text: '0',
   );
+
+  // Carrier Cost
+  final TextEditingController carrierCostPerCtnCtrl = TextEditingController(
+    text: '0',
+  );
+  final TextEditingController totalCarrierCostDisplayCtrl =
+      TextEditingController(text: '0');
+
   final TextEditingController shipmentNameCtrl = TextEditingController();
   final TextEditingController searchCtrl = TextEditingController();
   final TextEditingController globalExchangeRateCtrl = TextEditingController(
@@ -137,38 +145,72 @@ class ShipmentController extends GetxController {
       "BDT ${_currencyFormatter.format(amount)}";
 
   // --- GETTERS ---
-
-  // REQUIRED: Auto-calculate Total Weight from Manifest Items
   double get calculatedTotalWeight => currentManifestItems.fold(
     0.0,
     (sumv, item) =>
         sumv + (item.unitWeightSnapshot * (item.seaQty + item.airQty)),
   );
-
   double get totalOnWayValue => allShipments
       .where((s) => !s.isReceived)
-      .fold(0.0, (sumv, item) => sumv + item.totalAmount);
-
+      .fold(0.0, (sumv, item) => sumv + item.grandTotal);
   double get totalCompletedValue => allShipments
       .where((s) => s.isReceived)
-      .fold(0.0, (sumv, item) => sumv + item.totalAmount);
-
-  double get currentManifestTotalCost =>
+      .fold(0.0, (sumv, item) => sumv + item.grandTotal);
+  double get currentManifestProductCost =>
       currentManifestItems.fold(0.0, (sumv, item) => sumv + item.totalItemCost);
+
+  double get liveTotalCarrierCost {
+    int cartons = int.tryParse(totalCartonCtrl.text) ?? 0;
+    double costPerCtn = double.tryParse(carrierCostPerCtnCtrl.text) ?? 0.0;
+    return cartons * costPerCtn;
+  }
+
+  double get liveGrandTotal =>
+      currentManifestProductCost + liveTotalCarrierCost;
 
   String get totalOnWayDisplay => formatMoney(totalOnWayValue);
   String get totalCompletedDisplay => formatMoney(totalCompletedValue);
-  String get currentManifestTotalDisplay =>
-      formatMoney(currentManifestTotalCost);
+  String get currentManifestTotalDisplay => formatMoney(liveGrandTotal);
+
+  List<ShipmentModel> get paginatedShipments {
+    int start = (shipmentPage.value - 1) * shipmentPageSize.value;
+    int end = start + shipmentPageSize.value;
+    if (start >= filteredShipments.length) return [];
+    if (end > filteredShipments.length) end = filteredShipments.length;
+    return filteredShipments.sublist(start, end);
+  }
+
+  int get totalPages {
+    if (filteredShipments.isEmpty) return 1;
+    return (filteredShipments.length / shipmentPageSize.value).ceil();
+  }
 
   @override
   void onInit() {
     super.onInit();
     bindFirestoreStream();
     bindOnHoldStream();
-    ever(filterCarrier, (_) => _applyFilters());
-    ever(filterVendor, (_) => _applyFilters());
+
+    totalCartonCtrl.addListener(_updateCarrierCost);
+    carrierCostPerCtnCtrl.addListener(_updateCarrierCost);
+
+    ever(filterCarrier, (_) {
+      shipmentPage.value = 1;
+      _applyFilters();
+    });
+    ever(filterVendor, (_) {
+      shipmentPage.value = 1;
+      _applyFilters();
+    });
     ever(filterOnHoldCarrier, (_) => _applyOnHoldFilters());
+  }
+
+  void _updateCarrierCost() {
+    int cartons = int.tryParse(totalCartonCtrl.text) ?? 0;
+    double costPerCtn = double.tryParse(carrierCostPerCtnCtrl.text) ?? 0.0;
+    double total = cartons * costPerCtn;
+    totalCarrierCostDisplayCtrl.text = total.toStringAsFixed(2);
+    currentManifestItems.refresh();
   }
 
   @override
@@ -177,6 +219,8 @@ class ShipmentController extends GetxController {
     _onHoldSubscription?.cancel();
     totalCartonCtrl.dispose();
     totalWeightCtrl.dispose();
+    carrierCostPerCtnCtrl.dispose();
+    totalCarrierCostDisplayCtrl.dispose();
     shipmentNameCtrl.dispose();
     searchCtrl.dispose();
     globalExchangeRateCtrl.dispose();
@@ -184,13 +228,20 @@ class ShipmentController extends GetxController {
   }
 
   void onSearchChanged(String val) => productController.search(val);
+  void nextPage() {
+    if (shipmentPage.value < totalPages) shipmentPage.value++;
+  }
+
+  void prevPage() {
+    if (shipmentPage.value > 1) shipmentPage.value--;
+  }
 
   // --- FIRESTORE LISTENERS ---
   void bindFirestoreStream() {
     _shipmentSubscription = _firestore
         .collection('shipments')
         .orderBy('purchaseDate', descending: true)
-        .limit(100)
+        .limit(500)
         .snapshots()
         .listen((event) {
           final loaded =
@@ -240,8 +291,8 @@ class ShipmentController extends GetxController {
     for (var shipment in list) {
       if (!shipment.isReceived) {
         for (var item in shipment.items) {
-          int totalQty = item.seaQty + item.airQty;
-          tempMap[item.productId] = (tempMap[item.productId] ?? 0) + totalQty;
+          tempMap[item.productId] =
+              (tempMap[item.productId] ?? 0) + (item.seaQty + item.airQty);
         }
       }
     }
@@ -272,17 +323,14 @@ class ShipmentController extends GetxController {
         }
       }
     }
-    for (var p in tempMap.values) {
-      p.incomingDetails.sort((a, b) => a.date.compareTo(b.date));
-    }
     aggregatedList.assignAll(tempMap.values.toList());
   }
 
   int getOnWayQty(int productId) => onWayStockMap[productId] ?? 0;
 
-  // --- ADD TO MANIFEST (HANDLES BOTH NEW & EXISTING) ---
+  // --- ACTIONS ---
   Future<void> addToManifestAndVerify({
-    required int? productId, // NULL means CREATE NEW PRODUCT
+    required int? productId,
     required Map<String, dynamic> productData,
     required int seaQty,
     required int airQty,
@@ -291,10 +339,7 @@ class ShipmentController extends GetxController {
     isLoading.value = true;
     try {
       int finalProductId = productId ?? 0;
-
-      // 1. IF NEW PRODUCT: Create it and wait for ID
       if (productId == null || productId == 0) {
-        // Construct creation body
         final createBody = {
           ...productData,
           'stock_qty': 0,
@@ -302,22 +347,15 @@ class ShipmentController extends GetxController {
           'air_stock_qty': 0,
           'local_qty': 0,
         };
-
-        // --- UPDATED LOGIC HERE ---
-        // Use the new method that returns an Integer ID
         int? newId = await productController.createProductReturnId(createBody);
-
         if (newId != null && newId != 0) {
           finalProductId = newId;
         } else {
-          throw "Product created, but ID could not be retrieved. Please go back, refresh the catalog, and search for the model manually.";
+          throw "Product ID Missing";
         }
       } else {
-        // 2. IF EXISTING: Update details normally
         await productController.updateProduct(finalProductId, productData);
       }
-
-      // 3. Add to Local Manifest List
       final item = ShipmentItem(
         productId: finalProductId,
         productName: productData['name'],
@@ -333,26 +371,21 @@ class ShipmentController extends GetxController {
         seaPriceSnapshot: (productData['sea'] as num).toDouble(),
         airPriceSnapshot: (productData['air'] as num).toDouble(),
       );
-
       currentManifestItems.add(item);
-
-      // Update the totalWeight controller for UI display immediately
       totalWeightCtrl.text = calculatedTotalWeight.toStringAsFixed(2);
-
-      Get.back(); // Close Dialog
+      Get.back();
       Get.snackbar(
         "Success",
-        "Added ${item.productModel} to Manifest",
+        "Added to Manifest",
         backgroundColor: Colors.green,
         colorText: Colors.white,
       );
     } catch (e) {
       Get.snackbar(
         "Error",
-        "Operation failed: $e",
+        "$e",
         backgroundColor: Colors.redAccent,
         colorText: Colors.white,
-        duration: const Duration(seconds: 5),
       );
     } finally {
       isLoading.value = false;
@@ -361,22 +394,19 @@ class ShipmentController extends GetxController {
 
   void removeFromManifest(int index) {
     currentManifestItems.removeAt(index);
-    // Recalculate display weight
     totalWeightCtrl.text = calculatedTotalWeight.toStringAsFixed(2);
   }
 
-  // --- SAVE FINAL MANIFEST ---
   Future<void> saveShipmentToFirestore() async {
-    if (currentManifestItems.isEmpty) {
-      Get.snackbar("Error", "No items to ship");
-      return;
-    }
-    if (selectedVendorId.value == null || selectedCarrier.value == null) {
-      Get.snackbar("Error", "Please select Vendor and Carrier");
-      return;
-    }
+    if (currentManifestItems.isEmpty) return;
+    if (selectedVendorId.value == null || selectedCarrier.value == null) return;
     isLoading.value = true;
     try {
+      double carrierCostPerCtn =
+          double.tryParse(carrierCostPerCtnCtrl.text) ?? 0.0;
+      int cartons = int.tryParse(totalCartonCtrl.text) ?? 0;
+      double totalCarrierFee = carrierCostPerCtn * cartons;
+
       final newShipment = ShipmentModel(
         shipmentName:
             shipmentNameCtrl.text.isEmpty
@@ -387,18 +417,16 @@ class ShipmentController extends GetxController {
         vendorName: selectedVendorName.value ?? 'Unknown',
         carrier: selectedCarrier.value!,
         exchangeRate: double.tryParse(globalExchangeRateCtrl.text) ?? 0.0,
-        totalCartons: int.tryParse(totalCartonCtrl.text) ?? 0,
-
-        // HERE IS YOUR REQUIREMENT: Auto-calculated weight
+        totalCartons: cartons,
         totalWeight: calculatedTotalWeight,
-
-        totalAmount: currentManifestTotalCost,
+        carrierCostPerCarton: carrierCostPerCtn,
+        totalCarrierFee: totalCarrierFee,
+        totalAmount: currentManifestProductCost,
         items: currentManifestItems.toList(),
         isReceived: false,
       );
 
       await _firestore.collection('shipments').add(newShipment.toMap());
-
       await vendorController.addAutomatedShipmentCredit(
         vendorId: newShipment.vendorId!,
         amount: newShipment.totalAmount,
@@ -408,9 +436,9 @@ class ShipmentController extends GetxController {
 
       _resetForm();
       Get.back();
-      Get.snackbar("Success", "Manifest Created & Vendor Credited");
+      Get.snackbar("Success", "Manifest Created");
     } catch (e) {
-      Get.snackbar("Error", "Save failed: $e");
+      Get.snackbar("Error", "$e");
     } finally {
       isLoading.value = false;
     }
@@ -421,6 +449,8 @@ class ShipmentController extends GetxController {
     shipmentNameCtrl.clear();
     totalCartonCtrl.text = '0';
     totalWeightCtrl.text = '0';
+    carrierCostPerCtnCtrl.text = '0';
+    totalCarrierCostDisplayCtrl.text = '0';
     globalExchangeRateCtrl.text = '0.0';
     selectedVendorId.value = null;
     selectedVendorName.value = null;
@@ -428,7 +458,6 @@ class ShipmentController extends GetxController {
     searchCtrl.clear();
   }
 
-  // --- UPDATE DETAILS (Add/Edit Items) ---
   Future<void> updateShipmentDetails(
     ShipmentModel shipment,
     List<ShipmentItem> updatedItems,
@@ -441,27 +470,27 @@ class ShipmentController extends GetxController {
         'items': updatedItems.map((e) => e.toMap()).toList(),
         'carrierReport': report,
       });
-      Get.snackbar("Success", "Shipment Details Updated");
+      Get.snackbar(
+        "Success",
+        "Updated",
+        backgroundColor: Colors.green,
+        colorText: Colors.white,
+      );
     } catch (e) {
-      Get.snackbar("Error", "Update failed: $e");
+      Get.snackbar("Error", "$e");
     } finally {
       isLoading.value = false;
     }
   }
 
-  // --- RECEIVE SHIPMENT ---
   Future<void> receiveShipmentFast(
     ShipmentModel shipment,
     DateTime arrivalDate,
   ) async {
     if (isLoading.value) return;
     isLoading.value = true;
-
     try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) throw "Authentication Error";
-
-      // 1. ADD RECEIVED STOCK
+      // 1. Stock
       List<Map<String, dynamic>> bulkItems =
           shipment.items.map((item) {
             return {
@@ -473,19 +502,15 @@ class ShipmentController extends GetxController {
               'shipmentdate': DateFormat('yyyy-MM-dd').format(arrivalDate),
             };
           }).toList();
+      await productController.bulkAddStockMixed(bulkItems);
 
-      bool success = await productController.bulkAddStockMixed(bulkItems);
-      if (!success) throw "Stock update failed";
-
-      // 2. CHECK FOR MISSING ITEMS
+      // 2. Loss
       WriteBatch batch = _firestore.batch();
       bool hasLoss = false;
-
       for (var item in shipment.items) {
-        int ordered = item.seaQty + item.airQty;
-        int received = item.receivedSeaQty + item.receivedAirQty;
-        int missing = ordered - received;
-
+        int missing =
+            (item.seaQty + item.airQty) -
+            (item.receivedSeaQty + item.receivedAirQty);
         if (missing > 0 && !item.ignoreMissing) {
           hasLoss = true;
           DocumentReference ref = _firestore.collection('on_hold_items').doc();
@@ -501,31 +526,25 @@ class ShipmentController extends GetxController {
           });
         }
       }
-
       if (hasLoss) await batch.commit();
 
-      // 3. FINANCIAL DIFFERENCE
-      double totalReceivedValue = shipment.items.fold(
+      // 3. Update Status
+      double totalRecVal = shipment.items.fold(
         0.0,
-        (sumv, item) => sumv + item.receivedItemValue,
+        (sumv, i) => sumv + i.receivedItemValue,
       );
-      double originalBill = shipment.totalAmount;
-      double diff = originalBill - totalReceivedValue;
-      double vendorLoss = (diff > 0) ? diff : 0.0;
-
+      double diff = shipment.totalAmount - totalRecVal;
       await _firestore.collection('shipments').doc(shipment.docId).update({
         'isReceived': true,
         'arrivalDate': Timestamp.fromDate(arrivalDate),
-        'vendorLossAmount': vendorLoss,
+        'vendorLossAmount': (diff > 0) ? diff : 0.0,
       });
-
       Get.back();
       Get.snackbar(
         "Success",
-        "Stock Received. ${hasLoss ? 'Missing items moved to On Hold.' : ''} ${vendorLoss > 0 ? 'Shortage Note: ${formatMoney(vendorLoss)}' : ''}",
+        "Received",
         backgroundColor: Colors.green,
         colorText: Colors.white,
-        duration: const Duration(seconds: 4),
       );
     } catch (e) {
       Get.defaultDialog(title: "Error", middleText: e.toString());
@@ -534,174 +553,134 @@ class ShipmentController extends GetxController {
     }
   }
 
-  // --- RESOLVE ON HOLD ITEM ---
   Future<void> resolveOnHoldItem(OnHoldItem item) async {
     isLoading.value = true;
     try {
-      List<Map<String, dynamic>> singleItem = [
-        {
-          'id': item.productId,
-          'sea_qty': 0,
-          'air_qty': item.missingQty,
-          'local_qty': 0,
-          'local_price': 0.0,
-          'shipmentdate': DateFormat('yyyy-MM-dd').format(DateTime.now()),
-        },
-      ];
-
-      bool success = await productController.bulkAddStockMixed(singleItem);
-      if (!success) throw "Stock update failed";
-
+      await productController.addMixedStock(
+        productId: item.productId,
+        airQty: item.missingQty,
+      );
       await _firestore.collection('on_hold_items').doc(item.docId).delete();
-
       Get.snackbar(
         "Success",
-        "Item recovered and added to stock.",
+        "Resolved",
+        backgroundColor: Colors.green,
         colorText: Colors.white,
       );
     } catch (e) {
-      Get.snackbar(
-        "Error",
-        "Failed to resolve: $e",
-        backgroundColor: Colors.redAccent,
-        colorText: Colors.white,
-      );
+      Get.snackbar("Error", "$e");
     } finally {
       isLoading.value = false;
     }
   }
 
-  // --- PDF GENERATION ---
+  // --- UPDATED GENERATE PDF (With Carton Number) ---
   Future<void> generatePdf(ShipmentModel shipment) async {
     final doc = pw.Document();
     final font = await PdfGoogleFonts.robotoRegular();
     final fontBold = await PdfGoogleFonts.robotoBold();
 
-    final tableHeaders = [
-      'Carton',
-      'Model',
-      'Name',
-      'Qty (Ord)',
-      'Qty (Recv)',
-      'Cost/Unit',
-      'Total',
-    ];
+    // 1. Calculations for PDF
+    double totalReceivedVal = shipment.items.fold(
+      0.0,
+      (sumv, e) => sumv + e.receivedItemValue,
+    );
 
-    final tableData =
-        shipment.items.map((e) {
-          double cost =
-              (e.seaPriceSnapshot > 0)
-                  ? e.seaPriceSnapshot
-                  : e.airPriceSnapshot;
-          return [
-            e.cartonNo,
-            e.productModel,
-            e.productName,
-            "${e.seaQty + e.airQty}",
-            "${e.receivedSeaQty + e.receivedAirQty}",
-            formatMoney(cost),
-            formatMoney(e.totalItemCost),
-          ];
-        }).toList();
+    // Total Weight of what was actually received
+    double totalRecWeight = shipment.items.fold(0.0, (sumv, e) {
+      int receivedQty = e.receivedSeaQty + e.receivedAirQty;
+      return sumv + (receivedQty * e.unitWeightSnapshot);
+    });
+
+    // Differences
+    double valDiff = shipment.totalAmount - totalReceivedVal;
+    double weightDiff = shipment.totalWeight - totalRecWeight;
 
     doc.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.all(24),
+        margin: const pw.EdgeInsets.all(32),
         theme: pw.ThemeData.withFont(base: font, bold: fontBold),
         build:
             (context) => [
-              pw.Container(
-                padding: const pw.EdgeInsets.only(bottom: 20),
-                decoration: const pw.BoxDecoration(
-                  border: pw.Border(
-                    bottom: pw.BorderSide(width: 1, color: PdfColors.grey),
-                  ),
-                ),
-                child: pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Column(
-                      crossAxisAlignment: pw.CrossAxisAlignment.start,
-                      children: [
-                        pw.Text(
-                          "SHIPMENT MANIFEST",
-                          style: pw.TextStyle(
-                            fontSize: 22,
-                            fontWeight: pw.FontWeight.bold,
-                            color: PdfColors.blue900,
-                          ),
-                        ),
-                        pw.SizedBox(height: 5),
-                        pw.Text("ID: ${shipment.shipmentName}"),
-                        pw.Text(
-                          "Date: ${DateFormat('yyyy-MM-dd').format(shipment.purchaseDate)}",
-                        ),
-                      ],
-                    ),
-                    pw.Column(
-                      crossAxisAlignment: pw.CrossAxisAlignment.end,
-                      children: [
-                        pw.Text(
-                          "Vendor: ${shipment.vendorName}",
-                          style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-                        ),
-                        pw.Text("Carrier: ${shipment.carrier}"),
-                        pw.Text(
-                          "Cartons: ${shipment.totalCartons} | Weight: ${shipment.totalWeight}kg",
-                        ),
-                        if (shipment.isReceived)
-                          pw.Text(
-                            "Status: RECEIVED",
-                            style: pw.TextStyle(
-                              color: PdfColors.green,
-                              fontWeight: pw.FontWeight.bold,
-                            ),
-                          ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              pw.SizedBox(height: 20),
-              if (shipment.carrierReport != null &&
-                  shipment.carrierReport!.isNotEmpty)
-                pw.Container(
-                  width: double.infinity,
-                  margin: const pw.EdgeInsets.only(bottom: 15),
-                  padding: const pw.EdgeInsets.all(10),
-                  decoration: pw.BoxDecoration(
-                    color: PdfColors.orange50,
-                    border: pw.Border.all(color: PdfColors.orange200),
-                    borderRadius: const pw.BorderRadius.all(
-                      pw.Radius.circular(4),
-                    ),
-                  ),
-                  child: pw.Column(
+              // HEADER
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Column(
                     crossAxisAlignment: pw.CrossAxisAlignment.start,
                     children: [
                       pw.Text(
-                        "NOTE / REPORT:",
+                        "SHIPMENT REPORT",
                         style: pw.TextStyle(
+                          fontSize: 20,
                           fontWeight: pw.FontWeight.bold,
-                          color: PdfColors.orange900,
-                          fontSize: 10,
+                          color: PdfColors.blue900,
                         ),
                       ),
+                      pw.SizedBox(height: 4),
+                      pw.Text("ID: ${shipment.shipmentName}"),
                       pw.Text(
-                        shipment.carrierReport!,
-                        style: const pw.TextStyle(fontSize: 10),
+                        "Date: ${DateFormat('yyyy-MM-dd').format(shipment.purchaseDate)}",
                       ),
                     ],
                   ),
-                ),
+                  pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.end,
+                    children: [
+                      pw.Text(
+                        "Vendor: ${shipment.vendorName}",
+                        style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                      ),
+                      pw.Text("Carrier: ${shipment.carrier}"),
+                      pw.Text("Rate: ${shipment.exchangeRate}"),
+                      pw.Text(
+                        shipment.isReceived
+                            ? "Status: RECEIVED"
+                            : "Status: ON WAY",
+                        style: pw.TextStyle(
+                          color:
+                              shipment.isReceived
+                                  ? PdfColors.green
+                                  : PdfColors.orange,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              pw.SizedBox(height: 20),
+
+              // ITEMS TABLE (Added 'Ctn' Column)
               pw.Table.fromTextArray(
-                headers: tableHeaders,
-                data: tableData,
-                border: pw.TableBorder.all(
-                  color: PdfColors.grey400,
-                  width: 0.5,
-                ),
+                headers: [
+                  'Ctn',
+                  'Model',
+                  'Name',
+                  'Qty (Ord)',
+                  'Qty (Rec)',
+                  'Cost',
+                  'Total',
+                ],
+                data:
+                    shipment.items
+                        .map(
+                          (e) => [
+                            e.cartonNo, // <--- ADDED CARTON NUMBER HERE
+                            e.productModel,
+                            e.productName,
+                            "${e.seaQty + e.airQty}",
+                            "${e.receivedSeaQty + e.receivedAirQty}",
+                            formatMoney(
+                              e.seaPriceSnapshot > 0
+                                  ? e.seaPriceSnapshot
+                                  : e.airPriceSnapshot,
+                            ),
+                            formatMoney(e.totalItemCost),
+                          ],
+                        )
+                        .toList(),
                 headerStyle: pw.TextStyle(
                   fontWeight: pw.FontWeight.bold,
                   color: PdfColors.white,
@@ -711,49 +690,186 @@ class ShipmentController extends GetxController {
                   color: PdfColors.blueGrey800,
                 ),
                 cellStyle: const pw.TextStyle(fontSize: 9),
-                cellAlignment: pw.Alignment.centerLeft,
+                // Adjusted alignment for new column
                 cellAlignments: {
-                  0: pw.Alignment.center,
-                  3: pw.Alignment.center,
-                  4: pw.Alignment.center,
-                  5: pw.Alignment.centerRight,
-                  6: pw.Alignment.centerRight,
+                  0: pw.Alignment.center, // Ctn
+                  3: pw.Alignment.center, // Qty Ord
+                  4: pw.Alignment.center, // Qty Rec
+                  5: pw.Alignment.centerRight, // Cost
+                  6: pw.Alignment.centerRight, // Total
                 },
+                // Optional: Adjust column widths to fit 'Ctn' nicely
                 columnWidths: {
-                  0: const pw.FlexColumnWidth(0.8),
-                  1: const pw.FlexColumnWidth(1.5),
-                  2: const pw.FlexColumnWidth(2.5),
-                  3: const pw.FlexColumnWidth(0.8),
-                  4: const pw.FlexColumnWidth(0.8),
-                  5: const pw.FlexColumnWidth(1.2),
-                  6: const pw.FlexColumnWidth(1.2),
+                  0: const pw.FlexColumnWidth(0.8), // Ctn
+                  1: const pw.FlexColumnWidth(1.5), // Model
+                  2: const pw.FlexColumnWidth(2.5), // Name
+                  3: const pw.FlexColumnWidth(1), // Qty
+                  4: const pw.FlexColumnWidth(1), // Qty
+                  5: const pw.FlexColumnWidth(1.5), // Cost
+                  6: const pw.FlexColumnWidth(1.5), // Total
                 },
               ),
-              pw.SizedBox(height: 10),
-              pw.Container(
-                alignment: pw.Alignment.centerRight,
-                child: pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.end,
-                  children: [
-                    pw.Text(
-                      "Total Value (Billable): ${formatMoney(shipment.totalAmount)}",
-                      style: pw.TextStyle(
-                        fontSize: 14,
-                        fontWeight: pw.FontWeight.bold,
+              pw.SizedBox(height: 20),
+              pw.Divider(),
+
+              // SUMMARY SECTION (WEIGHT & FINANCIALS)
+              pw.Row(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  // LEFT: WEIGHT ANALYSIS
+                  pw.Expanded(
+                    child: pw.Container(
+                      padding: const pw.EdgeInsets.all(10),
+                      decoration: pw.BoxDecoration(
+                        border: pw.Border.all(color: PdfColors.grey300),
+                      ),
+                      child: pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text(
+                            "WEIGHT ANALYSIS",
+                            style: pw.TextStyle(
+                              fontWeight: pw.FontWeight.bold,
+                              fontSize: 10,
+                            ),
+                          ),
+                          pw.Divider(thickness: 0.5),
+                          pw.Row(
+                            mainAxisAlignment:
+                                pw.MainAxisAlignment.spaceBetween,
+                            children: [
+                              pw.Text("Original:"),
+                              pw.Text("${shipment.totalWeight} kg"),
+                            ],
+                          ),
+                          pw.Row(
+                            mainAxisAlignment:
+                                pw.MainAxisAlignment.spaceBetween,
+                            children: [
+                              pw.Text("Received:"),
+                              pw.Text(
+                                "${totalRecWeight.toStringAsFixed(2)} kg",
+                              ),
+                            ],
+                          ),
+                          pw.SizedBox(height: 5),
+                          pw.Row(
+                            mainAxisAlignment:
+                                pw.MainAxisAlignment.spaceBetween,
+                            children: [
+                              pw.Text(
+                                weightDiff > 0 ? "Loss:" : "Gain:",
+                                style: pw.TextStyle(
+                                  fontWeight: pw.FontWeight.bold,
+                                ),
+                              ),
+                              pw.Text(
+                                "${weightDiff.abs().toStringAsFixed(2)} kg",
+                                style: pw.TextStyle(
+                                  fontWeight: pw.FontWeight.bold,
+                                  color:
+                                      weightDiff > 0.1
+                                          ? PdfColors.red
+                                          : (weightDiff < -0.1
+                                              ? PdfColors.green
+                                              : PdfColors.black),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
                     ),
-                    if (shipment.vendorLossAmount > 0)
-                      pw.Text(
-                        "Shortage Note: ${formatMoney(shipment.vendorLossAmount)}",
-                        style: pw.TextStyle(
-                          fontSize: 12,
-                          color: PdfColors.red,
-                          fontStyle: pw.FontStyle.italic,
+                  ),
+                  pw.SizedBox(width: 20),
+
+                  // RIGHT: FINANCIAL ANALYSIS
+                  pw.Expanded(
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.end,
+                      children: [
+                        pw.Text(
+                          "Product Total: ${formatMoney(shipment.totalAmount)}",
                         ),
-                      ),
-                  ],
-                ),
+                        pw.Text(
+                          "Carrier Fee: ${formatMoney(shipment.totalCarrierFee)}",
+                        ),
+                        pw.Text(
+                          "GRAND TOTAL: ${formatMoney(shipment.grandTotal)}",
+                          style: pw.TextStyle(
+                            fontWeight: pw.FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                        pw.SizedBox(height: 10),
+
+                        // Financial Discrepancy Display
+                        pw.Container(
+                          padding: const pw.EdgeInsets.symmetric(
+                            vertical: 4,
+                            horizontal: 8,
+                          ),
+                          color:
+                              valDiff.abs() > 1
+                                  ? (valDiff > 0
+                                      ? PdfColors.red50
+                                      : PdfColors.green50)
+                                  : PdfColors.white,
+                          child: pw.Column(
+                            crossAxisAlignment: pw.CrossAxisAlignment.end,
+                            children: [
+                              pw.Text(
+                                "Recv. Value: ${formatMoney(totalReceivedVal)}",
+                                style: const pw.TextStyle(fontSize: 10),
+                              ),
+                              if (valDiff.abs() > 1)
+                                pw.Text(
+                                  valDiff > 0
+                                      ? "SHORTAGE: ${formatMoney(valDiff)}"
+                                      : "SURPLUS: ${formatMoney(valDiff.abs())}",
+                                  style: pw.TextStyle(
+                                    color:
+                                        valDiff > 0
+                                            ? PdfColors.red
+                                            : PdfColors.green,
+                                    fontWeight: pw.FontWeight.bold,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
+
+              if (shipment.carrierReport != null &&
+                  shipment.carrierReport!.isNotEmpty)
+                pw.Padding(
+                  padding: const pw.EdgeInsets.only(top: 20),
+                  child: pw.Container(
+                    width: double.infinity,
+                    padding: const pw.EdgeInsets.all(10),
+                    decoration: pw.BoxDecoration(
+                      color: PdfColors.orange50,
+                      border: pw.Border.all(color: PdfColors.orange200),
+                    ),
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Text(
+                          "REPORT / NOTES:",
+                          style: pw.TextStyle(
+                            fontWeight: pw.FontWeight.bold,
+                            color: PdfColors.orange900,
+                          ),
+                        ),
+                        pw.Text(shipment.carrierReport!),
+                      ],
+                    ),
+                  ),
+                ),
             ],
       ),
     );
@@ -763,6 +879,7 @@ class ShipmentController extends GetxController {
     );
   }
 
+  // --- RESTORED: AGGREGATED REPORT ---
   Future<void> generateAggregatedOnWayPdf() async {
     if (aggregatedList.isEmpty) {
       Get.snackbar("Info", "No data.");
@@ -775,73 +892,75 @@ class ShipmentController extends GetxController {
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
         theme: pw.ThemeData.withFont(base: font, bold: fontBold),
-        build: (context) {
-          return [
-            pw.Header(
-              level: 0,
-              child: pw.Text(
-                "INCOMING INVENTORY",
-                style: pw.TextStyle(
-                  fontSize: 18,
-                  fontWeight: pw.FontWeight.bold,
+        build:
+            (context) => [
+              pw.Header(
+                level: 0,
+                child: pw.Text(
+                  "INCOMING INVENTORY",
+                  style: pw.TextStyle(
+                    fontSize: 18,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
                 ),
               ),
-            ),
-            pw.SizedBox(height: 20),
-            pw.Table(
-              border: pw.TableBorder.all(color: PdfColors.grey300),
-              children: [
-                pw.TableRow(
-                  decoration: const pw.BoxDecoration(color: PdfColors.grey200),
-                  children: [
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.all(6),
-                      child: pw.Text(
-                        "Model",
-                        style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-                      ),
+              pw.SizedBox(height: 20),
+              pw.Table(
+                border: pw.TableBorder.all(color: PdfColors.grey300),
+                children: [
+                  pw.TableRow(
+                    decoration: const pw.BoxDecoration(
+                      color: PdfColors.grey200,
                     ),
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.all(6),
-                      child: pw.Text(
-                        "Qty",
-                        style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-                      ),
-                    ),
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.all(6),
-                      child: pw.Text(
-                        "Breakdown",
-                        style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-                      ),
-                    ),
-                  ],
-                ),
-                ...aggregatedList.map((product) {
-                  String details = product.incomingDetails
-                      .map((d) => "${d.shipmentName} | ${d.qty} pcs")
-                      .join("\n");
-                  return pw.TableRow(
                     children: [
                       pw.Padding(
                         padding: const pw.EdgeInsets.all(6),
-                        child: pw.Text("${product.model}\n${product.name}"),
+                        child: pw.Text(
+                          "Model",
+                          style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                        ),
                       ),
                       pw.Padding(
                         padding: const pw.EdgeInsets.all(6),
-                        child: pw.Text("${product.totalQty}"),
+                        child: pw.Text(
+                          "Qty",
+                          style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                        ),
                       ),
                       pw.Padding(
                         padding: const pw.EdgeInsets.all(6),
-                        child: pw.Text(details),
+                        child: pw.Text(
+                          "Breakdown",
+                          style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                        ),
                       ),
                     ],
-                  );
-                }),
-              ],
-            ),
-          ];
-        },
+                  ),
+                  ...aggregatedList.map(
+                    (product) => pw.TableRow(
+                      children: [
+                        pw.Padding(
+                          padding: const pw.EdgeInsets.all(6),
+                          child: pw.Text("${product.model}\n${product.name}"),
+                        ),
+                        pw.Padding(
+                          padding: const pw.EdgeInsets.all(6),
+                          child: pw.Text("${product.totalQty}"),
+                        ),
+                        pw.Padding(
+                          padding: const pw.EdgeInsets.all(6),
+                          child: pw.Text(
+                            product.incomingDetails
+                                .map((d) => "${d.shipmentName} | ${d.qty}")
+                                .join("\n"),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
       ),
     );
     await Printing.layoutPdf(

@@ -4,9 +4,7 @@ import 'package:get/get.dart';
 import 'package:gtel_erp/Shipment/controller.dart';
 import 'package:gtel_erp/Stock/controller.dart';
 import 'package:gtel_erp/Stock/model.dart';
-import 'shipmodel.dart'; // Ensure this matches your project structure
-
-// --- SHOW SHIPMENT ENTRY DIALOG (UPDATED WITH LOCAL QTY) ---
+import 'shipmodel.dart';
 
 void showShipmentEntryDialog(
   Product? p, // Nullable: Pass null to CREATE NEW PRODUCT
@@ -15,7 +13,6 @@ void showShipmentEntryDialog(
   double globalRate, {
   Function(ShipmentItem)? onSubmit,
 }) {
-  // Flag to check if we are creating a new product or editing existing one
   final isNewProduct = p == null;
 
   // -- CONTROLLERS --
@@ -58,8 +55,6 @@ void showShipmentEntryDialog(
   final wholesaleC = TextEditingController(
     text: (p?.wholesale ?? 0).toString(),
   );
-
-  // Alert Qty
   final alertQtyC = TextEditingController(text: (p?.alertQty ?? 5).toString());
 
   // Shipment Quantity
@@ -70,7 +65,7 @@ void showShipmentEntryDialog(
   // Stock Reference (Only for existing)
   final oldSeaStock = p?.seaStockQty ?? 0;
   final oldAirStock = p?.airStockQty ?? 0;
-  final oldLocalStock = p?.localQty ?? 0; // <--- ADDED LOCAL STOCK REFERENCE
+  final oldLocalStock = p?.localQty ?? 0;
   final onWayQty = isNewProduct ? 0 : shipCtrl.getOnWayQty(p.id);
 
   // -- LOGIC: Auto Calculate Prices --
@@ -100,15 +95,15 @@ void showShipmentEntryDialog(
 
   Get.dialog(
     Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       elevation: 0,
       backgroundColor: Colors.transparent,
       child: Container(
-        width: 800,
-        constraints: const BoxConstraints(maxHeight: 900),
+        width: 850,
+        constraints: const BoxConstraints(maxHeight: 850),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(8),
         ),
         child: Column(
           children: [
@@ -116,64 +111,50 @@ void showShipmentEntryDialog(
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
               decoration: BoxDecoration(
-                color: isNewProduct ? Colors.teal[800] : Colors.blue[900],
+                color:
+                    isNewProduct
+                        ? const Color(0xFF0F766E)
+                        : const Color(0xFF1E293B),
                 borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(12),
-                  topRight: Radius.circular(12),
+                  topLeft: Radius.circular(8),
+                  topRight: Radius.circular(8),
                 ),
               ),
               child: Row(
                 children: [
                   Icon(
-                    isNewProduct ? Icons.add_circle_outline : Icons.edit_note,
+                    isNewProduct ? Icons.add_circle : Icons.edit,
                     color: Colors.white,
-                    size: 28,
+                    size: 20,
                   ),
-                  const SizedBox(width: 16),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        isNewProduct
-                            ? "CREATE NEW PRODUCT"
-                            : "EDIT & ADD TO MANIFEST",
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                        ),
-                      ),
-                      Text(
-                        isNewProduct
-                            ? "Enter details to create and add to shipment"
-                            : "Model: ${p.model.toUpperCase()}",
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.8),
-                          fontSize: 13,
-                        ),
-                      ),
-                    ],
+                  const SizedBox(width: 12),
+                  Text(
+                    isNewProduct
+                        ? "NEW PRODUCT ENTRY"
+                        : "EDIT ${p.model.toUpperCase()}",
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
                   ),
                   const Spacer(),
                   if (!isNewProduct)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        "On Way: $onWayQty",
-                        style: const TextStyle(color: Colors.white),
+                    Text(
+                      "On Way: $onWayQty",
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
                       ),
                     ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 16),
                   IconButton(
                     onPressed: () => Get.back(),
-                    icon: const Icon(Icons.close, color: Colors.white),
+                    icon: const Icon(
+                      Icons.close,
+                      color: Colors.white,
+                      size: 20,
+                    ),
                   ),
                 ],
               ),
@@ -187,7 +168,7 @@ void showShipmentEntryDialog(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // ROW 1: BASIC INFO
-                    _sectionTitle("PRODUCT IDENTITY"),
+                    _sectionTitle("IDENTITY"),
                     Row(
                       children: [
                         Expanded(
@@ -197,79 +178,49 @@ void showShipmentEntryDialog(
                             autoFocus: isNewProduct,
                           ),
                         ),
-                        const SizedBox(width: 16),
+                        const SizedBox(width: 12),
                         Expanded(child: _erpInput(nameC, "Product Name")),
-                        const SizedBox(width: 16),
+                        const SizedBox(width: 12),
                         Expanded(child: _erpInput(brandC, "Brand")),
-                        const SizedBox(width: 16),
+                        const SizedBox(width: 12),
                         Expanded(child: _erpInput(categoryC, "Category")),
                       ],
                     ),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 20),
 
                     // ROW 2: COSTING
-                    _sectionTitle("COSTING & WEIGHT"),
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.grey[50],
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.grey[200]!),
-                      ),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: _erpInput(
-                              yuanC,
-                              "Yuan (¥)",
-                              isNum: true,
-                              prefix: "¥ ",
-                            ),
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: _erpInput(
-                              currencyC,
-                              "Ex. Rate",
-                              isNum: true,
-                            ),
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: _erpInput(
-                              weightC,
-                              "Weight (KG)",
-                              isNum: true,
-                              suffix: " kg",
-                            ),
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: _erpInput(
-                              seaTaxC,
-                              "Sea Tax/KG",
-                              isNum: true,
-                            ),
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: _erpInput(
-                              airTaxC,
-                              "Air Tax/KG",
-                              isNum: true,
-                            ),
-                          ),
-                        ],
-                      ),
+                    _sectionTitle("COSTING PARAMETERS"),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _erpInput(yuanC, "Yuan (¥)", isNum: true),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _erpInput(currencyC, "Rate", isNum: true),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _erpInput(weightC, "Weight (KG)", isNum: true),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _erpInput(seaTaxC, "Sea Tax", isNum: true),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _erpInput(airTaxC, "Air Tax", isNum: true),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 20),
 
                     // ROW 3: CALCULATED COSTS & SALES
                     Row(
                       children: [
                         // Calculated Costs
                         Expanded(
-                          flex: 4,
+                          flex: 5,
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -283,7 +234,7 @@ void showShipmentEntryDialog(
                                       Colors.blue,
                                     ),
                                   ),
-                                  const SizedBox(width: 16),
+                                  const SizedBox(width: 12),
                                   Expanded(
                                     child: _erpReadOnly(
                                       airPriceC,
@@ -299,11 +250,11 @@ void showShipmentEntryDialog(
                         const SizedBox(width: 24),
                         // Sales Prices
                         Expanded(
-                          flex: 3,
+                          flex: 4,
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              _sectionTitle("SALES PRICING"),
+                              _sectionTitle("SALES PRICES"),
                               Row(
                                 children: [
                                   Expanded(
@@ -313,7 +264,7 @@ void showShipmentEntryDialog(
                                       isNum: true,
                                     ),
                                   ),
-                                  const SizedBox(width: 16),
+                                  const SizedBox(width: 12),
                                   Expanded(
                                     child: _erpInput(
                                       wholesaleC,
@@ -328,116 +279,94 @@ void showShipmentEntryDialog(
                         ),
                       ],
                     ),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 20),
 
                     // ROW 4: SHIPMENT ENTRY & SETTINGS
-                    _sectionTitle("SHIPMENT QUANTITY & SETTINGS"),
+                    _sectionTitle("MANIFEST ENTRY"),
                     Container(
-                      padding: const EdgeInsets.all(20),
+                      padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: Colors.blue.withOpacity(0.05),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.blue.withOpacity(0.2)),
+                        color: Colors.blue[50],
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: Colors.blue[100]!),
                       ),
-                      child: Column(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              Expanded(
-                                flex: 2,
-                                child: _erpInput(
-                                  addSeaQtyC,
-                                  "Sea Quantity",
-                                  isNum: true,
-                                  bgColor: Colors.white,
-                                  hasBorder: true,
-                                ),
-                              ),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                flex: 2,
-                                child: _erpInput(
-                                  addAirQtyC,
-                                  "Air Quantity",
-                                  isNum: true,
-                                  bgColor: Colors.white,
-                                  hasBorder: true,
-                                ),
-                              ),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                flex: 3,
-                                child: _erpInput(
-                                  cartonNoC,
-                                  "Carton Number(s)",
-                                  bgColor: Colors.white,
-                                  hasBorder: true,
-                                  hint: "e.g. 1-5",
-                                ),
-                              ),
-                            ],
+                          Expanded(
+                            child: _erpInput(
+                              addSeaQtyC,
+                              "Add Sea Qty",
+                              isNum: true,
+                              bgColor: Colors.white,
+                            ),
                           ),
-                          const SizedBox(height: 15),
-                          Row(
-                            children: [
-                              // Added Alert Qty Field
-                              Expanded(
-                                flex: 2,
-                                child: _erpInput(
-                                  alertQtyC,
-                                  "Alert Qty",
-                                  isNum: true,
-                                  bgColor: Colors.white,
-                                  hasBorder: true,
-                                ),
-                              ),
-                              const SizedBox(width: 16),
-                              // Mini Summary for Existing
-                              Expanded(
-                                flex: 5,
-                                child:
-                                    !isNewProduct
-                                        ? Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              "Current Stock (Preserved)",
-                                              style: TextStyle(
-                                                fontSize: 10,
-                                                color: Colors.grey[600],
-                                              ),
-                                            ),
-                                            const SizedBox(height: 4),
-                                            Row(
-                                              children: [
-                                                _miniStockTag(
-                                                  "Sea",
-                                                  oldSeaStock,
-                                                ),
-                                                const SizedBox(width: 8),
-                                                _miniStockTag(
-                                                  "Air",
-                                                  oldAirStock,
-                                                ),
-                                                const SizedBox(width: 8),
-                                                // --- ADDED LOCAL QTY ---
-                                                _miniStockTag(
-                                                  "Loc",
-                                                  oldLocalStock,
-                                                ),
-                                              ],
-                                            ),
-                                          ],
-                                        )
-                                        : Container(),
-                              ),
-                            ],
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _erpInput(
+                              addAirQtyC,
+                              "Add Air Qty",
+                              isNum: true,
+                              bgColor: Colors.white,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _erpInput(
+                              cartonNoC,
+                              "Carton No",
+                              bgColor: Colors.white,
+                              hint: "1-5",
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _erpInput(
+                              alertQtyC,
+                              "Alert Qty",
+                              isNum: true,
+                              bgColor: Colors.white,
+                            ),
                           ),
                         ],
                       ),
                     ),
+
+                    // UPDATED CURRENT STOCK DISPLAY
+                    if (!isNewProduct)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 16),
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 10,
+                            horizontal: 16,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.orange[50],
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: Colors.orange[200]!),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.inventory_2_outlined,
+                                size: 20,
+                                color: Colors.orange[800],
+                              ),
+                              const SizedBox(width: 10),
+                              Text(
+                                "CURRENT STOCK:   SEA: $oldSeaStock   |   AIR: $oldAirStock   |   LOCAL: $oldLocalStock",
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.orange[900],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -447,38 +376,32 @@ void showShipmentEntryDialog(
             Container(
               padding: const EdgeInsets.all(16),
               decoration: const BoxDecoration(
-                border: Border(top: BorderSide(color: Colors.black12)),
-                color: Colors.white,
+                border: Border(top: BorderSide(color: Colors.grey)),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   TextButton(
                     onPressed: () => Get.back(),
-                    style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 24,
-                        vertical: 16,
-                      ),
-                    ),
-                    child: Text(
+                    child: const Text(
                       "Cancel",
-                      style: TextStyle(color: Colors.grey[600]),
+                      style: TextStyle(color: Colors.grey),
                     ),
                   ),
-                  const SizedBox(width: 16),
-                  ElevatedButton.icon(
+                  const SizedBox(width: 12),
+                  ElevatedButton(
                     onPressed: () {
                       // 1. Validation
                       if (modelC.text.isEmpty || nameC.text.isEmpty) {
-                        Get.snackbar(
-                          "Missing Info",
-                          "Name and Model are required",
-                        );
+                        Get.snackbar("Required", "Model and Name are missing");
                         return;
                       }
 
-                      // 2. Prepare Data Map
+                      // Capture calculated costs
+                      double sCost = double.tryParse(seaPriceC.text) ?? 0.0;
+                      double aCost = double.tryParse(airPriceC.text) ?? 0.0;
+
+                      // 2. Prepare Data Map (FIXED AVG PURCHASE PRICE)
                       final Map<String, dynamic> data = {
                         'name': nameC.text,
                         'category': categoryC.text,
@@ -489,22 +412,26 @@ void showShipmentEntryDialog(
                         'currency': double.tryParse(currencyC.text) ?? 0.0,
                         'shipmenttax': double.tryParse(seaTaxC.text) ?? 0.0,
                         'shipmenttaxair': double.tryParse(airTaxC.text) ?? 0.0,
-                        'sea': double.tryParse(seaPriceC.text) ?? 0.0,
-                        'air': double.tryParse(airPriceC.text) ?? 0.0,
+
+                        // Calculated Costs
+                        'sea': sCost,
+                        'air': aCost,
+
+                        // *** FIX: Explicitly set avg_purchase_price ***
+                        'avg_purchase_price': sCost > 0 ? sCost : aCost,
+
                         'agent': double.tryParse(agentC.text) ?? 0.0,
                         'wholesale': double.tryParse(wholesaleC.text) ?? 0.0,
                         'alert_qty': int.tryParse(alertQtyC.text) ?? 5,
                       };
 
-                      // --- PRESERVE ALL STOCK FOR EXISTING PRODUCTS ---
+                      // 3. Preserve Stock Logic
                       if (!isNewProduct) {
                         data['stock_qty'] = p.stockQty;
                         data['sea_stock_qty'] = p.seaStockQty;
                         data['air_stock_qty'] = p.airStockQty;
-                        data['local_qty'] =
-                            p.localQty; // Ensure Local Qty is sent back
+                        data['local_qty'] = p.localQty;
                       } else {
-                        // For NEW products, start with 0 stock
                         data['stock_qty'] = 0;
                         data['sea_stock_qty'] = 0;
                         data['air_stock_qty'] = 0;
@@ -514,8 +441,9 @@ void showShipmentEntryDialog(
                       int sQty = int.tryParse(addSeaQtyC.text) ?? 0;
                       int aQty = int.tryParse(addAirQtyC.text) ?? 0;
 
+                      // 4. Submit
                       if (onSubmit != null) {
-                        // For editing items already in manifest or details
+                        // Edit Existing Item in Manifest List
                         final newItem = ShipmentItem(
                           productId: isNewProduct ? 0 : p.id,
                           productName: nameC.text,
@@ -529,16 +457,14 @@ void showShipmentEntryDialog(
                           receivedSeaQty: sQty,
                           receivedAirQty: aQty,
                           cartonNo: cartonNoC.text,
-                          seaPriceSnapshot:
-                              double.tryParse(seaPriceC.text) ?? 0,
-                          airPriceSnapshot:
-                              double.tryParse(airPriceC.text) ?? 0,
+                          seaPriceSnapshot: sCost,
+                          airPriceSnapshot: aCost,
                           ignoreMissing: true,
                         );
                         onSubmit(newItem);
                         Get.back();
                       } else {
-                        // MAIN FLOW: Add to Controller
+                        // Add New to Controller
                         shipCtrl.addToManifestAndVerify(
                           productId: isNewProduct ? null : p.id,
                           productData: data,
@@ -550,22 +476,13 @@ void showShipmentEntryDialog(
                     },
                     style: ElevatedButton.styleFrom(
                       backgroundColor:
-                          isNewProduct ? Colors.teal[700] : Colors.blue[800],
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 32,
-                        vertical: 16,
-                      ),
-                      elevation: 2,
+                          isNewProduct
+                              ? const Color(0xFF0F766E)
+                              : const Color(0xFF1E293B),
                     ),
-                    icon: Icon(
-                      isNewProduct ? Icons.save : Icons.add_shopping_cart,
-                      size: 20,
-                    ),
-                    label: Text(
-                      isNewProduct
-                          ? "CREATE & ADD TO SHIPMENT"
-                          : "UPDATE & ADD TO SHIPMENT",
+                    child: Text(
+                      isNewProduct ? "CREATE & ADD" : "UPDATE & ADD",
+                      style: const TextStyle(color: Colors.white),
                     ),
                   ),
                 ],
@@ -579,18 +496,16 @@ void showShipmentEntryDialog(
   );
 }
 
-// --- ERP UI COMPONENTS ---
-
+// --- SMALLER ERP INPUTS WIDGETS ---
 Widget _sectionTitle(String title) {
   return Padding(
-    padding: const EdgeInsets.only(bottom: 8),
+    padding: const EdgeInsets.only(bottom: 6),
     child: Text(
       title,
-      style: TextStyle(
+      style: const TextStyle(
         fontSize: 11,
-        fontWeight: FontWeight.bold,
-        color: Colors.grey[600],
-        letterSpacing: 0.8,
+        fontWeight: FontWeight.w700,
+        color: Colors.grey,
       ),
     ),
   );
@@ -601,10 +516,7 @@ Widget _erpInput(
   String label, {
   bool isNum = false,
   bool autoFocus = false,
-  String? prefix,
-  String? suffix,
   Color? bgColor,
-  bool hasBorder = false,
   String? hint,
 }) {
   return Column(
@@ -612,15 +524,11 @@ Widget _erpInput(
     children: [
       Text(
         label,
-        style: const TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w500,
-          color: Colors.black87,
-        ),
+        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
       ),
-      const SizedBox(height: 6),
+      const SizedBox(height: 4),
       SizedBox(
-        height: 42,
+        height: 36, // Compact height for ERP
         child: TextField(
           controller: ctrl,
           autofocus: autoFocus,
@@ -628,33 +536,22 @@ Widget _erpInput(
               isNum
                   ? const TextInputType.numberWithOptions(decimal: true)
                   : TextInputType.text,
-          style: const TextStyle(fontSize: 13),
+          style: const TextStyle(fontSize: 12),
           decoration: InputDecoration(
             hintText: hint,
-            prefixText: prefix,
-            suffixText: suffix,
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: 0,
-            ),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 10),
             filled: true,
             fillColor: bgColor ?? Colors.grey[50],
             border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(6),
-              borderSide:
-                  hasBorder
-                      ? const BorderSide(color: Colors.black12)
-                      : BorderSide.none,
+              borderRadius: BorderRadius.circular(4),
+              borderSide: BorderSide(color: Colors.grey[300]!),
             ),
             enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(6),
-              borderSide:
-                  hasBorder
-                      ? const BorderSide(color: Colors.black12)
-                      : BorderSide.none,
+              borderRadius: BorderRadius.circular(4),
+              borderSide: BorderSide(color: Colors.grey[300]!),
             ),
             focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(4),
               borderSide: const BorderSide(color: Colors.blue, width: 1.5),
             ),
           ),
@@ -665,50 +562,41 @@ Widget _erpInput(
 }
 
 Widget _erpReadOnly(TextEditingController ctrl, String label, Color color) {
-  return Container(
-    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-    decoration: BoxDecoration(
-      color: color.withOpacity(0.08),
-      borderRadius: BorderRadius.circular(6),
-      border: Border.all(color: color.withOpacity(0.2)),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+          color: color,
+        ),
+      ),
+      const SizedBox(height: 4),
+      Container(
+        height: 36,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        alignment: Alignment.centerLeft,
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.05),
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: color.withOpacity(0.2)),
+        ),
+        child: TextField(
+          controller: ctrl,
+          readOnly: true,
           style: TextStyle(
-            fontSize: 11,
+            fontSize: 12,
             fontWeight: FontWeight.bold,
             color: color,
           ),
-        ),
-        const SizedBox(height: 2),
-        TextField(
-          controller: ctrl,
-          readOnly: true,
-          decoration: const InputDecoration.collapsed(hintText: ""),
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.bold,
-            color: color.withOpacity(0.8),
+          decoration: const InputDecoration(
+            border: InputBorder.none,
+            isDense: true,
           ),
         ),
-      ],
-    ),
-  );
-}
-
-Widget _miniStockTag(String type, int qty) {
-  return Container(
-    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-    decoration: BoxDecoration(
-      color: Colors.grey[200],
-      borderRadius: BorderRadius.circular(4),
-    ),
-    child: Text(
-      "$type: $qty",
-      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
-    ),
+      ),
+    ],
   );
 }

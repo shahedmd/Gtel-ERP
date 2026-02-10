@@ -1,5 +1,5 @@
+// file: shipmodel.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
-
 
 class ShipmentItem {
   final int productId;
@@ -8,20 +8,15 @@ class ShipmentItem {
   final String productBrand;
   final String productCategory;
   final double unitWeightSnapshot;
-
   // FINANCIAL (Ordered)
   final int seaQty;
   final int airQty;
-
   // PHYSICAL (Received)
   final int receivedSeaQty;
   final int receivedAirQty;
-
   final String cartonNo;
-
   final double seaPriceSnapshot;
   final double airPriceSnapshot;
-
   final bool ignoreMissing;
 
   ShipmentItem({
@@ -104,12 +99,14 @@ class ShipmentModel {
 
   final int totalCartons;
   final double totalWeight;
-  final double totalAmount; // Original Bill
+
+  final double carrierCostPerCarton;
+  final double totalCarrierFee;
+
+  final double totalAmount; // Original Bill (Products Only)
   final bool isReceived;
 
-  // NEW: Store the calculated loss/difference from vendor swaps
   final double vendorLossAmount;
-
   final List<ShipmentItem> items;
 
   ShipmentModel({
@@ -124,11 +121,16 @@ class ShipmentModel {
     this.carrierReport,
     required this.totalCartons,
     required this.totalWeight,
+    this.carrierCostPerCarton = 0.0, // NEW
+    this.totalCarrierFee = 0.0, // NEW
     required this.totalAmount,
     this.isReceived = false,
     this.vendorLossAmount = 0.0,
     required this.items,
   });
+
+  // Helper to get Grand Total (Product Cost + Carrier Fee)
+  double get grandTotal => totalAmount + totalCarrierFee;
 
   Map<String, dynamic> toMap() {
     return {
@@ -143,6 +145,8 @@ class ShipmentModel {
       'carrierReport': carrierReport,
       'totalCartons': totalCartons,
       'totalWeight': totalWeight,
+      'carrierCostPerCarton': carrierCostPerCarton, // NEW
+      'totalCarrierFee': totalCarrierFee, // NEW
       'totalAmount': totalAmount,
       'isReceived': isReceived,
       'vendorLossAmount': vendorLossAmount,
@@ -170,6 +174,9 @@ class ShipmentModel {
       carrierReport: data['carrierReport'],
       totalCartons: data['totalCartons'] ?? 0,
       totalWeight: (data['totalWeight'] ?? 0.0).toDouble(),
+      carrierCostPerCarton:
+          (data['carrierCostPerCarton'] ?? 0.0).toDouble(), // NEW
+      totalCarrierFee: (data['totalCarrierFee'] ?? 0.0).toDouble(), // NEW
       totalAmount: (data['totalAmount'] ?? 0.0).toDouble(),
       isReceived: data['isReceived'] ?? false,
       vendorLossAmount: (data['vendorLossAmount'] ?? 0.0).toDouble(),

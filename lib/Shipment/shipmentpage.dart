@@ -1,10 +1,10 @@
-// ignore_for_file: deprecated_member_use
+// ignore_for_file: deprecated_member_use, avoid_print
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Shipment/controller.dart';
 import 'package:gtel_erp/Shipment/details.dart';
 import 'package:gtel_erp/Shipment/onhold.dart';
-import 'package:gtel_erp/Shipment/shipmentdialog.dart'; // Ensure your fixed dialog is here
+import 'package:gtel_erp/Shipment/shipmentdialog.dart';
 import 'package:gtel_erp/Vendor/vendorcontroller.dart';
 import 'package:intl/intl.dart';
 import 'package:gtel_erp/Stock/controller.dart';
@@ -14,7 +14,8 @@ const Color kDarkSlate = Color(0xFF1E293B);
 const Color kPrimary = Color(0xFF2563EB);
 const Color kSuccess = Color(0xFF10B981);
 const Color kWarning = Color(0xFFF59E0B);
-const Color kBg = Color(0xFFF1F5F9);
+const Color kBg = Color(0xFFF8FAFC);
+const Color kBorder = Color(0xFFE2E8F0);
 
 class ShipmentPage extends StatelessWidget {
   const ShipmentPage({super.key});
@@ -29,41 +30,47 @@ class ShipmentPage extends StatelessWidget {
       backgroundColor: kBg,
       appBar: AppBar(
         title: const Text(
-          "LOGISTICS DASHBOARD",
+          "LOGISTICS MANAGER",
           style: TextStyle(
             color: kDarkSlate,
-            fontWeight: FontWeight.bold,
-            letterSpacing: 1,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.5,
           ),
         ),
         backgroundColor: Colors.white,
-        elevation: 1,
+        elevation: 0,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Container(color: kBorder, height: 1),
+        ),
         iconTheme: const IconThemeData(color: kDarkSlate),
         actions: [
-          TextButton.icon(
-            icon: const Icon(Icons.warning_amber_rounded, color: Colors.red),
-            label: const Text(
-              "MISSING / ON HOLD",
-              style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
-            ),
-            onPressed: () => Get.to(() => const OnHoldShipmentPage()),
+          _buildActionButton(
+            label: "ON HOLD ITEMS",
+            icon: Icons.warning_amber_rounded,
+            color: Colors.redAccent,
+            onTap: () => Get.to(() => const OnHoldShipmentPage()),
           ),
-          // --- FILTERS IN APP BAR ---
+          const SizedBox(width: 12),
+          // FILTERS
           _buildFilterDropdown(controller, vendorController),
-          const SizedBox(width: 10),
+          const SizedBox(width: 12),
           IconButton(
             icon: const Icon(Icons.refresh),
+            color: kDarkSlate,
             tooltip: "Refresh Data",
             onPressed: () => productController.fetchProducts(),
           ),
+          const SizedBox(width: 16),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         backgroundColor: kPrimary,
+        elevation: 4,
         icon: const Icon(Icons.add_location_alt),
         label: const Text(
-          "NEW SHIPMENT",
-          style: TextStyle(fontWeight: FontWeight.bold),
+          "CREATE SHIPMENT",
+          style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 0.5),
         ),
         onPressed:
             () => _openCreateManifestScreen(
@@ -78,183 +85,216 @@ class ShipmentPage extends StatelessWidget {
           // 1. DASHBOARD METRICS
           _buildDashboardMetrics(controller),
 
-          // 2. SHIPMENT REGISTRY TABLE
+          // 2. SHIPMENT TABLE WITH PAGINATION
           Expanded(
-            child: Container(
-              margin: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(8),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
-                    blurRadius: 5,
-                  ),
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Card(
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: const BorderSide(color: kBorder),
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    // Header
                     Container(
-                      padding: const EdgeInsets.all(12),
-                      color: kDarkSlate,
-                      child: const Text(
-                        "SHIPMENT REGISTRY",
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 16,
+                      ),
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.vertical(
+                          top: Radius.circular(12),
                         ),
+                        border: Border(bottom: BorderSide(color: kBorder)),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            "Active Shipments",
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: kDarkSlate,
+                            ),
+                          ),
+                          // Pagination Controls
+                          Obx(
+                            () => Row(
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.chevron_left),
+                                  onPressed:
+                                      controller.shipmentPage.value > 1
+                                          ? controller.prevPage
+                                          : null,
+                                ),
+                                Text(
+                                  "Page ${controller.shipmentPage.value} of ${controller.totalPages}",
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.grey,
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.chevron_right),
+                                  onPressed:
+                                      controller.shipmentPage.value <
+                                              controller.totalPages
+                                          ? controller.nextPage
+                                          : null,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                     ),
+
+                    // Table
                     Expanded(
                       child: Obx(() {
                         if (controller.filteredShipments.isEmpty) {
-                          return const Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.folder_open,
-                                  size: 40,
-                                  color: Colors.grey,
-                                ),
-                                SizedBox(height: 10),
-                                Text(
-                                  "No Shipments Found",
-                                  style: TextStyle(color: Colors.grey),
-                                ),
-                              ],
-                            ),
-                          );
+                          return _buildEmptyState();
                         }
                         return SingleChildScrollView(
-                          scrollDirection: Axis.vertical,
-                          child: SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: DataTable(
-                              headingRowColor: MaterialStateProperty.all(
-                                Colors.grey[100],
+                          child: DataTable(
+                            headingRowColor: MaterialStateProperty.all(
+                              Colors.grey[50],
+                            ),
+                            dataRowHeight: 60,
+                            dividerThickness: 1,
+                            columns: const [
+                              DataColumn(
+                                label: Text(
+                                  "Date",
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
                               ),
-                              showCheckboxColumn: false, // Make row clickable
-                              columns: const [
-                                DataColumn(label: Text("Purchase Date")),
-                                DataColumn(label: Text("Shipment Name")),
-                                DataColumn(label: Text("Vendor")),
-                                DataColumn(label: Text("Carrier")),
-                                DataColumn(label: Text("Items")),
-                                DataColumn(label: Text("Total Value")),
-                                DataColumn(label: Text("Status")),
-                                DataColumn(label: Text("Report")),
-                                DataColumn(label: Text("Actions")),
-                              ],
-                              rows:
-                                  controller.filteredShipments.map((item) {
-                                    return DataRow(
-                                      onSelectChanged: (_) {
-                                        // ROUTE TO DETAIL/EDIT SCREEN
-                                        Get.to(
+                              DataColumn(
+                                label: Text(
+                                  "Shipment ID",
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              DataColumn(
+                                label: Text(
+                                  "Vendor",
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              DataColumn(
+                                label: Text(
+                                  "Carrier",
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              DataColumn(
+                                label: Text(
+                                  "Items",
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              DataColumn(
+                                label: Text(
+                                  "Grand Total",
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              DataColumn(
+                                label: Text(
+                                  "Status",
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              DataColumn(
+                                label: Text(
+                                  "Actions",
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            ],
+                            rows:
+                                controller.paginatedShipments.map((item) {
+                                  return DataRow(
+                                    onSelectChanged:
+                                        (_) => Get.to(
                                           () => ShipmentDetailScreen(
                                             shipment: item,
                                           ),
-                                        );
-                                      },
-                                      cells: [
-                                        DataCell(
-                                          Text(
-                                            DateFormat(
-                                              'yyyy-MM-dd',
-                                            ).format(item.purchaseDate),
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.bold,
-                                            ),
+                                        ),
+                                    cells: [
+                                      DataCell(
+                                        Text(
+                                          DateFormat(
+                                            'MMM dd, yyyy',
+                                          ).format(item.purchaseDate),
+                                        ),
+                                      ),
+                                      DataCell(
+                                        Text(
+                                          item.shipmentName,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w600,
                                           ),
                                         ),
-                                        DataCell(
-                                          Text(
-                                            item.shipmentName,
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.w600,
-                                            ),
+                                      ),
+                                      DataCell(Text(item.vendorName)),
+                                      DataCell(
+                                        _buildCarrierBadge(item.carrier),
+                                      ),
+                                      DataCell(Text("${item.items.length}")),
+                                      DataCell(
+                                        Text(
+                                          controller.formatMoney(
+                                            item.grandTotal,
+                                          ),
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            color: kDarkSlate,
                                           ),
                                         ),
-                                        DataCell(Text(item.vendorName)),
-                                        DataCell(
-                                          Chip(
-                                            label: Text(
-                                              item.carrier,
-                                              style: const TextStyle(
-                                                fontSize: 10,
+                                      ),
+                                      DataCell(_statusChip(item.isReceived)),
+                                      DataCell(
+                                        Row(
+                                          children: [
+                                            IconButton(
+                                              icon: const Icon(
+                                                Icons.print_outlined,
+                                                size: 20,
+                                                color: Colors.black,
                                               ),
+                                              onPressed:
+                                                  () => controller.generatePdf(
+                                                    item,
+                                                  ),
                                             ),
-                                            backgroundColor: Colors.blue[50],
-                                            visualDensity:
-                                                VisualDensity.compact,
-                                          ),
-                                        ),
-                                        DataCell(Text("${item.items.length}")),
-                                        DataCell(
-                                          Text(
-                                            controller.formatMoney(
-                                              item.totalAmount,
-                                            ),
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.bold,
-                                              color: kDarkSlate,
-                                            ),
-                                          ),
-                                        ),
-                                        DataCell(_statusChip(item.isReceived)),
-                                        DataCell(
-                                          item.carrierReport != null &&
-                                                  item.carrierReport!.isNotEmpty
-                                              ? Tooltip(
-                                                message: item.carrierReport,
-                                                child: const Icon(
-                                                  Icons.warning_amber,
-                                                  color: Colors.orange,
-                                                ),
-                                              )
-                                              : const SizedBox(),
-                                        ),
-                                        DataCell(
-                                          Row(
-                                            children: [
+                                            if (!item.isReceived)
                                               IconButton(
                                                 icon: const Icon(
-                                                  Icons.print,
-                                                  size: 18,
-                                                  color: Colors.grey,
+                                                  Icons.check_circle_outline,
+                                                  color: kSuccess,
+                                                  size: 20,
                                                 ),
-                                                tooltip: "Print Manifest",
                                                 onPressed:
-                                                    () => controller
-                                                        .generatePdf(item),
+                                                    () => Get.to(
+                                                      () =>
+                                                          ShipmentDetailScreen(
+                                                            shipment: item,
+                                                          ),
+                                                    ),
                                               ),
-                                              if (!item.isReceived)
-                                                IconButton(
-                                                  icon: const Icon(
-                                                    Icons.download_done,
-                                                    size: 18,
-                                                    color: kSuccess,
-                                                  ),
-                                                  tooltip: "Quick Receive",
-                                                  onPressed:
-                                                      () => Get.to(
-                                                        () =>
-                                                            ShipmentDetailScreen(
-                                                              shipment: item,
-                                                            ),
-                                                      ),
-                                                ),
-                                            ],
-                                          ),
+                                          ],
                                         ),
-                                      ],
-                                    );
-                                  }).toList(),
-                            ),
+                                      ),
+                                    ],
+                                  );
+                                }).toList(),
                           ),
                         );
                       }),
@@ -269,7 +309,70 @@ class ShipmentPage extends StatelessWidget {
     );
   }
 
-  // --- WIDGETS ---
+  // --- WIDGET HELPERS ---
+  Widget _buildActionButton({
+    required String label,
+    required IconData icon,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 16, color: color),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return const Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.folder_open_outlined, size: 48, color: Colors.grey),
+          SizedBox(height: 12),
+          Text("No shipments found", style: TextStyle(color: Colors.grey)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCarrierBadge(String carrier) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.blue[50],
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: Colors.blue[100]!),
+      ),
+      child: Text(
+        carrier,
+        style: TextStyle(
+          fontSize: 11,
+          color: Colors.blue[800],
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
 
   Widget _buildFilterDropdown(
     ShipmentController ctrl,
@@ -278,89 +381,135 @@ class ShipmentPage extends StatelessWidget {
     return Row(
       children: [
         Obx(
-          () => DropdownButton<String>(
+          () => _styledDropdown(
             value:
                 ctrl.filterCarrier.value.isEmpty
                     ? null
                     : ctrl.filterCarrier.value,
-            hint: const Text("Filter Carrier"),
-            underline: Container(),
-            items: [
-              const DropdownMenuItem(value: "", child: Text("All Carriers")),
-              ...ctrl.carrierList.map(
-                (c) => DropdownMenuItem(value: c, child: Text(c)),
-              ),
-            ],
+            hint: "All Carriers",
+            items: ctrl.carrierList,
             onChanged: (val) => ctrl.filterCarrier.value = val ?? "",
           ),
         ),
-        const SizedBox(width: 16),
+        const SizedBox(width: 8),
         Obx(
-          () => DropdownButton<String>(
-            value:
-                ctrl.filterVendor.value.isEmpty
-                    ? null
-                    : ctrl.filterVendor.value,
-            hint: const Text("Filter Vendor"),
-            underline: Container(),
-            items: [
-              const DropdownMenuItem(value: "", child: Text("All Vendors")),
-              ...vendorCtrl.vendors.map(
-                (v) => DropdownMenuItem(value: v.docId, child: Text(v.name)),
+          () => SizedBox(
+            width: 150,
+            child: DropdownButtonFormField<String>(
+              value:
+                  ctrl.filterVendor.value.isEmpty
+                      ? null
+                      : ctrl.filterVendor.value,
+              decoration: const InputDecoration(
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 0,
+                ),
+                border: OutlineInputBorder(),
+                isDense: true,
               ),
-            ],
-            onChanged: (val) => ctrl.filterVendor.value = val ?? "",
+              hint: const Text("All Vendors", style: TextStyle(fontSize: 12)),
+              items: [
+                const DropdownMenuItem(
+                  value: "",
+                  child: Text("All Vendors", style: TextStyle(fontSize: 12)),
+                ),
+                ...vendorCtrl.vendors.map(
+                  (v) => DropdownMenuItem(
+                    value: v.docId,
+                    child: Text(
+                      v.name,
+                      style: const TextStyle(fontSize: 12),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+              ],
+              onChanged: (val) => ctrl.filterVendor.value = val ?? "",
+            ),
           ),
         ),
       ],
     );
   }
 
+  Widget _styledDropdown({
+    String? value,
+    required String hint,
+    required List<String> items,
+    required Function(String?) onChanged,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey[300]!),
+        borderRadius: BorderRadius.circular(4),
+        color: Colors.white,
+      ),
+      child: DropdownButton<String>(
+        value: value,
+        hint: Text(hint, style: const TextStyle(fontSize: 12)),
+        underline: Container(),
+        icon: const Icon(Icons.arrow_drop_down, size: 18),
+        items: [
+          DropdownMenuItem(
+            value: "",
+            child: Text(hint, style: const TextStyle(fontSize: 12)),
+          ),
+          ...items.map(
+            (c) => DropdownMenuItem(
+              value: c,
+              child: Text(c, style: const TextStyle(fontSize: 12)),
+            ),
+          ),
+        ],
+        onChanged: onChanged,
+      ),
+    );
+  }
+
   Widget _statusChip(bool done) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: done ? kSuccess : kWarning,
-        borderRadius: BorderRadius.circular(4),
+        color: done ? kSuccess.withOpacity(0.1) : kWarning.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: done ? kSuccess : kWarning),
       ),
       child: Text(
         done ? "RECEIVED" : "ON WAY",
-        style: const TextStyle(
-          fontSize: 10,
+        style: TextStyle(
+          fontSize: 11,
           fontWeight: FontWeight.bold,
-          color: Colors.white,
+          color: done ? kSuccess : kWarning,
         ),
       ),
     );
   }
 
   Widget _buildDashboardMetrics(ShipmentController ctrl) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: Colors.grey[200]!)),
-      ),
+    return Padding(
+      padding: const EdgeInsets.all(20),
       child: Row(
         children: [
           Expanded(
             child: Obx(
-              () => _MetricCard(
-                title: "ON THE WAY",
+              () => _MetricTile(
+                title: "TOTAL ON WAY",
                 value: ctrl.totalOnWayDisplay,
-                color: kWarning,
                 icon: Icons.sailing,
+                color: kWarning,
               ),
             ),
           ),
-          const SizedBox(width: 16),
+          const SizedBox(width: 20),
           Expanded(
             child: Obx(
-              () => _MetricCard(
-                title: "COMPLETED",
+              () => _MetricTile(
+                title: "TOTAL COMPLETED",
                 value: ctrl.totalCompletedDisplay,
+                icon: Icons.check_circle,
                 color: kSuccess,
-                icon: Icons.check_circle_outline,
               ),
             ),
           ),
@@ -376,25 +525,26 @@ class ShipmentPage extends StatelessWidget {
     ProductController prodCtrl,
     VendorController vendorCtrl,
   ) {
-    // 1. Reset State
+    // Reset Everything
     ctrl.currentManifestItems.clear();
     ctrl.shipmentNameCtrl.clear();
     ctrl.totalCartonCtrl.text = "0";
     ctrl.totalWeightCtrl.text = "0";
+    ctrl.carrierCostPerCtnCtrl.text = "0";
+    ctrl.totalCarrierCostDisplayCtrl.text = "0";
     ctrl.globalExchangeRateCtrl.text = "0.0";
     ctrl.purchaseDateInput.value = DateTime.now();
     ctrl.selectedVendorId.value = null;
-    ctrl.selectedVendorName.value = null;
     ctrl.selectedCarrier.value = null;
     ctrl.searchCtrl.clear();
     prodCtrl.search('');
 
     Get.to(
       () => Scaffold(
-        backgroundColor: Colors.grey[100],
+        backgroundColor: Colors.grey[50],
         appBar: AppBar(
           title: const Text(
-            "CREATE NEW MANIFEST",
+            "CREATE MANIFEST",
             style: TextStyle(color: kDarkSlate, fontWeight: FontWeight.w900),
           ),
           backgroundColor: Colors.white,
@@ -402,60 +552,62 @@ class ShipmentPage extends StatelessWidget {
           iconTheme: const IconThemeData(color: kDarkSlate),
           actions: [
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+              padding: const EdgeInsets.all(10),
               child: ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: kPrimary,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 12,
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
                 ),
                 onPressed: ctrl.saveShipmentToFirestore,
-                icon: const Icon(Icons.save_alt),
-                label: const Text("FINALIZE & SAVE"),
+                icon: const Icon(Icons.save, size: 18),
+                label: const Text("SAVE SHIPMENT"),
               ),
             ),
           ],
         ),
         body: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // LEFT: MANIFEST DETAILS FORM
+            // LEFT: FORM & ITEMS
             Expanded(
-              flex: 13,
+              flex: 8,
               child: Column(
                 children: [
                   _buildExtendedManifestFormHeader(context, ctrl, vendorCtrl),
                   Expanded(
                     child: Container(
-                      margin: const EdgeInsets.all(16),
+                      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                       decoration: BoxDecoration(
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.grey[300]!),
+                        border: Border.all(color: kBorder),
                       ),
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Padding(
-                            padding: const EdgeInsets.all(16.0),
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: const BoxDecoration(
+                              color: kDarkSlate,
+                              borderRadius: BorderRadius.vertical(
+                                top: Radius.circular(11),
+                              ),
+                            ),
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 const Text(
                                   "MANIFEST ITEMS",
                                   style: TextStyle(
+                                    color: Colors.white,
                                     fontWeight: FontWeight.bold,
-                                    color: kDarkSlate,
                                   ),
                                 ),
                                 Obx(
                                   () => Text(
-                                    "Total: ${ctrl.currentManifestTotalDisplay}",
+                                    "GRAND TOTAL (Est.): ${ctrl.currentManifestTotalDisplay}",
                                     style: const TextStyle(
-                                      fontWeight: FontWeight.w900,
-                                      color: kPrimary,
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
                                       fontSize: 16,
                                     ),
                                   ),
@@ -463,13 +615,12 @@ class ShipmentPage extends StatelessWidget {
                               ],
                             ),
                           ),
-                          const Divider(height: 1),
                           Expanded(
                             child: Obx(() {
                               if (ctrl.currentManifestItems.isEmpty) {
                                 return const Center(
                                   child: Text(
-                                    "Select products from the right list ->",
+                                    "Add items from the catalog ->",
                                     style: TextStyle(color: Colors.grey),
                                   ),
                                 );
@@ -478,22 +629,16 @@ class ShipmentPage extends StatelessWidget {
                                 padding: EdgeInsets.zero,
                                 itemCount: ctrl.currentManifestItems.length,
                                 separatorBuilder:
-                                    (c, i) => const Divider(height: 1),
+                                    (_, __) => const Divider(height: 1),
                                 itemBuilder: (ctx, i) {
                                   final item = ctrl.currentManifestItems[i];
                                   return ListTile(
-                                    contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                      vertical: 8,
-                                    ),
-                                    leading: CircleAvatar(
-                                      backgroundColor: Colors.blue[50],
-                                      child: Text(
-                                        "${i + 1}",
-                                        style: const TextStyle(
-                                          color: kPrimary,
-                                          fontWeight: FontWeight.bold,
-                                        ),
+                                    dense: true,
+                                    leading: Text(
+                                      "${i + 1}",
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.grey,
                                       ),
                                     ),
                                     title: Text(
@@ -503,40 +648,23 @@ class ShipmentPage extends StatelessWidget {
                                       ),
                                     ),
                                     subtitle: Text(
-                                      "${item.productModel} • Ctn: ${item.cartonNo}",
+                                      "${item.productModel} • Ctn: ${item.cartonNo} • ${item.seaQty}s/${item.airQty}a",
                                     ),
                                     trailing: Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.end,
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.center,
-                                          children: [
-                                            Text(
-                                              ctrl.formatMoney(
-                                                item.totalItemCost,
-                                              ),
-                                              style: const TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 13,
-                                              ),
-                                            ),
-                                            Text(
-                                              "Sea: ${item.seaQty} | Air: ${item.airQty}",
-                                              style: const TextStyle(
-                                                color: Colors.grey,
-                                                fontSize: 11,
-                                              ),
-                                            ),
-                                          ],
+                                        Text(
+                                          ctrl.formatMoney(item.totalItemCost),
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                          ),
                                         ),
-                                        const SizedBox(width: 8),
+                                        const SizedBox(width: 10),
                                         IconButton(
                                           icon: const Icon(
-                                            Icons.delete_outline,
+                                            Icons.delete,
                                             color: Colors.red,
+                                            size: 18,
                                           ),
                                           onPressed:
                                               () => ctrl.removeFromManifest(i),
@@ -555,46 +683,39 @@ class ShipmentPage extends StatelessWidget {
                 ],
               ),
             ),
-
-            // RIGHT: PRODUCT CATALOG & CREATION
+            // RIGHT: CATALOG
             Expanded(
-              flex: 7,
+              flex: 4,
               child: Container(
                 color: Colors.white,
                 child: Column(
                   children: [
                     Container(
                       padding: const EdgeInsets.all(16),
-                      color: kDarkSlate,
+                      decoration: BoxDecoration(
+                        border: Border(
+                          bottom: BorderSide(color: Colors.grey[200]!),
+                        ),
+                      ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           const Text(
                             "PRODUCT CATALOG",
                             style: TextStyle(
-                              color: Colors.white,
                               fontWeight: FontWeight.bold,
+                              color: kDarkSlate,
                             ),
                           ),
                           const SizedBox(height: 10),
-
-                          // --- NEW: CREATE PRODUCT BUTTON ---
                           ElevatedButton.icon(
                             style: ElevatedButton.styleFrom(
                               backgroundColor: kSuccess,
                               foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
                             ),
-                            icon: const Icon(
-                              Icons.add_circle_outline,
-                              size: 20,
-                            ),
-                            label: const Text(
-                              "CREATE NEW PRODUCT",
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
+                            icon: const Icon(Icons.add_circle, size: 18),
+                            label: const Text("CREATE NEW PRODUCT"),
                             onPressed: () {
-                              // Pass null for NEW product creation
                               double globalRate =
                                   double.tryParse(
                                     ctrl.globalExchangeRateCtrl.text,
@@ -608,30 +729,19 @@ class ShipmentPage extends StatelessWidget {
                               );
                             },
                           ),
-
-                          // ----------------------------------
                           const SizedBox(height: 10),
                           TextField(
                             controller: ctrl.searchCtrl,
-                            style: const TextStyle(color: Colors.white),
-                            cursorColor: Colors.white,
                             decoration: InputDecoration(
-                              hintText: "Search model or name...",
-                              hintStyle: TextStyle(
-                                color: Colors.white.withOpacity(0.5),
-                              ),
-                              prefixIcon: const Icon(
-                                Icons.search,
-                                color: Colors.white70,
-                              ),
+                              hintText: "Search...",
+                              prefixIcon: const Icon(Icons.search),
                               filled: true,
-                              fillColor: Colors.white.withOpacity(0.1),
+                              fillColor: Colors.grey[100],
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(8),
                                 borderSide: BorderSide.none,
                               ),
                               contentPadding: const EdgeInsets.symmetric(
-                                vertical: 0,
                                 horizontal: 12,
                               ),
                             ),
@@ -647,31 +757,13 @@ class ShipmentPage extends StatelessWidget {
                             child: CircularProgressIndicator(),
                           );
                         }
-                        if (prodCtrl.allProducts.isEmpty) {
-                          return const Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.search_off,
-                                  size: 40,
-                                  color: Colors.grey,
-                                ),
-                                SizedBox(height: 10),
-                                Text(
-                                  "No products found",
-                                  style: TextStyle(color: Colors.grey),
-                                ),
-                              ],
-                            ),
-                          );
-                        }
                         return ListView.separated(
                           itemCount: prodCtrl.allProducts.length,
                           separatorBuilder: (_, __) => const Divider(height: 1),
                           itemBuilder: (ctx, i) {
                             final p = prodCtrl.allProducts[i];
                             return ListTile(
+                              dense: true,
                               title: Text(
                                 p.model,
                                 style: const TextStyle(
@@ -683,17 +775,8 @@ class ShipmentPage extends StatelessWidget {
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
-                              trailing: ElevatedButton(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.grey[100],
-                                  foregroundColor: kDarkSlate,
-                                  elevation: 0,
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                  ),
-                                ),
+                              trailing: TextButton(
                                 onPressed: () {
-                                  // Pass existing product to dialog (Edit Mode)
                                   double globalRate =
                                       double.tryParse(
                                         ctrl.globalExchangeRateCtrl.text,
@@ -713,6 +796,35 @@ class ShipmentPage extends StatelessWidget {
                         );
                       }),
                     ),
+                    // PAGINATION FOOTER FOR CATALOG
+                    Obx(
+                      () => Container(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        color: Colors.grey[50],
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.chevron_left),
+                              onPressed:
+                                  prodCtrl.currentPage.value > 1
+                                      ? prodCtrl.previousPage
+                                      : null,
+                            ),
+                            Text(
+                              "${prodCtrl.currentPage.value}",
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.chevron_right),
+                              onPressed: prodCtrl.nextPage,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -724,7 +836,7 @@ class ShipmentPage extends StatelessWidget {
     );
   }
 
-  // --- EXTENDED HEADER ---
+  // --- NEW MANIFEST FORM HEADER (4 ROWS) ---
   Widget _buildExtendedManifestFormHeader(
     BuildContext context,
     ShipmentController ctrl,
@@ -732,37 +844,38 @@ class ShipmentPage extends StatelessWidget {
   ) {
     return Container(
       margin: const EdgeInsets.all(16),
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10),
+          BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            "SHIPMENT DETAILS",
+            "SHIPMENT CONFIGURATION",
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.bold,
               color: Colors.grey,
+              letterSpacing: 1,
             ),
           ),
-          const SizedBox(height: 12),
-          // ROW 1
+          const SizedBox(height: 16),
+
+          // ROW 1: ID & DATE
           Row(
             children: [
               Expanded(
-                flex: 2,
                 child: TextField(
                   controller: ctrl.shipmentNameCtrl,
                   decoration: const InputDecoration(
-                    labelText: "Shipment ID / Name",
+                    labelText: "Shipment ID",
                     border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.label_outline),
+                    prefixIcon: Icon(Icons.tag),
                   ),
                 ),
               ),
@@ -797,24 +910,27 @@ class ShipmentPage extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 16),
-          // ROW 2
+
+          // ROW 2: VENDOR, CARRIER, GLOBAL RATE
           Row(
             children: [
               Expanded(
                 child: Obx(
                   () => DropdownButtonFormField<String>(
                     decoration: const InputDecoration(
-                      labelText: "Select Vendor *",
+                      labelText: "Vendor",
                       border: OutlineInputBorder(),
                     ),
                     value: ctrl.selectedVendorId.value,
                     items:
-                        vendorCtrl.vendors.map((v) {
-                          return DropdownMenuItem(
-                            value: v.docId,
-                            child: Text(v.name),
-                          );
-                        }).toList(),
+                        vendorCtrl.vendors
+                            .map(
+                              (v) => DropdownMenuItem(
+                                value: v.docId,
+                                child: Text(v.name),
+                              ),
+                            )
+                            .toList(),
                     onChanged: (val) {
                       ctrl.selectedVendorId.value = val;
                       try {
@@ -822,9 +938,7 @@ class ShipmentPage extends StatelessWidget {
                             vendorCtrl.vendors
                                 .firstWhere((v) => v.docId == val)
                                 .name;
-                      } catch (e) {
-                        ctrl.selectedVendorName.value = "Unknown";
-                      }
+                      } catch (_) {}
                     },
                   ),
                 ),
@@ -834,7 +948,7 @@ class ShipmentPage extends StatelessWidget {
                 child: Obx(
                   () => DropdownButtonFormField<String>(
                     decoration: const InputDecoration(
-                      labelText: "Select Carrier *",
+                      labelText: "Carrier",
                       border: OutlineInputBorder(),
                     ),
                     value: ctrl.selectedCarrier.value,
@@ -854,17 +968,17 @@ class ShipmentPage extends StatelessWidget {
                   controller: ctrl.globalExchangeRateCtrl,
                   keyboardType: TextInputType.number,
                   decoration: const InputDecoration(
-                    labelText: "Global Rate (Opt)",
+                    labelText: "Global Rate",
                     border: OutlineInputBorder(),
                     prefixIcon: Icon(Icons.currency_exchange),
-                    hintText: "e.g. 17.5",
                   ),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 16),
-          // ROW 3
+
+          // ROW 3: CARTONS & CARRIER COSTS
           Row(
             children: [
               Expanded(
@@ -874,22 +988,60 @@ class ShipmentPage extends StatelessWidget {
                   decoration: const InputDecoration(
                     labelText: "Total Cartons",
                     border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.grid_view),
+                    prefixIcon: Icon(Icons.view_in_ar),
                   ),
                 ),
               ),
               const SizedBox(width: 16),
               Expanded(
                 child: TextField(
+                  controller: ctrl.carrierCostPerCtnCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: "Cost Per Carton",
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.price_change),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: TextField(
+                  controller: ctrl.totalCarrierCostDisplayCtrl,
+                  readOnly: true, // AUTO GENERATED
+                  decoration: const InputDecoration(
+                    labelText: "Total Carrier Cost",
+                    border: OutlineInputBorder(),
+                    filled: true,
+                    fillColor: Color(0xFFF1F5F9),
+                    prefixIcon: Icon(Icons.attach_money),
+                  ),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: kDarkSlate,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // ROW 4: WEIGHT
+          Row(
+            children: [
+              Expanded(
+                flex: 1,
+                child: TextField(
                   controller: ctrl.totalWeightCtrl,
                   keyboardType: TextInputType.number,
                   decoration: const InputDecoration(
                     labelText: "Total Weight (KG)",
                     border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.monitor_weight_outlined),
+                    prefixIcon: Icon(Icons.scale),
                   ),
                 ),
               ),
+              const Expanded(flex: 2, child: SizedBox()), // Spacer
             ],
           ),
         ],
@@ -898,37 +1050,35 @@ class ShipmentPage extends StatelessWidget {
   }
 }
 
-class _MetricCard extends StatelessWidget {
-  final String title;
-  final String value;
-  final Color color;
+class _MetricTile extends StatelessWidget {
+  final String title, value;
   final IconData icon;
-
-  const _MetricCard({
+  final Color color;
+  const _MetricTile({
     required this.title,
     required this.value,
-    required this.color,
     required this.icon,
+    required this.color,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
+        color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.2)),
+        border: Border.all(color: kBorder),
       ),
       child: Row(
         children: [
           Container(
-            padding: const EdgeInsets.all(10),
-            decoration: const BoxDecoration(
-              color: Colors.white,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.1),
               shape: BoxShape.circle,
             ),
-            child: Icon(icon, color: color, size: 24),
+            child: Icon(icon, color: color, size: 28),
           ),
           const SizedBox(width: 16),
           Column(
@@ -937,9 +1087,10 @@ class _MetricCard extends StatelessWidget {
               Text(
                 title,
                 style: TextStyle(
-                  color: color,
-                  fontWeight: FontWeight.bold,
+                  color: Colors.grey[600],
                   fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1,
                 ),
               ),
               const SizedBox(height: 4),
@@ -947,8 +1098,8 @@ class _MetricCard extends StatelessWidget {
                 value,
                 style: const TextStyle(
                   color: kDarkSlate,
+                  fontSize: 20,
                   fontWeight: FontWeight.bold,
-                  fontSize: 18,
                 ),
               ),
             ],

@@ -18,7 +18,7 @@ import 'auth.dart';
 import 'firebase_options.dart';
 import 'login.dart';
 
-
+  
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
@@ -36,6 +36,7 @@ Future<void> main() async {
   Get.put(OverviewController());
   runApp(const MyApp());
 }
+
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
