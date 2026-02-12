@@ -42,7 +42,7 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                       SizedBox(height: 20.h),
                       Text(
-                        "G Tel ERP System",
+                        "G tel ERP System",
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 32.sp,

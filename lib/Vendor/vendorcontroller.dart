@@ -4,70 +4,259 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:gtel_erp/Cash/controller.dart'; // Your Cash Controller Import
+import 'package:gtel_erp/Cash/controller.dart';
 import 'package:gtel_erp/Vendor/vendormodel.dart';
 import 'package:gtel_erp/Web%20Screen/Expenses/dailycontroller.dart';
 
 class VendorController extends GetxController {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  // --- STATE ---
-  final RxList<VendorModel> vendors = <VendorModel>[].obs;
+  // --- STATE VARIABLES ---
+
+  // 1. Vendor List State (Stream + Client-Side Pagination)
+  final RxList<VendorModel> _allVendors =
+      <VendorModel>[].obs; // Stores ALL data from stream
+  final RxList<VendorModel> vendors =
+      <VendorModel>[].obs; // Stores only CURRENT PAGE data
+  final RxBool isLoading = false.obs;
+  final RxString searchQuery = ''.obs;
+
+  // Vendor Pagination
+  final int _itemsPerPage = 10;
+  final RxInt currentVendorPage = 1.obs;
+  final RxBool hasMoreVendors = false.obs;
+
+  // 2. Transaction History State (Server-Side Pagination)
   final RxList<VendorTransaction> currentTransactions =
       <VendorTransaction>[].obs;
-  final RxBool isLoading = false.obs;
+  final RxBool isHistoryLoading = false.obs;
+  final RxString currentTransFilter = 'All'.obs; // 'All', 'CREDIT', 'DEBIT'
+
+  // History Pagination Helpers
+  DocumentSnapshot? _lastTransDoc;
+  final List<DocumentSnapshot> _transPageStartDocs = [];
+  final RxInt currentTransPage = 1.obs;
+  final RxBool hasMoreTrans = true.obs;
+  String? _activeVendorId; // To track which vendor is open
 
   StreamSubscription? _vendorSub;
-  StreamSubscription? _historySub;
 
   @override
   void onInit() {
     super.onInit();
-    bindVendors();
+    bindVendors(); // Restored your original stream
   }
 
   @override
   void onClose() {
     _vendorSub?.cancel();
-    _historySub?.cancel();
     super.onClose();
   }
 
-  // 1. LISTEN TO VENDORS
+  // ===========================================================================
+  // 1. VENDOR LOGIC (Restored Stream + Added Pagination)
+  // ===========================================================================
+
   void bindVendors() {
+    isLoading.value = true;
     _vendorSub = _firestore
         .collection('vendors')
         .orderBy('name')
         .snapshots()
         .listen(
           (event) {
-            vendors.value =
+            // 1. Save ALL data to internal list
+            _allVendors.value =
                 event.docs.map((e) => VendorModel.fromSnapshot(e)).toList();
+
+            // 2. Refresh the visible page
+            _refreshVendorPage();
+
+            isLoading.value = false;
           },
           onError: (e) {
+            isLoading.value = false;
             debugPrint("Vendor Stream Error: $e");
           },
         );
   }
 
-  // 2. FETCH HISTORY
-  void fetchHistory(String vendorId) {
-    currentTransactions.clear();
-    _historySub?.cancel();
+  // Search Logic
+  void searchVendors(String query) {
+    searchQuery.value = query;
+    currentVendorPage.value = 1; // Reset to page 1 on search
+    _refreshVendorPage();
+  }
 
-    _historySub = _firestore
+  // Pagination Logic (Client Side - Instant)
+  void nextVendorPage() {
+    if (hasMoreVendors.value) {
+      currentVendorPage.value++;
+      _refreshVendorPage();
+    }
+  }
+
+  void previousVendorPage() {
+    if (currentVendorPage.value > 1) {
+      currentVendorPage.value--;
+      _refreshVendorPage();
+    }
+  }
+
+  // Core function to slice the list based on page & search
+  void _refreshVendorPage() {
+    // A. Filter by Search
+    List<VendorModel> filtered =
+        _allVendors.where((v) {
+          return v.name.toLowerCase().contains(searchQuery.value.toLowerCase());
+        }).toList();
+
+    // B. Calculate Pagination Indices
+    int totalItems = filtered.length;
+    int startIndex = (currentVendorPage.value - 1) * _itemsPerPage;
+    int endIndex = startIndex + _itemsPerPage;
+
+    // C. Safety Check
+    if (startIndex >= totalItems) {
+      startIndex = 0;
+      currentVendorPage.value = 1; // Reset if out of bounds
+    }
+    if (endIndex > totalItems) endIndex = totalItems;
+
+    // D. Update Visible List
+    vendors.value = filtered.sublist(startIndex, endIndex);
+
+    // E. Update "Has More" Flag
+    hasMoreVendors.value = endIndex < totalItems;
+  }
+
+  // ===========================================================================
+  // 2. TRANSACTION HISTORY LOGIC (Server-Side Pagination)
+  // ===========================================================================
+
+  void setTransactionFilter(String filter) {
+    if (currentTransFilter.value == filter) return;
+    currentTransFilter.value = filter;
+    if (_activeVendorId != null) {
+      loadHistoryInitial(_activeVendorId!);
+    }
+  }
+
+  Future<void> loadHistoryInitial(String vendorId) async {
+    _activeVendorId = vendorId;
+    isHistoryLoading.value = true;
+    currentTransPage.value = 1;
+    _transPageStartDocs.clear();
+    _lastTransDoc = null;
+    currentTransactions.clear();
+
+    try {
+      Query query = _buildHistoryQuery(vendorId);
+      QuerySnapshot snapshot = await query.get();
+
+      if (snapshot.docs.isNotEmpty) {
+        _lastTransDoc = snapshot.docs.last;
+        _transPageStartDocs.add(snapshot.docs.first);
+        currentTransactions.value =
+            snapshot.docs
+                .map((e) => VendorTransaction.fromSnapshot(e))
+                .toList();
+        hasMoreTrans.value = snapshot.docs.length == _itemsPerPage;
+      } else {
+        hasMoreTrans.value = false;
+      }
+    } catch (e) {
+      debugPrint("Error loading history: $e");
+    } finally {
+      isHistoryLoading.value = false;
+    }
+  }
+
+  Future<void> nextHistoryPage() async {
+    if (!hasMoreTrans.value ||
+        isHistoryLoading.value ||
+        _activeVendorId == null) {
+      return;
+    }
+
+    isHistoryLoading.value = true;
+    try {
+      Query query = _buildHistoryQuery(
+        _activeVendorId!,
+      ).startAfterDocument(_lastTransDoc!);
+
+      QuerySnapshot snapshot = await query.get();
+
+      if (snapshot.docs.isNotEmpty) {
+        _lastTransDoc = snapshot.docs.last;
+        _transPageStartDocs.add(snapshot.docs.first);
+        currentTransactions.value =
+            snapshot.docs
+                .map((e) => VendorTransaction.fromSnapshot(e))
+                .toList();
+        currentTransPage.value++;
+        hasMoreTrans.value = snapshot.docs.length == _itemsPerPage;
+      } else {
+        hasMoreTrans.value = false;
+      }
+    } catch (e) {
+      debugPrint("Error next history: $e");
+    } finally {
+      isHistoryLoading.value = false;
+    }
+  }
+
+  Future<void> previousHistoryPage() async {
+    if (currentTransPage.value <= 1 ||
+        isHistoryLoading.value ||
+        _activeVendorId == null) {
+      return;
+    }
+
+    isHistoryLoading.value = true;
+    try {
+      _transPageStartDocs.removeLast(); // Remove current
+      DocumentSnapshot targetStartDoc =
+          _transPageStartDocs.last; // Get previous
+
+      Query query = _buildHistoryQuery(
+        _activeVendorId!,
+      ).startAtDocument(targetStartDoc);
+
+      QuerySnapshot snapshot = await query.get();
+
+      _lastTransDoc = snapshot.docs.last;
+      currentTransactions.value =
+          snapshot.docs.map((e) => VendorTransaction.fromSnapshot(e)).toList();
+      currentTransPage.value--;
+      hasMoreTrans.value = true;
+    } catch (e) {
+      debugPrint("Error prev history: $e");
+    } finally {
+      isHistoryLoading.value = false;
+    }
+  }
+
+  Query _buildHistoryQuery(String vendorId) {
+    Query query = _firestore
         .collection('vendors')
         .doc(vendorId)
         .collection('history')
-        .orderBy('date', descending: true)
-        .snapshots()
-        .listen((event) {
-          currentTransactions.value =
-              event.docs.map((e) => VendorTransaction.fromSnapshot(e)).toList();
-        });
+        .orderBy('date', descending: true);
+
+    if (currentTransFilter.value == 'CREDIT') {
+      query = query.where('type', isEqualTo: 'CREDIT');
+    } else if (currentTransFilter.value == 'DEBIT') {
+      query = query.where('type', isEqualTo: 'DEBIT');
+    }
+
+    return query.limit(_itemsPerPage);
   }
 
-  // 3. CREATE VENDOR
+  // ===========================================================================
+  // 3. WRITES (Add Vendor / Add Transaction)
+  // ===========================================================================
+
   Future<void> addVendor(String name, String contact) async {
     try {
       await _firestore.collection('vendors').add({
@@ -76,6 +265,7 @@ class VendorController extends GetxController {
         'totalDue': 0.0,
         'createdAt': FieldValue.serverTimestamp(),
       });
+      // Note: No need to manually refresh list, the bindVendors stream handles it!
       Get.back();
       Get.snackbar(
         "Success",
@@ -93,7 +283,6 @@ class VendorController extends GetxController {
     }
   }
 
-  // 4. AUTOMATED SHIPMENT CREDIT (Optimized for Web)
   Future<void> addAutomatedShipmentCredit({
     required String vendorId,
     required double amount,
@@ -103,15 +292,9 @@ class VendorController extends GetxController {
     try {
       final vendorRef = _firestore.collection('vendors').doc(vendorId);
       final historyRef = vendorRef.collection('history').doc();
-
-      // USE BATCH INSTEAD OF TRANSACTION
-      // It is faster and less prone to network timeouts on hosted web
       WriteBatch batch = _firestore.batch();
 
-      // 1. Atomic Increment (No need to read the doc first)
       batch.update(vendorRef, {'totalDue': FieldValue.increment(amount)});
-
-      // 2. Add History Entry
       batch.set(historyRef, {
         'type': 'CREDIT',
         'amount': amount,
@@ -124,17 +307,18 @@ class VendorController extends GetxController {
       });
 
       await batch.commit();
+      // Logic: Stream updates vendor balance automatically.
+      // Logic: If user is on details page, we might want to refresh history
+      if (_activeVendorId == vendorId) loadHistoryInitial(vendorId);
     } catch (e) {
-      // Throw the error so ShipmentController knows it failed
       throw "Vendor Credit Failed: $e";
     }
   }
 
-  // 5. MANUAL TRANSACTION (WEB OPTIMIZED - NO FREEZING)
   Future<void> addTransaction({
     required String vendorId,
     required String vendorName,
-    required String type, // 'CREDIT' or 'DEBIT'
+    required String type,
     required double amount,
     required DateTime date,
     String? paymentMethod,
@@ -144,40 +328,24 @@ class VendorController extends GetxController {
     bool isIncomingCash = false,
   }) async {
     isLoading.value = true;
-
     try {
       final vendorRef = _firestore.collection('vendors').doc(vendorId);
       final historyRef = vendorRef.collection('history').doc();
-
-      // USE BATCH INSTEAD OF TRANSACTION
       WriteBatch batch = _firestore.batch();
 
-      // --- LOGIC FOR DUE AMOUNT (The Math) ---
-      // We use Atomic Increment.
-      // If we are paying the vendor (DEBIT), we ADD a negative number.
       double amountChange = 0.0;
-
       if (isIncomingCash) {
-        // Scenario: Vendor gave us money (Advance).
-        // We owe them MORE. Liability increases.
-        amountChange = amount;
+        amountChange = amount; // Increases Liability (Due)
       } else if (type == 'CREDIT') {
-        // Scenario: We bought goods on credit.
-        // We owe them MORE.
-        amountChange = amount;
+        amountChange = amount; // Increases Liability (Due)
       } else {
-        // Scenario: DEBIT (We paid the vendor).
-        // We owe them LESS. So we subtract.
-        amountChange = -amount;
+        amountChange = -amount; // Decreases Liability (Paid)
       }
 
-      // 1. Update Vendor Balance Atomically
       batch.update(vendorRef, {'totalDue': FieldValue.increment(amountChange)});
-
-      // 2. Add History Record
       batch.set(historyRef, {
         'type': isIncomingCash ? 'CREDIT' : type,
-        'amount': amount, // Always record positive number in history log
+        'amount': amount,
         'date': Timestamp.fromDate(date),
         'paymentMethod': paymentMethod,
         'shipmentName': shipmentName,
@@ -186,22 +354,16 @@ class VendorController extends GetxController {
         'isIncomingCash': isIncomingCash,
       });
 
-      // 3. Commit to Firestore (Fast & Stable)
       await batch.commit();
 
-      // --- INTEGRATION: CONNECTING TO CASH & EXPENSES ---
-      // These run AFTER the database update succeeds.
-
-      // SCENARIO 1: Vendor Paid Us (Incoming Advance)
+      // Integration Hooks
       if (isIncomingCash) {
         await _ensureCashLedgerEntry(
           amount: amount,
           method: paymentMethod ?? 'cash',
           desc: "Advance/Refund from Vendor: $vendorName",
         );
-      }
-      // SCENARIO 2: We Paid Vendor (Outgoing Payment)
-      else if (type == 'DEBIT') {
+      } else if (type == 'DEBIT') {
         _logToDailyExpenses(
           vendorName,
           amount,
@@ -211,6 +373,9 @@ class VendorController extends GetxController {
       }
 
       if (Get.isDialogOpen ?? false) Get.back();
+
+      // Refresh History Table (Balance updates automatically via stream)
+      if (_activeVendorId == vendorId) loadHistoryInitial(vendorId);
 
       Get.snackbar(
         "Success",
@@ -226,14 +391,11 @@ class VendorController extends GetxController {
         colorText: Colors.white,
       );
     } finally {
-      // CRITICAL: This unfreezes the button/spinner
       isLoading.value = false;
     }
   }
 
-  // --- HELPER METHODS ---
-
-  // 1. Safe Cash Ledger Entry (Fallback Mechanism)
+  // --- HELPERS ---
   Future<void> _ensureCashLedgerEntry({
     required double amount,
     required String method,
@@ -241,16 +403,12 @@ class VendorController extends GetxController {
   }) async {
     try {
       if (Get.isRegistered<CashDrawerController>()) {
-        // CASE A: Controller is active (User visited Cash screen)
-        // Update via controller to refresh UI immediately
         await Get.find<CashDrawerController>().addManualCash(
           amount: amount,
           method: method,
           desc: desc,
         );
       } else {
-        // CASE B: Controller is NOT active (User hasn't visited Cash screen yet)
-        // Write directly to Firestore so data is not lost
         await _firestore.collection('cash_ledger').add({
           'type': 'deposit',
           'amount': amount,
@@ -260,11 +418,10 @@ class VendorController extends GetxController {
         });
       }
     } catch (e) {
-      debugPrint("CRITICAL ERROR: Could not save to Cash Ledger: $e");
+      debugPrint("Cash Ledger Error: $e");
     }
   }
 
-  // 2. Helper for Daily Expenses
   void _logToDailyExpenses(
     String vendorName,
     double amount,
@@ -280,8 +437,6 @@ class VendorController extends GetxController {
           date: date,
         );
       }
-      // Expenses are complex to add manually via fallback due to subcollections,
-      // usually Expense controller is initialized early in the app.
     } catch (e) {
       debugPrint("Expense Log Error: $e");
     }

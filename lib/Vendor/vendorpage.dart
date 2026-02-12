@@ -3,11 +3,8 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
-import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-
-// ADJUST IMPORTS TO MATCH YOUR FOLDER STRUCTURE
 import 'package:gtel_erp/Vendor/vendorcontroller.dart';
 import 'package:gtel_erp/Vendor/vendormodel.dart';
 
@@ -15,45 +12,15 @@ import 'package:gtel_erp/Vendor/vendormodel.dart';
 // 1. ERP THEME CONFIGURATION
 // ==========================================
 class AppTheme {
-  // Core Colors
   static const Color darkSlate = Color(0xFF1E293B);
-  static const Color bgGrey = Color(0xFFF8FAFC);
+  static const Color bgGrey = Color(0xFFF1F5F9);
   static const Color white = Colors.white;
-  static const Color border = Color(0xFFE2E8F0);
-
-  // Semantic Colors
-  static const Color creditRed = Color(
-    0xFFEF4444,
-  ); // Liability Increases (Bill)
-  static const Color debitGreen = Color(
-    0xFF10B981,
-  ); // Liability Decreases (Payment)
-  static const Color advancePurple = Color(
-    0xFF8B5CF6,
-  ); // Cash In (Advance/Refund)
+  static const Color border = Color(0xFFCBD5E1);
+  static const Color primary = Color(0xFF3B82F6);
+  static const Color danger = Color(0xFFEF4444);
+  static const Color success = Color(0xFF10B981);
   static const Color textDark = Color(0xFF0F172A);
   static const Color textMuted = Color(0xFF64748B);
-
-  // Text Styles
-  static TextStyle get title => const TextStyle(
-    color: darkSlate,
-    fontWeight: FontWeight.w800,
-    fontSize: 22,
-    letterSpacing: -0.5,
-  );
-
-  static TextStyle get label => const TextStyle(
-    color: textMuted,
-    fontSize: 12,
-    fontWeight: FontWeight.w600,
-    letterSpacing: 0.5,
-  );
-
-  static TextStyle get value => const TextStyle(
-    color: textDark,
-    fontSize: 15,
-    fontWeight: FontWeight.w600,
-  );
 }
 
 // ==========================================
@@ -69,17 +36,16 @@ class VendorPage extends StatelessWidget {
     return Scaffold(
       backgroundColor: AppTheme.bgGrey,
       appBar: AppBar(
-        title: Text("Vendor Management", style: AppTheme.title),
-        backgroundColor: AppTheme.bgGrey,
-        elevation: 0,
-        centerTitle: false,
-        iconTheme: const IconThemeData(color: AppTheme.darkSlate),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh, color: AppTheme.darkSlate),
-            onPressed: () => controller.bindVendors(),
+        title: const Text(
+          "Vendor Accounts",
+          style: TextStyle(
+            color: AppTheme.darkSlate,
+            fontWeight: FontWeight.bold,
           ),
-        ],
+        ),
+        backgroundColor: AppTheme.white,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: AppTheme.darkSlate),
       ),
       floatingActionButton: FloatingActionButton.extended(
         backgroundColor: AppTheme.darkSlate,
@@ -91,20 +57,17 @@ class VendorPage extends StatelessWidget {
         children: [
           // Search Bar
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            padding: const EdgeInsets.all(16.0),
             child: TextField(
+              onChanged: (val) => controller.searchVendors(val),
               decoration: InputDecoration(
-                hintText: "Search vendor...",
+                hintText: "Search vendors...",
                 prefixIcon: const Icon(Icons.search, color: AppTheme.textMuted),
                 filled: true,
                 fillColor: AppTheme.white,
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: AppTheme.border),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: AppTheme.border),
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide.none,
                 ),
               ),
             ),
@@ -113,28 +76,17 @@ class VendorPage extends StatelessWidget {
           // List
           Expanded(
             child: Obx(() {
-              if (controller.vendors.isEmpty) {
-                return Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.inventory_2_outlined,
-                        size: 60,
-                        color: Colors.grey[300],
-                      ),
-                      const SizedBox(height: 10),
-                      const Text(
-                        "No Vendors Found",
-                        style: TextStyle(color: AppTheme.textMuted),
-                      ),
-                    ],
-                  ),
-                );
+              if (controller.isLoading.value) {
+                return const Center(child: CircularProgressIndicator());
               }
-              return ListView.builder(
+              if (controller.vendors.isEmpty) {
+                return const Center(child: Text("No vendors found"));
+              }
+
+              return ListView.separated(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 itemCount: controller.vendors.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 10),
                 itemBuilder: (context, index) {
                   return _VendorCard(
                     vendor: controller.vendors[index],
@@ -143,6 +95,52 @@ class VendorPage extends StatelessWidget {
                 },
               );
             }),
+          ),
+
+          // Pagination Footer
+          _buildPaginationFooter(controller),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPaginationFooter(VendorController controller) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: const BoxDecoration(
+        color: AppTheme.white,
+        border: Border(top: BorderSide(color: AppTheme.border)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Obx(
+            () => Text(
+              "Page ${controller.currentVendorPage.value}",
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+          Row(
+            children: [
+              Obx(
+                () => IconButton(
+                  onPressed:
+                      controller.currentVendorPage.value > 1
+                          ? () => controller.previousVendorPage()
+                          : null,
+                  icon: const Icon(Icons.chevron_left),
+                ),
+              ),
+              Obx(
+                () => IconButton(
+                  onPressed:
+                      controller.hasMoreVendors.value
+                          ? () => controller.nextVendorPage()
+                          : null,
+                  icon: const Icon(Icons.chevron_right),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -154,37 +152,30 @@ class VendorPage extends StatelessWidget {
     final contactC = TextEditingController();
     Get.defaultDialog(
       title: "Add Vendor",
-      titlePadding: const EdgeInsets.only(top: 20),
       contentPadding: const EdgeInsets.all(20),
-      radius: 10,
       content: Column(
         children: [
-          _AppTextField(
+          TextField(
             controller: nameC,
-            label: "Company Name",
-            icon: Icons.business,
+            decoration: const InputDecoration(
+              labelText: "Company Name",
+              border: OutlineInputBorder(),
+            ),
           ),
-          const SizedBox(height: 15),
-          _AppTextField(
+          const SizedBox(height: 10),
+          TextField(
             controller: contactC,
-            label: "Contact Number",
-            icon: Icons.phone,
+            decoration: const InputDecoration(
+              labelText: "Contact",
+              border: OutlineInputBorder(),
+            ),
           ),
         ],
       ),
-      confirm: SizedBox(
-        width: double.infinity,
-        child: ElevatedButton(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppTheme.darkSlate,
-            padding: const EdgeInsets.symmetric(vertical: 14),
-          ),
-          onPressed: () => ctrl.addVendor(nameC.text, contactC.text),
-          child: const Text(
-            "SAVE",
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-          ),
-        ),
+      confirm: ElevatedButton(
+        style: ElevatedButton.styleFrom(backgroundColor: AppTheme.darkSlate),
+        onPressed: () => ctrl.addVendor(nameC.text, contactC.text),
+        child: const Text("Create", style: TextStyle(color: Colors.white)),
       ),
     );
   }
@@ -193,72 +184,55 @@ class VendorPage extends StatelessWidget {
 class _VendorCard extends StatelessWidget {
   final VendorModel vendor;
   final VendorController controller;
-
   const _VendorCard({required this.vendor, required this.controller});
 
   @override
   Widget build(BuildContext context) {
-    // Red if positive (We owe), Green if negative (Advance given)
-    final color =
+    Color color =
         vendor.totalDue > 0
-            ? AppTheme.creditRed
-            : (vendor.totalDue < 0 ? AppTheme.debitGreen : AppTheme.textMuted);
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: AppTheme.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.border),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.02),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
+            ? AppTheme.danger
+            : (vendor.totalDue < 0 ? AppTheme.primary : AppTheme.success);
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: const BorderSide(color: AppTheme.border),
       ),
       child: ListTile(
-        contentPadding: const EdgeInsets.all(16),
         onTap: () {
-          controller.fetchHistory(vendor.docId!);
+          controller.loadHistoryInitial(vendor.docId!);
           Get.to(
             () => VendorDetailPage(vendor: vendor, controller: controller),
           );
         },
         leading: CircleAvatar(
-          radius: 24,
-          backgroundColor: AppTheme.darkSlate,
+          backgroundColor: AppTheme.bgGrey,
           child: Text(
-            vendor.name.substring(0, 1).toUpperCase(),
+            vendor.name[0].toUpperCase(),
             style: const TextStyle(
-              color: Colors.white,
+              color: AppTheme.darkSlate,
               fontWeight: FontWeight.bold,
             ),
           ),
         ),
-        title: Text(vendor.name, style: AppTheme.value.copyWith(fontSize: 16)),
-        subtitle: Text(
-          vendor.contact,
-          style: const TextStyle(color: AppTheme.textMuted, fontSize: 13),
+        title: Text(
+          vendor.name,
+          style: const TextStyle(fontWeight: FontWeight.bold),
         ),
+        subtitle: Text(vendor.contact),
         trailing: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            Text("Balance", style: AppTheme.label),
-            const SizedBox(height: 2),
             Text(
-              NumberFormat.simpleCurrency(
-                name: 'BDT ',
-                decimalDigits: 0,
-              ).format(vendor.totalDue),
+              "BDT ${vendor.formattedDue}",
               style: TextStyle(
                 color: color,
-                fontWeight: FontWeight.w900,
+                fontWeight: FontWeight.bold,
                 fontSize: 16,
               ),
             ),
+            Text(vendor.status, style: TextStyle(color: color, fontSize: 10)),
           ],
         ),
       ),
@@ -267,12 +241,11 @@ class _VendorCard extends StatelessWidget {
 }
 
 // ==========================================
-// 3. VENDOR DETAIL PAGE (LEDGER & ACTIONS)
+// 3. VENDOR DETAIL PAGE (ERP TABLE)
 // ==========================================
 class VendorDetailPage extends StatelessWidget {
   final VendorModel vendor;
   final VendorController controller;
-
   const VendorDetailPage({
     super.key,
     required this.vendor,
@@ -284,443 +257,279 @@ class VendorDetailPage extends StatelessWidget {
     return Scaffold(
       backgroundColor: AppTheme.bgGrey,
       appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              vendor.name,
-              style: const TextStyle(
-                color: AppTheme.darkSlate,
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            Text(
-              vendor.contact,
-              style: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
-            ),
-          ],
+        title: Text(
+          vendor.name,
+          style: const TextStyle(color: AppTheme.darkSlate),
         ),
         backgroundColor: AppTheme.white,
         elevation: 0,
         iconTheme: const IconThemeData(color: AppTheme.darkSlate),
         actions: [
           IconButton(
-            icon: const Icon(Icons.picture_as_pdf_outlined),
+            icon: const Icon(Icons.print),
             onPressed: () => _generatePDF(context),
-            tooltip: "Download Statement",
           ),
         ],
       ),
       body: Column(
         children: [
-          // --- HEADER: BALANCE ---
-          _buildBalanceHeader(),
+          // Balance Header (Live Update via Obx)
+          Container(
+            padding: const EdgeInsets.all(20),
+            color: AppTheme.white,
+            width: double.infinity,
+            child: Obx(() {
+              final liveVendor = controller.vendors.firstWhere(
+                (v) => v.docId == vendor.docId,
+                orElse: () => vendor,
+              );
+              Color color =
+                  liveVendor.totalDue > 0
+                      ? AppTheme.danger
+                      : (liveVendor.totalDue < 0
+                          ? AppTheme.primary
+                          : AppTheme.success);
+              return Column(
+                children: [
+                  const Text(
+                    "Current Balance",
+                    style: TextStyle(color: AppTheme.textMuted),
+                  ),
+                  Text(
+                    "BDT ${liveVendor.formattedDue}",
+                    style: TextStyle(
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                      color: color,
+                    ),
+                  ),
+                ],
+              );
+            }),
+          ),
 
-          // --- ACTION GRID (3 BUTTONS) ---
+          // Actions
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            padding: const EdgeInsets.all(10),
             child: Row(
               children: [
-                // 1. BILL (Purchase)
                 Expanded(
                   child: _ActionButton(
-                    label: "Purchase",
-                    sub: "Bill Entry",
-                    icon: Icons.receipt_long,
-                    color: AppTheme.creditRed,
-                    onTap:
-                        () => _openTransactionForm(
-                          context,
-                          TransactionMode.purchase,
-                        ),
+                    "Add Bill",
+                    Icons.receipt,
+                    AppTheme.danger,
+                    () =>
+                        _openTransactionForm(context, TransactionMode.purchase),
                   ),
                 ),
                 const SizedBox(width: 10),
-
-                // 2. PAYMENT (Out)
                 Expanded(
                   child: _ActionButton(
-                    label: "Payment",
-                    sub: "Send Cash",
-                    icon: Icons.send,
-                    color: AppTheme.debitGreen,
-                    onTap:
-                        () => _openTransactionForm(
-                          context,
-                          TransactionMode.payment,
-                        ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-
-                // 3. ADVANCE (In) - NEW!
-                Expanded(
-                  child: _ActionButton(
-                    label: "Receive",
-                    sub: "Adv/Refund",
-                    icon: Icons.download,
-                    color: AppTheme.advancePurple,
-                    onTap:
-                        () => _openTransactionForm(
-                          context,
-                          TransactionMode.advance,
-                        ),
+                    "Payment",
+                    Icons.send,
+                    AppTheme.success,
+                    () =>
+                        _openTransactionForm(context, TransactionMode.payment),
                   ),
                 ),
               ],
             ),
           ),
 
-          // --- LEDGER LIST ---
-          Expanded(
-            child: Container(
-              decoration: const BoxDecoration(
-                color: AppTheme.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black12,
-                    blurRadius: 10,
-                    offset: Offset(0, -2),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
-                    child: Text("RECENT TRANSACTIONS", style: AppTheme.label),
-                  ),
-                  Expanded(
-                    child: Obx(() {
-                      if (controller.currentTransactions.isEmpty) {
-                        return const Center(
-                          child: Text(
-                            "No history available",
-                            style: TextStyle(color: AppTheme.textMuted),
-                          ),
-                        );
-                      }
-                      return ListView.separated(
-                        padding: const EdgeInsets.only(bottom: 20),
-                        itemCount: controller.currentTransactions.length,
-                        separatorBuilder:
-                            (_, __) => const Divider(
-                              height: 1,
-                              indent: 70,
-                              color: AppTheme.bgGrey,
-                            ),
-                        itemBuilder:
-                            (context, index) => _TransactionTile(
-                              tx: controller.currentTransactions[index],
-                            ),
-                      );
-                    }),
-                  ),
-                ],
-              ),
+          // Filters
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                _FilterButton("All", "All", controller),
+                const SizedBox(width: 8),
+                _FilterButton("Bills", "CREDIT", controller),
+                const SizedBox(width: 8),
+                _FilterButton("Payments", "DEBIT", controller),
+              ],
             ),
           ),
+
+          // ERP Table
+          Expanded(child: _buildTransactionTable()),
+
+          // History Pagination
+          _buildHistoryPagination(controller),
         ],
       ),
     );
   }
 
-  Widget _buildBalanceHeader() {
-    return Container(
-      width: double.infinity,
-      color: AppTheme.white,
-      padding: const EdgeInsets.symmetric(vertical: 20),
-      child: Column(
-        children: [
-          Text("OUTSTANDING BALANCE", style: AppTheme.label),
-          const SizedBox(height: 8),
-          Obx(() {
-            final liveVendor = controller.vendors.firstWhere(
-              (v) => v.docId == vendor.docId,
-              orElse: () => vendor,
-            );
-            return Text(
-              NumberFormat.simpleCurrency(
-                name: 'BDT ',
-                decimalDigits: 0,
-              ).format(liveVendor.totalDue),
-              style: TextStyle(
-                fontSize: 36,
-                fontWeight: FontWeight.w900,
-                color:
-                    liveVendor.totalDue > 0
-                        ? AppTheme.creditRed
-                        : AppTheme.debitGreen,
-              ),
-            );
-          }),
-        ],
-      ),
-    );
-  }
+  Widget _buildTransactionTable() {
+    return Obx(() {
+      if (controller.isHistoryLoading.value) {
+        return const Center(child: CircularProgressIndicator());
+      }
+      if (controller.currentTransactions.isEmpty) {
+        return const Center(child: Text("No transactions"));
+      }
 
-  // --- LOGIC: TRANSACTION DIALOG ---
-  void _openTransactionForm(BuildContext context, TransactionMode mode) {
-    final amountC = TextEditingController();
-    final noteC = TextEditingController();
-    final refC = TextEditingController();
-    final methodC = TextEditingController(text: "Cash");
-    final date = DateTime.now().obs;
-
-    String title;
-    Color color;
-    IconData icon;
-
-    switch (mode) {
-      case TransactionMode.purchase:
-        title = "Record Purchase (Bill)";
-        color = AppTheme.creditRed;
-        icon = Icons.shopping_cart;
-        break;
-      case TransactionMode.payment:
-        title = "Record Payment (Out)";
-        color = AppTheme.debitGreen;
-        icon = Icons.arrow_outward;
-        break;
-      case TransactionMode.advance:
-        title = "Receive Advance (In)";
-        color = AppTheme.advancePurple;
-        icon = Icons.arrow_downward;
-        break;
-    }
-
-    Get.bottomSheet(
-      Container(
-        padding: const EdgeInsets.all(24),
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
+      return SingleChildScrollView(
+        scrollDirection: Axis.vertical,
         child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header
-              Row(
-                children: [
-                  CircleAvatar(
-                    backgroundColor: color.withOpacity(0.1),
-                    child: Icon(icon, color: color),
-                  ),
-                  const SizedBox(width: 12),
-                  Text(title, style: AppTheme.title.copyWith(fontSize: 18)),
-                ],
-              ),
-              const SizedBox(height: 20),
-
-              // Inputs
-              Row(
-                children: [
-                  Expanded(
-                    flex: 2,
-                    child: _AppTextField(
-                      controller: amountC,
-                      label: "Amount",
-                      icon: Icons.attach_money,
-                      isNumber: true,
-                      autoFocus: true,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: InkWell(
-                      onTap: () async {
-                        final d = await showDatePicker(
-                          context: context,
-                          initialDate: date.value,
-                          firstDate: DateTime(2020),
-                          lastDate: DateTime(2030),
-                        );
-                        if (d != null) date.value = d;
-                      },
-                      child: Obx(
-                        () => Container(
-                          height: 56,
-                          decoration: BoxDecoration(
-                            border: Border.all(color: AppTheme.border),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          alignment: Alignment.center,
-                          child: Text(
-                            DateFormat('dd/MM').format(date.value),
-                            style: const TextStyle(fontWeight: FontWeight.bold),
+          scrollDirection: Axis.horizontal,
+          child: DataTable(
+            headingRowColor: MaterialStateProperty.all(Colors.grey[200]),
+            columns: const [
+              DataColumn(label: Text("Date")),
+              DataColumn(label: Text("Description")),
+              DataColumn(label: Text("Type")),
+              DataColumn(label: Text("Amount",)),
+            ],
+            rows:
+                controller.currentTransactions.map((tx) {
+                  bool isCredit = tx.type == 'CREDIT' || tx.isIncomingCash;
+                  return DataRow(
+                    cells: [
+                      DataCell(Text(DateFormat('dd-MMM').format(tx.date))),
+                      DataCell(Text(tx.shipmentName ?? tx.notes ?? "-")),
+                      DataCell(
+                        Text(
+                          tx.isIncomingCash
+                              ? "ADVANCE"
+                              : (isCredit ? "BILL" : "PAYMENT"),
+                          style: TextStyle(
+                            color:
+                                isCredit ? AppTheme.danger : AppTheme.success,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
                       ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-
-              // Hide Payment Method for Purchase (usually just Bill Credit)
-              if (mode != TransactionMode.purchase)
-                _AppTextField(
-                  controller: methodC,
-                  label: "Payment Method (Cash/Bank/Bkash)",
-                  icon: Icons.account_balance_wallet,
-                ),
-
-              if (mode == TransactionMode.purchase)
-                _AppTextField(
-                  controller: refC,
-                  label: "Shipment Ref / Invoice #",
-                  icon: Icons.description,
-                ),
-
-              const SizedBox(height: 16),
-              _AppTextField(
-                controller: noteC,
-                label: "Notes / Remarks",
-                icon: Icons.note,
-              ),
-
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: color,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  onPressed: () {
-                    if (amountC.text.isEmpty) return;
-                    Get.back();
-
-                    controller.addTransaction(
-                      vendorId: vendor.docId!,
-                      vendorName: vendor.name,
-                      type:
-                          mode == TransactionMode.payment ? 'DEBIT' : 'CREDIT',
-                      amount: double.parse(amountC.text),
-                      date: date.value,
-                      notes: noteC.text,
-                      paymentMethod: methodC.text,
-                      shipmentName: refC.text,
-                      // KEY LOGIC CONNECTION:
-                      isIncomingCash: mode == TransactionMode.advance,
-                    );
-                  },
-                  child: Text(
-                    "CONFIRM ENTRY",
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10), // Safe area
-            ],
+                      DataCell(
+                        Text(
+                          tx.formattedAmount,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ],
+                  );
+                }).toList(),
           ),
         ),
+      );
+    });
+  }
+
+  Widget _buildHistoryPagination(VendorController ctrl) {
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.all(8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Obx(() => Text("Page ${ctrl.currentTransPage.value}")),
+          Row(
+            children: [
+              Obx(
+                () => IconButton(
+                  onPressed:
+                      ctrl.currentTransPage.value > 1
+                          ? () => ctrl.previousHistoryPage()
+                          : null,
+                  icon: const Icon(Icons.chevron_left),
+                ),
+              ),
+              Obx(
+                () => IconButton(
+                  onPressed:
+                      ctrl.hasMoreTrans.value
+                          ? () => ctrl.nextHistoryPage()
+                          : null,
+                  icon: const Icon(Icons.chevron_right),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
-      isScrollControlled: true,
     );
   }
 
-  // --- PDF GENERATION ---
+  void _openTransactionForm(BuildContext context, TransactionMode mode) {
+    final amountC = TextEditingController();
+    final noteC = TextEditingController();
+    Get.bottomSheet(
+      Container(
+        padding: const EdgeInsets.all(20),
+        color: Colors.white,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              mode == TransactionMode.purchase ? "Add Bill" : "Add Payment",
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: amountC,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: "Amount",
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: noteC,
+              decoration: const InputDecoration(
+                labelText: "Note",
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.darkSlate,
+                minimumSize: const Size(double.infinity, 50),
+              ),
+              onPressed: () {
+                if (amountC.text.isEmpty) return;
+                Get.back();
+                controller.addTransaction(
+                  vendorId: vendor.docId!,
+                  vendorName: vendor.name,
+                  type: mode == TransactionMode.purchase ? 'CREDIT' : 'DEBIT',
+                  amount: double.parse(amountC.text),
+                  date: DateTime.now(),
+                  notes: noteC.text,
+                );
+              },
+              child: const Text(
+                "Confirm",
+                style: TextStyle(color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _generatePDF(BuildContext context) async {
     final pdf = pw.Document();
-    final list = List<VendorTransaction>.from(controller.currentTransactions);
-    list.sort(
-      (a, b) => a.date.compareTo(b.date),
-    ); // Oldest first for ledger calc
-
-    double balance = 0;
-
+    final list = controller.currentTransactions;
     pdf.addPage(
       pw.MultiPage(
-        pageFormat: PdfPageFormat.a4,
         build:
-            (context) => [
-              pw.Header(
-                level: 0,
-                child: pw.Text("VENDOR LEDGER: ${vendor.name.toUpperCase()}"),
-              ),
-              pw.SizedBox(height: 10),
+            (ctx) => [
+              pw.Header(level: 0, child: pw.Text("Statement: ${vendor.name}")),
               pw.Table.fromTextArray(
-                headers: [
-                  "Date",
-                  "Description",
-                  "Debit (-)",
-                  "Credit (+)",
-                  "Balance",
-                ],
-                headerStyle: pw.TextStyle(
-                  fontWeight: pw.FontWeight.bold,
-                  color: PdfColors.white,
-                ),
-                headerDecoration: const pw.BoxDecoration(
-                  color: PdfColors.black,
-                ),
+                headers: ["Date", "Desc", "Amount"],
                 data:
-                    list.map((t) {
-                      // Calculate running balance
-                      // Credit (Bill) = Adds to Due
-                      // Advance (Incoming Cash) = Adds to Due (Liability)
-                      // Debit (Payment) = Reduces Due
-                      bool isLiabilityIncrease = t.type == 'CREDIT';
-
-                      if (isLiabilityIncrease) {
-                        balance += t.amount;
-                      } else {
-                        balance -= t.amount;
-                      }
-
-                      // Description String
-                      String desc = t.shipmentName ?? t.type;
-                      if (t.isIncomingCash) desc = "ADVANCE RECEIVED";
-                      if (t.notes != null && t.notes!.isNotEmpty) {
-                        desc += "\n(${t.notes})";
-                      }
-
-                      return [
-                        DateFormat('yyyy-MM-dd').format(t.date),
-                        desc,
-                        !isLiabilityIncrease
-                            ? t.amount.toStringAsFixed(0)
-                            : "-",
-                        isLiabilityIncrease ? t.amount.toStringAsFixed(0) : "-",
-                        balance.toStringAsFixed(0),
-                      ];
-                    }).toList(),
-                columnWidths: {
-                  0: const pw.FlexColumnWidth(2),
-                  1: const pw.FlexColumnWidth(4),
-                  2: const pw.FlexColumnWidth(2),
-                  3: const pw.FlexColumnWidth(2),
-                  4: const pw.FlexColumnWidth(2),
-                },
-                cellAlignments: {
-                  2: pw.Alignment.centerRight,
-                  3: pw.Alignment.centerRight,
-                  4: pw.Alignment.centerRight,
-                },
-              ),
-              pw.SizedBox(height: 20),
-              pw.Align(
-                alignment: pw.Alignment.centerRight,
-                child: pw.Text(
-                  "Closing Balance: $balance",
-                  style: pw.TextStyle(
-                    fontWeight: pw.FontWeight.bold,
-                    fontSize: 14,
-                  ),
-                ),
+                    list
+                        .map(
+                          (e) => [
+                            DateFormat('dd/MM').format(e.date),
+                            e.notes ?? "-",
+                            e.amount.toString(),
+                          ],
+                        )
+                        .toList(),
               ),
             ],
       ),
@@ -729,173 +538,58 @@ class VendorDetailPage extends StatelessWidget {
   }
 }
 
-// ==========================================
-// 4. HELPER WIDGETS
-// ==========================================
-
-enum TransactionMode { purchase, payment, advance }
+// Helpers
+enum TransactionMode { purchase, payment }
 
 class _ActionButton extends StatelessWidget {
   final String label;
-  final String sub;
   final IconData icon;
   final Color color;
   final VoidCallback onTap;
-
-  const _ActionButton({
-    required this.label,
-    required this.sub,
-    required this.icon,
-    required this.color,
-    required this.onTap,
-  });
-
+  const _ActionButton(this.label, this.icon, this.color, this.onTap);
   @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: color.withOpacity(0.1),
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          child: Column(
-            children: [
-              Icon(icon, color: color, size: 28),
-              const SizedBox(height: 8),
-              Text(
-                label,
-                style: TextStyle(
-                  color: color,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 13,
-                ),
-              ),
-              Text(
-                sub,
-                style: TextStyle(color: color.withOpacity(0.7), fontSize: 10),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => ElevatedButton.icon(
+    style: ElevatedButton.styleFrom(
+      backgroundColor: color.withOpacity(0.1),
+      foregroundColor: color,
+      elevation: 0,
+      padding: const EdgeInsets.symmetric(vertical: 15),
+    ),
+    onPressed: onTap,
+    icon: Icon(icon),
+    label: Text(label),
+  );
 }
 
-class _TransactionTile extends StatelessWidget {
-  final VendorTransaction tx;
-  const _TransactionTile({required this.tx});
-
-  @override
-  Widget build(BuildContext context) {
-    // Determine visuals
-    final bool isBill = tx.type == 'CREDIT' && !tx.isIncomingCash;
-    final bool isAdvance = tx.isIncomingCash;
-
-    Color color;
-    IconData icon;
-    String title;
-    String sign;
-
-    if (isAdvance) {
-      color = AppTheme.advancePurple;
-      icon = Icons.download;
-      title = "Advance Received";
-      sign = "+";
-    } else if (isBill) {
-      color = AppTheme.creditRed;
-      icon = Icons.receipt_long;
-      title = tx.shipmentName ?? "Purchase Bill";
-      sign = "+";
-    } else {
-      color = AppTheme.debitGreen;
-      icon = Icons.arrow_outward;
-      title = "Payment Sent";
-      sign = "-";
-    }
-
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-      leading: Container(
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Icon(icon, color: color, size: 20),
-      ),
-      title: Text(title, style: AppTheme.value),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            DateFormat('dd MMM, hh:mm a').format(tx.date),
-            style: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
-          ),
-          if (tx.notes != null && tx.notes!.isNotEmpty)
-            Text(
-              tx.notes!,
-              style: TextStyle(
-                fontSize: 11,
-                color: AppTheme.textDark.withOpacity(0.6),
-                fontStyle: FontStyle.italic,
-              ),
-            ),
-        ],
-      ),
-      trailing: Text(
-        "$sign ${NumberFormat.compact().format(tx.amount)}",
-        style: TextStyle(
-          color: color,
-          fontWeight: FontWeight.bold,
-          fontSize: 16,
-        ),
-      ),
-    );
-  }
-}
-
-class _AppTextField extends StatelessWidget {
-  final TextEditingController controller;
+class _FilterButton extends StatelessWidget {
   final String label;
-  final IconData icon;
-  final bool isNumber;
-  final bool autoFocus;
-
-  const _AppTextField({
-    required this.controller,
-    required this.label,
-    required this.icon,
-    this.isNumber = false,
-    this.autoFocus = false,
-  });
-
+  final String value;
+  final VendorController ctrl;
+  const _FilterButton(this.label, this.value, this.ctrl);
   @override
-  Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      autofocus: autoFocus,
-      keyboardType: isNumber ? TextInputType.number : TextInputType.text,
-      decoration: InputDecoration(
-        labelText: label,
-        prefixIcon: Icon(icon, size: 20, color: AppTheme.textMuted),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppTheme.border),
+  Widget build(BuildContext context) => Obx(
+    () => InkWell(
+      onTap: () => ctrl.setTransactionFilter(value),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color:
+              ctrl.currentTransFilter.value == value
+                  ? AppTheme.darkSlate
+                  : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: AppTheme.border),
         ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppTheme.border),
+        child: Text(
+          label,
+          style: TextStyle(
+            color:
+                ctrl.currentTransFilter.value == value
+                    ? Colors.white
+                    : AppTheme.textMuted,
+          ),
         ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppTheme.darkSlate, width: 2),
-        ),
-        filled: true,
-        fillColor: AppTheme.bgGrey,
       ),
-    );
-  }
+    ),
+  );
 }
