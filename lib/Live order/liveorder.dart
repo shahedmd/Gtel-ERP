@@ -3,19 +3,24 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Live%20order/salemodel.dart';
+// CHANGE THIS IMPORT if your controller file is named differently
 import '../Stock/model.dart';
-
 class LiveOrderSalesPage extends StatelessWidget {
   const LiveOrderSalesPage({super.key});
 
   @override
   Widget build(BuildContext context) {
+    // Inject the controller
     final controller = Get.put(LiveSalesController());
+
     return Scaffold(
       backgroundColor: const Color(0xFFF1F5F9),
       body: Row(
         children: [
+          // Left Side: Product Table
           Expanded(flex: 6, child: _ProductTableSection(controller)),
+
+          // Right Side: Cart & Checkout
           Container(
             width: 500,
             decoration: BoxDecoration(
@@ -44,7 +49,9 @@ class LiveOrderSalesPage extends StatelessWidget {
                         const SizedBox(height: 20),
                         _buildCustomerSection(controller),
                         const SizedBox(height: 20),
-                        _buildCartSection(controller),
+                        _buildCartSection(
+                          controller,
+                        ), // UPDATED with Price Editor Logic
                         const SizedBox(height: 20),
                         _buildPaymentSection(controller),
                         const SizedBox(height: 20),
@@ -632,7 +639,7 @@ class LiveOrderSalesPage extends StatelessWidget {
     );
   }
 
-  // --- 2. CART SECTION (WITH LOSS INDICATOR) ---
+  // --- 2. UPDATED CART SECTION WITH PRICE EDITOR & VALIDATION LOGIC ---
   Widget _buildCartSection(LiveSalesController controller) {
     return Container(
       decoration: BoxDecoration(
@@ -654,7 +661,7 @@ class LiveOrderSalesPage extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: const [
                 Text(
-                  "Item Details",
+                  "Item Details & Rate",
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
@@ -684,6 +691,13 @@ class LiveOrderSalesPage extends StatelessWidget {
                 ),
               );
             }
+
+            // Determine if Price should be editable
+            // Requirement: Agent & Debtor = Fixed Price
+            bool isPriceFixed =
+                (controller.customerType.value == 'Agent' ||
+                    controller.customerType.value == 'Debtor');
+
             return ListView.separated(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
@@ -691,7 +705,6 @@ class LiveOrderSalesPage extends StatelessWidget {
               separatorBuilder: (_, __) => const Divider(height: 1),
               itemBuilder: (context, index) {
                 final item = controller.cart[index];
-                // *** LOSS CHECK FOR CART ITEMS ***
                 final bool isLoss = item.isLoss;
 
                 return Padding(
@@ -714,19 +727,42 @@ class LiveOrderSalesPage extends StatelessWidget {
                                 color: Colors.black87,
                               ),
                             ),
-                            Text(
-                              "Rate: ৳${item.priceAtSale}",
-                              style: TextStyle(
-                                color:
-                                    isLoss
-                                        ? Colors.red
-                                        : Colors.grey, // RED if Loss
-                                fontWeight:
-                                    isLoss
-                                        ? FontWeight.bold
-                                        : FontWeight.normal,
-                                fontSize: 12,
-                              ),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                const Text(
+                                  "Rate: ",
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey,
+                                  ),
+                                ),
+                                // --- EDITABLE PRICE FIELD ---
+                                SizedBox(
+                                  width: 80,
+                                  height: 30,
+                                  child: CartPriceEditor(
+                                    initialPrice: item.priceAtSale,
+                                    isLoss: isLoss,
+                                    readOnly:
+                                        isPriceFixed, // Pass the lock state
+                                    onChanged:
+                                        (val) => controller.updateItemPrice(
+                                          index,
+                                          val,
+                                        ),
+                                  ),
+                                ),
+                                if (isLoss)
+                                  const Padding(
+                                    padding: EdgeInsets.only(left: 5),
+                                    child: Icon(
+                                      Icons.warning_amber_rounded,
+                                      color: Colors.red,
+                                      size: 16,
+                                    ),
+                                  ),
+                              ],
                             ),
                           ],
                         ),
@@ -767,10 +803,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 14,
-                            color:
-                                isLoss
-                                    ? Colors.red
-                                    : Colors.black87, // RED if Loss
+                            color: isLoss ? Colors.red : Colors.black87,
                           ),
                         ),
                       ),
@@ -1637,7 +1670,6 @@ class _ProductRow extends StatelessWidget {
                           ? product.wholesale
                           : product.agent;
 
-                  // *** LOSS CHECK FOR PRODUCT LIST ***
                   bool isLoss = price < product.avgPurchasePrice;
 
                   return Text(
@@ -1646,8 +1678,7 @@ class _ProductRow extends StatelessWidget {
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: metaSize,
-                      color:
-                          isLoss ? Colors.red : Colors.black87, // RED if loss
+                      color: isLoss ? Colors.red : Colors.black87,
                     ),
                   );
                 }),
@@ -1773,6 +1804,113 @@ class _CartQuantityEditorState extends State<CartQuantityEditor> {
           ),
         ],
       ),
+    );
+  }
+}
+
+// --- UPDATED WIDGET: CART PRICE EDITOR ---
+class CartPriceEditor extends StatefulWidget {
+  final double initialPrice;
+  final bool isLoss;
+  final bool readOnly; // ADDED THIS
+  final Function(String) onChanged;
+
+  const CartPriceEditor({
+    super.key,
+    required this.initialPrice,
+    required this.isLoss,
+    this.readOnly = false, // ADDED THIS
+    required this.onChanged,
+  });
+
+  @override
+  State<CartPriceEditor> createState() => _CartPriceEditorState();
+}
+
+class _CartPriceEditorState extends State<CartPriceEditor> {
+  late TextEditingController _ctrl;
+  late FocusNode _focusNode;
+
+  @override
+  void initState() {
+    super.initState();
+    // Use toStringAsFixed(0) if you prefer integers, or (2) for decimals
+    _ctrl = TextEditingController(text: widget.initialPrice.toStringAsFixed(0));
+    _focusNode = FocusNode();
+
+    // Submit when focus is lost
+    _focusNode.addListener(() {
+      if (!_focusNode.hasFocus) {
+        widget.onChanged(_ctrl.text);
+      }
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant CartPriceEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Update text if the value changed externally (e.g. switching customer type)
+    if (widget.initialPrice != oldWidget.initialPrice && !_focusNode.hasFocus) {
+      _ctrl.text = widget.initialPrice.toStringAsFixed(0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: _ctrl,
+      focusNode: _focusNode,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      textAlign: TextAlign.left,
+      readOnly: widget.readOnly, // USE THE PARAMETER
+      style: TextStyle(
+        fontWeight: FontWeight.bold,
+        fontSize: 13,
+        // Shows RED text if selling below cost
+        color:
+            widget.isLoss
+                ? Colors.red
+                : (widget.readOnly
+                    ? Colors.grey.shade700
+                    : Colors.blue.shade800),
+      ),
+      decoration: InputDecoration(
+        prefixText: "৳",
+        prefixStyle: TextStyle(
+          fontSize: 13,
+          color: widget.readOnly ? Colors.grey.shade500 : Colors.grey.shade600,
+        ),
+        isDense: true,
+        // Visual feedback for Read Only state
+        filled: widget.readOnly,
+        fillColor: widget.readOnly ? Colors.grey.shade100 : null,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+        border:
+            widget.readOnly
+                ? InputBorder
+                    .none // No underline if fixed
+                : UnderlineInputBorder(
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+        focusedBorder:
+            widget.readOnly
+                ? InputBorder.none
+                : const UnderlineInputBorder(
+                  borderSide: BorderSide(color: Colors.blue),
+                ),
+      ),
+      onSubmitted: (val) {
+        if (!widget.readOnly) {
+          widget.onChanged(val);
+        }
+      },
     );
   }
 }

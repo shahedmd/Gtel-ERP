@@ -17,6 +17,7 @@ import '../Web Screen/Sales/controller.dart';
 class SalesCartItem {
   final Product product;
   RxInt quantity;
+  // CHANGED: Mutable price for manual edits
   double priceAtSale;
 
   SalesCartItem({
@@ -27,7 +28,7 @@ class SalesCartItem {
 
   double get subtotal => priceAtSale * quantity.value;
 
-  // --- NEW: Helper to detect Loss for UI (Red Color) ---
+  // Real-time Loss Detection: Checks if sold price is less than purchase price
   bool get isLoss => priceAtSale < product.avgPurchasePrice;
 }
 
@@ -81,7 +82,7 @@ class LiveSalesController extends GetxController {
   final nameC = TextEditingController();
   final phoneC = TextEditingController();
   final shopC = TextEditingController();
-  final addressC = TextEditingController(); // Now used for ALL sales
+  final addressC = TextEditingController();
   final challanC = TextEditingController();
   final cartonsC = TextEditingController();
 
@@ -154,6 +155,7 @@ class LiveSalesController extends GetxController {
     debtorOldDue.value = 0.0;
     debtorRunningDue.value = 0.0;
 
+    // Reset prices based on type when switching customer type
     for (var item in cart) {
       double newPrice =
           (customerType.value == "Debtor" || customerType.value == "Agent")
@@ -162,6 +164,55 @@ class LiveSalesController extends GetxController {
       item.priceAtSale = newPrice;
     }
     cart.refresh();
+    updatePaymentCalculations();
+  }
+
+  // --- UPDATED: UPDATE PRICE MANUALLY WITH VALIDATION ---
+  void updateItemPrice(int index, String val) {
+    // 1. Check if price editing is allowed (Agent/Debtor Fixed)
+    if (customerType.value == "Agent" || customerType.value == "Debtor") {
+      Get.snackbar(
+        "Action Denied",
+        "Price is fixed for ${customerType.value} customers.",
+        backgroundColor: Colors.redAccent,
+        colorText: Colors.white,
+        snackPosition: SnackPosition.BOTTOM,
+        duration: const Duration(seconds: 2),
+      );
+      // Refresh to revert UI changes since model wasn't updated
+      cart.refresh();
+      return;
+    }
+
+    double? newPrice = double.tryParse(val);
+    if (newPrice == null) return; // Invalid input
+    if (newPrice < 0) newPrice = 0.0;
+
+    // 2. Retailer Constraint: Cannot be less than Agent Price
+    if (customerType.value == "Retailer") {
+      double minAllowedPrice = cart[index].product.agent;
+      if (newPrice < minAllowedPrice) {
+        Get.snackbar(
+          "Price Constraint",
+          "Retailer price cannot be less than Agent price (৳$minAllowedPrice).",
+          backgroundColor: Colors.orange,
+          colorText: Colors.white,
+          snackPosition: SnackPosition.BOTTOM,
+          duration: const Duration(seconds: 3),
+        );
+        // Refresh to revert UI
+        cart.refresh();
+        return;
+      }
+    }
+
+    // Update the specific item's price
+    cart[index].priceAtSale = newPrice;
+
+    // Refresh the cart list to trigger UI rebuilds (Calculations, Colors)
+    cart.refresh();
+
+    // Recalculate Totals (Grand Total, Profit, etc.)
     updatePaymentCalculations();
   }
 
@@ -200,6 +251,7 @@ class LiveSalesController extends GetxController {
     ),
   );
 
+  // Profit now uses the updated (manual) price in grandTotal
   double get invoiceProfit => _round(grandTotal - totalInvoiceCost);
 
   void addToCart(Product p) {
@@ -269,10 +321,10 @@ class LiveSalesController extends GetxController {
   }
 
   // ==============================================================================
-  // FINALIZE SALE
+  // FINALIZE SALE (VALIDATION & ENTRY)
   // ==============================================================================
   Future<void> finalizeSale() async {
-    // 1. VALIDATION
+    // 1. BASIC INPUT VALIDATION
     if (cart.isEmpty) {
       Get.snackbar("Error", "Cart is empty");
       return;
@@ -282,7 +334,6 @@ class LiveSalesController extends GetxController {
       return;
     }
 
-    // --- UPDATED: Validation logic logic ---
     if (isConditionSale.value) {
       if (addressC.text.isEmpty) {
         Get.snackbar("Required", "Delivery Address required for Condition");
@@ -297,14 +348,6 @@ class LiveSalesController extends GetxController {
         return;
       }
     }
-    // Note: For Normal Sale, Address is optional but recommended.
-    // If you want it mandatory for all, uncomment below:
-    /*
-    if (addressC.text.isEmpty) {
-       Get.snackbar("Required", "Address is required");
-       return;
-    }
-    */
 
     String? finalCourierName;
     if (isConditionSale.value) {
@@ -354,6 +397,70 @@ class LiveSalesController extends GetxController {
       if (parts.length > 1) sellerPhone = parts[1].trim();
     }
 
+    // 2. PAYMENT VALIDATION (NEW FEATURE)
+    // If total payment is 0, show a popup warning
+    if (totalPaidInput.value <= 0) {
+      Get.defaultDialog(
+        title: "No Payment Details",
+        titleStyle: const TextStyle(
+          color: Colors.red,
+          fontWeight: FontWeight.bold,
+        ),
+        middleText:
+            "You have not entered any payment amount.\nDo you want to proceed as a Due/Credit sale?",
+        middleTextStyle: const TextStyle(fontSize: 16),
+        textConfirm: "PROCEED",
+        textCancel: "CANCEL",
+        confirmTextColor: Colors.white,
+        buttonColor: Colors.redAccent,
+        radius: 10,
+        onConfirm: () {
+          Get.back(); // Close Dialog
+          // Trigger the transaction with zero payment
+          _processTransaction(
+            finalCourierName: finalCourierName,
+            finalChallan: finalChallan,
+            fName: fName,
+            fPhone: fPhone,
+            debtorId: debtorId,
+            sellerUid: sellerUid,
+            sellerName: sellerName,
+            sellerPhone: sellerPhone,
+          );
+        },
+        onCancel: () {
+          // Just closes dialog, no action needed
+        },
+      );
+      return; // Stop execution here, wait for dialog response
+    }
+
+    // If payment exists, proceed directly
+    _processTransaction(
+      finalCourierName: finalCourierName,
+      finalChallan: finalChallan,
+      fName: fName,
+      fPhone: fPhone,
+      debtorId: debtorId,
+      sellerUid: sellerUid,
+      sellerName: sellerName,
+      sellerPhone: sellerPhone,
+    );
+  }
+
+  // ==============================================================================
+  // TRANSACTION LOGIC (Extracted from finalizeSale for reuse)
+  // ==============================================================================
+  Future<void> _processTransaction({
+    String? finalCourierName,
+    required String finalChallan,
+    required String fName,
+    required String fPhone,
+    String? debtorId,
+    required String sellerUid,
+    required String sellerName,
+    required String sellerPhone,
+  }) async {
     isProcessing.value = true;
     final String invNo = _generateInvoiceID();
     final DateTime saleDate = DateTime.now();
@@ -513,6 +620,7 @@ class LiveSalesController extends GetxController {
       allocatedToPrevRunningDue - absorbedByDailySales,
     );
 
+    // --- KEY PART: ORDER ITEMS SAVED WITH ACTUAL (EDITED) SALE RATE ---
     List<Map<String, dynamic>> orderItems =
         cart.map((item) {
           return {
@@ -521,7 +629,7 @@ class LiveSalesController extends GetxController {
             "model": item.product.model,
             "brand": item.product.brand,
             "qty": item.quantity.value,
-            "saleRate": item.priceAtSale,
+            "saleRate": item.priceAtSale, // Uses the edited price
             "costRate": item.product.avgPurchasePrice,
             "subtotal": item.subtotal,
           };
@@ -573,7 +681,7 @@ class LiveSalesController extends GetxController {
         "debtorId": debtorId,
         "shopName": shopC.text,
         "isCondition": isConditionSale.value,
-        "deliveryAddress": addressC.text, // Address is saved here for everyone
+        "deliveryAddress": addressC.text,
         "challanNo": finalChallan,
         "cartons": isConditionSale.value ? cartonsInt : 0,
         "courierName": isConditionSale.value ? finalCourierName : null,
@@ -823,7 +931,6 @@ class LiveSalesController extends GetxController {
           "name": fName,
           "phone": fPhone,
           "shop": shopC.text,
-          // UPDATED: Save Address for Retailer too
           "address": addressC.text,
           "lastInv": invNo,
           "lastShopDate": FieldValue.serverTimestamp(),
@@ -1051,10 +1158,7 @@ class LiveSalesController extends GetxController {
                 child: pw.Center(
                   child: pw.Text(
                     "DELIVERY CHALLAN",
-                    style: pw.TextStyle(
-                      fontSize: 14,
-                      letterSpacing: 2,
-                    ),
+                    style: pw.TextStyle(fontSize: 14, letterSpacing: 2),
                   ),
                 ),
               ),
@@ -1089,7 +1193,6 @@ class LiveSalesController extends GetxController {
     await Printing.layoutPdf(onLayout: (f) => pdf.save());
   }
 
-  // --- UPDATED: PDF HEADER ---
   pw.Widget _buildCompanyHeader(pw.Font bold, pw.Font reg) {
     return pw.Center(
       child: pw.Container(
@@ -1102,17 +1205,14 @@ class LiveSalesController extends GetxController {
           crossAxisAlignment: pw.CrossAxisAlignment.center,
           mainAxisAlignment: pw.MainAxisAlignment.center,
           children: [
-            // Line 1: Main Title
             pw.Text(
               "G TEL",
               style: pw.TextStyle(font: bold, fontSize: 26, letterSpacing: 2),
             ),
-            // Line 2: Subtitle Line 1
             pw.Text(
               "JOY EXPRESS",
               style: pw.TextStyle(font: bold, fontSize: 16, letterSpacing: 5),
             ),
-            // Line 3: Subtitle Line 2
             pw.SizedBox(height: 2),
             pw.Text(
               "MOBILE PARTS WHOLESALER",
@@ -1189,7 +1289,6 @@ class LiveSalesController extends GetxController {
               if (shopName.isNotEmpty)
                 pw.Text(shopName, style: pw.TextStyle(font: reg, fontSize: 10)),
               pw.Text(phone, style: pw.TextStyle(font: reg, fontSize: 10)),
-              // UPDATED: Displays address if available (for both condition and normal)
               if (addr.isNotEmpty)
                 pw.Text(addr, style: pw.TextStyle(font: reg, fontSize: 9)),
             ],

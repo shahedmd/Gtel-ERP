@@ -60,6 +60,13 @@ class CashDrawerView extends StatelessWidget {
               if (controller.isLoading.value) {
                 return const Center(child: CircularProgressIndicator());
               }
+
+              // Calculate Total Pages
+              int totalPages =
+                  (controller.totalItems.value / controller.itemsPerPage)
+                      .ceil();
+              if (totalPages == 0) totalPages = 1;
+
               return RefreshIndicator(
                 onRefresh: () async => controller.fetchData(),
                 child: SingleChildScrollView(
@@ -152,7 +159,7 @@ class CashDrawerView extends StatelessWidget {
                       ),
                       const SizedBox(height: 20),
 
-                      // B. SUMMARY ROW (Inflow/Outflow)
+                      // B. SUMMARY ROW
                       Row(
                         children: [
                           _summaryItem(
@@ -194,7 +201,7 @@ class CashDrawerView extends StatelessWidget {
                         crossAxisCount: 2,
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
-                        childAspectRatio: 6, // Adjusted for better fit
+                        childAspectRatio: 6,
                         mainAxisSpacing: 12,
                         crossAxisSpacing: 12,
                         children: [
@@ -240,17 +247,17 @@ class CashDrawerView extends StatelessWidget {
                           const SizedBox(width: 12),
                           Expanded(
                             child: _actionBtn(
-                              "Withdraw Funds",
-                              Icons.remove_circle_outline,
+                              "Cash Out / Transfer",
+                              Icons.swap_horiz_outlined,
                               Colors.orange.shade800,
-                              () => _showCashOutDialog(),
+                              () => _showTransferDialog(),
                             ),
                           ),
                         ],
                       ),
                       const SizedBox(height: 30),
 
-                      // E. TRANSACTIONS LIST
+                      // E. TRANSACTION HEADER
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -264,7 +271,7 @@ class CashDrawerView extends StatelessWidget {
                             ),
                           ),
                           Text(
-                            "${controller.recentTransactions.length} entries",
+                            "Total: ${controller.totalItems.value}",
                             style: const TextStyle(
                               fontSize: 10,
                               color: Colors.grey,
@@ -273,27 +280,87 @@ class CashDrawerView extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: 10),
+
+                      // F. TRANSACTIONS LIST
                       Container(
                         decoration: BoxDecoration(
                           color: Colors.white,
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(color: borderCol),
                         ),
-                        child: ListView.separated(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          itemCount: controller.recentTransactions.length,
-                          separatorBuilder:
-                              (c, i) => Divider(
-                                height: 1,
-                                color: Colors.grey.shade200,
+                        child: Column(
+                          children: [
+                            if (controller.paginatedTransactions.isEmpty)
+                              const Padding(
+                                padding: EdgeInsets.all(30.0),
+                                child: Text(
+                                  "No transactions found in this period.",
+                                ),
+                              )
+                            else
+                              ListView.separated(
+                                shrinkWrap: true,
+                                physics: const NeverScrollableScrollPhysics(),
+                                itemCount:
+                                    controller.paginatedTransactions.length,
+                                separatorBuilder:
+                                    (c, i) => Divider(
+                                      height: 1,
+                                      color: Colors.grey.shade200,
+                                    ),
+                                itemBuilder:
+                                    (context, index) => _transactionRow(
+                                      controller.paginatedTransactions[index],
+                                    ),
                               ),
-                          itemBuilder:
-                              (context, index) => _transactionRow(
-                                controller.recentTransactions[index],
-                              ),
+                          ],
                         ),
                       ),
+
+                      const SizedBox(height: 16),
+
+                      // G. PAGINATION CONTROLS (ALWAYS VISIBLE if > 0 items)
+                      if (controller.totalItems.value > 0)
+                        Container(
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              // Previous Button
+                              _pageBtn(
+                                icon: Icons.chevron_left,
+                                onTap:
+                                    controller.currentPage.value > 1
+                                        ? () => controller.previousPage()
+                                        : null,
+                              ),
+
+                              // Page Info
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 20,
+                                ),
+                                child: Text(
+                                  "Page ${controller.currentPage.value} of $totalPages",
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: darkBlue,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+
+                              // Next Button
+                              _pageBtn(
+                                icon: Icons.chevron_right,
+                                onTap:
+                                    controller.currentPage.value < totalPages
+                                        ? () => controller.nextPage()
+                                        : null,
+                              ),
+                            ],
+                          ),
+                        ),
                       const SizedBox(height: 40),
                     ],
                   ),
@@ -309,6 +376,23 @@ class CashDrawerView extends StatelessWidget {
   // =========================================
   // SUB-WIDGETS
   // =========================================
+
+  Widget _pageBtn({required IconData icon, VoidCallback? onTap}) {
+    bool disabled = onTap == null;
+    return Container(
+      decoration: BoxDecoration(
+        color: disabled ? Colors.grey.shade200 : Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: disabled ? Colors.transparent : borderCol),
+      ),
+      child: IconButton(
+        icon: Icon(icon, color: disabled ? Colors.grey : darkBlue),
+        onPressed: onTap,
+        constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+        padding: EdgeInsets.zero,
+      ),
+    );
+  }
 
   Widget _summaryItem(String label, double val, Color col, IconData icon) {
     return Expanded(
@@ -348,12 +432,15 @@ class CashDrawerView extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 8),
-            Text(
-              NumberFormat.compact().format(val),
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                color: col,
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                currencyFormatter.format(val),
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: col,
+                ),
               ),
             ),
           ],
@@ -424,9 +511,25 @@ class CashDrawerView extends StatelessWidget {
   Widget _transactionRow(DrawerTransaction tx) {
     bool isCredit = tx.type == 'sale' || tx.type == 'collection';
     bool isDebit = tx.type == 'expense' || tx.type == 'withdraw';
+    bool isTransfer = tx.type == 'transfer';
 
-    Color amountColor = isCredit ? Colors.green.shade700 : Colors.red.shade700;
-    IconData icon = isCredit ? Icons.arrow_downward : Icons.arrow_upward;
+    Color amountColor;
+    IconData icon;
+    Color bgCol;
+
+    if (isTransfer) {
+      amountColor = Colors.orange.shade800;
+      icon = Icons.swap_horiz;
+      bgCol = Colors.orange;
+    } else if (isCredit) {
+      amountColor = Colors.green.shade700;
+      icon = Icons.arrow_downward;
+      bgCol = Colors.green;
+    } else {
+      amountColor = Colors.red.shade700;
+      icon = Icons.arrow_upward;
+      bgCol = Colors.red;
+    }
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
@@ -435,7 +538,7 @@ class CashDrawerView extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: (isCredit ? Colors.green : Colors.red).withOpacity(0.1),
+              color: bgCol.withOpacity(0.1),
               borderRadius: BorderRadius.circular(6),
             ),
             child: Icon(icon, size: 16, color: amountColor),
@@ -502,7 +605,7 @@ class CashDrawerView extends StatelessWidget {
           Expanded(
             flex: 2,
             child: Text(
-              "${isDebit ? '-' : '+'}${currencyFormatter.format(tx.amount)}",
+              "${isTransfer ? '' : (isDebit ? '-' : '+')}${currencyFormatter.format(tx.amount)}",
               textAlign: TextAlign.right,
               style: TextStyle(
                 fontSize: 13,
@@ -543,7 +646,7 @@ class CashDrawerView extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: const BoxDecoration(
-        color: Colors.white, // <--- Moved color inside decoration
+        color: Colors.white,
         border: Border(bottom: BorderSide(color: borderCol)),
       ),
       child: Row(
@@ -555,7 +658,6 @@ class CashDrawerView extends StatelessWidget {
           Expanded(child: _filterBtn("Year", DateFilter.yearly)),
           const SizedBox(width: 8),
 
-          // Custom Date Picker Icon
           InkWell(
             onTap: () async {
               var res = await showDateRangePicker(
@@ -747,11 +849,17 @@ class CashDrawerView extends StatelessWidget {
     );
   }
 
-  void _showCashOutDialog() {
+  void _showTransferDialog() {
     final amt = TextEditingController();
     final bankName = TextEditingController();
     final accNo = TextEditingController();
-    String method = 'bank'; // Default to bank for withdrawals usually
+    final note = TextEditingController();
+
+    // Default selections
+    String fromMethod = 'bank';
+    String toMethod = 'cash';
+    final RxString fromVal = fromMethod.obs;
+    final RxString toVal = toMethod.obs;
 
     Get.dialog(
       Dialog(
@@ -760,98 +868,208 @@ class CashDrawerView extends StatelessWidget {
           padding: const EdgeInsets.all(24),
           width: 400,
           child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  "Withdraw Funds",
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 18,
-                    color: Colors.redAccent,
+            child: Obx(
+              () => Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    "Cash Out / Transfer",
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18,
+                      color: Colors.deepOrange,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 20),
-                DropdownButtonFormField<String>(
-                  value: method,
-                  dropdownColor: Colors.white,
-                  items:
-                      ['bank', 'bkash', 'nagad', 'cash']
-                          .map(
-                            (e) => DropdownMenuItem(
-                              value: e,
-                              child: Text(
-                                e.toUpperCase(),
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
+                  const SizedBox(height: 5),
+                  Text(
+                    "Move funds between accounts",
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // FROM -> TO ROW
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              "From",
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.grey,
+                              ),
+                            ),
+                            const SizedBox(height: 5),
+                            DropdownButtonFormField<String>(
+                              value: fromVal.value,
+                              dropdownColor: Colors.white,
+                              isExpanded: true,
+                              items:
+                                  ['cash', 'bank', 'bkash', 'nagad']
+                                      .map(
+                                        (e) => DropdownMenuItem(
+                                          value: e,
+                                          child: Text(e.toUpperCase()),
+                                        ),
+                                      )
+                                      .toList(),
+                              onChanged: (v) {
+                                fromVal.value = v!;
+                                // Prevent selecting same value
+                                if (toVal.value == v) {
+                                  toVal.value = (v == 'cash') ? 'bank' : 'cash';
+                                }
+                              },
+                              decoration: InputDecoration(
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 0,
+                                ),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
                                 ),
                               ),
                             ),
-                          )
-                          .toList(),
-                  onChanged: (v) => method = v!,
-                  decoration: _inputDeco(
-                    "Withdraw From",
-                    Icons.account_balance_wallet_outlined,
+                          ],
+                        ),
+                      ),
+                      const Padding(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 8.0,
+                          vertical: 20,
+                        ),
+                        child: Icon(Icons.arrow_forward, color: Colors.grey),
+                      ),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              "To",
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.grey,
+                              ),
+                            ),
+                            const SizedBox(height: 5),
+                            DropdownButtonFormField<String>(
+                              value: toVal.value,
+                              dropdownColor: Colors.white,
+                              isExpanded: true,
+                              items:
+                                  ['cash', 'bank', 'bkash', 'nagad']
+                                      .map(
+                                        (e) => DropdownMenuItem(
+                                          value: e,
+                                          child: Text(e.toUpperCase()),
+                                        ),
+                                      )
+                                      .toList(),
+                              onChanged: (v) {
+                                toVal.value = v!;
+                                if (fromVal.value == v) {
+                                  fromVal.value =
+                                      (v == 'cash') ? 'bank' : 'cash';
+                                }
+                              },
+                              decoration: InputDecoration(
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 0,
+                                ),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: amt,
-                  keyboardType: TextInputType.number,
-                  decoration: _inputDeco("Amount (BDT)", Icons.attach_money),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: bankName,
-                  decoration: _inputDeco("Bank/Provider Name", Icons.business),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: accNo,
-                  decoration: _inputDeco(
-                    "Check/Ref Number",
-                    Icons.confirmation_number,
+
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: amt,
+                    keyboardType: TextInputType.number,
+                    decoration: _inputDeco("Amount (BDT)", Icons.attach_money),
                   ),
-                ),
-                const SizedBox(height: 24),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: () {
-                      if (amt.text.isNotEmpty) {
-                        controller.cashOutFromBank(
-                          amount: double.parse(amt.text),
-                          fromMethod: method,
-                          bankName: bankName.text,
-                          accountNo: accNo.text,
-                        );
-                      }
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.redAccent.shade700,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
+                  const SizedBox(height: 12),
+
+                  // Details Section (Visible if Bank/Bkash/Nagad involved)
+                  if (fromVal.value != 'cash' || toVal.value != 'cash') ...[
+                    TextField(
+                      controller: bankName,
+                      decoration: _inputDeco(
+                        "Bank/Provider Name",
+                        Icons.business,
                       ),
                     ),
-                    child: const Text(
-                      "CONFIRM WITHDRAWAL",
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: accNo,
+                      decoration: _inputDeco("Account/Check No", Icons.numbers),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+
+                  TextField(
+                    controller: note,
+                    decoration: _inputDeco("Note (Optional)", Icons.note),
+                  ),
+
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        if (amt.text.isNotEmpty &&
+                            double.tryParse(amt.text) != null) {
+                          controller.transferFund(
+                            amount: double.parse(amt.text),
+                            fromMethod: _capitalize(fromVal.value),
+                            toMethod: _capitalize(toVal.value),
+                            bankName: bankName.text,
+                            accountNo: accNo.text,
+                            description:
+                                note.text.isNotEmpty
+                                    ? note.text
+                                    : "Transfer: ${_capitalize(fromVal.value)} to ${_capitalize(toVal.value)}",
+                          );
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.deepOrange,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: const Text(
+                        "CONFIRM TRANSFER",
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
       ),
     );
   }
+
+  String _capitalize(String s) =>
+      s.isNotEmpty ? '${s[0].toUpperCase()}${s.substring(1)}' : '';
 
   InputDecoration _inputDeco(String label, IconData icon) {
     return InputDecoration(

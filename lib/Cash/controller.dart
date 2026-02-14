@@ -15,10 +15,14 @@ class DrawerTransaction {
   final DateTime date;
   final String description;
   final double amount;
-  final String type; // 'sale', 'collection', 'expense', 'withdraw'
+  final String type; // 'sale', 'collection', 'expense', 'transfer'
   final String method; // 'Cash', 'Bank', 'Bkash', 'Nagad', 'Mixed'
   final String? bankName;
   final String? accountDetails;
+
+  // Added to help UI distinguish transfer direction
+  final String? transferFrom;
+  final String? transferTo;
 
   DrawerTransaction({
     required this.date,
@@ -28,6 +32,8 @@ class DrawerTransaction {
     required this.method,
     this.bankName,
     this.accountDetails,
+    this.transferFrom,
+    this.transferTo,
   });
 }
 
@@ -53,9 +59,24 @@ class CashDrawerController extends GetxController {
   final RxDouble rawCollectionTotal = 0.0.obs;
   final RxDouble rawExpenseTotal = 0.0.obs;
 
-  final RxList<DrawerTransaction> recentTransactions =
+  // --- PAGINATION & LISTS ---
+  // Stores ALL fetched data for PDF and totals
+  final List<DrawerTransaction> _allTransactions = [];
+  // Stores only the current page data for UI
+  final RxList<DrawerTransaction> paginatedTransactions =
       <DrawerTransaction>[].obs;
+
+  final RxInt currentPage = 1.obs;
+  final int itemsPerPage = 30;
+  final RxInt totalItems = 0.obs;
+
+  // --- FORMATTING ---
+  // 1. UPDATE: Strict full numbering format (e.g. 1,200.00) - No 1.2k
   final NumberFormat _currencyFormat = NumberFormat('#,##0.00');
+
+  String formatNumber(double amount) {
+    return _currencyFormat.format(amount);
+  }
 
   @override
   void onInit() {
@@ -63,6 +84,40 @@ class CashDrawerController extends GetxController {
     setFilter(DateFilter.monthly);
   }
 
+  // --- PAGINATION LOGIC ---
+  void _applyPagination() {
+    totalItems.value = _allTransactions.length;
+    int startIndex = (currentPage.value - 1) * itemsPerPage;
+    int endIndex = startIndex + itemsPerPage;
+
+    if (startIndex >= _allTransactions.length) {
+      paginatedTransactions.clear();
+    } else {
+      if (endIndex > _allTransactions.length) {
+        endIndex = _allTransactions.length;
+      }
+      paginatedTransactions.assignAll(
+        _allTransactions.sublist(startIndex, endIndex),
+      );
+    }
+  }
+
+  void nextPage() {
+    int maxPage = (totalItems.value / itemsPerPage).ceil();
+    if (currentPage.value < maxPage) {
+      currentPage.value++;
+      _applyPagination();
+    }
+  }
+
+  void previousPage() {
+    if (currentPage.value > 1) {
+      currentPage.value--;
+      _applyPagination();
+    }
+  }
+
+  // --- DATE FILTERING ---
   void setFilter(DateFilter filter) {
     filterType.value = filter;
     DateTime now = DateTime.now();
@@ -95,8 +150,13 @@ class CashDrawerController extends GetxController {
     fetchData();
   }
 
+  // --- DATA FETCHING ---
   Future<void> fetchData() async {
     isLoading.value = true;
+    _allTransactions.clear(); // Clear internal list
+    paginatedTransactions.clear(); // Clear UI list
+    currentPage.value = 1; // Reset to page 1
+
     try {
       DateTime start = DateTime(
         selectedRange.value.start.year,
@@ -124,7 +184,7 @@ class CashDrawerController extends GetxController {
               .orderBy('timestamp', descending: true)
               .get();
 
-      // 2. Fetch Ledger
+      // 2. Fetch Ledger (Deposits, Manual Adds, Transfers)
       var ledgerFuture =
           _db
               .collection('cash_ledger')
@@ -150,23 +210,23 @@ class CashDrawerController extends GetxController {
       // --- Accumulators ---
       double tCash = 0, tBank = 0, tBkash = 0, tNagad = 0;
       double sumSales = 0, sumCollections = 0, sumExpenses = 0;
-      List<DrawerTransaction> allTx = [...expenseList];
 
-      // --- A. PROCESS SALES (FIXED FOR CONDITION RECOVERY) ---
+      // We will add all parsed transactions here temporarily
+      List<DrawerTransaction> tempTxList = [...expenseList];
+
+      // --- A. PROCESS SALES ---
       for (var doc in salesSnap.docs) {
         var data = doc.data() as Map<String, dynamic>;
 
         double totalPaid = double.tryParse(data['paid'].toString()) ?? 0;
         double ledgerPaid = double.tryParse(data['ledgerPaid'].toString()) ?? 0;
-
-        // Actual money received now = Paid - Ledger Usage
         double actualReceived = totalPaid - ledgerPaid;
 
         if (actualReceived <= 0.01) continue;
 
         sumSales += actualReceived;
 
-        // Parse Payment Method
+        // Payment Method Logic (Same as before)
         var pm = data['paymentMethod'];
         double c = 0, b = 0, bk = 0, n = 0;
         String displayMethod = "Cash";
@@ -174,11 +234,8 @@ class CashDrawerController extends GetxController {
         String? displayAcc;
 
         if (pm is Map) {
-          // --- FIX: Check for 'type' (Condition/Single) vs keys (POS Mixed) ---
           if (pm.containsKey('type')) {
-            // Condition Recovery Format: {type: 'bkash', details: '...'}
             String type = (pm['type'] ?? 'cash').toString().toLowerCase();
-
             if (type.contains('bank')) {
               b = actualReceived;
               displayMethod = "Bank";
@@ -196,13 +253,11 @@ class CashDrawerController extends GetxController {
               displayMethod = "Cash";
             }
           } else {
-            // POS Mixed Format: {cash: 100, bank: 50...}
             c = double.tryParse(pm['cash'].toString()) ?? 0;
             b = double.tryParse(pm['bank'].toString()) ?? 0;
             bk = double.tryParse(pm['bkash'].toString()) ?? 0;
             n = double.tryParse(pm['nagad'].toString()) ?? 0;
 
-            // Details
             if (b > 0) {
               displayBank = pm['bankName']?.toString();
               displayAcc = pm['accountNumber']?.toString();
@@ -210,7 +265,6 @@ class CashDrawerController extends GetxController {
             if (bk > 0 && displayAcc == null)
               displayAcc = "Bkash: ${pm['bkashNumber']}";
 
-            // Label
             List<String> used = [];
             if (c > 0) used.add("Cash");
             if (b > 0) used.add("Bank");
@@ -222,7 +276,6 @@ class CashDrawerController extends GetxController {
               displayMethod = used.first;
           }
         } else {
-          // Legacy String Fallback
           String s = pm.toString().toLowerCase();
           if (s.contains('bank')) {
             b = actualReceived;
@@ -239,16 +292,15 @@ class CashDrawerController extends GetxController {
           }
         }
 
-        // Add to Accumulators
         tCash += c;
         tBank += b;
         tBkash += bk;
         tNagad += n;
 
-        allTx.add(
+        tempTxList.add(
           DrawerTransaction(
             date: (data['timestamp'] as Timestamp).toDate(),
-            description: "Sale/Rec: ${data['name'] ?? 'NA'}",
+            description: "Sale: ${data['name'] ?? 'NA'}",
             amount: actualReceived,
             type: 'sale',
             method: displayMethod,
@@ -258,7 +310,7 @@ class CashDrawerController extends GetxController {
         );
       }
 
-      // --- B. PROCESS LEDGER (Manual & Collections) ---
+      // --- B. PROCESS LEDGER (Manual, Collections AND TRANSFERS) ---
       for (var doc in ledgerSnap.docs) {
         var data = doc.data() as Map<String, dynamic>;
         String source = (data['source'] ?? '').toString();
@@ -266,9 +318,52 @@ class CashDrawerController extends GetxController {
         if (source == 'pos_sale') continue;
 
         double amt = double.tryParse(data['amount'].toString()) ?? 0;
-        String type = data['type'] ?? 'deposit';
+        String type = data['type'] ?? 'deposit'; // deposit, withdraw, transfer
 
-        // Parse Details
+        // 3. UPDATE: Handle 'transfer' logic
+        if (type == 'transfer') {
+          String fromMethod = (data['fromMethod'] ?? '').toString();
+          String toMethod = (data['toMethod'] ?? '').toString();
+          String? bankNm = data['bankName'];
+          String? accNo = data['accountNo'];
+
+          // Deduct from Source
+          if (fromMethod == 'Bank')
+            tBank -= amt;
+          else if (fromMethod == 'Bkash')
+            tBkash -= amt;
+          else if (fromMethod == 'Nagad')
+            tNagad -= amt;
+          else
+            tCash -= amt; // Default to Cash
+
+          // Add to Destination
+          if (toMethod == 'Bank')
+            tBank += amt;
+          else if (toMethod == 'Bkash')
+            tBkash += amt;
+          else if (toMethod == 'Nagad')
+            tNagad += amt;
+          else
+            tCash += amt; // Default to Cash
+
+          tempTxList.add(
+            DrawerTransaction(
+              date: (data['timestamp'] as Timestamp).toDate(),
+              description: data['description'] ?? "Fund Transfer",
+              amount: amt,
+              type: 'transfer',
+              method: "$fromMethod > $toMethod",
+              bankName: bankNm,
+              accountDetails: accNo,
+              transferFrom: fromMethod,
+              transferTo: toMethod,
+            ),
+          );
+          continue; // Skip standard deposit/withdraw logic below
+        }
+
+        // Standard Logic for Deposit/Withdraw (Legacy support)
         String methodStr = (data['method'] ?? 'Cash').toString();
         String? lBank, lAcc;
 
@@ -299,6 +394,7 @@ class CashDrawerController extends GetxController {
           else
             tCash += amt;
         } else {
+          // Legacy withdraw (Cash Out) logic
           sumExpenses += amt;
           if (isBank)
             tBank -= amt;
@@ -310,7 +406,7 @@ class CashDrawerController extends GetxController {
             tCash -= amt;
         }
 
-        allTx.add(
+        tempTxList.add(
           DrawerTransaction(
             date: (data['timestamp'] as Timestamp).toDate(),
             description: data['description'] ?? source.replaceAll('_', ' '),
@@ -328,6 +424,7 @@ class CashDrawerController extends GetxController {
         sumExpenses += ex.amount;
         double remaining = ex.amount;
 
+        // Priority: Cash -> Bank -> Bkash -> Nagad
         if (tCash >= remaining) {
           tCash -= remaining;
           remaining = 0;
@@ -345,7 +442,6 @@ class CashDrawerController extends GetxController {
             tBank = 0;
           }
         }
-
         if (remaining > 0) {
           if (tBkash >= remaining) {
             tBkash -= remaining;
@@ -355,7 +451,6 @@ class CashDrawerController extends GetxController {
             tBkash = 0;
           }
         }
-
         if (remaining > 0) {
           if (tNagad >= remaining) {
             tNagad -= remaining;
@@ -378,9 +473,13 @@ class CashDrawerController extends GetxController {
       rawCollectionTotal.value = sumCollections;
       rawExpenseTotal.value = sumExpenses;
 
-      allTx.sort((a, b) => b.date.compareTo(a.date));
-      recentTransactions.assignAll(allTx);
+      // Sort and Paginate
+      tempTxList.sort((a, b) => b.date.compareTo(a.date));
+      _allTransactions.addAll(tempTxList);
+
+      _applyPagination(); // Update UI list
     } catch (e) {
+      print(e);
       Get.snackbar("Error", "Could not calculate cash drawer.");
     } finally {
       isLoading.value = false;
@@ -446,21 +545,26 @@ class CashDrawerController extends GetxController {
     fetchData();
   }
 
-  Future<void> cashOutFromBank({
+  // 3. UPDATE: REPLACED cashOutFromBank WITH transferFund
+  // Supports moving money between any two methods with optional bank details
+  Future<void> transferFund({
     required double amount,
-    required String fromMethod,
-    String? bankName,
-    String? accountNo,
+    required String fromMethod, // 'Cash', 'Bank', 'Bkash', 'Nagad'
+    required String toMethod, // 'Cash', 'Bank', 'Bkash', 'Nagad'
+    String? bankName, // Optional: If either side is Bank
+    String? accountNo, // Optional: Account details
+    String? description,
   }) async {
     await _db.collection('cash_ledger').add({
-      'type': 'withdraw',
+      'type': 'transfer',
       'amount': amount,
-      'method': fromMethod,
+      'fromMethod': fromMethod,
+      'toMethod': toMethod,
       'bankName': bankName,
       'accountNo': accountNo,
-      'description': 'Cash Out / Withdrawal',
+      'description': description ?? 'Fund Transfer',
       'timestamp': FieldValue.serverTimestamp(),
-      'source': 'manual_withdraw',
+      'source': 'manual_transfer',
     });
     fetchData();
     Get.back();
@@ -473,6 +577,9 @@ class CashDrawerController extends GetxController {
     final fontBold = await PdfGoogleFonts.openSansBold();
     String period =
         "${DateFormat('dd MMM').format(selectedRange.value.start)} - ${DateFormat('dd MMM yyyy').format(selectedRange.value.end)}";
+
+    // Use _allTransactions for PDF so nothing is hidden by pagination
+    final pdfTxList = _allTransactions;
 
     doc.addPage(
       pw.MultiPage(
@@ -523,7 +630,7 @@ class CashDrawerController extends GetxController {
                       PdfColors.blue900,
                     ),
                     _pdfSummaryCol(
-                      "Expenses/Out",
+                      "Expenses",
                       rawExpenseTotal.value,
                       fontBold,
                       PdfColors.red900,
@@ -567,16 +674,20 @@ class CashDrawerController extends GetxController {
               pw.TableHelper.fromTextArray(
                 headers: ['Date', 'Desc', 'Method', 'Amount'],
                 data:
-                    recentTransactions
-                        .map(
-                          (tx) => [
-                            DateFormat('dd-MMM HH:mm').format(tx.date),
-                            tx.description,
-                            tx.method,
-                            "${(tx.type == 'withdraw' || tx.type == 'expense') ? '-' : '+'}${_currencyFormat.format(tx.amount)}",
-                          ],
-                        )
-                        .toList(),
+                    pdfTxList.map((tx) {
+                      String sign = "+";
+                      if (tx.type == 'withdraw' || tx.type == 'expense')
+                        sign = "-";
+                      if (tx.type == 'transfer')
+                        sign = "↔"; // Icon for transfer
+
+                      return [
+                        DateFormat('dd-MMM HH:mm').format(tx.date),
+                        tx.description,
+                        tx.method,
+                        "$sign${_currencyFormat.format(tx.amount)}",
+                      ];
+                    }).toList(),
                 headerStyle: pw.TextStyle(
                   font: fontBold,
                   fontSize: 9,
