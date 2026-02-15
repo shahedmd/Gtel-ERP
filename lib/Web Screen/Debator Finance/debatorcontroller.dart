@@ -788,9 +788,7 @@ class DebatorController extends GetxController {
     }
   }
 
-  // ------------------------------------------------------------------
-  // 3. DEBTOR PROFILE CRUD
-  // ------------------------------------------------------------------
+
 
   Future<void> addBody({
     required String name,

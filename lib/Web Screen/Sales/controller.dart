@@ -507,7 +507,7 @@ class DailySalesController extends GetxController {
   }
 
   // ==========================================
-  // REPRINT LOGIC (Updated with Professional PDF)
+  // REPRINT LOGIC (Fixed: Debtor Payment Method Display)
   // ==========================================
   Future<void> reprintInvoice(String invoiceId) async {
     isLoading.value = true;
@@ -521,66 +521,135 @@ class DailySalesController extends GetxController {
       }
 
       Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+      bool isCond = data['isCondition'] ?? false;
 
-      // 2. Check Daily Sales for real-time payment updates
-      double realTimePaid = 0.0;
-      bool foundInDaily = false;
+      // 2. Prepare Base Payment Map
+      Map<String, dynamic> payMap = Map<String, dynamic>.from(
+        data['paymentDetails'] ?? {},
+      );
 
-      QuerySnapshot dailySnap =
-          await _db
-              .collection('daily_sales')
-              .where('transactionId', isEqualTo: invoiceId)
-              .limit(1)
-              .get();
+      // 3. Logic Branch: Condition vs Regular (Debtor/Cash)
+      if (isCond) {
+        // --- SCENARIO A: CONDITION SALE ---
+        // (Logic identical to ConditionSalesController)
+        List<dynamic> history = data['collectionHistory'] ?? [];
+        double historyTotal = 0.0;
 
-      if (dailySnap.docs.isNotEmpty) {
-        var dailyData = dailySnap.docs.first.data() as Map<String, dynamic>;
-        realTimePaid = (dailyData['paid'] as num?)?.toDouble() ?? 0.0;
-        foundInDaily = true;
+        for (var h in history) {
+          if (h is Map) {
+            String method = h['method']?.toString().toLowerCase() ?? 'cash';
+            double amount = double.tryParse(h['amount'].toString()) ?? 0.0;
+            historyTotal += amount;
+
+            double existing =
+                double.tryParse(payMap[method]?.toString() ?? '0') ?? 0.0;
+            payMap[method] = existing + amount;
+          }
+        }
+        double initialPaid =
+            double.tryParse(payMap['paidForInvoice'].toString()) ?? 0.0;
+        payMap['paidForInvoice'] = initialPaid + historyTotal;
+        payMap['due'] = double.tryParse(data['courierDue'].toString()) ?? 0.0;
+      } else {
+        // --- SCENARIO B: DEBTOR / REGULAR SALE ---
+
+        // Fetch real-time status from daily_sales
+        QuerySnapshot dailySnap =
+            await _db
+                .collection('daily_sales')
+                .where('transactionId', isEqualTo: invoiceId)
+                .limit(1)
+                .get();
+
+        if (dailySnap.docs.isNotEmpty) {
+          var dailyData = dailySnap.docs.first.data() as Map<String, dynamic>;
+
+          double realTimePaid = (dailyData['paid'] as num?)?.toDouble() ?? 0.0;
+          List<dynamic> paymentHistory = dailyData['paymentHistory'] ?? [];
+
+          // A. Recalculate Invoice Totals
+          List<Map<String, dynamic>> items = List<Map<String, dynamic>>.from(
+            data['items'] ?? [],
+          );
+          double subTotal = items.fold(
+            0.0,
+            (sumv, item) => sumv + (item['subtotal'] ?? 0),
+          );
+          double discountVal = (data['discount'] as num?)?.toDouble() ?? 0.0;
+          double grandTotal = subTotal - discountVal;
+
+          // Update Paid & Due Amount
+          payMap['paidForInvoice'] = realTimePaid;
+          double newDue = grandTotal - realTimePaid;
+          payMap['due'] = newDue < 0 ? 0 : newDue;
+
+          // B. FIX PAYMENT METHOD DISPLAY (The Critical Fix)
+          // We need to populate keys like 'cash', 'bkash' for the PDF to see them.
+
+          if (paymentHistory.isNotEmpty) {
+            // Option 1: Aggregate from History (Best for partial payments)
+            for (var h in paymentHistory) {
+              if (h is Map) {
+                String type = (h['type'] ?? 'cash').toString().toLowerCase();
+                double amt = (h['amount'] as num?)?.toDouble() ?? 0.0;
+
+                // Add to PDF specific keys
+                double current =
+                    double.tryParse(payMap[type]?.toString() ?? '0') ?? 0.0;
+                payMap[type] = current + amt;
+
+                // Map details if available
+                if (h['number'] != null) payMap['${type}Number'] = h['number'];
+                if (h['bankName'] != null) payMap['bankName'] = h['bankName'];
+                if (h['accountNumber'] != null) {
+                  payMap['accountNumber'] = h['accountNumber'];
+                }
+              }
+            }
+          } else if (realTimePaid > 0) {
+            // Option 2: No history (Legacy or simple update), use 'paymentMethod' map
+            var pm = dailyData['paymentMethod'];
+            if (pm != null && pm is Map) {
+              String type = (pm['type'] ?? 'cash').toString().toLowerCase();
+
+              // Assign the FULL paid amount to this method key
+              payMap[type] = realTimePaid;
+
+              // Map details
+              if (pm['number'] != null) payMap['${type}Number'] = pm['number'];
+              if (pm['bankName'] != null) payMap['bankName'] = pm['bankName'];
+              if (pm['accountNumber'] != null) {
+                payMap['accountNumber'] = pm['accountNumber'];
+              }
+            } else {
+              // Option 3: Paid exists but no method info -> Default to CASH to avoid "Unpaid"
+              payMap['cash'] = realTimePaid;
+            }
+          }
+        }
       }
 
-      // 3. Extract Data
+      // 4. Extract Common Data
       String name = data['customerName'] ?? "";
       String phone = data['customerPhone'] ?? "";
       String shop = data['shopName'] ?? "";
       String address = data['deliveryAddress'] ?? "";
       String? courier = data['courierName'];
       int cartons = data['cartons'] ?? 0;
-      bool isCond = data['isCondition'] ?? false;
       String challan = data['challanNo'] ?? "";
-      // Note: First file used 'packagerName', second used 'packagerName' key.
       String packagerName = data['packagerName'] ?? '';
 
       List<Map<String, dynamic>> items = List<Map<String, dynamic>>.from(
         data['items'] ?? [],
       );
 
-      // 4. Prepare Payment Map
-      Map<String, dynamic> payMap = Map.from(data['paymentDetails'] ?? {});
-
-      double subTotal = items.fold(
-        0.0,
-        (sumv, item) => sumv + (item['subtotal'] ?? 0),
-      );
-      double discountVal = (data['discount'] as num?)?.toDouble() ?? 0.0;
-      double grandTotal = subTotal - discountVal;
-
-      // If found in daily sales, update the 'paidForInvoice' and 'due'
-      // to reflect the actual transaction status
-      if (foundInDaily) {
-        payMap['paidForInvoice'] = realTimePaid;
-        double newDue = grandTotal - realTimePaid;
-        if (newDue < 0) newDue = 0;
-        payMap['due'] = newDue;
-      }
-
       double snapOld = (data['snapshotOldDue'] as num?)?.toDouble() ?? 0.0;
       double snapRun = (data['snapshotRunningDue'] as num?)?.toDouble() ?? 0.0;
+      double discountVal = (data['discount'] as num?)?.toDouble() ?? 0.0;
 
       // 5. Get Seller Info
       String sellerName = "Joynal Abedin";
       String sellerPhone = "01720677206";
-
       if (data['soldBy'] != null) {
         var soldByData = data['soldBy'];
         if (soldByData is Map) {
@@ -591,7 +660,7 @@ class DailySalesController extends GetxController {
         }
       }
 
-      // 6. Generate PDF using the Professional Layout
+      // 6. Generate PDF
       await _generatePdf(
         invoiceId,
         name,

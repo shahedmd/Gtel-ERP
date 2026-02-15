@@ -296,6 +296,11 @@ class SidebarMenu extends StatelessWidget {
                       title: "Staff Overview",
                       isSubItem: true,
                     ),
+                    _NavTile(
+                      id: Routes.PRODUCTOVERVIEW,
+                      title: "Product Overview",
+                      isSubItem: true,
+                    ),
                   ],
                 ),
 

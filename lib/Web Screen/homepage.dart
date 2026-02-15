@@ -7,6 +7,7 @@ import 'package:gtel_erp/Staff%20Sale%20Report/ui.dart';
 import 'package:gtel_erp/Stock/Service/servicepage.dart';
 import 'package:gtel_erp/Vendor/vendorpage.dart';
 import 'package:gtel_erp/Web%20Screen/Sales/Condition/conditionpage.dart';
+import 'package:gtel_erp/Web%20Screen/Sales/Product%20analytics/ppage.dart';
 import '../Live order/liveorder.dart';
 import '../Profit&loss/page.dart';
 import '../Sale Return/salereturnpage.dart';
@@ -100,6 +101,9 @@ class _AdminHomepageState extends State<AdminHomepage> {
                   }
                   if (settings.name == Routes.STAFFSALEREPORT) {
                     return GetPageRoute(page: () => StaffReportScreen());
+                  }
+                  if (settings.name == Routes.PRODUCTOVERVIEW) {
+                    return GetPageRoute(page: () => HotSellingProductPage());
                   }
                   return GetPageRoute(
                     page: () => const Center(child: Text("Not Found")),
