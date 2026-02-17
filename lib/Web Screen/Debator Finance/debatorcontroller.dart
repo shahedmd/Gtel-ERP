@@ -4,7 +4,6 @@ import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:gtel_erp/Profit&loss/controller.dart';
 import 'package:gtel_erp/Web%20Screen/overviewcontroller.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
@@ -18,21 +17,17 @@ class DebatorController extends GetxController {
   final FirebaseFirestore db = FirebaseFirestore.instance;
 
   // --- DATA LISTS ---
-  var bodies = <DebtorModel>[].obs; // The list displayed on screen
+  var bodies = <DebtorModel>[].obs;
 
   // --- LOADING STATES ---
   RxBool isBodiesLoading = false.obs;
   RxBool isSearching = false.obs;
 
   // --- PAGINATION STATE ---
-  final int _limit = 20; // Items per page
-
-  // This list keeps track of the 'startAfter' document for every page.
-  // Index 0 = Page 1 (starts after null), Index 1 = Page 2 (starts after Doc A), etc.
+  final int _limit = 20;
   List<DocumentSnapshot?> pageCursors = [null];
-
   RxInt currentPage = 1.obs;
-  RxBool hasMore = true.obs; // Can we go forward?
+  RxBool hasMore = true.obs;
 
   // --- MARKET TOTALS ---
   var totalMarketOutstanding = 0.0.obs;
@@ -40,14 +35,10 @@ class DebatorController extends GetxController {
 
   // --- OBSERVABLES ---
   var filteredBodies = <DebtorModel>[].obs;
-
-  // Global Market Debt (Receivable)
-  // Global Market Payable (We owe them)
-
   RxBool gbIsLoading = false.obs;
   RxBool isAddingBody = false.obs;
 
-  // --- PAGINATION STATE ---
+  // --- PAGINATION STATE (INTERNAL) ---
   DocumentSnapshot? _lastDocument;
   final RxBool isMoreLoading = false.obs;
 
@@ -71,7 +62,7 @@ class DebatorController extends GetxController {
   void onInit() {
     super.onInit();
     _silentAutoRepair();
-    loadPage(1); // Load Page 1 initially
+    loadPage(1);
     loadBodies();
     calculateTotalOutstanding();
   }
@@ -87,29 +78,21 @@ class DebatorController extends GetxController {
   }
 
   // =========================================================
-  // 2. SERVER-SIDE SEARCH LOGIC
+  // 1. SEARCH & LOAD LOGIC
   // =========================================================
 
   Future<void> runServerSearch(String queryText) async {
     if (queryText.trim().isEmpty) {
-      // If search is cleared, reload the current page of the main list
       loadPage(currentPage.value);
       return;
     }
 
     isBodiesLoading.value = true;
-    isSearching.value =
-        true; // Mark as search mode (disables pagination buttons)
+    isSearching.value = true;
 
     try {
-      // NOTE: Firestore text search is case-sensitive and prefix-based.
-      // "Rahim" matches "Rah", but "rahim" does not match "Rah".
-      // Searching by multiple fields (Phone OR Name) requires multiple queries in Firestore.
-
       String term = queryText.trim();
 
-      // 1. Try finding by Name (Prefix search)
-      // This looks for names starting with the query term
       QuerySnapshot nameSnap =
           await db
               .collection('debatorbody')
@@ -118,15 +101,12 @@ class DebatorController extends GetxController {
               .limit(20)
               .get();
 
-      // 2. Try finding by Phone (Exact match usually, or prefix)
-      // Note: If you want prefix search on phone, use the same logic as name
       QuerySnapshot phoneSnap =
           await db
               .collection('debatorbody')
               .where('phone', isEqualTo: term)
               .get();
 
-      // Merge results (removing duplicates based on ID)
       Map<String, DebtorModel> results = {};
 
       for (var doc in nameSnap.docs) {
@@ -139,8 +119,6 @@ class DebatorController extends GetxController {
       }
 
       bodies.value = results.values.toList();
-
-      // In search mode, pagination doesn't apply the same way
       hasMore.value = false;
     } catch (e) {
       Get.snackbar("Search Error", e.toString());
@@ -152,9 +130,6 @@ class DebatorController extends GetxController {
 
   Future<void> calculateTotalOutstanding() async {
     try {
-      // Note: This still requires reading all docs if you want an exact market total.
-      // If you have thousands of debtors, consider running this via a Cloud Function
-      // or maintaining a separate aggregation document.
       final snap = await db.collection('debatorbody').get();
       double totalRec = 0;
       double totalPay = 0;
@@ -180,12 +155,11 @@ class DebatorController extends GetxController {
   }
 
   Future<void> loadPage(int pageIndex) async {
-    // Safety check
     if (pageIndex < 1) return;
     if (pageIndex > pageCursors.length) return;
 
     isBodiesLoading.value = true;
-    isSearching.value = false; // Disable search mode
+    isSearching.value = false;
 
     try {
       Query query = db
@@ -193,9 +167,6 @@ class DebatorController extends GetxController {
           .orderBy('createdAt', descending: true)
           .limit(_limit);
 
-      // Get the cursor for this page.
-      // Page 1 cursor is at index 0 (null).
-      // Page 2 cursor is at index 1 (the last doc of page 1).
       DocumentSnapshot? startAfterDoc = pageCursors[pageIndex - 1];
 
       if (startAfterDoc != null) {
@@ -208,22 +179,18 @@ class DebatorController extends GetxController {
         bodies.value =
             snap.docs.map((d) => DebtorModel.fromFirestore(d)).toList();
 
-        // Determine if we have more data for a NEXT page
         if (snap.docs.length < _limit) {
           hasMore.value = false;
         } else {
           hasMore.value = true;
-          // If we are on the furthest page reached so far, save the cursor for the next page
           if (pageCursors.length <= pageIndex) {
             pageCursors.add(snap.docs.last);
           } else {
-            // Update existing cursor just in case
             pageCursors[pageIndex] = snap.docs.last;
           }
         }
         currentPage.value = pageIndex;
       } else {
-        // No data found for this page (shouldn't happen via buttons, but safe to handle)
         if (pageIndex == 1) bodies.clear();
         hasMore.value = false;
       }
@@ -276,14 +243,13 @@ class DebatorController extends GetxController {
       searchDebtors('');
     } catch (e) {
       Get.snackbar("Error", "Could not load debtors: $e");
-      print(e);
     } finally {
       isBodiesLoading.value = false;
       isMoreLoading.value = false;
     }
   }
 
-  // --- UPDATED: PRECISE BREAKDOWN LOGIC ---
+  // --- BREAKDOWN LOGIC ---
   Future<Map<String, double>> getInstantDebtorBreakdown(String debtorId) async {
     try {
       final snap =
@@ -293,11 +259,10 @@ class DebatorController extends GetxController {
               .collection('transactions')
               .get();
 
-      double oldDueTotal = 0.0; // From 'previous_due'
-      double oldDuePaid = 0.0; // From 'loan_payment'
-
-      double runningSales = 0.0; // From 'credit' (Invoices)
-      double runningPaid = 0.0; // From 'debit' (Invoice Payments)
+      double oldDueTotal = 0.0;
+      double oldDuePaid = 0.0;
+      double runningSales = 0.0;
+      double runningPaid = 0.0;
 
       for (var doc in snap.docs) {
         final data = doc.data();
@@ -315,8 +280,6 @@ class DebatorController extends GetxController {
         }
       }
 
-      // Logic: Loan payments strictly reduce Old Due.
-      // If Loan Paid > Loan Total, the excess helps cover running sales (safeguard)
       double currentLoan = oldDueTotal - oldDuePaid;
       if (currentLoan < 0) {
         runningPaid += currentLoan.abs();
@@ -326,8 +289,8 @@ class DebatorController extends GetxController {
       double runningDue = runningSales - runningPaid;
 
       return {
-        'loan': currentLoan, // Strict Old Due
-        'running': runningDue, // Strict Running Due
+        'loan': currentLoan,
+        'running': runningDue,
         'total': currentLoan + runningDue,
       };
     } catch (e) {
@@ -336,7 +299,6 @@ class DebatorController extends GetxController {
     }
   }
 
-  // --- STREAM BREAKDOWN ---
   Stream<Map<String, double>> getDebtorBreakdown(String debtorId) {
     return db
         .collection('debatorbody')
@@ -377,9 +339,9 @@ class DebatorController extends GetxController {
         });
   }
 
-  // ------------------------------------------------------------------
+  // =========================================================
   // 2. TRANSACTION LOGIC
-  // ------------------------------------------------------------------
+  // =========================================================
 
   void clearTransactionState() {
     currentTransactions.clear();
@@ -469,9 +431,7 @@ class DebatorController extends GetxController {
 
   Future<void> _recalculateSingleDebtorBalance(String debtorId) async {
     try {
-      // Use the strict breakdown logic for the main balance update
       final breakdown = await getInstantDebtorBreakdown(debtorId);
-
       await db.collection('debatorbody').doc(debtorId).update({
         'balance': breakdown['total'],
         'lastTransactionDate': FieldValue.serverTimestamp(),
@@ -487,45 +447,62 @@ class DebatorController extends GetxController {
     required double amount,
     required String note,
     required String type,
-    required DateTime date, // <--- Ensure this is FEB 7 (Collection Date)
+    required DateTime date,
     required Map<String, dynamic> paymentMethodData,
     String? txid,
   }) async {
     gbIsLoading.value = true;
     try {
+      // 1. GET DEBTOR INFO
       final debtorRef = db.collection('debatorbody').doc(debtorId);
       final debtorSnap = await debtorRef.get();
       if (!debtorSnap.exists) throw "Debtor not found";
       final String debtorName = debtorSnap.data()?['name'] ?? 'Unknown';
 
-      DocumentReference newTxRef = debtorRef.collection('transactions').doc();
-      if (txid != null && txid.isNotEmpty) {
-        newTxRef = debtorRef.collection('transactions').doc(txid);
-      }
+      // 2. SAVE TRANSACTION (History)
+      DocumentReference newTxRef =
+          (txid != null && txid.isNotEmpty)
+              ? debtorRef.collection('transactions').doc(txid)
+              : debtorRef.collection('transactions').doc();
       String finalTxId = newTxRef.id;
 
-      // 1. Save Transaction (History)
       await newTxRef.set({
         'transactionId': finalTxId,
         'amount': amount,
         'note': note,
         'type': type,
-        'date': Timestamp.fromDate(date), // FEB 7
+        'date': Timestamp.fromDate(date),
         'paymentMethod': paymentMethodData,
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      // 2. Add to CASH LEDGER (This makes it show up on FEB 7)
-      if (type == 'debit' ||
-          type == 'loan_payment' ||
-          type == 'advance_received') {
+      // 3. CASH LEDGER ENTRY
+      bool isCollection = [
+        'debit',
+        'loan_payment',
+        'advance_received',
+        'collection',
+        'payment',
+        'received',
+      ].contains(type.toLowerCase());
+
+      if (isCollection) {
+        String method = (paymentMethodData['type'] ?? 'cash').toString();
+        if (method.toLowerCase() == 'cash' &&
+            paymentMethodData.containsKey('bankName')) {
+          method = 'Bank';
+        } else if (method.toLowerCase() == 'cash' &&
+            paymentMethodData.containsKey('bkashNumber')) {
+          method = 'Bkash';
+        }
+
         await db.collection('cash_ledger').add({
           'type': 'deposit',
           'amount': amount,
-          'method': paymentMethodData['type'] ?? 'cash',
+          'method': method,
           'details': paymentMethodData,
           'description': "Collection from $debtorName",
-          'timestamp': Timestamp.fromDate(date), // FEB 7
+          'timestamp': Timestamp.fromDate(date),
           'linkedDebtorId': debtorId,
           'linkedTxId': finalTxId,
           'source': 'debtor_collection',
@@ -542,113 +519,134 @@ class DebatorController extends GetxController {
         });
       }
 
-      // 3. Update Old Bills (Prevents Double Entry on FEB 6)
-      if (type == 'debit') {
-        double remaining = amount;
+      // =================================================================
+      // 4. FIX: UPDATE BILLS (WORKS FOR AGENT OR DEBTOR)
+      // =================================================================
+      if (isCollection) {
+        double remainingToAllocate = amount;
 
-        // Find unpaid bills
-        QuerySnapshot pendingSnap =
+        // QUERY BY NAME ONLY.
+        // This ensures it catches "agent", "debtor", or any other type.
+        QuerySnapshot salesSnap =
             await db
                 .collection('daily_sales')
-                .where('customerType', isEqualTo: 'debtor')
                 .where('name', isEqualTo: debtorName)
-                .where('pending', isGreaterThan: 0)
-                .orderBy('pending')
                 .get();
 
-        List<DocumentSnapshot> sortedDocs = pendingSnap.docs.toList();
-        sortedDocs.sort(
-          (a, b) => (a['timestamp'] as Timestamp).compareTo(
-            b['timestamp'] as Timestamp,
-          ),
-        );
+        // Filter for UNPAID bills in Memory (Dart)
+        // We check if pending is greater than 0.5 to avoid tiny decimal errors
+        List<DocumentSnapshot> pendingBills =
+            salesSnap.docs.where((doc) {
+              final data = doc.data() as Map<String, dynamic>;
+              double p = double.tryParse(data['pending'].toString()) ?? 0.0;
+              return p > 0.5;
+            }).toList();
 
-        WriteBatch batch = db.batch();
+        // Sort: OLDEST FIRST (FIFO) - Pay the oldest bill first
+        pendingBills.sort((a, b) {
+          Timestamp t1 = a['timestamp'] as Timestamp;
+          Timestamp t2 = b['timestamp'] as Timestamp;
+          return t1.compareTo(t2);
+        });
 
-        for (var doc in sortedDocs) {
-          if (remaining <= 0) break;
-          Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+        if (pendingBills.isNotEmpty) {
+          WriteBatch batch = db.batch();
+          bool hasUpdates = false;
 
-          double currentPending =
-              double.tryParse(data['pending'].toString()) ?? 0.0;
-          double currentPaid = double.tryParse(data['paid'].toString()) ?? 0.0;
-          double currentLedgerPaid =
-              double.tryParse(data['ledgerPaid']?.toString() ?? '0') ?? 0.0;
+          for (var doc in pendingBills) {
+            if (remainingToAllocate <= 0.01) break;
 
-          double take =
-              (remaining >= currentPending) ? currentPending : remaining;
+            Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+            double currentPending =
+                double.tryParse(data['pending'].toString()) ?? 0.0;
+            double currentPaid =
+                double.tryParse(data['paid'].toString()) ?? 0.0;
+            double currentLedgerPaid =
+                double.tryParse(data['ledgerPaid']?.toString() ?? '0') ?? 0.0;
 
-          // Update FEB 6 Document
-          batch.update(doc.reference, {
-            "paid": currentPaid + take,
-            "pending": currentPending - take,
-            "ledgerPaid": currentLedgerPaid + take, // <--- CRITICAL
-            "status": (currentPending - take) <= 0.5 ? "paid" : "partial",
-          });
+            // Calculate payment for this bill
+            double take =
+                (remainingToAllocate >= currentPending)
+                    ? currentPending
+                    : remainingToAllocate;
 
-          // Update Master Sales Order
-          String saleTxId = data['transactionId'] ?? '';
-          if (saleTxId.isNotEmpty) {
-            QuerySnapshot orderSnap =
-                await db
-                    .collection('sales_orders')
-                    .where('transactionId', isEqualTo: saleTxId)
-                    .limit(1)
-                    .get();
-            if (orderSnap.docs.isNotEmpty) {
-              double oPaid =
-                  double.tryParse(orderSnap.docs.first['paid'].toString()) ??
-                  0.0;
-              batch.update(orderSnap.docs.first.reference, {
-                "paid": oPaid + take,
-                "due": (currentPending - take),
-                "status":
-                    (currentPending - take) <= 0.5 ? "completed" : "pending",
-              });
+            // Create History Entry
+            final newHistoryEntry = {
+              'type': paymentMethodData['type'] ?? 'cash',
+              'amount': take,
+              'paidAt': Timestamp.now(),
+              'sourceTxId': finalTxId,
+            };
+
+            // Update the bill
+            batch.update(doc.reference, {
+              "paid": currentPaid + take,
+              "pending": currentPending - take,
+              "ledgerPaid": currentLedgerPaid + take,
+              "status": (currentPending - take) <= 0.5 ? "paid" : "partial",
+              "paymentHistory": FieldValue.arrayUnion([newHistoryEntry]),
+            });
+            hasUpdates = true;
+
+            // Update Master Sales Order (if linked)
+            String saleTxId = data['transactionId'] ?? '';
+            if (saleTxId.isNotEmpty) {
+              db
+                  .collection('sales_orders')
+                  .where('transactionId', isEqualTo: saleTxId)
+                  .limit(1)
+                  .get()
+                  .then((orderSnap) {
+                    if (orderSnap.docs.isNotEmpty) {
+                      var oDoc = orderSnap.docs.first;
+                      double oPaid =
+                          double.tryParse(oDoc['paid'].toString()) ?? 0.0;
+                      oDoc.reference.update({
+                        "paid": oPaid + take,
+                        "due": (currentPending - take),
+                        "status":
+                            (currentPending - take) <= 0.5
+                                ? "completed"
+                                : "pending",
+                      });
+                    }
+                  });
             }
+
+            remainingToAllocate -= take;
           }
-          remaining -= take;
+
+          if (hasUpdates) {
+            await batch.commit();
+          }
         }
-        await batch.commit();
       }
 
-      // 4. *** FORCE REFRESH ALL CONTROLLERS ***
-      // This is why you were stuck. The other controllers didn't know data changed.
-
+      // 5. REFRESH CONTROLLERS
       await _recalculateSingleDebtorBalance(debtorId);
       await loadBodies(loadMore: false);
 
       if (Get.isRegistered<DailySalesController>()) {
-        await Get.find<DailySalesController>()
-            .loadDailySales(); // RELOAD SALES LIST
+        await Get.find<DailySalesController>().loadDailySales();
       }
-
+      if (Get.isRegistered<OverviewController>()) {
+        Get.find<OverviewController>().refreshData();
+      }
       if (Get.isRegistered<CashDrawerController>()) {
         Get.find<CashDrawerController>().fetchData();
       }
 
-      if (Get.isRegistered<OverviewController>()) {
-        Get.find<OverviewController>().refreshData(); // RELOAD OVERVIEW
-      }
-
-      if (Get.isRegistered<ProfitController>()) {
-        Get.find<ProfitController>().refreshData();
-      }
-
       if (Get.isDialogOpen ?? false) Get.back();
-      Get.snackbar("Success", "Transaction Recorded & Controllers Refreshed");
+      Get.snackbar("Success", "Collection Recorded & Bills Updated");
     } catch (e) {
       Get.snackbar("Error", e.toString());
-      print(e);
+      print("Error: $e");
     } finally {
       gbIsLoading.value = false;
     }
   }
 
-  // ------------------------------------------------------------------
-  // DELETE & EDIT
-  // ------------------------------------------------------------------
-
+  // --- DELETE TRANSACTION ---
   Future<void> deleteTransaction(String debtorId, String transactionId) async {
     gbIsLoading.value = true;
     try {
@@ -673,19 +671,20 @@ class DebatorController extends GetxController {
           .delete();
 
       // Cleanup Ledger
-      if (type == 'loan_payment' || type.contains('advance')) {
-        QuerySnapshot lSnap =
-            await db
-                .collection('cash_ledger')
-                .where('linkedTxId', isEqualTo: transactionId)
-                .get();
-        for (var doc in lSnap.docs) {
-          await doc.reference.delete();
-        }
+      QuerySnapshot lSnap =
+          await db
+              .collection('cash_ledger')
+              .where('linkedTxId', isEqualTo: transactionId)
+              .get();
+      for (var doc in lSnap.docs) {
+        await doc.reference.delete();
       }
 
-      // Cleanup Sales
-      if (type == 'credit' || type == 'debit') {
+      // Cleanup Sales (Reverse payments)
+      if (type == 'credit' ||
+          type == 'debit' ||
+          type == 'collection' ||
+          type == 'payment') {
         if (!Get.isRegistered<DailySalesController>()) {
           Get.put(DailySalesController());
         }
@@ -693,6 +692,8 @@ class DebatorController extends GetxController {
         final debtorSnap =
             await db.collection('debatorbody').doc(debtorId).get();
         final debtorName = debtorSnap.data()?['name'] ?? "";
+
+        // Find sales paid by this transaction
         final salesSnap =
             await db
                 .collection('daily_sales')
@@ -702,18 +703,37 @@ class DebatorController extends GetxController {
 
         for (final doc in salesSnap.docs) {
           final data = doc.data();
+          // If this sales entry ITSELF was the transaction (unlikely here but possible)
           if (data['transactionId'] == transactionId) {
             batch.delete(doc.reference);
           } else {
-            List applied = List.from(data['appliedDebits'] ?? []);
-            if (applied.any((e) => e['id'] == transactionId)) {
-              final entry = applied.firstWhere((e) => e['id'] == transactionId);
-              double used = (entry['amount'] as num).toDouble();
-              double paid = (data['paid'] as num).toDouble();
-              applied.removeWhere((e) => e['id'] == transactionId);
+            // Check payment history for this transaction ID linkage
+            List history = List.from(data['paymentHistory'] ?? []);
+            bool changed = false;
+            double amountReversed = 0.0;
+
+            history.removeWhere((h) {
+              if (h['sourceTxId'] == transactionId) {
+                amountReversed += (h['amount'] as num).toDouble();
+                changed = true;
+                return true;
+              }
+              return false;
+            });
+
+            if (changed) {
+              double currentPaid = (data['paid'] as num).toDouble();
+              double currentPending = (data['pending'] as num).toDouble();
+              double newPaid = (currentPaid - amountReversed).clamp(
+                0,
+                double.infinity,
+              );
+
               batch.update(doc.reference, {
-                'paid': (paid - used).clamp(0, double.infinity),
-                'appliedDebits': applied,
+                'paid': newPaid,
+                'pending': currentPending + amountReversed,
+                'paymentHistory': history,
+                'status': 'partial', // Revert to partial/unpaid
               });
             }
           }
@@ -762,19 +782,24 @@ class DebatorController extends GetxController {
 
       await _recalculateSingleDebtorBalance(debtorId);
 
-      if (oldType == 'loan_payment' || oldType.contains('advance')) {
-        QuerySnapshot lSnap =
-            await db
-                .collection('cash_ledger')
-                .where('linkedTxId', isEqualTo: transactionId)
-                .get();
-        for (var d in lSnap.docs) {
-          await d.reference.update({
-            'amount': newAmount,
-            'details': paymentMethod,
-            'method': paymentMethod['type'],
-          });
+      // Update Ledger
+      QuerySnapshot lSnap =
+          await db
+              .collection('cash_ledger')
+              .where('linkedTxId', isEqualTo: transactionId)
+              .get();
+      for (var d in lSnap.docs) {
+        String method = (paymentMethod['type'] ?? 'cash').toString();
+        if (method == 'cash' && paymentMethod.containsKey('bankName')) {
+          method = 'Bank';
         }
+        await d.reference.update({
+          'amount': newAmount,
+          'details': paymentMethod,
+          'method': method,
+          'bankName': paymentMethod['bankName'],
+          'accountNo': paymentMethod['accountNumber'],
+        });
       }
 
       loadDebtorTransactions(debtorId);
@@ -787,8 +812,6 @@ class DebatorController extends GetxController {
       gbIsLoading.value = false;
     }
   }
-
-
 
   Future<void> addBody({
     required String name,
@@ -896,7 +919,6 @@ class DebatorController extends GetxController {
     }
   }
 
-
   void searchDebtors(String query) {
     if (query.trim().isEmpty) {
       filteredBodies.assignAll(bodies);
@@ -916,7 +938,22 @@ class DebatorController extends GetxController {
     );
   }
 
-
+  // Helper for PDF Payment Method Display
+  String _formatMethodForPdf(dynamic pm) {
+    if (pm == null) return "Cash";
+    if (pm is String) return pm;
+    if (pm is Map) {
+      String type = (pm['type'] ?? 'Cash').toString();
+      if (type.toLowerCase() == 'cash' && pm.containsKey('bankName')) {
+        return "Bank: ${pm['bankName']}";
+      }
+      if (type.toLowerCase() == 'bank') return "Bank: ${pm['bankName'] ?? ''}";
+      if (type.toLowerCase().contains('bkash')) return "Bkash";
+      if (type.toLowerCase().contains('nagad')) return "Nagad";
+      return type.toUpperCase();
+    }
+    return "Cash";
+  }
 
   Future<Uint8List> generatePDF(
     String debtorName,
@@ -937,7 +974,8 @@ class DebatorController extends GetxController {
           (t) =>
               t['type'] == 'debit' ||
               t['type'] == 'advance_received' ||
-              t['type'] == 'loan_payment',
+              t['type'] == 'loan_payment' ||
+              t['type'] == 'collection',
         )
         .fold(0.0, (s, t) => s + (t['amount'] as num).toDouble());
 
@@ -989,14 +1027,6 @@ class DebatorController extends GetxController {
                 headers: ["Date", "Type", "Note", "Method", "Amount"],
                 data:
                     transactions.map((t) {
-                      String method = "Cash";
-                      if (t['paymentMethod'] != null &&
-                          t['paymentMethod'] is Map) {
-                        method =
-                            (t['paymentMethod']['type'] ?? 'Cash')
-                                .toString()
-                                .toUpperCase();
-                      }
                       return [
                         DateFormat('dd/MM/yy').format(
                           (t['date'] is DateTime
@@ -1005,7 +1035,9 @@ class DebatorController extends GetxController {
                         ),
                         t['type'].toString().toUpperCase().replaceAll('_', ' '),
                         t['note'] ?? "",
-                        method,
+                        _formatMethodForPdf(
+                          t['paymentMethod'],
+                        ), // Robust helper
                         bdCurrency.format((t['amount'] as num)),
                       ];
                     }).toList(),

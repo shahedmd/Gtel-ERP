@@ -159,21 +159,16 @@ class CashDrawerView extends StatelessWidget {
                       ),
                       const SizedBox(height: 20),
 
-                      // B. SUMMARY ROW
+                      // B. SUMMARY ROW (MERGED Total Income)
                       Row(
                         children: [
                           _summaryItem(
-                            "Sales Income",
-                            controller.rawSalesTotal.value,
+                            "Total Income",
+                            // Summing Sales + Collections
+                            controller.rawSalesTotal.value +
+                                controller.rawCollectionTotal.value,
                             Colors.green.shade700,
                             Icons.arrow_downward,
-                          ),
-                          const SizedBox(width: 12),
-                          _summaryItem(
-                            "Collections",
-                            controller.rawCollectionTotal.value,
-                            Colors.blue.shade700,
-                            Icons.savings,
                           ),
                           const SizedBox(width: 12),
                           _summaryItem(

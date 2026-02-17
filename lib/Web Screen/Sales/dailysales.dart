@@ -138,7 +138,6 @@ class DailySalesPage extends StatelessWidget {
                             Icons.receipt_long,
                             [
                               _detailRow("Normal Sales", revenueNormal),
-                              _detailRow("Debtor Sales", revenueDebtor),
                               _detailRow("Condition Sales", revenueCondition),
                             ],
                           ),
@@ -153,7 +152,6 @@ class DailySalesPage extends StatelessWidget {
                             Icons.savings_outlined,
                             [
                               _detailRow("Cash Sales", collectedNormal),
-                              _detailRow("Debtor Recv.", collectedDebtor),
                               _detailRow("Condition Recv.", collectedCondition),
                             ],
                           ),

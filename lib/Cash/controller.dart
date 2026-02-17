@@ -145,7 +145,7 @@ class CashDrawerController extends GetxController {
   }
 
   // ========================================================================
-  // CORE FETCH LOGIC (FIXED: History + Cash Priority)
+  // CORE FETCH LOGIC (FIXED)
   // ========================================================================
   Future<void> fetchData() async {
     isLoading.value = true;
@@ -154,7 +154,7 @@ class CashDrawerController extends GetxController {
     currentPage.value = 1;
 
     try {
-      // 1. Filter Range (For UI List & Period Reports)
+      // 1. Filter Range
       DateTime filterStart = DateTime(
         selectedRange.value.start.year,
         selectedRange.value.start.month,
@@ -172,7 +172,7 @@ class CashDrawerController extends GetxController {
         59,
       );
 
-      // 2. Absolute Start (For Net Asset Calculation - Includes 2020 history)
+      // 2. Absolute Start (2020)
       DateTime absoluteStart = DateTime(2020, 1, 1);
 
       // 3. Fetch Data
@@ -198,11 +198,10 @@ class CashDrawerController extends GetxController {
         expensesFuture,
       ]);
 
-      // 4. Combine & Sort Data (Oldest First)
+      // 4. Combine & Sort
       List<dynamic> allRawItems = [];
 
-      var salesSnap = results[0] as QuerySnapshot;
-      for (var doc in salesSnap.docs) {
+      for (var doc in (results[0] as QuerySnapshot).docs) {
         allRawItems.add({
           'type': 'sale',
           'data': doc.data(),
@@ -210,8 +209,7 @@ class CashDrawerController extends GetxController {
         });
       }
 
-      var ledgerSnap = results[1] as QuerySnapshot;
-      for (var doc in ledgerSnap.docs) {
+      for (var doc in (results[1] as QuerySnapshot).docs) {
         allRawItems.add({
           'type': 'ledger',
           'data': doc.data(),
@@ -239,7 +237,7 @@ class CashDrawerController extends GetxController {
             itemTime.compareTo(filterStart) >= 0 &&
             itemTime.compareTo(filterEnd) <= 0;
 
-        // --- SALES ---
+        // --- SALES PROCESSING ---
         if (item['type'] == 'sale') {
           var data = item['data'];
           double totalPaid = double.tryParse(data['paid'].toString()) ?? 0;
@@ -250,41 +248,70 @@ class CashDrawerController extends GetxController {
           if (actualReceived > 0.01) {
             if (isInPeriod) periodSales += actualReceived;
 
-            // --- CASH FIRST LOGIC ---
-            double c = actualReceived;
-            double b = 0, bk = 0, n = 0;
+            // --- SPLIT PAYMENT LOGIC ---
+            double c = 0, b = 0, bk = 0, n = 0;
             String displayMethod = "Cash";
-            String? displayBank;
-            String? displayAcc;
+            String? displayBankDetails;
 
             var pm = data['paymentMethod'];
-            if (pm != null) {
+
+            if (pm is Map) {
+              // 1. Try to read explicit split amounts first
+              c = double.tryParse(pm['cash'].toString()) ?? 0;
+              b = double.tryParse(pm['bank'].toString()) ?? 0;
+              bk = double.tryParse(pm['bkash'].toString()) ?? 0;
+              n = double.tryParse(pm['nagad'].toString()) ?? 0;
+
+              displayBankDetails = pm['bankName'];
+
+              // 2. If explicit amounts sum to 0 (legacy data format), fallback to total assignment
+              if ((c + b + bk + n) == 0) {
+                // Check for keys/values indicating method
+                String valBank = (pm['bankName'] ?? '').toString();
+                String valBkash = (pm['bkashNumber'] ?? '').toString();
+                String valNagad = (pm['nagadNumber'] ?? '').toString();
+
+                if (valBank.isNotEmpty) {
+                  b = actualReceived;
+                  displayMethod = "Bank";
+                } else if (valBkash.isNotEmpty) {
+                  bk = actualReceived;
+                  displayMethod = "Bkash";
+                } else if (valNagad.isNotEmpty) {
+                  n = actualReceived;
+                  displayMethod = "Nagad";
+                } else {
+                  c = actualReceived;
+                  displayMethod = "Cash";
+                }
+              } else {
+                // Determine display label for Mixed
+                List<String> mParts = [];
+                if (c > 0) mParts.add("Cash");
+                if (b > 0) mParts.add("Bank");
+                if (bk > 0) mParts.add("Bkash");
+                if (n > 0) mParts.add("Nagad");
+                displayMethod = mParts.join('/');
+              }
+            } else {
+              // String format legacy
               String s = pm.toString().toLowerCase();
               if (s.contains('bank')) {
                 b = actualReceived;
-                c = 0;
                 displayMethod = "Bank";
-                if (pm is Map) {
-                  displayBank = pm['bankName'];
-                  displayAcc = pm['accountNumber'];
-                }
               } else if (s.contains('bkash')) {
                 bk = actualReceived;
-                c = 0;
                 displayMethod = "Bkash";
-                if (pm is Map) {
-                  displayAcc = pm['bkashNumber'];
-                }
               } else if (s.contains('nagad')) {
                 n = actualReceived;
-                c = 0;
                 displayMethod = "Nagad";
-                if (pm is Map) {
-                  displayAcc = pm['nagadNumber'];
-                }
+              } else {
+                c = actualReceived;
+                displayMethod = "Cash";
               }
             }
 
+            // Add to totals
             tCash += c;
             tBank += b;
             tBkash += bk;
@@ -298,26 +325,27 @@ class CashDrawerController extends GetxController {
                   amount: actualReceived,
                   type: 'sale',
                   method: displayMethod,
-                  bankName: displayBank,
-                  accountDetails: displayAcc,
+                  bankName: displayBankDetails,
+                  accountDetails: null,
                 ),
               );
             }
           }
         }
-        // --- LEDGER ---
+        // --- LEDGER PROCESSING ---
         else if (item['type'] == 'ledger') {
           var data = item['data'];
-          String source = (data['source'] ?? '').toString();
-          if (source == 'pos_sale') continue;
+          if (data['source'] == 'pos_sale') continue; // Skip auto-entries
 
           double amt = double.tryParse(data['amount'].toString()) ?? 0;
           String type = data['type'] ?? 'deposit';
 
           if (type == 'transfer') {
+            // ... (Keep your existing Transfer Logic here, it looked okay) ...
             String from = (data['fromMethod'] ?? 'Cash').toString();
             String to = (data['toMethod'] ?? 'Cash').toString();
 
+            // Deduct From
             if (from == 'Bank')
               tBank -= amt;
             else if (from == 'Bkash')
@@ -326,6 +354,8 @@ class CashDrawerController extends GetxController {
               tNagad -= amt;
             else
               tCash -= amt;
+
+            // Add To
             if (to == 'Bank')
               tBank += amt;
             else if (to == 'Bkash')
@@ -343,10 +373,6 @@ class CashDrawerController extends GetxController {
                   amount: amt,
                   type: 'transfer',
                   method: "$from > $to",
-                  transferFrom: from,
-                  transferTo: to,
-                  bankName: data['bankName'], // Use data here
-                  accountDetails: data['accountNo'], // Use data here
                 ),
               );
             }
@@ -357,6 +383,7 @@ class CashDrawerController extends GetxController {
             bool isBkash = methodStr.toLowerCase().contains('bkash');
             bool isNagad = methodStr.toLowerCase().contains('nagad');
 
+            // Adjust balances
             if (type == 'deposit') {
               if (isInPeriod) periodCollections += amt;
               if (isBank)
@@ -383,23 +410,24 @@ class CashDrawerController extends GetxController {
               periodTxList.add(
                 DrawerTransaction(
                   date: itemTime,
-                  description: data['description'] ?? "Manual Entry",
+                  description: data['description'] ?? "Entry",
                   amount: amt,
                   type: type == 'deposit' ? 'collection' : 'withdraw',
                   method: methodStr,
-                  bankName: data['bankName'], // RESTORED
-                  accountDetails: data['accountNo'], // RESTORED
                 ),
               );
             }
           }
         }
-        // --- EXPENSES ---
+        // --- EXPENSE PROCESSING ---
         else if (item['type'] == 'expense') {
           DrawerTransaction ex = item['data'];
           if (isInPeriod) periodExpenses += ex.amount;
 
-          // Waterfall Deduction
+          // Note: Waterfall deduction is risky if expenses are paid by Bank but
+          // code subtracts from Cash because Cash > 0.
+          // However, for Grand Total Net Asset, this is mathematically fine.
+
           double rem = ex.amount;
           if (tCash >= rem) {
             tCash -= rem;
@@ -408,6 +436,7 @@ class CashDrawerController extends GetxController {
             rem -= tCash;
             tCash = 0;
           }
+
           if (rem > 0) {
             if (tBank >= rem) {
               tBank -= rem;
@@ -453,10 +482,10 @@ class CashDrawerController extends GetxController {
 
       // 8. Update List
       periodTxList.sort((a, b) => b.date.compareTo(a.date));
-      _allTransactions.addAll(periodTxList);
+      _allTransactions.assignAll(periodTxList);
       _applyPagination();
     } catch (e) {
-      Get.snackbar("Error", "Could not calculate cash drawer.");
+      Get.snackbar("Error", "Could not calculate cash drawer: $e");
     } finally {
       isLoading.value = false;
     }
@@ -498,22 +527,22 @@ class CashDrawerController extends GetxController {
     return list;
   }
 
-  // --- ACTIONS (RESTORED PARAMETERS) ---
-
+  // In CashDrawerController
   Future<void> addManualCash({
     required double amount,
     required String method,
     required String desc,
-    String? bankName, // RESTORED
-    String? accountNo, // RESTORED
+    String? bankName,
+    String? accountNo,
   }) async {
     await _db.collection('cash_ledger').add({
       'type': 'deposit',
       'amount': amount,
       'method': method,
       'description': desc,
-      'bankName': bankName, // RESTORED
-      'accountNo': accountNo, // RESTORED
+      // Fix: If bankName is empty string, save as null
+      'bankName': (bankName == null || bankName.isEmpty) ? null : bankName,
+      'accountNo': (accountNo == null || accountNo.isEmpty) ? null : accountNo,
       'timestamp': FieldValue.serverTimestamp(),
       'source': 'manual_add',
     });
@@ -524,8 +553,8 @@ class CashDrawerController extends GetxController {
     required double amount,
     required String fromMethod,
     required String toMethod,
-    String? bankName, // RESTORED
-    String? accountNo, // RESTORED
+    String? bankName,
+    String? accountNo,
     String? description,
   }) async {
     await _db.collection('cash_ledger').add({
@@ -533,8 +562,8 @@ class CashDrawerController extends GetxController {
       'amount': amount,
       'fromMethod': fromMethod,
       'toMethod': toMethod,
-      'bankName': bankName, // RESTORED
-      'accountNo': accountNo, // RESTORED
+      'bankName': bankName,
+      'accountNo': accountNo,
       'description': description ?? 'Fund Transfer',
       'timestamp': FieldValue.serverTimestamp(),
       'source': 'manual_transfer',

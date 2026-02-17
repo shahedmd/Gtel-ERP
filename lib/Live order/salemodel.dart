@@ -360,7 +360,7 @@ class LiveSalesController extends GetxController {
             ? otherCourierC.text.trim()
             : selectedCourier.value;
 
-      String fName = nameC.text.trim();
+    String fName = nameC.text.trim();
     String fPhone = phoneC.text.trim();
     String? finalDebtorId;
 

@@ -107,7 +107,103 @@ class DailySalesController extends GetxController {
   }
 
   // ==========================================
-  // 2. ADD SALE (UPDATED)
+  // HELPER: FORMAT PAYMENT METHOD (RESTORED & FIXED)
+  // ==========================================
+  String formatPaymentMethod(
+    dynamic pm,
+    double paidAmount, [
+    double? totalAmount,
+  ]) {
+    if (paidAmount <= 0.01) return "CREDIT / DUE";
+
+    if (pm == null || pm == "") return "CREDIT / DUE";
+
+    // If it's just a string, return it
+    if (pm is! Map) return pm.toString().toUpperCase();
+
+    // Helper to format currency
+    String toMoney(dynamic val) =>
+        double.parse(val.toString()).toStringAsFixed(0);
+
+    // 1. Extract Amounts from Mixed Map (Legacy or POS Mixed)
+    double cash = double.tryParse(pm['cash'].toString()) ?? 0;
+    double bkash = double.tryParse(pm['bkash'].toString()) ?? 0;
+    double nagad = double.tryParse(pm['nagad'].toString()) ?? 0;
+    double bank = double.tryParse(pm['bank'].toString()) ?? 0;
+
+    // 2. Fallback Logic: If specific keys are 0, check 'type' or implied keys
+    if (cash == 0 && bank == 0 && bkash == 0 && nagad == 0) {
+      double effectiveTotal =
+          (totalAmount != null && totalAmount > 0) ? totalAmount : paidAmount;
+      String type = (pm['type'] ?? '').toString().toLowerCase();
+
+      // --- ROBUST DETECTION (Fix for missing 'type') ---
+      if (type.isEmpty || type == 'cash') {
+        if (pm['bankName'].toString().isNotEmpty) {
+          type = 'bank';
+        }
+         if (pm['bkashNumber'].toString().isNotEmpty) {
+           type = 'bkash';
+         }
+         if (pm['nagadNumber'].toString().isNotEmpty) {
+           type = 'nagad';
+         }
+      }
+
+      if (type.contains('bank')) {
+        bank = effectiveTotal;
+      } else if (type.contains('bkash')) {
+        bkash = effectiveTotal;
+      } else if (type.contains('nagad')) {
+        nagad = effectiveTotal;
+      } else {
+        cash = effectiveTotal;
+      }
+    }
+
+    List<String> parts = [];
+
+    if (cash > 0) {
+      parts.add("Cash: ${toMoney(cash)}");
+    }
+    if (bkash > 0) {
+      String num = (pm['bkashNumber'] ?? pm['number'] ?? "").toString();
+      String line = "Bkash: ${toMoney(bkash)}";
+      if (num.isNotEmpty && num.length > 3) line += " ($num)";
+      parts.add(line);
+    }
+    if (nagad > 0) {
+      String num = (pm['nagadNumber'] ?? pm['number'] ?? "").toString();
+      String line = "Nagad: ${toMoney(nagad)}";
+      if (num.isNotEmpty && num.length > 3) line += " ($num)";
+      parts.add(line);
+    }
+    if (bank > 0) {
+      String myBankName = (pm['bankName'] ?? "Bank").toString();
+      String custTrxInfo =
+          (pm['accountNumber'] ?? pm['accountNo'] ?? "").toString();
+
+      String line = "$myBankName: ${toMoney(bank)}";
+      if (custTrxInfo.isNotEmpty) {
+        line += "\nInfo: $custTrxInfo";
+      }
+      parts.add(line);
+    }
+
+    if (parts.isEmpty && pm['type'] != null) {
+      String type = pm['type'].toString().toUpperCase();
+      if (type == "BANK") {
+        String myBankName = (pm['bankName'] ?? "BANK").toString();
+        return myBankName;
+      }
+      return type;
+    }
+
+    return parts.isEmpty ? "MULTI-PAY" : parts.join("\n");
+  }
+
+  // ==========================================
+  // 2. ADD SALE
   // ==========================================
   Future<void> addSale({
     required String name,
@@ -148,7 +244,7 @@ class DailySalesController extends GetxController {
         "name": name,
         "amount": _round(amount),
         "paid": _round(paidPart),
-        "ledgerPaid": 0.0, // <--- NEW: Initialize to 0 for consistency
+        "ledgerPaid": 0.0,
         "customerType": customerType,
         "timestamp": Timestamp.fromDate(date),
         "paymentMethod": paymentMethod,
@@ -224,8 +320,6 @@ class DailySalesController extends GetxController {
 
           batch.update(doc.reference, {
             "paid": _round(alreadyPaid + toApply),
-            // Note: We do NOT touch ledgerPaid here because this function
-            // represents a "Today" payment collection, not a Ledger allocation.
             "paymentMethod": paymentMethod,
             "lastPaymentAt": FieldValue.serverTimestamp(),
             "appliedDebits": applied,
@@ -285,14 +379,9 @@ class DailySalesController extends GetxController {
         if (remainingToReverse <= 0) break;
         final data = doc.data();
         double currentPaid = _round((data['paid'] as num).toDouble());
-        // Also check if any part was ledger paid to avoid reversing ledger allocations incorrectly
         double ledgerPart = _round(
           (data['ledgerPaid'] as num?)?.toDouble() ?? 0.0,
         );
-
-        // We can only reverse "Cash Paid" here, ideally.
-        // If a transaction was fully Ledger Paid, reversing it here is tricky.
-        // For now, standard reversal logic applies to the 'paid' total.
 
         if (currentPaid > 0) {
           double toSubtract =
@@ -304,15 +393,13 @@ class DailySalesController extends GetxController {
           double newPaid = _round(currentPaid - toSubtract);
           double newLedgerPaid = ledgerPart;
 
-          // If we are reversing more than what was 'cash paid' (meaning we eat into ledger paid),
-          // we should update ledgerPaid too so stats stay correct.
           if (newPaid < ledgerPart) {
             newLedgerPaid = newPaid;
           }
 
           batch.update(doc.reference, {
             'paid': newPaid,
-            'ledgerPaid': newLedgerPaid, // Keep consistent
+            'ledgerPaid': newLedgerPaid,
             'lastReversalAt': FieldValue.serverTimestamp(),
             'reversalHistory': FieldValue.arrayUnion([
               {
@@ -423,91 +510,8 @@ class DailySalesController extends GetxController {
     }
   }
 
-  String formatPaymentMethod(
-    dynamic pm,
-    double paidAmount, [
-    double? totalAmount,
-  ]) {
-    if (paidAmount <= 0) return "CREDIT / DUE";
-
-    if (pm == null || pm == "") return "CREDIT / DUE";
-    if (pm is! Map) return pm.toString().toUpperCase();
-
-    // Helper to format currency
-    String toMoney(dynamic val) =>
-        double.parse(val.toString()).toStringAsFixed(0);
-
-    // 1. Extract Amounts
-    double cash = double.tryParse(pm['cash'].toString()) ?? 0;
-    double bkash = double.tryParse(pm['bkash'].toString()) ?? 0;
-    double nagad = double.tryParse(pm['nagad'].toString()) ?? 0;
-    double bank = double.tryParse(pm['bank'].toString()) ?? 0;
-
-    // 2. Fallback Logic
-    if (cash == 0 &&
-        bank == 0 &&
-        bkash == 0 &&
-        nagad == 0 &&
-        totalAmount != null &&
-        totalAmount > 0) {
-      String type = (pm['type'] ?? '').toString().toLowerCase();
-      if (type.contains('bank')) {
-        bank = totalAmount;
-      }
-      if (type.contains('bkash')) {
-        bkash = totalAmount;
-      }
-      if (type.contains('nagad')) {
-        nagad = totalAmount;
-      }
-      if (type == 'cash') {
-        cash = totalAmount;
-      }
-    }
-
-    List<String> parts = [];
-
-    if (cash > 0) {
-      parts.add("Cash: ${toMoney(cash)}");
-    }
-    if (bkash > 0) {
-      String num = (pm['bkashNumber'] ?? pm['number'] ?? "").toString();
-      String line = "Bkash: ${toMoney(bkash)}";
-      if (num.isNotEmpty && num.length > 3) line += " ($num)";
-      parts.add(line);
-    }
-    if (nagad > 0) {
-      String num = (pm['nagadNumber'] ?? pm['number'] ?? "").toString();
-      String line = "Nagad: ${toMoney(nagad)}";
-      if (num.isNotEmpty && num.length > 3) line += " ($num)";
-      parts.add(line);
-    }
-    if (bank > 0) {
-      String myBankName = (pm['bankName'] ?? "Bank").toString();
-      String custTrxInfo =
-          (pm['accountNumber'] ?? pm['accountNo'] ?? "").toString();
-
-      String line = "$myBankName: ${toMoney(bank)}";
-      if (custTrxInfo.isNotEmpty) {
-        line += "\nInfo: $custTrxInfo";
-      }
-      parts.add(line);
-    }
-
-    if (parts.isEmpty && pm['type'] != null) {
-      String type = pm['type'].toString().toUpperCase();
-      if (type == "BANK") {
-        String myBankName = (pm['bankName'] ?? "BANK").toString();
-        return myBankName;
-      }
-      return type;
-    }
-
-    return parts.isEmpty ? "MULTI-PAY" : parts.join("\n");
-  }
-
   // ==========================================
-  // REPRINT LOGIC (Fixed: Debtor Payment Method Display)
+  // REPRINT LOGIC (FIXED)
   // ==========================================
   Future<void> reprintInvoice(String invoiceId) async {
     isLoading.value = true;
@@ -531,7 +535,6 @@ class DailySalesController extends GetxController {
       // 3. Logic Branch: Condition vs Regular (Debtor/Cash)
       if (isCond) {
         // --- SCENARIO A: CONDITION SALE ---
-        // (Logic identical to ConditionSalesController)
         List<dynamic> history = data['collectionHistory'] ?? [];
         double historyTotal = 0.0;
 
@@ -583,14 +586,31 @@ class DailySalesController extends GetxController {
           double newDue = grandTotal - realTimePaid;
           payMap['due'] = newDue < 0 ? 0 : newDue;
 
-          // B. FIX PAYMENT METHOD DISPLAY (The Critical Fix)
-          // We need to populate keys like 'cash', 'bkash' for the PDF to see them.
+          // --- FIX START: CLEAR OLD KEYS ---
+          payMap.remove('cash');
+          payMap.remove('bank');
+          payMap.remove('bkash');
+          payMap.remove('nagad');
+          payMap.remove('bkashNumber');
+          payMap.remove('nagadNumber');
+          payMap.remove('bankName');
+          payMap.remove('accountNumber');
+          // --- FIX END ---
 
+          // B. RE-POPULATE PAYMENT METHOD (ROBUST)
           if (paymentHistory.isNotEmpty) {
-            // Option 1: Aggregate from History (Best for partial payments)
+            // Option 1: Aggregate from History
             for (var h in paymentHistory) {
               if (h is Map) {
-                String type = (h['type'] ?? 'cash').toString().toLowerCase();
+                // DETECT TYPE if missing
+                String type = (h['type'] ?? '').toString().toLowerCase();
+                String bankVal = (h['bankName'] ?? '').toString();
+
+                if (type.isEmpty || type == 'cash') {
+                  if (bankVal.isNotEmpty) type = 'bank';
+                }
+                if (type.isEmpty) type = 'cash';
+
                 double amt = (h['amount'] as num?)?.toDouble() ?? 0.0;
 
                 // Add to PDF specific keys
@@ -598,7 +618,7 @@ class DailySalesController extends GetxController {
                     double.tryParse(payMap[type]?.toString() ?? '0') ?? 0.0;
                 payMap[type] = current + amt;
 
-                // Map details if available
+                // Map details
                 if (h['number'] != null) payMap['${type}Number'] = h['number'];
                 if (h['bankName'] != null) payMap['bankName'] = h['bankName'];
                 if (h['accountNumber'] != null) {
@@ -607,22 +627,48 @@ class DailySalesController extends GetxController {
               }
             }
           } else if (realTimePaid > 0) {
-            // Option 2: No history (Legacy or simple update), use 'paymentMethod' map
+            // Option 2: No history, use 'paymentMethod' map
             var pm = dailyData['paymentMethod'];
             if (pm != null && pm is Map) {
-              String type = (pm['type'] ?? 'cash').toString().toLowerCase();
+              // --- ROBUST DETECTION LOGIC ---
+              String detectedType = 'cash'; // Default
 
-              // Assign the FULL paid amount to this method key
-              payMap[type] = realTimePaid;
+              // Check values
+              String valBank = (pm['bankName'] ?? '').toString().trim();
+              String valBkash = (pm['bkashNumber'] ?? '').toString().trim();
+              String valNagad = (pm['nagadNumber'] ?? '').toString().trim();
+              String explicitType =
+                  (pm['type'] ?? '').toString().trim().toLowerCase();
 
-              // Map details
-              if (pm['number'] != null) payMap['${type}Number'] = pm['number'];
-              if (pm['bankName'] != null) payMap['bankName'] = pm['bankName'];
+              // Prioritize values because 'type' key might be missing
+              if (valBank.isNotEmpty) {
+                detectedType = 'bank';
+              } else if (valBkash.isNotEmpty) {
+                detectedType = 'bkash';
+              } else if (valNagad.isNotEmpty) {
+                detectedType = 'nagad';
+              } else if (explicitType.isNotEmpty && explicitType != 'cash') {
+                detectedType = explicitType;
+              }
+
+              // Assign the FULL paid amount to this detected type
+              payMap[detectedType] = realTimePaid;
+
+              // Map details for the PDF
+              if (pm['number'] != null) {
+                payMap['${detectedType}Number'] = pm['number'];
+              }
+
+              // Explicitly map these regardless of detected type
+              if (valBank.isNotEmpty) payMap['bankName'] = valBank;
+              if (valBkash.isNotEmpty) payMap['bkashNumber'] = valBkash;
+              if (valNagad.isNotEmpty) payMap['nagadNumber'] = valNagad;
+
               if (pm['accountNumber'] != null) {
                 payMap['accountNumber'] = pm['accountNumber'];
               }
             } else {
-              // Option 3: Paid exists but no method info -> Default to CASH to avoid "Unpaid"
+              // Option 3: Paid exists but no method info -> Default to CASH
               payMap['cash'] = realTimePaid;
             }
           }
@@ -688,7 +734,7 @@ class DailySalesController extends GetxController {
   }
 
   // ==========================================
-  // PROFESSIONAL PDF GENERATOR (From First File)
+  // PROFESSIONAL PDF GENERATOR
   // ==========================================
   Future<void> _generatePdf(
     String invId,
@@ -714,7 +760,6 @@ class DailySalesController extends GetxController {
     final regularFont = await PdfGoogleFonts.robotoRegular();
     final italicFont = await PdfGoogleFonts.robotoItalic();
 
-    // Calculations to match first file logic
     double paidOld = double.tryParse(payMap['paidForOldDue'].toString()) ?? 0.0;
     double paidInv =
         double.tryParse(payMap['paidForInvoice'].toString()) ?? 0.0;
@@ -840,8 +885,6 @@ class DailySalesController extends GetxController {
     }
     await Printing.layoutPdf(onLayout: (f) => pdf.save());
   }
-
-  // --- UPDATED PDF WIDGETS (Matching First File) ---
 
   pw.Widget _buildCompanyHeader(pw.Font bold, pw.Font reg) {
     return pw.Center(
@@ -1101,7 +1144,6 @@ class DailySalesController extends GetxController {
                   style: pw.TextStyle(font: bold, fontSize: 8),
                 ),
                 pw.Divider(thickness: 0.5),
-                // Replaced compact lines with professional table
                 _buildProfessionalPaymentDetails(payMap, reg, bold),
                 if (cartons != null && cartons > 0) ...[
                   pw.SizedBox(height: 8),
@@ -1248,7 +1290,6 @@ class DailySalesController extends GetxController {
     ],
   );
 
-  // THIS IS THE KEY FIX FOR PAYMENT METHODS
   pw.Widget _buildProfessionalPaymentDetails(
     Map payMap,
     pw.Font reg,

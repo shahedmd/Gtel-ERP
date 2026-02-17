@@ -159,7 +159,6 @@ class HotSalesController extends GetxController {
       _applySearchAndPagination();
 
       // Debug Print
-      print("Total Sold Items Found: ${allHotProducts.length}");
     } catch (e) {
       print("Error fetching hot sales: $e");
     } finally {

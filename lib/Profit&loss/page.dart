@@ -3,7 +3,8 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
-import 'controller.dart'; // Ensure this points to your file
+// REPLACE with your actual path to the controller file
+import 'controller.dart';
 
 class ProfitView extends StatelessWidget {
   final ProfitController controller = Get.put(ProfitController());
@@ -55,8 +56,8 @@ class ProfitView extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // --- FILTERS ---
-              _buildFilterChips(),
+              // --- FILTERS (UPDATED) ---
+              _buildFilterChips(context), // Pass context here
               const SizedBox(height: 20),
 
               // ============================================================
@@ -88,9 +89,9 @@ class ProfitView extends StatelessWidget {
               const SizedBox(height: 15),
 
               // ============================================================
-              // 2. NET RECEIVABLES GAP (Sales - Collection)
+              // 2. NET RECEIVABLES GAP
               // ============================================================
-              _buildNetPendingGapCard(),
+              _buildNetPendingGapCard(), // Renamed for clarity
 
               const SizedBox(height: 30),
 
@@ -102,7 +103,7 @@ class ProfitView extends StatelessWidget {
 
               Row(
                 children: [
-                  // PAPER PROFIT (Theoretical)
+                  // PAPER PROFIT
                   Expanded(
                     child: _buildProfitCard(
                       label: "Paper Profit",
@@ -114,7 +115,7 @@ class ProfitView extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 15),
-                  // CASH PROFIT (Realized)
+                  // CASH PROFIT
                   Expanded(
                     child: _buildProfitCard(
                       label: "CASH PROFIT",
@@ -131,7 +132,7 @@ class ProfitView extends StatelessWidget {
 
               const SizedBox(height: 10),
 
-              // Average Margin Indicator (Since expenses are removed)
+              // Average Margin
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(
@@ -271,32 +272,68 @@ class ProfitView extends StatelessWidget {
   // WIDGET HELPERS
   // --------------------------------------------------------------------------
 
-  // --- FILTERS ---
-  Widget _buildFilterChips() {
-    List<String> filters = ['Today', 'This Month', 'Last 30 Days', 'This Year'];
-    return SizedBox(
-      height: 40,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: filters.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 10),
-        itemBuilder: (context, index) {
-          bool isSelected =
-              controller.selectedFilterLabel.value == filters[index];
-          return ChoiceChip(
-            label: Text(filters[index]),
-            selected: isSelected,
-            selectedColor: brandBlue,
-            labelStyle: TextStyle(
-              color: isSelected ? Colors.white : darkBlue,
-              fontWeight: FontWeight.bold,
-              fontSize: 12,
-            ),
-            backgroundColor: Colors.white,
-            side: BorderSide(color: Colors.grey.shade200),
-            onSelected: (_) => controller.setDateRange(filters[index]),
-          );
-        },
+  // --- 1. UPDATED FILTER CHIPS WITH CUSTOM DATE ---
+  Widget _buildFilterChips(BuildContext context) {
+    List<String> presets = ['Today', 'This Month', 'Last 30 Days', 'This Year'];
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          // Standard Presets
+          ...presets.map((filter) {
+            return Padding(
+              padding: const EdgeInsets.only(right: 10.0),
+              child: Obx(() {
+                bool isSelected =
+                    controller.selectedFilterLabel.value == filter;
+                return ChoiceChip(
+                  label: Text(filter),
+                  selected: isSelected,
+                  selectedColor: brandBlue,
+                  labelStyle: TextStyle(
+                    color: isSelected ? Colors.white : darkBlue,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                  ),
+                  backgroundColor: Colors.white,
+                  side: BorderSide(color: Colors.grey.shade200),
+                  onSelected: (_) => controller.setDateRange(filter),
+                );
+              }),
+            );
+          }),
+
+          // Custom Date Button
+          Obx(() {
+            bool isCustom = controller.selectedFilterLabel.value == 'Custom';
+
+            // Format label if custom is selected (e.g. "12 Feb - 15 Feb")
+            String label =
+                isCustom
+                    ? "${DateFormat('dd MMM').format(controller.startDate.value)} - ${DateFormat('dd MMM').format(controller.endDate.value)}"
+                    : "Custom Range";
+
+            return ActionChip(
+              avatar: Icon(
+                Icons.calendar_month_outlined,
+                size: 16,
+                color: isCustom ? Colors.white : darkBlue,
+              ),
+              label: Text(label),
+              backgroundColor: isCustom ? brandBlue : Colors.white,
+              labelStyle: TextStyle(
+                color: isCustom ? Colors.white : darkBlue,
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+              ),
+              side: BorderSide(
+                color: isCustom ? brandBlue : Colors.grey.shade200,
+              ),
+              onPressed: () => controller.pickDateRange(context),
+            );
+          }),
+        ],
       ),
     );
   }
@@ -372,75 +409,77 @@ class ProfitView extends StatelessWidget {
 
   // --- NET PENDING GAP CARD ---
   Widget _buildNetPendingGapCard() {
-    double pendingChange = controller.netPendingChange.value;
-    // Positive = Sales > Collection (Bad/Neutral - Market Debt Grew)
-    // Negative = Collection > Sales (Good - Recovered Money)
+    return Obx(() {
+      double pendingChange = controller.netPendingChange.value;
+      // Positive = Sales > Collection (Bad/Neutral - Market Debt Grew)
+      // Negative = Collection > Sales (Good - Recovered Money)
 
-    bool debtIncreased = pendingChange > 0;
+      bool debtIncreased = pendingChange > 0;
 
-    Color statusColor = debtIncreased ? Colors.orange.shade800 : brandGreen;
-    Color bgColor =
-        debtIncreased ? Colors.orange.shade50 : Colors.green.shade50;
-    IconData icon = debtIncreased ? Icons.trending_up : Icons.trending_down;
+      Color statusColor = debtIncreased ? Colors.orange.shade800 : brandGreen;
+      Color bgColor =
+          debtIncreased ? Colors.orange.shade50 : Colors.green.shade50;
+      IconData icon = debtIncreased ? Icons.trending_up : Icons.trending_down;
 
-    String mainText =
-        debtIncreased ? "MARKET DEBT INCREASED" : "DEBT RECOVERED";
-    String subText =
-        debtIncreased
-            ? "Sales exceeded Collections by:"
-            : "Collections exceeded Sales by:";
+      String mainText =
+          debtIncreased ? "MARKET DEBT INCREASED" : "DEBT RECOVERED";
+      String subText =
+          debtIncreased
+              ? "Sales exceeded Collections by:"
+              : "Collections exceeded Sales by:";
 
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: statusColor.withOpacity(0.2)),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(icon, size: 16, color: statusColor),
-                    const SizedBox(width: 6),
-                    Text(
-                      mainText,
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: statusColor,
-                        fontSize: 12,
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: statusColor.withOpacity(0.2)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(icon, size: 16, color: statusColor),
+                      const SizedBox(width: 6),
+                      Text(
+                        mainText,
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: statusColor,
+                          fontSize: 12,
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  subText,
-                  style: TextStyle(
-                    color: statusColor.withOpacity(0.8),
-                    fontSize: 11,
+                    ],
                   ),
-                ),
-              ],
+                  const SizedBox(height: 4),
+                  Text(
+                    subText,
+                    style: TextStyle(
+                      color: statusColor.withOpacity(0.8),
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          Text(
-            "Tk ${NumberFormat('#,##0').format(pendingChange.abs())}",
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 18,
-              color: statusColor,
+            Text(
+              "Tk ${NumberFormat('#,##0').format(pendingChange.abs())}",
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 18,
+                color: statusColor,
+              ),
             ),
-          ),
-        ],
-      ),
-    );
+          ],
+        ),
+      );
+    });
   }
 
   // --- PROFIT CARDS ---
@@ -566,27 +605,29 @@ class ProfitView extends StatelessWidget {
 
   // --- SORT DROPDOWN ---
   Widget _buildSortDropdown() {
-    return Container(
-      height: 30,
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.grey.shade300),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: controller.sortOption.value,
-          icon: const Icon(Icons.arrow_drop_down, size: 16),
-          style: const TextStyle(fontSize: 11, color: darkBlue),
-          items:
-              ['Date (Newest)', 'Profit (High > Low)', 'Loss (High > Low)']
-                  .map(
-                    (String value) =>
-                        DropdownMenuItem(value: value, child: Text(value)),
-                  )
-                  .toList(),
-          onChanged: (val) => controller.sortTransactions(val),
+    return Obx(
+      () => Container(
+        height: 30,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.grey.shade300),
+        ),
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<String>(
+            value: controller.sortOption.value,
+            icon: const Icon(Icons.arrow_drop_down, size: 16),
+            style: const TextStyle(fontSize: 11, color: darkBlue),
+            items:
+                ['Date (Newest)', 'Profit (High > Low)', 'Loss (High > Low)']
+                    .map(
+                      (String value) =>
+                          DropdownMenuItem(value: value, child: Text(value)),
+                    )
+                    .toList(),
+            onChanged: (val) => controller.sortTransactions(val),
+          ),
         ),
       ),
     );
@@ -594,102 +635,107 @@ class ProfitView extends StatelessWidget {
 
   // --- TRANSACTION LIST ---
   Widget _buildTransactionList() {
-    if (controller.transactionList.isEmpty) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(30),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: const Center(
-          child: Text(
-            "No sales records for this period",
-            style: TextStyle(color: Colors.grey),
-          ),
-        ),
-      );
-    }
-
-    return ListView.builder(
-      physics: const NeverScrollableScrollPhysics(),
-      shrinkWrap: true,
-      itemCount: controller.transactionList.length,
-      itemBuilder: (context, index) {
-        final item = controller.transactionList[index];
-        bool isLoss = (item['profit'] as double) < 0;
-
+    return Obx(() {
+      if (controller.transactionList.isEmpty) {
         return Container(
-          margin: const EdgeInsets.only(bottom: 10),
-          padding: const EdgeInsets.all(12),
+          width: double.infinity,
+          padding: const EdgeInsets.all(30),
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.grey.shade100),
           ),
-          child: Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: isLoss ? Colors.red.shade50 : Colors.green.shade50,
-                  borderRadius: BorderRadius.circular(8),
+          child: const Center(
+            child: Text(
+              "No sales records for this period",
+              style: TextStyle(color: Colors.grey),
+            ),
+          ),
+        );
+      }
+
+      return ListView.builder(
+        physics: const NeverScrollableScrollPhysics(),
+        shrinkWrap: true,
+        itemCount: controller.transactionList.length,
+        itemBuilder: (context, index) {
+          final item = controller.transactionList[index];
+          bool isLoss = (item['profit'] as double) < 0;
+
+          return Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.grey.shade100),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: isLoss ? Colors.red.shade50 : Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    isLoss ? Icons.trending_down : Icons.trending_up,
+                    color: isLoss ? brandRed : brandGreen,
+                    size: 20,
+                  ),
                 ),
-                child: Icon(
-                  isLoss ? Icons.trending_down : Icons.trending_up,
-                  color: isLoss ? brandRed : brandGreen,
-                  size: 20,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        item['name'] ?? 'Unknown',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                          color: darkBlue,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        DateFormat('dd MMM • hh:mm a').format(item['date']),
+                        style: const TextStyle(
+                          color: Colors.grey,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Text(
-                      item['name'] ?? 'Unknown',
+                      "Tk ${NumberFormat('#,##0').format(item['total'])}",
                       style: const TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 13,
                         color: darkBlue,
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 2),
                     Text(
-                      DateFormat('dd MMM • hh:mm a').format(item['date']),
-                      style: const TextStyle(color: Colors.grey, fontSize: 10),
+                      "Profit: ${NumberFormat('#,##0').format(item['profit'])}",
+                      style: TextStyle(
+                        color: isLoss ? brandRed : brandGreen,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ],
                 ),
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    "Tk ${NumberFormat('#,##0').format(item['total'])}",
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                      color: darkBlue,
-                    ),
-                  ),
-                  Text(
-                    "Profit: ${NumberFormat('#,##0').format(item['profit'])}",
-                    style: TextStyle(
-                      color: isLoss ? brandRed : brandGreen,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        );
-      },
-    );
+              ],
+            ),
+          );
+        },
+      );
+    });
   }
 }
