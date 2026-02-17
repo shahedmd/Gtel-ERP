@@ -1,14 +1,16 @@
-// ignore_for_file: empty_catches, curly_braces_in_flow_control_structures
+// ignore_for_file: empty_catches, curly_braces_in_flow_control_structures, deprecated_member_use
 
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:get/get.dart';
-import 'package:gtel_erp/Web%20Screen/Expenses/dailycontroller.dart';
-import 'package:gtel_erp/Web%20Screen/Sales/controller.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+
+// IMPORTANT: Update imports to match your file structure
+import 'package:gtel_erp/Web%20Screen/Expenses/dailycontroller.dart';
+import 'package:gtel_erp/Web%20Screen/Sales/controller.dart';
 
 // --- MODEL FOR UI ---
 class LedgerItem {
@@ -106,7 +108,7 @@ class OverviewController extends GetxController {
     expenseCtrl.changeDate(selectedDate.value);
   }
 
-  // --- 1. CALCULATE PREVIOUS BALANCE (FIXED: Ignored Transfers) ---
+  // --- 1. CALCULATE PREVIOUS BALANCE ---
   Future<void> _fetchPreviousBalance() async {
     isLoadingHistory.value = true;
     try {
@@ -134,7 +136,7 @@ class OverviewController extends GetxController {
         pastSales += (paid - lPaid);
       }
 
-      // B. Past Ledger (FIXED HERE)
+      // B. Past Ledger
       var ledgerSnap =
           await _db
               .collection('cash_ledger')
@@ -148,7 +150,7 @@ class OverviewController extends GetxController {
 
         String type = (d['type'] ?? 'deposit').toString();
 
-        // --- KEY FIX: Ignore Transfers in History Calculation ---
+        // Ignore Transfers in History Calculation
         if (type == 'transfer') continue;
 
         double amt = double.tryParse(d['amount'].toString()) ?? 0;
@@ -213,6 +215,7 @@ class OverviewController extends GetxController {
     double tIn = 0;
     double tOut = 0;
 
+    // Reset Breakdown
     Map<String, double> tempBreakdown = {
       "Cash": 0.0,
       "Bkash": 0.0,
@@ -223,7 +226,7 @@ class OverviewController extends GetxController {
     List<LedgerItem> tempIn = [];
     List<LedgerItem> tempOut = [];
 
-    // --- A. PROCESS SALES (Unchanged) ---
+    // --- A. PROCESS SALES (UPDATED FOR SPLIT PAYMENTS) ---
     for (var sale in salesCtrl.salesList) {
       double realCash = sale.paid - sale.ledgerPaid;
 
@@ -232,36 +235,75 @@ class OverviewController extends GetxController {
 
         String methodLabel = "Cash";
         String displaySubtitle = "Direct Sale";
+
+        // Dynamic map parsing
         dynamic pm = sale.paymentMethod;
+        double c = 0, b = 0, bk = 0, n = 0;
 
         if (pm is Map) {
-          String valBank = (pm['bankName'] ?? '').toString().trim();
-          String valBkash = (pm['bkashNumber'] ?? '').toString().trim();
-          String valNagad = (pm['nagadNumber'] ?? '').toString().trim();
+          // 1. Try to read explicit amounts (New Standard)
+          c = double.tryParse(pm['cash'].toString()) ?? 0;
+          b = double.tryParse(pm['bank'].toString()) ?? 0;
+          bk = double.tryParse(pm['bkash'].toString()) ?? 0;
+          n = double.tryParse(pm['nagad'].toString()) ?? 0;
 
-          if (valBank.isNotEmpty) {
-            methodLabel = "Bank";
-            displaySubtitle = "Bank: $valBank";
-            tempBreakdown['Bank'] = (tempBreakdown['Bank'] ?? 0) + realCash;
-          } else if (valBkash.isNotEmpty) {
-            methodLabel = "Bkash";
-            displaySubtitle = "Bkash: $valBkash";
-            tempBreakdown['Bkash'] = (tempBreakdown['Bkash'] ?? 0) + realCash;
-          } else if (valNagad.isNotEmpty) {
-            methodLabel = "Nagad";
-            displaySubtitle = "Nagad: $valNagad";
-            tempBreakdown['Nagad'] = (tempBreakdown['Nagad'] ?? 0) + realCash;
+          // 2. Legacy Fallback (If map exists but amounts are 0)
+          if ((c + b + bk + n) == 0) {
+            String valBank = (pm['bankName'] ?? '').toString().trim();
+            String valBkash = (pm['bkashNumber'] ?? '').toString().trim();
+            String valNagad = (pm['nagadNumber'] ?? '').toString().trim();
+
+            if (valBank.isNotEmpty) {
+              b = realCash;
+              methodLabel = "Bank";
+            } else if (valBkash.isNotEmpty) {
+              bk = realCash;
+              methodLabel = "Bkash";
+            } else if (valNagad.isNotEmpty) {
+              n = realCash;
+              methodLabel = "Nagad";
+            } else {
+              c = realCash;
+              methodLabel = "Cash";
+            }
           } else {
-            tempBreakdown['Cash'] = (tempBreakdown['Cash'] ?? 0) + realCash;
+            // Determine Label for Split
+            List<String> labels = [];
+            if (c > 0) labels.add("Cash");
+            if (b > 0) labels.add("Bank");
+            if (bk > 0) labels.add("Bkash");
+            if (n > 0) labels.add("Nagad");
+
+            if (labels.length > 1) {
+              methodLabel = "Multi";
+              displaySubtitle = labels.join('/'); // e.g. "Cash/Bkash"
+            } else if (labels.isNotEmpty) {
+              methodLabel = labels.first;
+            }
           }
         } else {
-          if (pm.toString().toLowerCase().contains('bank')) {
-            tempBreakdown['Bank'] = (tempBreakdown['Bank'] ?? 0) + realCash;
+          // String fallback
+          String s = pm.toString().toLowerCase();
+          if (s.contains('bank')) {
+            b = realCash;
             methodLabel = "Bank";
+          } else if (s.contains('bkash')) {
+            bk = realCash;
+            methodLabel = "Bkash";
+          } else if (s.contains('nagad')) {
+            n = realCash;
+            methodLabel = "Nagad";
           } else {
-            tempBreakdown['Cash'] = (tempBreakdown['Cash'] ?? 0) + realCash;
+            c = realCash;
+            methodLabel = "Cash";
           }
         }
+
+        // Add to Breakdown Totals
+        tempBreakdown['Cash'] = (tempBreakdown['Cash'] ?? 0) + c;
+        tempBreakdown['Bank'] = (tempBreakdown['Bank'] ?? 0) + b;
+        tempBreakdown['Bkash'] = (tempBreakdown['Bkash'] ?? 0) + bk;
+        tempBreakdown['Nagad'] = (tempBreakdown['Nagad'] ?? 0) + n;
 
         tempIn.add(
           LedgerItem(
@@ -276,7 +318,7 @@ class OverviewController extends GetxController {
       }
     }
 
-    // --- B. PROCESS LEDGER (FIXED LOGIC HERE) ---
+    // --- B. PROCESS LEDGER (UPDATED LOGIC) ---
     for (var item in externalLedgerData) {
       String type = item['type'] ?? 'deposit';
 
@@ -287,43 +329,25 @@ class OverviewController extends GetxController {
       DateTime time = (item['timestamp'] as Timestamp).toDate();
       String description = item['description'] ?? "Entry";
 
-      // --- METHOD DETECTION FIX ---
+      // Parse method
       String displayMethod = "Cash";
       String methodRaw = (item['method'] ?? 'Cash').toString().toLowerCase();
-
-      // Get bank name and ensure it's not null AND not empty string
       var bankNameVal = item['bankName'];
       bool hasBankDetails =
           bankNameVal != null && bankNameVal.toString().trim().isNotEmpty;
 
-      // 1. Check Bank
-      if (methodRaw.contains('bank') || hasBankDetails) {
+      if (methodRaw.contains('bank') || hasBankDetails)
         displayMethod = "Bank";
-      }
-      // 2. Check Bkash
-      else if (methodRaw.contains('bkash')) {
+      else if (methodRaw.contains('bkash'))
         displayMethod = "Bkash";
-      }
-      // 3. Check Nagad
-      else if (methodRaw.contains('nagad')) {
+      else if (methodRaw.contains('nagad'))
         displayMethod = "Nagad";
-      }
-      // 4. Default is Cash (already set)
 
-      // Add to totals
       if (type == 'deposit') {
         tIn += amt;
-
-        // Add to Breakdown
-        if (displayMethod == 'Bank') {
-          tempBreakdown['Bank'] = (tempBreakdown['Bank'] ?? 0) + amt;
-        } else if (displayMethod == 'Bkash') {
-          tempBreakdown['Bkash'] = (tempBreakdown['Bkash'] ?? 0) + amt;
-        } else if (displayMethod == 'Nagad') {
-          tempBreakdown['Nagad'] = (tempBreakdown['Nagad'] ?? 0) + amt;
-        } else {
-          tempBreakdown['Cash'] = (tempBreakdown['Cash'] ?? 0) + amt;
-        }
+        // Update Breakdown
+        tempBreakdown[displayMethod] =
+            (tempBreakdown[displayMethod] ?? 0) + amt;
 
         tempIn.add(
           LedgerItem(
@@ -331,7 +355,7 @@ class OverviewController extends GetxController {
             title: description,
             subtitle:
                 displayMethod == "Bank" && hasBankDetails
-                    ? "Bank: $bankNameVal" // Show bank name if available
+                    ? "Bank: $bankNameVal"
                     : displayMethod,
             amount: amt,
             type: 'income',
@@ -339,8 +363,12 @@ class OverviewController extends GetxController {
           ),
         );
       } else {
-        // Withdraw/Expense from Ledger
+        // Withdraw/Expense
         tOut += amt;
+        // Note: We don't usually subtract from breakdown here for simple view,
+        // or we can implement waterfall logic if needed.
+        // For simple ledger, expenses are just "Out".
+
         tempOut.add(
           LedgerItem(
             time: time,
@@ -357,7 +385,7 @@ class OverviewController extends GetxController {
       }
     }
 
-    // --- C. PROCESS EXPENSES (Unchanged) ---
+    // --- C. PROCESS EXPENSES ---
     for (var expense in expenseCtrl.dailyList) {
       double amt = expense.amount.toDouble();
       tOut += amt;

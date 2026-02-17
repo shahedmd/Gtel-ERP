@@ -43,14 +43,12 @@ class LiveSalesController extends GetxController {
   final dailyCtrl = Get.find<DailySalesController>();
 
   // --- STATE VARIABLES ---
-  // UPDATED: Default is now WHOLESALE (which is editable)
   final RxString customerType = "WHOLESALE".obs;
   final RxBool isConditionSale = false.obs;
   final RxList<SalesCartItem> cart = <SalesCartItem>[].obs;
   final RxBool isProcessing = false.obs;
   final Rxn<DebtorModel> selectedDebtor = Rxn<DebtorModel>();
 
-  // UPDATED: Reordered List (Wholesale first, VIP second)
   final List<String> customerTypesList = ['WHOLESALE', 'VIP', 'AGENT'];
 
   final List<String> courierList = [
@@ -108,7 +106,7 @@ class LiveSalesController extends GetxController {
   final RxDouble changeReturn = 0.0.obs;
   final RxDouble calculatedCourierDue = 0.0.obs;
 
-  // --- PAGINATION HELPERS (Restored) ---
+  // --- PAGINATION HELPERS ---
   int get currentPage => productCtrl.currentPage.value;
   int get totalPages =>
       (productCtrl.totalProducts.value / productCtrl.pageSize.value).ceil();
@@ -125,7 +123,6 @@ class LiveSalesController extends GetxController {
 
     // DEBTOR SEARCH LISTENER
     debtorPhoneSearch.addListener(() {
-      // Only search if we are in AGENT mode
       if (customerType.value != 'AGENT') return;
 
       String query = debtorPhoneSearch.text.trim();
@@ -134,7 +131,6 @@ class LiveSalesController extends GetxController {
         return;
       }
 
-      // Use the list from DebatorController
       if (debtorCtrl.bodies.isNotEmpty) {
         final match = debtorCtrl.bodies.firstWhereOrNull(
           (e) =>
@@ -157,26 +153,22 @@ class LiveSalesController extends GetxController {
 
     if (productCtrl.allProducts.isEmpty) productCtrl.fetchProducts();
 
-    // Auto-fill debtor details
     ever(selectedDebtor, (DebtorModel? debtor) async {
       if (debtor != null && customerType.value == 'AGENT') {
         nameC.text = debtor.name;
         phoneC.text = debtor.phone;
         addressC.text = debtor.address;
 
-        // Use the breakdown method from DebatorController
         var breakdown = await debtorCtrl.getInstantDebtorBreakdown(debtor.id);
         debtorOldDue.value = breakdown['loan'] ?? 0.0;
         debtorRunningDue.value = breakdown['running'] ?? 0.0;
       } else {
-        // Clear balances when deselected, but keep text fields for manual entry (New Agent case)
         debtorOldDue.value = 0.0;
         debtorRunningDue.value = 0.0;
       }
     });
   }
 
-  // --- UPDATE PRICE LOGIC ---
   void _handleTypeChange() {
     selectedDebtor.value = null;
     debtorPhoneSearch.clear();
@@ -188,7 +180,6 @@ class LiveSalesController extends GetxController {
       if (customerType.value == "AGENT") {
         newPrice = item.product.agent;
       } else {
-        // WHOLESALE & VIP both start with Wholesale base price
         newPrice = item.product.wholesale;
       }
       item.priceAtSale = newPrice;
@@ -198,8 +189,6 @@ class LiveSalesController extends GetxController {
   }
 
   void updateItemPrice(int index, String val) {
-    // UPDATED LOGIC:
-    // VIP & AGENT: Fixed Price (No Edit)
     if (customerType.value == "VIP" || customerType.value == "AGENT") {
       Get.snackbar(
         "Action Denied",
@@ -212,7 +201,6 @@ class LiveSalesController extends GetxController {
       return;
     }
 
-    // WHOLESALE: Editable, but with Minimum Limit (Agent Price)
     double? newPrice = double.tryParse(val);
     if (newPrice == null) return;
     if (newPrice < 0) newPrice = 0.0;
@@ -253,7 +241,6 @@ class LiveSalesController extends GetxController {
     if (customerType.value == "AGENT") {
       price = p.agent;
     } else {
-      // Both WHOLESALE and VIP get wholesale base price
       price = p.wholesale;
     }
 
@@ -364,42 +351,33 @@ class LiveSalesController extends GetxController {
     String fPhone = phoneC.text.trim();
     String? finalDebtorId;
 
-    // 2. AGENT HANDLING (Debtor Creation Logic)
+    // 2. AGENT HANDLING
     if (customerType.value == "AGENT") {
       if (selectedDebtor.value != null) {
-        // Existing Debtor
         finalDebtorId = selectedDebtor.value!.id;
         fName = selectedDebtor.value!.name;
         fPhone = selectedDebtor.value!.phone;
       } else {
-        // NEW AGENT CREATION
         try {
           isProcessing.value = true;
-          // Create ID first
           DocumentReference newDebtorRef = _db.collection('debatorbody').doc();
           finalDebtorId = newDebtorRef.id;
 
-          // Align fields with DebatorController
           await newDebtorRef.set({
-            'id': finalDebtorId, // Some models require ID in doc
+            'id': finalDebtorId,
             'name': fName,
             'phone': fPhone,
             'address': addressC.text,
-            'des': shopC.text, // Shop name mapped to 'des'
-            'nid': '', // Init empty
+            'des': shopC.text,
+            'nid': '',
             'balance': 0.0,
             'purchaseDue': 0.0,
             'createdAt': FieldValue.serverTimestamp(),
             'lastTransactionDate': FieldValue.serverTimestamp(),
-            'searchKeywords': _generateSearchKeywords(
-              fName,
-              fPhone,
-            ), // Added helper
+            'searchKeywords': _generateSearchKeywords(fName, fPhone),
           });
 
-          // Refresh DebatorController to pick up new agent
           await debtorCtrl.loadBodies();
-
           Get.snackbar("New Agent", "Created account for $fName");
         } catch (e) {
           isProcessing.value = false;
@@ -456,7 +434,6 @@ class LiveSalesController extends GetxController {
     );
   }
 
-  // --- HELPER: SEARCH KEYWORDS ---
   List<String> _generateSearchKeywords(String name, String phone) {
     List<String> keywords = [];
     String lowerName = name.toLowerCase();
@@ -485,7 +462,6 @@ class LiveSalesController extends GetxController {
     final DateTime saleDate = DateTime.now();
     double totalPaidInputVal = totalPaidInput.value;
 
-    // --- PAYMENT ALLOCATION ---
     double allocatedToOldDue = 0.0;
     double allocatedToInvoice = 0.0;
     double allocatedToPrevRunningDue = 0.0;
@@ -496,7 +472,6 @@ class LiveSalesController extends GetxController {
         !isConditionSale.value &&
         debtorId != null) {
       double remaining = totalPaidInputVal;
-      // 1. Pay Old Loan
       if (oldDueSnap > 0 && remaining > 0) {
         if (remaining >= oldDueSnap) {
           allocatedToOldDue = oldDueSnap;
@@ -506,7 +481,6 @@ class LiveSalesController extends GetxController {
           remaining = 0.0;
         }
       }
-      // 2. Pay Invoice
       if (remaining > 0) {
         if (remaining >= grandTotal) {
           allocatedToInvoice = grandTotal;
@@ -516,12 +490,10 @@ class LiveSalesController extends GetxController {
           remaining = 0.0;
         }
       }
-      // 3. Surplus
       if (remaining > 0) {
         allocatedToPrevRunningDue = remaining;
       }
     } else {
-      // VIP/WHOLESALE
       allocatedToInvoice =
           totalPaidInputVal > grandTotal ? grandTotal : totalPaidInputVal;
     }
@@ -529,7 +501,6 @@ class LiveSalesController extends GetxController {
     double invoiceDueAmount = _round(grandTotal - allocatedToInvoice);
     if (invoiceDueAmount < 0) invoiceDueAmount = 0;
 
-    // --- STOCK UPDATES ---
     List<Map<String, dynamic>> orderItems =
         cart.map((item) {
           return {
@@ -601,8 +572,6 @@ class LiveSalesController extends GetxController {
                 : "completed",
       });
 
-      // --- BRANCHING ---
-
       if (isConditionSale.value) {
         _handleConditionSale(
           batch,
@@ -620,7 +589,6 @@ class LiveSalesController extends GetxController {
           masterPaymentMap,
         );
       } else if (customerType.value == "AGENT" && debtorId != null) {
-        // AGENT LOGIC
         _handleAgentTransaction(
           batch,
           debtorId,
@@ -658,6 +626,7 @@ class LiveSalesController extends GetxController {
           "soldBy": sellerName,
         });
 
+        // --- UPDATED DAILY SALES ENTRY WITH ROBUST PAYMENT METHOD ---
         DocumentReference dailyRef = _db.collection('daily_sales').doc();
         batch.set(dailyRef, {
           "name": fName,
@@ -666,7 +635,9 @@ class LiveSalesController extends GetxController {
           "pending": 0.0,
           "customerType": customerType.value.toLowerCase(),
           "timestamp": Timestamp.fromDate(saleDate),
-          "paymentMethod": _extractPaymentFor(allocatedToInvoice),
+          "paymentMethod": _extractPaymentFor(
+            allocatedToInvoice,
+          ), // UPDATED FUNCTION USED HERE
           "createdAt": FieldValue.serverTimestamp(),
           "source": "pos_sale",
           "transactionId": invNo,
@@ -728,7 +699,6 @@ class LiveSalesController extends GetxController {
     }
   }
 
-  // --- HELPER: Condition Sale ---
   void _handleConditionSale(
     WriteBatch batch,
     String fName,
@@ -807,7 +777,6 @@ class LiveSalesController extends GetxController {
     }
   }
 
-  // --- HELPER: Agent Transaction ---
   void _handleAgentTransaction(
     WriteBatch batch,
     String debtorId,
@@ -840,7 +809,6 @@ class LiveSalesController extends GetxController {
       "soldByPhone": sellerPhone,
     });
 
-    // 1. Old Loan Payment
     if (allocatedToOldDue > 0) {
       DocumentReference oldPayRef =
           _db
@@ -851,7 +819,7 @@ class LiveSalesController extends GetxController {
       batch.set(oldPayRef, {
         "amount": allocatedToOldDue,
         "transactionId": oldPayRef.id,
-        "type": "loan_payment", // Matches DebatorController Breakdown
+        "type": "loan_payment",
         "date": Timestamp.fromDate(saleDate),
         "createdAt": FieldValue.serverTimestamp(),
         "note": "Payment via Inv $invNo",
@@ -875,7 +843,6 @@ class LiveSalesController extends GetxController {
       });
     }
 
-    // 2. Invoice Credit (Bill)
     DocumentReference creditRef = _db
         .collection('debatorbody')
         .doc(debtorId)
@@ -884,7 +851,7 @@ class LiveSalesController extends GetxController {
     batch.set(creditRef, {
       "amount": grandTotal,
       "transactionId": invNo,
-      "type": "credit", // Matches DebatorController Breakdown
+      "type": "credit",
       "date": Timestamp.fromDate(saleDate),
       "createdAt": FieldValue.serverTimestamp(),
       "note": "Invoice $invNo",
@@ -892,7 +859,6 @@ class LiveSalesController extends GetxController {
       "soldByPhone": sellerPhone,
     });
 
-    // 3. Invoice Debit (Payment)
     if (allocatedToInvoice > 0) {
       DocumentReference debitRef = _db
           .collection('debatorbody')
@@ -902,7 +868,7 @@ class LiveSalesController extends GetxController {
       batch.set(debitRef, {
         "amount": allocatedToInvoice,
         "transactionId": "${invNo}_pay",
-        "type": "debit", // Matches DebatorController Breakdown
+        "type": "debit",
         "date": Timestamp.fromDate(saleDate),
         "createdAt": FieldValue.serverTimestamp(),
         "note": "Payment for Inv $invNo",
@@ -912,7 +878,6 @@ class LiveSalesController extends GetxController {
       });
     }
 
-    // 4. Surplus (Advance)
     if (allocatedToPrevRunningDue > 0) {
       DocumentReference surplusRef = _db
           .collection('debatorbody')
@@ -922,7 +887,7 @@ class LiveSalesController extends GetxController {
       batch.set(surplusRef, {
         "amount": allocatedToPrevRunningDue,
         "transactionId": "${invNo}_surplus",
-        "type": "debit", // Reduces Running Due
+        "type": "debit",
         "date": Timestamp.fromDate(saleDate),
         "createdAt": FieldValue.serverTimestamp(),
         "note": "Surplus Pay from Inv $invNo",
@@ -945,7 +910,6 @@ class LiveSalesController extends GetxController {
       });
     }
 
-    // 5. Daily Sales
     DocumentReference dailyRef = _db.collection('daily_sales').doc();
     double due = grandTotal - allocatedToInvoice;
     batch.set(dailyRef, {
@@ -968,9 +932,40 @@ class LiveSalesController extends GetxController {
     });
   }
 
-  // --- HELPERS: Payment & ID ---
+  // --- UPDATED HELPER: MULTI PAYMENT SUPPORT ---
   Map<String, dynamic> _extractPaymentFor(double targetAmount) {
+    double cash = double.tryParse(cashC.text) ?? 0;
+    double bkash = double.tryParse(bkashC.text) ?? 0;
+    double nagad = double.tryParse(nagadC.text) ?? 0;
+    double bank = double.tryParse(bankC.text) ?? 0;
+
+    // Determine the type string for correct report labelling
+    int types = 0;
+    if (cash > 0) types++;
+    if (bkash > 0) types++;
+    if (nagad > 0) types++;
+    if (bank > 0) types++;
+
+    String type = "Cash"; // Default
+    if (types > 1) {
+      type = "Multi";
+    } else if (bkash > 0) {
+      type = "Bkash";
+    } else if (nagad > 0) {
+      type = "Nagad";
+    } else if (bank > 0) {
+      type = "Bank";
+    }
+
+    if (targetAmount <= 0) type = "Due";
+
+    // Return full breakdown with "method" key for reports
     return {
+      "method": type,
+      "cash": cash,
+      "bkash": bkash,
+      "nagad": nagad,
+      "bank": bank,
       "currency": "BDT",
       "bkashNumber": bkashNumberC.text.trim(),
       "nagadNumber": nagadNumberC.text.trim(),
@@ -1055,7 +1050,7 @@ class LiveSalesController extends GetxController {
     debtorOldDue.value = 0.0;
     debtorRunningDue.value = 0.0;
     selectedPackager.value = null;
-    customerType.value = "WHOLESALE"; // UPDATED: Default is WHOLESALE
+    customerType.value = "WHOLESALE";
   }
 
   // --- PDF GENERATION ---
@@ -1152,7 +1147,7 @@ class LiveSalesController extends GetxController {
         },
       ),
     );
-    // Condition page logic...
+
     if (isCondition) {
       pdf.addPage(
         pw.MultiPage(

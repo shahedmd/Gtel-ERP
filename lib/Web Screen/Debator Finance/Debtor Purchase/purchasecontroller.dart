@@ -39,52 +39,36 @@ class DebtorPurchaseController extends GetxController {
   DocumentSnapshot? _lastDocument;
   var hasMore = true.obs;
   var isFirstPage = true.obs;
-  // Stack to store the first document of previous pages to allow "Back" navigation
   final List<DocumentSnapshot?> _pageStartStack = [];
 
-  // ----------------------------------------------------------------
-  // 1. DATA LOADING & PAGINATION
-  // ----------------------------------------------------------------
 
-  // Initial Load (First Page)
+
   Future<void> loadPurchases(String debtorId) async {
     _pageStartStack.clear();
     _lastDocument = null;
     isFirstPage.value = true;
     await _fetchPage(debtorId);
-    await _fetchAccurateStats(debtorId); // Calc totals via Aggregation
+    await _fetchAccurateStats(debtorId);
   }
 
-  // Next Page
   Future<void> nextPage(String debtorId) async {
     if (!hasMore.value || isLoading.value) return;
     if (purchases.isNotEmpty && _lastDocument != null) {
-      _pageStartStack.add(
-        purchases.first['snapshot'],
-      ); // Save current start for back nav
+      _pageStartStack.add(purchases.first['snapshot']);
       isFirstPage.value = false;
       await _fetchPage(debtorId, startAfter: _lastDocument);
     }
   }
 
-  // Previous Page
   Future<void> previousPage(String debtorId) async {
     if (_pageStartStack.isEmpty || isLoading.value) return;
-
-    // Pop the previous start point
     DocumentSnapshot? prevStart = _pageStartStack.removeLast();
-
     if (_pageStartStack.isEmpty) {
-      isFirstPage.value = true; // We are back at start
+      isFirstPage.value = true;
     }
-
-    // To go back effectively in Firestore without 'endBefore' complexity,
-    // we simply reload starting AT the popped snapshot.
-    // Note: We need to use startAtDocument for the prev page's first item.
     await _fetchPage(debtorId, startAt: prevStart);
   }
 
-  // Core Fetch Logic
   Future<void> _fetchPage(
     String debtorId, {
     DocumentSnapshot? startAfter,
@@ -115,13 +99,11 @@ class DebtorPurchaseController extends GetxController {
             snap.docs.map((d) {
               var data = d.data() as Map<String, dynamic>;
               data['id'] = d.id;
-              data['snapshot'] = d; // Keep ref for internal use
+              data['snapshot'] = d;
               return data;
             }).toList();
       } else {
         hasMore.value = false;
-        // If we tried to go next but failed, don't clear list, just stay.
-        // But for initial load, clear.
         if (startAfter == null && startAt == null) purchases.clear();
       }
     } catch (e) {
@@ -131,27 +113,11 @@ class DebtorPurchaseController extends GetxController {
     }
   }
 
-  // Calculate Accurate Stats using Server-Side Aggregation
-  // (Since we are paginating, we can't sum the list locally)
   Future<void> _fetchAccurateStats(String debtorId) async {
     try {
-      // Note: Firestore Aggregation is cheapest way to sum if many docs.
-      // If you don't have Aggregation enabled or it's complex, we can read the parent doc.
-      // Assuming parent doc 'purchaseDue' is accurate for the balance.
-      // We will try to rely on parent doc for "Due", but getting "Total Purchased" history
-      // requires summing. For now, I will simulate it by reading the parent doc if you stored fields there.
-      // If not, we have to run a full query (expensive) or just show the Due.
-
-      // Let's rely on the parent document for the "Balance" which is most important.
       DocumentSnapshot parentSnap =
           await _db.collection('debatorbody').doc(debtorId).get();
       if (parentSnap.exists) {
-        // If you saved 'purchaseDue' in parent
-
-        // Back-calculate: We can't easily know Total Purchased vs Paid without reading all.
-        // For UI purposes, we might just show "Current Due".
-        // HOWEVER, to keep your UI working:
-        // Let's do a lightweight read of all docs JUST for fields 'amount' and 'type'.
         QuerySnapshot allDocs =
             await _db
                 .collection('debatorbody')
@@ -181,7 +147,7 @@ class DebtorPurchaseController extends GetxController {
   }
 
   // ----------------------------------------------------------------
-  // 2. PURCHASE LOGIC
+  // 2. PURCHASE LOGIC (UPDATED WITH CUSTOM DATE)
   // ----------------------------------------------------------------
   void addToCart(
     Map<String, dynamic> product,
@@ -213,7 +179,11 @@ class DebtorPurchaseController extends GetxController {
     }
   }
 
-  Future<void> finalizePurchase(String debtorId, String note) async {
+  Future<void> finalizePurchase(
+    String debtorId,
+    String note, {
+    DateTime? customDate, // NEW OPTIONAL PARAMETER
+  }) async {
     if (cartItems.isEmpty) return;
     isLoading.value = true;
     try {
@@ -230,7 +200,12 @@ class DebtorPurchaseController extends GetxController {
               .collection('purchases')
               .doc();
 
-      // Convert cart items to a clean list for Firestore
+      // Use custom date if provided, else server timestamp
+      dynamic dateField =
+          customDate != null
+              ? Timestamp.fromDate(customDate)
+              : FieldValue.serverTimestamp();
+
       List<Map<String, dynamic>> finalItems =
           cartItems
               .map(
@@ -247,7 +222,7 @@ class DebtorPurchaseController extends GetxController {
               .toList();
 
       batch.set(purchaseRef, {
-        'date': FieldValue.serverTimestamp(),
+        'date': dateField,
         'type': 'invoice',
         'items': finalItems,
         'totalAmount': grandTotal,
@@ -262,7 +237,6 @@ class DebtorPurchaseController extends GetxController {
 
       await batch.commit();
 
-      // Stock Update
       List<Future> stockUpdates = [];
       for (var item in cartItems) {
         int pid = int.tryParse(item['productId'].toString()) ?? 0;
@@ -282,7 +256,7 @@ class DebtorPurchaseController extends GetxController {
       await Future.wait(stockUpdates);
 
       cartItems.clear();
-      await loadPurchases(debtorId); // Refresh list
+      await loadPurchases(debtorId);
       Get.back();
       Get.snackbar("Success", "Purchase Recorded.");
     } catch (e) {
@@ -293,7 +267,7 @@ class DebtorPurchaseController extends GetxController {
   }
 
   // ----------------------------------------------------------------
-  // 3. PAYMENT LOGIC
+  // 3. PAYMENT LOGIC (UPDATED WITH CUSTOM DATE)
   // ----------------------------------------------------------------
   Future<void> makePayment({
     required String debtorId,
@@ -301,6 +275,7 @@ class DebtorPurchaseController extends GetxController {
     required double amount,
     required String method,
     String? note,
+    DateTime? customDate, // NEW OPTIONAL PARAMETER
   }) async {
     if (amount <= 0) return;
     isLoading.value = true;
@@ -313,8 +288,14 @@ class DebtorPurchaseController extends GetxController {
               .collection('purchases')
               .doc();
 
+      // Use custom date if provided, else server timestamp
+      dynamic dateField =
+          customDate != null
+              ? Timestamp.fromDate(customDate)
+              : FieldValue.serverTimestamp();
+
       batch.set(histRef, {
-        'date': FieldValue.serverTimestamp(),
+        'date': dateField,
         'type': 'payment',
         'amount': amount,
         'method': method,
@@ -332,7 +313,7 @@ class DebtorPurchaseController extends GetxController {
           "Payment to $debtorName",
           amount.toInt(),
           note: "Debtor Payment. Method: $method. ${note ?? ''}",
-          date: DateTime.now(),
+          date: customDate ?? DateTime.now(), // Pass custom date to expense too
         );
       } catch (e) {
         print("Expense Auto-add failed: $e");
@@ -351,6 +332,7 @@ class DebtorPurchaseController extends GetxController {
   Future<void> processContraAdjustment({
     required String debtorId,
     required double amount,
+    DateTime? customDate, // NEW OPTIONAL PARAMETER
   }) async {
     if (amount <= 0) return;
     isLoading.value = true;
@@ -363,8 +345,14 @@ class DebtorPurchaseController extends GetxController {
               .doc(debtorId)
               .collection('purchases')
               .doc();
+
+      dynamic dateField =
+          customDate != null
+              ? Timestamp.fromDate(customDate)
+              : FieldValue.serverTimestamp();
+
       batch.set(purchaseAdjRef, {
-        'date': FieldValue.serverTimestamp(),
+        'date': dateField,
         'type': 'adjustment',
         'amount': amount,
         'method': 'Contra Adjustment',
@@ -385,7 +373,7 @@ class DebtorPurchaseController extends GetxController {
         'transactionId': ledgerRef.id,
         'amount': amount,
         'type': 'debit',
-        'date': FieldValue.serverTimestamp(),
+        'date': dateField,
         'note': 'Contra Adjustment (Ref Purchase)',
         'paymentMethod': {'type': 'Contra'},
         'createdAt': FieldValue.serverTimestamp(),
@@ -531,7 +519,6 @@ class DebtorPurchaseController extends GetxController {
     }
   }
 
-  // Helper
   Future<void> loadProductsForSearch() async {
     if (stockCtrl.allProducts.isEmpty) await stockCtrl.fetchProducts();
     productSearchList.value =

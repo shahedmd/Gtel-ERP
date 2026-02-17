@@ -6,6 +6,7 @@ import 'package:gtel_erp/Customer/cusotmerpage.dart';
 import 'package:gtel_erp/Staff%20Sale%20Report/ui.dart';
 import 'package:gtel_erp/Stock/Service/servicepage.dart';
 import 'package:gtel_erp/Vendor/vendorpage.dart';
+import 'package:gtel_erp/Web%20Screen/Debator%20Finance/purchasehistorypage.dart';
 import 'package:gtel_erp/Web%20Screen/Sales/Condition/conditionpage.dart';
 import 'package:gtel_erp/Web%20Screen/Sales/Product%20analytics/ppage.dart';
 import '../Live order/liveorder.dart';
@@ -104,6 +105,9 @@ class _AdminHomepageState extends State<AdminHomepage> {
                   }
                   if (settings.name == Routes.PRODUCTOVERVIEW) {
                     return GetPageRoute(page: () => HotSellingProductPage());
+                  }
+                  if (settings.name == Routes.PURCHASE) {
+                    return GetPageRoute(page: () => GlobalPurchasePage());
                   }
                   return GetPageRoute(
                     page: () => const Center(child: Text("Not Found")),

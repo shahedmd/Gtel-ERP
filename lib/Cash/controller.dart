@@ -145,7 +145,7 @@ class CashDrawerController extends GetxController {
   }
 
   // ========================================================================
-  // CORE FETCH LOGIC (FIXED)
+  // CORE FETCH LOGIC (UPDATED FOR MULTI-PAYMENT)
   // ========================================================================
   Future<void> fetchData() async {
     isLoading.value = true;
@@ -172,7 +172,7 @@ class CashDrawerController extends GetxController {
         59,
       );
 
-      // 2. Absolute Start (2020)
+      // 2. Absolute Start (for cumulative balances)
       DateTime absoluteStart = DateTime(2020, 1, 1);
 
       // 3. Fetch Data
@@ -246,17 +246,17 @@ class CashDrawerController extends GetxController {
           double actualReceived = totalPaid - ledgerPaid;
 
           if (actualReceived > 0.01) {
-            if (isInPeriod) periodSales += actualReceived;
-
-            // --- SPLIT PAYMENT LOGIC ---
             double c = 0, b = 0, bk = 0, n = 0;
             String displayMethod = "Cash";
             String? displayBankDetails;
 
             var pm = data['paymentMethod'];
 
+            // ----------------------------------------------------
+            // NEW PARSING LOGIC FOR SPLIT PAYMENTS
+            // ----------------------------------------------------
             if (pm is Map) {
-              // 1. Try to read explicit split amounts first
+              // 1. Try exact values first (The new standard)
               c = double.tryParse(pm['cash'].toString()) ?? 0;
               b = double.tryParse(pm['bank'].toString()) ?? 0;
               bk = double.tryParse(pm['bkash'].toString()) ?? 0;
@@ -264,64 +264,71 @@ class CashDrawerController extends GetxController {
 
               displayBankDetails = pm['bankName'];
 
-              // 2. If explicit amounts sum to 0 (legacy data format), fallback to total assignment
+              // 2. Legacy Fallback: If map exists but all amounts are 0 (Old data)
+              // We infer from account numbers or labels
               if ((c + b + bk + n) == 0) {
-                // Check for keys/values indicating method
                 String valBank = (pm['bankName'] ?? '').toString();
                 String valBkash = (pm['bkashNumber'] ?? '').toString();
                 String valNagad = (pm['nagadNumber'] ?? '').toString();
 
+                // Fallback: Assign WHOLE amount to one method
                 if (valBank.isNotEmpty) {
                   b = actualReceived;
-                  displayMethod = "Bank";
                 } else if (valBkash.isNotEmpty) {
                   bk = actualReceived;
-                  displayMethod = "Bkash";
                 } else if (valNagad.isNotEmpty) {
                   n = actualReceived;
-                  displayMethod = "Nagad";
                 } else {
                   c = actualReceived;
-                  displayMethod = "Cash";
                 }
-              } else {
-                // Determine display label for Mixed
-                List<String> mParts = [];
-                if (c > 0) mParts.add("Cash");
-                if (b > 0) mParts.add("Bank");
-                if (bk > 0) mParts.add("Bkash");
-                if (n > 0) mParts.add("Nagad");
-                displayMethod = mParts.join('/');
               }
             } else {
-              // String format legacy
+              // 3. String Fallback (Very old data)
               String s = pm.toString().toLowerCase();
-              if (s.contains('bank')) {
+              if (s.contains('bank'))
                 b = actualReceived;
-                displayMethod = "Bank";
-              } else if (s.contains('bkash')) {
+              else if (s.contains('bkash'))
                 bk = actualReceived;
-                displayMethod = "Bkash";
-              } else if (s.contains('nagad')) {
+              else if (s.contains('nagad'))
                 n = actualReceived;
-                displayMethod = "Nagad";
-              } else {
+              else
                 c = actualReceived;
-                displayMethod = "Cash";
-              }
             }
 
-            // Add to totals
+            // Determine Display Label
+            List<String> activeMethods = [];
+            if (c > 0) activeMethods.add("Cash");
+            if (b > 0) activeMethods.add("Bank");
+            if (bk > 0) activeMethods.add("Bkash");
+            if (n > 0) activeMethods.add("Nagad");
+
+            if (activeMethods.length > 1) {
+              displayMethod =
+                  "Multi"; // Or "Multi (${activeMethods.join('/')})"
+            } else if (activeMethods.isNotEmpty) {
+              displayMethod = activeMethods.first;
+            }
+
+            // Update Global Accumulators
             tCash += c;
             tBank += b;
             tBkash += bk;
             tNagad += n;
 
             if (isInPeriod) {
+              periodSales += actualReceived;
+
+              // Helper to show breakdown in description if multi
+              String desc = "Sale: ${data['name'] ?? 'NA'}";
+              if (displayMethod == "Multi") {
+                desc +=
+                    " (C:${_currencyFormat.format(c)} B:${_currencyFormat.format(b)} Bk:${_currencyFormat.format(bk)} N:${_currencyFormat.format(n)})";
+              }
+
               periodTxList.add(
                 DrawerTransaction(
                   date: itemTime,
-                  description: "Sale: ${data['name'] ?? 'NA'}",
+                  description: desc,
                   amount: actualReceived,
                   type: 'sale',
                   method: displayMethod,
@@ -335,17 +342,16 @@ class CashDrawerController extends GetxController {
         // --- LEDGER PROCESSING ---
         else if (item['type'] == 'ledger') {
           var data = item['data'];
-          if (data['source'] == 'pos_sale') continue; // Skip auto-entries
+          if (data['source'] == 'pos_sale') continue;
 
           double amt = double.tryParse(data['amount'].toString()) ?? 0;
           String type = data['type'] ?? 'deposit';
 
           if (type == 'transfer') {
-            // ... (Keep your existing Transfer Logic here, it looked okay) ...
             String from = (data['fromMethod'] ?? 'Cash').toString();
             String to = (data['toMethod'] ?? 'Cash').toString();
 
-            // Deduct From
+            // Deduct
             if (from == 'Bank')
               tBank -= amt;
             else if (from == 'Bkash')
@@ -355,7 +361,7 @@ class CashDrawerController extends GetxController {
             else
               tCash -= amt;
 
-            // Add To
+            // Add
             if (to == 'Bank')
               tBank += amt;
             else if (to == 'Bkash')
@@ -377,13 +383,12 @@ class CashDrawerController extends GetxController {
               );
             }
           } else {
-            // Deposit / Withdraw
+            // Deposit/Withdraw
             String methodStr = (data['method'] ?? 'Cash').toString();
             bool isBank = methodStr.toLowerCase().contains('bank');
             bool isBkash = methodStr.toLowerCase().contains('bkash');
             bool isNagad = methodStr.toLowerCase().contains('nagad');
 
-            // Adjust balances
             if (type == 'deposit') {
               if (isInPeriod) periodCollections += amt;
               if (isBank)
@@ -424,10 +429,7 @@ class CashDrawerController extends GetxController {
           DrawerTransaction ex = item['data'];
           if (isInPeriod) periodExpenses += ex.amount;
 
-          // Note: Waterfall deduction is risky if expenses are paid by Bank but
-          // code subtracts from Cash because Cash > 0.
-          // However, for Grand Total Net Asset, this is mathematically fine.
-
+          // Waterfall Deduction for expenses (Default logic as expenses don't usually track method)
           double rem = ex.amount;
           if (tCash >= rem) {
             tCash -= rem;
@@ -527,7 +529,6 @@ class CashDrawerController extends GetxController {
     return list;
   }
 
-  // In CashDrawerController
   Future<void> addManualCash({
     required double amount,
     required String method,
@@ -540,7 +541,6 @@ class CashDrawerController extends GetxController {
       'amount': amount,
       'method': method,
       'description': desc,
-      // Fix: If bankName is empty string, save as null
       'bankName': (bankName == null || bankName.isEmpty) ? null : bankName,
       'accountNo': (accountNo == null || accountNo.isEmpty) ? null : accountNo,
       'timestamp': FieldValue.serverTimestamp(),

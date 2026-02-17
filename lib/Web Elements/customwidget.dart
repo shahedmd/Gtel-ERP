@@ -315,13 +315,18 @@ class SidebarMenu extends StatelessWidget {
                     ),
                     _NavTile(
                       id: '/service', // Example of a standalone route
-                      icon: FontAwesomeIcons.productHunt,
                       title: "Service Product",
+                      isSubItem: true,
                     ),
                     _NavTile(
                       id: Routes.SHIPMENT,
-                      icon: FontAwesomeIcons.shippingFast,
                       title: "Shipment Details",
+                      isSubItem: true,
+                    ),
+                    _NavTile(
+                      id: Routes.PURCHASE,
+                      title: "Purchase Hirstory",
+                      isSubItem: true,
                     ),
                   ],
                 ),

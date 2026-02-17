@@ -21,4 +21,6 @@ abstract class Routes {
   static const String CUSTOMEROVERVIEW = '/customeroverview';
   static const String STAFFSALEREPORT = '/staffsalereport';
   static const String PRODUCTOVERVIEW = '/productoverview';
+    static const String PURCHASE = '/purchase';
+
 }

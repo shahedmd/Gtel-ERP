@@ -3,9 +3,11 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:intl/intl.dart';
+
+// IMPORTANT: Ensure these match your project structure
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/Debtor%20Purchase/dialog.dart';
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/Debtor%20Purchase/purchasecontroller.dart';
-import 'package:intl/intl.dart';
 
 class DebtorPurchasePage extends StatelessWidget {
   final String debtorId;
@@ -17,9 +19,11 @@ class DebtorPurchasePage extends StatelessWidget {
     required this.debtorName,
   });
 
-  final DebtorPurchaseController controller = Get.put(
-    DebtorPurchaseController(),
-  );
+  // Inject the controller
+  final DebtorPurchaseController controller =
+      Get.isRegistered<DebtorPurchaseController>()
+          ? Get.find<DebtorPurchaseController>()
+          : Get.put(DebtorPurchaseController());
 
   // THEME COLORS (ERP Standard)
   static const Color darkSlate = Color(0xFF111827); // Dark header
@@ -36,6 +40,7 @@ class DebtorPurchasePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Initial Load
     WidgetsBinding.instance.addPostFrameCallback((_) {
       controller.loadPurchases(debtorId);
     });
@@ -46,13 +51,13 @@ class DebtorPurchasePage extends StatelessWidget {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
+            const Text(
               "Purchases Ledger",
               style: TextStyle(color: Colors.white, fontSize: 14),
             ),
             Text(
               debtorName,
-              style: TextStyle(
+              style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
                 fontSize: 18,
@@ -195,7 +200,7 @@ class DebtorPurchasePage extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            "Tk ${val.value.toStringAsFixed(0)}", // Removed decimal for cleaner look
+            "Tk ${val.value.toStringAsFixed(0)}",
             style: TextStyle(
               color: valColor,
               fontSize: 24,
@@ -232,7 +237,7 @@ class DebtorPurchasePage extends StatelessWidget {
               icon: Icons.payments,
               bgColor: debitGreen,
               textColor: Colors.white,
-              onTap: () => _showNormalPaymentDialog(context),
+              onTap: () => _showPaymentDialogWithDate(context),
             ),
           ),
           const SizedBox(width: 12),
@@ -243,7 +248,7 @@ class DebtorPurchasePage extends StatelessWidget {
               bgColor: Colors.white,
               textColor: Colors.orange[800]!,
               borderColor: Colors.orange[200]!,
-              onTap: () => _showContraDialog(context),
+              onTap: () => _showContraDialogWithDate(context),
             ),
           ),
         ],
@@ -351,6 +356,12 @@ class DebtorPurchasePage extends StatelessWidget {
     Color amountColor =
         isInvoice ? textDark : (isAdj ? warningOrange : debitGreen);
 
+    // Safe Date Parsing
+    DateTime dateObj = DateTime.now();
+    if (item['date'] is Timestamp) {
+      dateObj = (item['date'] as Timestamp).toDate();
+    }
+
     return InkWell(
       onTap: isInvoice ? () => _showPurchaseDetails(context, item) : null,
       hoverColor: Colors.grey[50],
@@ -363,9 +374,7 @@ class DebtorPurchasePage extends StatelessWidget {
             Expanded(
               flex: 2,
               child: Text(
-                DateFormat(
-                  'dd MMM yyyy',
-                ).format((item['date'] as dynamic).toDate()),
+                DateFormat('dd MMM yyyy').format(dateObj),
                 style: const TextStyle(
                   fontSize: 13,
                   color: textDark,
@@ -422,20 +431,18 @@ class DebtorPurchasePage extends StatelessWidget {
                           : (isAdj
                               ? "Contra Ledger Adjustment"
                               : "Cash Payment to Vendor"),
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 12,
                         color: textMuted,
                         fontStyle: FontStyle.italic,
                       ),
                     ),
-
-                  // Show Invoice ID or Reference if available (placeholder logic)
                   if (isInvoice)
                     Padding(
                       padding: const EdgeInsets.only(top: 2),
                       child: Text(
                         "ID: ${item['id'].toString().substring(0, 8).toUpperCase()}",
-                        style: TextStyle(fontSize: 10, color: textMuted),
+                        style: const TextStyle(fontSize: 10, color: textMuted),
                       ),
                     ),
                 ],
@@ -451,7 +458,7 @@ class DebtorPurchasePage extends StatelessWidget {
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
                   color: amountColor,
-                  fontFamily: 'Roboto', // Monospace feel
+                  fontFamily: 'Roboto',
                   fontSize: 13,
                 ),
               ),
@@ -482,7 +489,10 @@ class DebtorPurchasePage extends StatelessWidget {
         children: [
           Icon(Icons.receipt_long_outlined, size: 48, color: Colors.grey[300]),
           const SizedBox(height: 12),
-          Text("No purchase history yet", style: TextStyle(color: textMuted)),
+          const Text(
+            "No purchase history yet",
+            style: TextStyle(color: textMuted),
+          ),
         ],
       ),
     );
@@ -498,7 +508,6 @@ class DebtorPurchasePage extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          // PREVIOUS BUTTON
           Obx(
             () => ElevatedButton.icon(
               onPressed:
@@ -515,14 +524,12 @@ class DebtorPurchasePage extends StatelessWidget {
                   horizontal: 16,
                   vertical: 12,
                 ),
-                side: BorderSide(color: borderCol),
+                side: const BorderSide(color: borderCol),
                 disabledBackgroundColor: bgGrey,
                 disabledForegroundColor: textMuted,
               ),
             ),
           ),
-
-          // NEXT BUTTON (Fixed: Manual Row Construction)
           Obx(
             () => ElevatedButton(
               onPressed:
@@ -537,7 +544,7 @@ class DebtorPurchasePage extends StatelessWidget {
                   horizontal: 16,
                   vertical: 12,
                 ),
-                side: BorderSide(color: borderCol),
+                side: const BorderSide(color: borderCol),
                 disabledBackgroundColor: bgGrey,
                 disabledForegroundColor: textMuted,
               ),
@@ -557,12 +564,17 @@ class DebtorPurchasePage extends StatelessWidget {
   }
 
   // ===========================================================================
-  // DIALOG LOGIC (PRESERVED)
+  // 5. DIALOG LOGIC
   // ===========================================================================
 
   void _showPurchaseDetails(BuildContext context, Map<String, dynamic> item) {
+    // Kept original implementation for details view
     List items = item['items'] ?? [];
     double total = double.tryParse(item['totalAmount'].toString()) ?? 0.0;
+
+    DateTime dateObj = DateTime.now();
+    if (item['date'] is Timestamp)
+      dateObj = (item['date'] as Timestamp).toDate();
 
     showDialog(
       context: context,
@@ -572,13 +584,12 @@ class DebtorPurchasePage extends StatelessWidget {
               borderRadius: BorderRadius.circular(12),
             ),
             child: Container(
-              width: 600, // Slightly wider for table
+              width: 600,
               padding: EdgeInsets.zero,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Header
                   Container(
                     padding: const EdgeInsets.all(20),
                     decoration: const BoxDecoration(
@@ -610,12 +621,10 @@ class DebtorPurchasePage extends StatelessWidget {
                       ],
                     ),
                   ),
-
                   Padding(
                     padding: const EdgeInsets.all(24),
                     child: Column(
                       children: [
-                        // Invoice Info
                         Row(
                           children: [
                             Expanded(
@@ -623,7 +632,7 @@ class DebtorPurchasePage extends StatelessWidget {
                                 "Date",
                                 DateFormat(
                                   'dd MMM yyyy, hh:mm a',
-                                ).format((item['date'] as Timestamp).toDate()),
+                                ).format(dateObj),
                               ),
                             ),
                             const SizedBox(width: 10),
@@ -633,8 +642,6 @@ class DebtorPurchasePage extends StatelessWidget {
                           ],
                         ),
                         const SizedBox(height: 20),
-
-                        // Items Table
                         Container(
                           decoration: BoxDecoration(
                             border: Border.all(color: borderCol),
@@ -642,7 +649,6 @@ class DebtorPurchasePage extends StatelessWidget {
                           ),
                           child: Column(
                             children: [
-                              // Table Header
                               Container(
                                 padding: const EdgeInsets.all(10),
                                 color: bgGrey,
@@ -685,7 +691,6 @@ class DebtorPurchasePage extends StatelessWidget {
                                   ],
                                 ),
                               ),
-                              // List
                               Container(
                                 constraints: const BoxConstraints(
                                   maxHeight: 250,
@@ -776,8 +781,6 @@ class DebtorPurchasePage extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 20),
-
-                        // Footer Actions
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
@@ -851,6 +854,272 @@ class DebtorPurchasePage extends StatelessWidget {
     );
   }
 
+  // --- UPDATED PAYMENT DIALOG WITH DATE ---
+  void _showPaymentDialogWithDate(BuildContext context) {
+    final amountC = TextEditingController();
+    final noteC = TextEditingController();
+    // Use State variable for Date inside StatefulBuilder
+    DateTime selectedDate = DateTime.now();
+    final dateC = TextEditingController(
+      text: DateFormat('dd-MMM-yyyy').format(DateTime.now()),
+    );
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Container(
+            padding: const EdgeInsets.all(24),
+            width: 400,
+            child: StatefulBuilder(
+              builder: (context, setState) {
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      "Record Payment Out",
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: darkSlate,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    const Text(
+                      "Pay Cash to this debtor. This will be recorded as an Expense.",
+                      style: TextStyle(fontSize: 12, color: textMuted),
+                    ),
+                    const SizedBox(height: 20),
+
+                    // DATE PICKER FIELD
+                    TextField(
+                      controller: dateC,
+                      readOnly: true,
+                      decoration: const InputDecoration(
+                        labelText: "Payment Date",
+                        suffixIcon: Icon(Icons.calendar_today, size: 16),
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 12,
+                        ),
+                      ),
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: context,
+                          initialDate: selectedDate,
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime(2030),
+                        );
+                        if (picked != null) {
+                          setState(() {
+                            selectedDate = picked;
+                            dateC.text = DateFormat(
+                              'dd-MMM-yyyy',
+                            ).format(picked);
+                          });
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 15),
+
+                    // AMOUNT FIELD
+                    TextField(
+                      controller: amountC,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: "Amount",
+                        border: OutlineInputBorder(),
+                        prefixText: "Tk ",
+                      ),
+                    ),
+                    const SizedBox(height: 15),
+
+                    // NOTE FIELD
+                    TextField(
+                      controller: noteC,
+                      decoration: const InputDecoration(
+                        labelText: "Note (Optional)",
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+
+                    // SUBMIT BUTTON
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: debitGreen,
+                          padding: const EdgeInsets.all(16),
+                        ),
+                        onPressed: () {
+                          controller.makePayment(
+                            debtorId: debtorId,
+                            debtorName: debtorName,
+                            amount: double.tryParse(amountC.text) ?? 0,
+                            method: "Cash",
+                            note: noteC.text,
+                            customDate: selectedDate, // Pass selected date
+                          );
+                          // Controller handles Get.back()
+                        },
+                        child: const Text(
+                          "Confirm Payment",
+                          style: TextStyle(color: Colors.white),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // --- UPDATED CONTRA DIALOG WITH DATE ---
+  void _showContraDialogWithDate(BuildContext context) {
+    final amountC = TextEditingController();
+    DateTime selectedDate = DateTime.now();
+    final dateC = TextEditingController(
+      text: DateFormat('dd-MMM-yyyy').format(DateTime.now()),
+    );
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Container(
+            padding: const EdgeInsets.all(24),
+            width: 400,
+            child: StatefulBuilder(
+              builder: (context, setState) {
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.compare_arrows, color: Colors.orange),
+                        SizedBox(width: 10),
+                        Text(
+                          "Contra Adjustment",
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: darkSlate,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.orange[50],
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Text(
+                        "This will deduct the amount from 'Payable Due' and also deduct from 'Receivable Due' in the Debtor's Sales Ledger.",
+                        style: TextStyle(fontSize: 12, color: Colors.brown),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+
+                    Obx(
+                      () => Text(
+                        "Max Adjust: ${controller.currentPayable.toStringAsFixed(2)}",
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: textMuted,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 15),
+
+                    // DATE PICKER
+                    TextField(
+                      controller: dateC,
+                      readOnly: true,
+                      decoration: const InputDecoration(
+                        labelText: "Adjustment Date",
+                        suffixIcon: Icon(Icons.calendar_today, size: 16),
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 12,
+                        ),
+                      ),
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: context,
+                          initialDate: selectedDate,
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime(2030),
+                        );
+                        if (picked != null) {
+                          setState(() {
+                            selectedDate = picked;
+                            dateC.text = DateFormat(
+                              'dd-MMM-yyyy',
+                            ).format(picked);
+                          });
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 15),
+
+                    TextField(
+                      controller: amountC,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: "Adjustment Amount",
+                        border: OutlineInputBorder(),
+                        prefixText: "Tk ",
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: darkSlate,
+                          padding: const EdgeInsets.all(16),
+                        ),
+                        onPressed: () {
+                          controller.processContraAdjustment(
+                            debtorId: debtorId,
+                            amount: double.tryParse(amountC.text) ?? 0,
+                            customDate: selectedDate, // Pass selected date
+                          );
+                        },
+                        child: const Text(
+                          "Process Adjustment",
+                          style: TextStyle(color: Colors.white),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _infoBox(String label, String val) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -866,164 +1135,6 @@ class DebtorPurchasePage extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-
-  void _showNormalPaymentDialog(BuildContext context) {
-    final amountC = TextEditingController();
-    final noteC = TextEditingController();
-
-    Get.dialog(
-      Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        child: Container(
-          padding: const EdgeInsets.all(24),
-          width: 400,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                "Record Payment Out",
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: darkSlate,
-                ),
-              ),
-              const SizedBox(height: 5),
-              const Text(
-                "Pay Cash to this debtor. This will be recorded as an Expense.",
-                style: TextStyle(fontSize: 12, color: textMuted),
-              ),
-              const SizedBox(height: 20),
-              TextField(
-                controller: amountC,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: "Amount",
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: noteC,
-                decoration: const InputDecoration(
-                  labelText: "Note (Optional)",
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: debitGreen,
-                    padding: const EdgeInsets.all(16),
-                  ),
-                  onPressed:
-                      () => controller.makePayment(
-                        debtorId: debtorId,
-                        debtorName: debtorName,
-                        amount: double.tryParse(amountC.text) ?? 0,
-                        method: "Cash",
-                        note: noteC.text,
-                      ),
-                  child: const Text(
-                    "Confirm Payment",
-                    style: TextStyle(color: Colors.white),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _showContraDialog(BuildContext context) {
-    final amountC = TextEditingController();
-
-    Get.dialog(
-      Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        child: Container(
-          padding: const EdgeInsets.all(24),
-          width: 400,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Row(
-                children: [
-                  Icon(Icons.compare_arrows, color: Colors.orange),
-                  SizedBox(width: 10),
-                  Text(
-                    "Contra Adjustment",
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: darkSlate,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.orange[50],
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Text(
-                  "This will deduct the amount from 'Payable Due' and also deduct from 'Receivable Due' in the Debtor's Sales Ledger.",
-                  style: TextStyle(fontSize: 12, color: Colors.brown),
-                ),
-              ),
-              const SizedBox(height: 20),
-              Obx(
-                () => Text(
-                  "Max Adjust: ${controller.currentPayable}",
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: textMuted,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 5),
-              TextField(
-                controller: amountC,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: "Adjustment Amount",
-                  border: OutlineInputBorder(),
-                  prefixText: "Tk ",
-                ),
-              ),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: darkSlate,
-                    padding: const EdgeInsets.all(16),
-                  ),
-                  onPressed:
-                      () => controller.processContraAdjustment(
-                        debtorId: debtorId,
-                        amount: double.tryParse(amountC.text) ?? 0,
-                      ),
-                  child: const Text(
-                    "Process Adjustment",
-                    style: TextStyle(color: Colors.white),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 }

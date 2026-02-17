@@ -1,6 +1,8 @@
 // ignore_for_file: deprecated_member_use, avoid_print
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:intl/intl.dart'; // Added for date formatting
+// IMPORTANT: Update this import path
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/Debtor%20Purchase/purchasecontroller.dart';
 
 void showPurchaseDialog(BuildContext context, String debtorId) {
@@ -12,13 +14,31 @@ void showPurchaseDialog(BuildContext context, String debtorId) {
   // Local Controllers
   final qtyC = TextEditingController();
   final costC = TextEditingController();
+  final dateC = TextEditingController(
+    text: DateFormat('dd-MMM-yyyy').format(DateTime.now()),
+  ); // Date Controller
 
   // Reactive State
   Rxn<Map<String, dynamic>> selectedProduct = Rxn<Map<String, dynamic>>();
   RxString selectedLocation = "Sea".obs;
+  Rx<DateTime> selectedDate = DateTime.now().obs; // Store the date
 
   const Color activeAccent = Color(0xFF3B82F6);
   const Color darkSlate = Color(0xFF111827);
+
+  // Helper function to pick date
+  Future<void> _pickDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: selectedDate.value,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2030),
+    );
+    if (picked != null && picked != selectedDate.value) {
+      selectedDate.value = picked;
+      dateC.text = DateFormat('dd-MMM-yyyy').format(picked);
+    }
+  }
 
   showDialog(
     context: context,
@@ -27,7 +47,7 @@ void showPurchaseDialog(BuildContext context, String debtorId) {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         child: Container(
           width: 700,
-          height: 750,
+          height: 800, // Increased height slightly for date field
           padding: const EdgeInsets.all(24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -55,33 +75,57 @@ void showPurchaseDialog(BuildContext context, String debtorId) {
               const Divider(),
               const SizedBox(height: 15),
 
+              // --- 0. DATE SELECTION (NEW) ---
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      "Purchase Date:",
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  Expanded(
+                    flex: 2,
+                    child: TextField(
+                      controller: dateC,
+                      readOnly: true,
+                      decoration: InputDecoration(
+                        hintText: "Select Date",
+                        suffixIcon: const Icon(Icons.calendar_today, size: 16),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          vertical: 0,
+                          horizontal: 10,
+                        ),
+                      ),
+                      onTap: () => _pickDate(context),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 15),
+
               // --- 1. SERVER-SIDE AUTOCOMPLETE ---
+              // (Kept largely the same, just wrapped in LayoutBuilder for constraints)
               LayoutBuilder(
                 builder: (context, constraints) {
-                  // We use Autocomplete with an async optionsBuilder
                   return Autocomplete<Map<String, dynamic>>(
-                    // A. THE SEARCH LOGIC (HITS SERVER)
                     optionsBuilder: (TextEditingValue textEditingValue) async {
                       if (textEditingValue.text.isEmpty) {
                         return const Iterable<Map<String, dynamic>>.empty();
                       }
-                      // This calls the API directly, just like your Stock Page
                       return await controller.stockCtrl
                           .searchProductsForDropdown(textEditingValue.text);
                     },
-
-                    // B. DISPLAY STRING (What shows in the box after clicking)
                     displayStringForOption:
                         (option) => "${option['name']} - ${option['model']}",
-
-                    // C. SELECTION LOGIC
                     onSelected: (selection) {
                       selectedProduct.value = selection;
                       costC.text = selection['buyingPrice']?.toString() ?? "0";
                       qtyC.text = "1";
                     },
-
-                    // D. CUSTOM LIST VIEW (Shows Model clearly)
                     optionsViewBuilder: (context, onSelected, options) {
                       return Align(
                         alignment: Alignment.topLeft,
@@ -119,8 +163,6 @@ void showPurchaseDialog(BuildContext context, String debtorId) {
                         ),
                       );
                     },
-
-                    // E. INPUT FIELD
                     fieldViewBuilder: (
                       context,
                       textController,
@@ -134,7 +176,7 @@ void showPurchaseDialog(BuildContext context, String debtorId) {
                         decoration: InputDecoration(
                           labelText: "Search Server (Model or Name)",
                           hintText: "Type model number...",
-                          prefixIcon:  Icon(Icons.search),
+                          prefixIcon: const Icon(Icons.search),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                           ),
@@ -203,6 +245,7 @@ void showPurchaseDialog(BuildContext context, String debtorId) {
                           return;
                         }
 
+                        // Add to cart
                         controller.addToCart(
                           selectedProduct.value!,
                           int.tryParse(qtyC.text) ?? 0,
@@ -210,6 +253,7 @@ void showPurchaseDialog(BuildContext context, String debtorId) {
                           selectedLocation.value,
                         );
 
+                        // Reset fields but keep product search logic ready
                         selectedProduct.value = null;
                         qtyC.clear();
                         costC.clear();
@@ -346,6 +390,8 @@ void showPurchaseDialog(BuildContext context, String debtorId) {
                         () => controller.finalizePurchase(
                           debtorId,
                           "Stock Purchase",
+                          customDate:
+                              selectedDate.value, // Pass the custom date
                         ),
                   ),
                 ],
