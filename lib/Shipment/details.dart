@@ -26,8 +26,13 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
   final ProductController productController = Get.find<ProductController>();
   late TextEditingController reportCtrl;
 
-  // Local state for editing before saving
+  // Local state for editing
   late List<ShipmentItem> editedItems;
+
+  // New Edit Mode State
+  bool _isEditingManifest = false;
+  late TextEditingController _cartonCountCtrl;
+  late TextEditingController _carrierRateCtrl;
 
   @override
   void initState() {
@@ -35,8 +40,18 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
     reportCtrl = TextEditingController(
       text: widget.shipment.carrierReport ?? "",
     );
+    _cartonCountCtrl = TextEditingController(
+      text: widget.shipment.totalCartons.toString(),
+    );
+    _carrierRateCtrl = TextEditingController(
+      text: widget.shipment.carrierCostPerCarton.toString(),
+    );
 
-    // Deep Copy of items to allow editing without mutating original immediately
+    // Deep Copy of items
+    _resetEditedItems();
+  }
+
+  void _resetEditedItems() {
     editedItems =
         widget.shipment.items
             .map(
@@ -63,6 +78,8 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
   @override
   void dispose() {
     reportCtrl.dispose();
+    _cartonCountCtrl.dispose();
+    _carrierRateCtrl.dispose();
     super.dispose();
   }
 
@@ -72,26 +89,44 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
     });
   }
 
+  void _deleteItem(int index) {
+    setState(() {
+      editedItems.removeAt(index);
+    });
+  }
+
   // --- CALCULATIONS ---
 
-  // Financials
+  // Live Recalculations for EDIT MODE
+  double get liveProductCost =>
+      editedItems.fold(0.0, (sum, e) => sum + e.totalItemCost);
+  double get liveTotalWeight => editedItems.fold(
+    0.0,
+    (sum, e) => sum + (e.unitWeightSnapshot * (e.seaQty + e.airQty)),
+  );
+  double get liveCarrierCost {
+    int ctn = int.tryParse(_cartonCountCtrl.text) ?? 0;
+    double rate = double.tryParse(_carrierRateCtrl.text) ?? 0.0;
+    return ctn * rate;
+  }
+
+  // The grand total of the shipment (Product + Carrier)
+  double get liveGrandTotal => liveProductCost + liveCarrierCost;
+
+  // Financials for RECEIVE MODE (Comparison)
   double get totalReceivedValue =>
       editedItems.fold(0.0, (sum, e) => sum + e.receivedItemValue);
-  double get originalValue => widget.shipment.totalAmount;
   double get valueDifference =>
-      originalValue - totalReceivedValue; // Positive = Loss, Negative = Surplus
+      widget.shipment.totalAmount - totalReceivedValue; // Positive = Loss
 
-  // Weights (The Requested Update)
-  double get originalWeight => widget.shipment.totalWeight;
-
+  // Weights for RECEIVE MODE (Comparison)
   double get currentReceivedWeight => editedItems.fold(0.0, (sum, e) {
     int totalReceivedQty = e.receivedSeaQty + e.receivedAirQty;
     return sum + (totalReceivedQty * e.unitWeightSnapshot);
   });
-
   double get weightDifference =>
-      originalWeight -
-      currentReceivedWeight; // Positive = Weight Loss, Negative = Extra Weight
+      widget.shipment.totalWeight -
+      currentReceivedWeight; // Positive = Weight Loss
 
   // --- ACTIONS ---
 
@@ -185,6 +220,40 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
     );
   }
 
+  void _toggleEditMode() {
+    setState(() {
+      _isEditingManifest = !_isEditingManifest;
+    });
+  }
+
+  void _saveManifestChanges() {
+    int cartons = int.tryParse(_cartonCountCtrl.text) ?? 0;
+    double rate = double.tryParse(_carrierRateCtrl.text) ?? 0.0;
+
+    Get.defaultDialog(
+      title: "Recalculate & Save?",
+      middleText:
+          "This will update the Original Bill, Weight, and Carrier Costs based on your changes.",
+      textConfirm: "SAVE UPDATES",
+      confirmTextColor: Colors.white,
+      onConfirm: () async {
+        Get.back(); // close dialog
+        await controller.saveEditedManifest(
+          docId: widget.shipment.docId!,
+          newItems: editedItems,
+          newCartonCount: cartons,
+          newCarrierRate: rate,
+          report: reportCtrl.text,
+        );
+        setState(() {
+          _isEditingManifest = false;
+        });
+        Get.back(); // Return to previous screen usually, or stay
+      },
+      textCancel: "Cancel",
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final bool isReceived = widget.shipment.isReceived;
@@ -193,9 +262,11 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
       backgroundColor: kBgColor,
       appBar: AppBar(
         title: Text(
-          "MANIFEST: ${widget.shipment.shipmentName}",
-          style: const TextStyle(
-            color: kHeaderColor,
+          _isEditingManifest
+              ? "EDITING MODE"
+              : "MANIFEST: ${widget.shipment.shipmentName}",
+          style: TextStyle(
+            color: _isEditingManifest ? Colors.red : kHeaderColor,
             fontWeight: FontWeight.w800,
           ),
         ),
@@ -207,6 +278,27 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
           child: Container(color: kBorderColor, height: 1),
         ),
         actions: [
+          // EDIT MODE TOGGLE
+          if (!isReceived)
+            Row(
+              children: [
+                const Text(
+                  "EDIT",
+                  style: TextStyle(
+                    color: Colors.black54,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Switch(
+                  value: _isEditingManifest,
+                  activeColor: Colors.red,
+                  onChanged: (val) => _toggleEditMode(),
+                ),
+              ],
+            ),
+
+          // ADD ITEM: Enabled in BOTH modes now, as per request
           if (!isReceived)
             TextButton.icon(
               icon: const Icon(Icons.add_circle_outline, color: kAccentColor),
@@ -219,26 +311,33 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
               ),
               onPressed: _addNewProductWithDialog,
             ),
+
           if (!isReceived)
-            TextButton.icon(
-              icon: const Icon(Icons.save_as, color: Colors.green),
-              label: const Text(
-                "SAVE DRAFT",
-                style: TextStyle(
-                  color: Colors.green,
-                  fontWeight: FontWeight.bold,
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8.0),
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor:
+                      _isEditingManifest ? Colors.red : Colors.green,
+                  foregroundColor: Colors.white,
                 ),
+                icon: Icon(_isEditingManifest ? Icons.save : Icons.save_as),
+                label: Text(_isEditingManifest ? "RE-CALC" : "SAVE"),
+                onPressed: () {
+                  if (_isEditingManifest) {
+                    _saveManifestChanges();
+                  } else {
+                    controller.updateShipmentDetails(
+                      widget.shipment,
+                      editedItems,
+                      reportCtrl.text,
+                    );
+                  }
+                },
               ),
-              onPressed: () {
-                controller.updateShipmentDetails(
-                  widget.shipment,
-                  editedItems,
-                  reportCtrl.text,
-                );
-              },
             ),
-          const SizedBox(width: 8),
-          if (!isReceived)
+
+          if (!isReceived && !_isEditingManifest)
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
                 backgroundColor: kHeaderColor,
@@ -246,15 +345,15 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
                 elevation: 0,
               ),
               icon: const Icon(Icons.check_circle_outline, size: 16),
-              label: const Text("RECEIVE STOCK"),
+              label: const Text("RECEIVE"),
               onPressed: () => _showReceiveConfirmation(),
             ),
-          const SizedBox(width: 16),
+          const SizedBox(width: 8),
         ],
       ),
       body: Column(
         children: [
-          // 1. INFO HEADER (METADATA)
+          // 1. INFO HEADER (METADATA + CARTONS + RATE)
           _buildInfoHeader(),
 
           // 2. MAIN CONTENT SPLIT
@@ -280,64 +379,64 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
                             horizontal: 12,
                             vertical: 10,
                           ),
-                          decoration: const BoxDecoration(
-                            color: kHeaderColor,
-                            borderRadius: BorderRadius.vertical(
+                          decoration: BoxDecoration(
+                            color:
+                                _isEditingManifest
+                                    ? Colors.red[50]
+                                    : kHeaderColor,
+                            borderRadius: const BorderRadius.vertical(
                               top: Radius.circular(7),
                             ),
                           ),
                           child: Row(
-                            children: const [
-                              Expanded(
+                            children: [
+                              const Expanded(
                                 flex: 3,
                                 child: Text(
                                   "PRODUCT INFO",
                                   style: TextStyle(
-                                    color: Colors.white,
                                     fontWeight: FontWeight.bold,
                                     fontSize: 12,
                                   ),
                                 ),
                               ),
-                              Expanded(
+                              const Expanded(
                                 flex: 1,
                                 child: Text(
                                   "WGT/Unit",
-                                  style: TextStyle(
-                                    color: Colors.white70,
-                                    fontSize: 11,
-                                  ),
+                                  style: TextStyle(fontSize: 11),
                                 ),
                               ),
                               Expanded(
                                 flex: 2,
                                 child: Text(
-                                  "ORDERED (S/A)",
-                                  style: TextStyle(
-                                    color: Colors.white70,
-                                    fontSize: 11,
-                                  ),
+                                  _isEditingManifest
+                                      ? "ORDERED (S/A)"
+                                      : "ORDERED",
+                                  style: const TextStyle(fontSize: 11),
                                 ),
                               ),
                               Expanded(
                                 flex: 3,
                                 child: Text(
-                                  "RECEIVED (SEA / AIR)",
+                                  _isEditingManifest
+                                      ? "PRICES (Sea / Air)"
+                                      : "RECEIVED (Sea / Air)",
                                   style: TextStyle(
-                                    color: Colors.yellowAccent,
+                                    color:
+                                        _isEditingManifest
+                                            ? Colors.black
+                                            : Colors.yellowAccent,
                                     fontWeight: FontWeight.bold,
                                     fontSize: 12,
                                   ),
                                 ),
                               ),
-                              Expanded(
+                              const Expanded(
                                 flex: 2,
                                 child: Text(
-                                  "STATUS",
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
-                                  ),
+                                  "STATUS / ACTION",
+                                  style: TextStyle(fontSize: 12),
                                 ),
                               ),
                             ],
@@ -367,30 +466,8 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
                   child: SingleChildScrollView(
                     child: Column(
                       children: [
-                        _buildSummaryCard("FINANCIAL SUMMARY", [
-                          _summaryRow(
-                            "Original Bill",
-                            controller.formatMoney(originalValue),
-                          ),
-                          _summaryRow(
-                            "Received Value",
-                            controller.formatMoney(totalReceivedValue),
-                          ),
-                          const Divider(),
-                          _diffRow(valueDifference, isCurrency: true),
-                        ]),
-                        _buildSummaryCard("WEIGHT SUMMARY", [
-                          _summaryRow(
-                            "Original Weight",
-                            "${originalWeight.toStringAsFixed(2)} kg",
-                          ),
-                          _summaryRow(
-                            "Recv. Weight",
-                            "${currentReceivedWeight.toStringAsFixed(2)} kg",
-                          ),
-                          const Divider(),
-                          _diffRow(weightDifference, isCurrency: false),
-                        ]),
+                        _buildFinancialSummary(), // NEW DETAILED SUMMARY
+                        _buildWeightSummary(),
                         _buildReportCard(isReceived),
                       ],
                     ),
@@ -416,19 +493,32 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
         children: [
           _headerItem("VENDOR", s.vendorName, Icons.store),
           _headerItem("CARRIER", s.carrier, Icons.local_shipping),
-          _headerItem(
-            "EX. RATE",
-            s.exchangeRate.toString(),
-            Icons.currency_exchange,
-          ),
+
+          // EDITABLE HEADER FIELDS
+          _isEditingManifest
+              ? _editableHeaderField("CTNS", _cartonCountCtrl)
+              : _headerItem(
+                "CTNS",
+                s.totalCartons.toString(),
+                Icons.inventory_2,
+              ),
+
+          _isEditingManifest
+              ? _editableHeaderField("RATE", _carrierRateCtrl)
+              : _headerItem(
+                "RATE",
+                s.carrierCostPerCarton.toString(),
+                Icons.monetization_on,
+              ),
+
           _headerItem(
             "DATE",
-            DateFormat('yyyy-MM-dd').format(s.purchaseDate),
+            DateFormat('MM/dd').format(s.purchaseDate),
             Icons.calendar_today,
           ),
           _headerItem(
             "STATUS",
-            s.isReceived ? "RECEIVED" : "ON WAY",
+            s.isReceived ? "RCVD" : "ON WAY",
             s.isReceived ? Icons.check_circle : Icons.timer,
             color: s.isReceived ? Colors.green : Colors.orange,
           ),
@@ -467,10 +557,31 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
     );
   }
 
+  Widget _editableHeaderField(String label, TextEditingController ctrl) {
+    return SizedBox(
+      width: 60,
+      child: TextField(
+        controller: ctrl,
+        keyboardType: TextInputType.number,
+        style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red),
+        decoration: InputDecoration(
+          labelText: label,
+          labelStyle: const TextStyle(fontSize: 10),
+          isDense: true,
+          contentPadding: const EdgeInsets.all(4),
+          border: const OutlineInputBorder(),
+        ),
+        onChanged:
+            (val) =>
+                setState(() {}), // trigger recalculation of liveCarrierCost
+      ),
+    );
+  }
+
   Widget _buildItemRow(int index, bool isReceived) {
     final item = editedItems[index];
     bool isLoss = item.lossQty > 0;
-    bool isGain = item.lossQty < 0; // Negative loss means we received MORE
+    bool isGain = item.lossQty < 0;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
@@ -495,192 +606,399 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                Text(
-                  "Ctn: ${item.cartonNo}",
-                  style: TextStyle(fontSize: 10, color: Colors.grey[500]),
-                ),
+                _isEditingManifest
+                    ? SizedBox(
+                      height: 25,
+                      width: 60,
+                      child: TextField(
+                        decoration: const InputDecoration(
+                          labelText: "Ctn#",
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                        style: const TextStyle(fontSize: 10),
+                        controller: TextEditingController(text: item.cartonNo),
+                        onChanged: (val) {
+                          final updated = _copyItemWith(item, cartonNo: val);
+                          _updateItem(index, updated);
+                        },
+                      ),
+                    )
+                    : Text(
+                      "Ctn: ${item.cartonNo}",
+                      style: TextStyle(fontSize: 10, color: Colors.grey[500]),
+                    ),
               ],
             ),
           ),
 
-          // WEIGHT UNIT
+          // WEIGHT UNIT (Now Editable Without Edit Mode)
           Expanded(
             flex: 1,
-            child: Text(
-              "${item.unitWeightSnapshot} kg",
-              style: const TextStyle(fontSize: 11),
-            ),
+            child:
+                !isReceived
+                    // FIX 1: Removed Expanded inside this call
+                    ? _erpInputSmall(
+                      value: item.unitWeightSnapshot.toString(),
+                      onChanged: (val) {
+                        double w = double.tryParse(val) ?? 0.0;
+                        final updated = _copyItemWith(
+                          item,
+                          unitWeightSnapshot: w,
+                        );
+                        _updateItem(index, updated);
+                      },
+                    )
+                    : Text(
+                      "${item.unitWeightSnapshot} kg",
+                      style: const TextStyle(fontSize: 11),
+                    ),
           ),
 
-          // ORDERED
-          Expanded(
-            flex: 2,
-            child: Text(
-              "${item.seaQty} / ${item.airQty}",
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-          ),
-
-          // INPUTS (RECEIVED)
-          Expanded(
-            flex: 3,
-            child: Row(
-              children: [
-                _erpInput(
-                  value: item.receivedSeaQty,
-                  label: "Sea",
-                  enabled: !isReceived,
-                  onChanged: (val) {
-                    // COPY ITEM, UPDATE VALUE, TRIGGER STATE
-                    final updated = ShipmentItem(
-                      productId: item.productId,
-                      productName: item.productName,
-                      productModel: item.productModel,
-                      productBrand: item.productBrand,
-                      productCategory: item.productCategory,
-                      unitWeightSnapshot: item.unitWeightSnapshot,
-                      seaQty: item.seaQty,
-                      airQty: item.airQty,
-                      cartonNo: item.cartonNo,
-                      seaPriceSnapshot: item.seaPriceSnapshot,
-                      airPriceSnapshot: item.airPriceSnapshot,
-                      ignoreMissing: item.ignoreMissing,
-                      receivedAirQty: item.receivedAirQty, // Keep Air Same
-                      receivedSeaQty: int.tryParse(val) ?? 0, // Update Sea
-                    );
-                    _updateItem(index, updated);
-                  },
-                ),
-                const SizedBox(width: 8),
-                _erpInput(
-                  value: item.receivedAirQty,
-                  label: "Air",
-                  enabled: !isReceived,
-                  onChanged: (val) {
-                    final updated = ShipmentItem(
-                      productId: item.productId,
-                      productName: item.productName,
-                      productModel: item.productModel,
-                      productBrand: item.productBrand,
-                      productCategory: item.productCategory,
-                      unitWeightSnapshot: item.unitWeightSnapshot,
-                      seaQty: item.seaQty,
-                      airQty: item.airQty,
-                      cartonNo: item.cartonNo,
-                      seaPriceSnapshot: item.seaPriceSnapshot,
-                      airPriceSnapshot: item.airPriceSnapshot,
-                      ignoreMissing: item.ignoreMissing,
-                      receivedSeaQty: item.receivedSeaQty, // Keep Sea Same
-                      receivedAirQty: int.tryParse(val) ?? 0, // Update Air
-                    );
-                    _updateItem(index, updated);
-                  },
-                ),
-              ],
-            ),
-          ),
-
-          // STATUS
+          // ORDERED QTY (Editable in Edit Mode)
           Expanded(
             flex: 2,
             child:
-                isLoss
+                _isEditingManifest
                     ? Row(
                       children: [
-                        Checkbox(
-                          value: item.ignoreMissing,
-                          activeColor: Colors.orange,
-                          onChanged:
-                              isReceived
-                                  ? null
-                                  : (v) {
-                                    // Just toggle boolean
-                                    final updated = ShipmentItem(
-                                      productId: item.productId,
-                                      productName: item.productName,
-                                      productModel: item.productModel,
-                                      productBrand: item.productBrand,
-                                      productCategory: item.productCategory,
-                                      unitWeightSnapshot:
-                                          item.unitWeightSnapshot,
-                                      seaQty: item.seaQty,
-                                      airQty: item.airQty,
-                                      cartonNo: item.cartonNo,
-                                      seaPriceSnapshot: item.seaPriceSnapshot,
-                                      airPriceSnapshot: item.airPriceSnapshot,
-                                      receivedSeaQty: item.receivedSeaQty,
-                                      receivedAirQty: item.receivedAirQty,
-                                      ignoreMissing: v ?? false,
-                                    );
-                                    _updateItem(index, updated);
-                                  },
-                        ),
+                        // FIX 2: Wrapped in Expanded here
                         Expanded(
-                          child: Text(
-                            "Missing ${item.lossQty}",
-                            style: const TextStyle(
-                              fontSize: 10,
-                              color: Colors.red,
-                              fontWeight: FontWeight.bold,
-                            ),
+                          child: _erpInputSmall(
+                            value: item.seaQty.toString(),
+                            label: "S",
+                            onChanged: (v) {
+                              int q = int.tryParse(v) ?? 0;
+                              // When editing ordered qty, auto-update received qty to match
+                              _updateItem(
+                                index,
+                                _copyItemWith(
+                                  item,
+                                  seaQty: q,
+                                  receivedSeaQty: q,
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        // FIX 2: Wrapped in Expanded here
+                        Expanded(
+                          child: _erpInputSmall(
+                            value: item.airQty.toString(),
+                            label: "A",
+                            onChanged: (v) {
+                              int q = int.tryParse(v) ?? 0;
+                              _updateItem(
+                                index,
+                                _copyItemWith(
+                                  item,
+                                  airQty: q,
+                                  receivedAirQty: q,
+                                ),
+                              );
+                            },
                           ),
                         ),
                       ],
                     )
-                    : isGain
-                    ? Text(
-                      "Extra +${item.lossQty.abs()}",
-                      style: const TextStyle(
-                        color: Colors.blue,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 11,
-                      ),
-                    )
-                    : const Text(
-                      "Matched",
-                      style: TextStyle(
-                        color: Colors.green,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 11,
-                      ),
+                    : Text(
+                      "${item.seaQty} / ${item.airQty}",
+                      style: const TextStyle(fontWeight: FontWeight.w600),
                     ),
+          ),
+
+          // INPUTS (RECEIVED OR PRICES)
+          Expanded(
+            flex: 3,
+            child:
+                _isEditingManifest
+                    // EDIT MODE: SHOW PRICES
+                    ? Row(
+                      children: [
+                        // FIX 2: Wrapped in Expanded here
+                        Expanded(
+                          child: _erpInputSmall(
+                            value: item.seaPriceSnapshot.toString(),
+                            label: "\$Sea",
+                            onChanged: (v) {
+                              _updateItem(
+                                index,
+                                _copyItemWith(
+                                  item,
+                                  seaPriceSnapshot: double.tryParse(v) ?? 0,
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        // FIX 2: Wrapped in Expanded here
+                        Expanded(
+                          child: _erpInputSmall(
+                            value: item.airPriceSnapshot.toString(),
+                            label: "\$Air",
+                            onChanged: (v) {
+                              _updateItem(
+                                index,
+                                _copyItemWith(
+                                  item,
+                                  airPriceSnapshot: double.tryParse(v) ?? 0,
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    )
+                    // NORMAL MODE: SHOW RECEIVED INPUTS
+                    : Row(
+                      children: [
+                        // FIX 2: Wrapped in Expanded here
+                        Expanded(
+                          child: _erpInput(
+                            value: item.receivedSeaQty,
+                            label: "Sea",
+                            enabled: !isReceived,
+                            onChanged: (val) {
+                              final updated = _copyItemWith(
+                                item,
+                                receivedSeaQty: int.tryParse(val) ?? 0,
+                              );
+                              _updateItem(index, updated);
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        // FIX 2: Wrapped in Expanded here
+                        Expanded(
+                          child: _erpInput(
+                            value: item.receivedAirQty,
+                            label: "Air",
+                            enabled: !isReceived,
+                            onChanged: (val) {
+                              final updated = _copyItemWith(
+                                item,
+                                receivedAirQty: int.tryParse(val) ?? 0,
+                              );
+                              _updateItem(index, updated);
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+          ),
+
+          // STATUS OR DELETE
+          Expanded(
+            flex: 2,
+            child:
+                _isEditingManifest
+                    ? IconButton(
+                      icon: const Icon(Icons.delete, color: Colors.red),
+                      onPressed: () => _deleteItem(index),
+                    )
+                    : (isLoss
+                        ? Row(
+                          children: [
+                            Checkbox(
+                              value: item.ignoreMissing,
+                              activeColor: Colors.orange,
+                              onChanged:
+                                  isReceived
+                                      ? null
+                                      : (v) => _updateItem(
+                                        index,
+                                        _copyItemWith(
+                                          item,
+                                          ignoreMissing: v ?? false,
+                                        ),
+                                      ),
+                            ),
+                            Expanded(
+                              child: Text(
+                                "Missing ${item.lossQty}",
+                                style: const TextStyle(
+                                  fontSize: 10,
+                                  color: Colors.red,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        )
+                        : isGain
+                        ? Text(
+                          "Extra +${item.lossQty.abs()}",
+                          style: const TextStyle(
+                            color: Colors.blue,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 11,
+                          ),
+                        )
+                        : const Text(
+                          "Matched",
+                          style: TextStyle(
+                            color: Colors.green,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 11,
+                          ),
+                        )),
           ),
         ],
       ),
     );
   }
 
+  // Helper to copy item easily
+  ShipmentItem _copyItemWith(
+    ShipmentItem original, {
+    String? cartonNo,
+    int? seaQty,
+    int? airQty,
+    int? receivedSeaQty,
+    int? receivedAirQty,
+    double? unitWeightSnapshot,
+    double? seaPriceSnapshot,
+    double? airPriceSnapshot,
+    bool? ignoreMissing,
+  }) {
+    return ShipmentItem(
+      productId: original.productId,
+      productName: original.productName,
+      productModel: original.productModel,
+      productBrand: original.productBrand,
+      productCategory: original.productCategory,
+      unitWeightSnapshot: unitWeightSnapshot ?? original.unitWeightSnapshot,
+      seaQty: seaQty ?? original.seaQty,
+      airQty: airQty ?? original.airQty,
+      receivedSeaQty: receivedSeaQty ?? original.receivedSeaQty,
+      receivedAirQty: receivedAirQty ?? original.receivedAirQty,
+      cartonNo: cartonNo ?? original.cartonNo,
+      seaPriceSnapshot: seaPriceSnapshot ?? original.seaPriceSnapshot,
+      airPriceSnapshot: airPriceSnapshot ?? original.airPriceSnapshot,
+      ignoreMissing: ignoreMissing ?? original.ignoreMissing,
+    );
+  }
+
+  // FIX 3: Removed Expanded from this helper
   Widget _erpInput({
     required int value,
     required String label,
     required bool enabled,
     required Function(String) onChanged,
   }) {
-    return Expanded(
-      child: SizedBox(
-        height: 35,
-        child: TextFormField(
-          initialValue: value.toString(),
-          enabled: enabled,
-          keyboardType: TextInputType.number,
-          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-          decoration: InputDecoration(
-            labelText: label,
-            labelStyle: const TextStyle(fontSize: 10),
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 8,
-              vertical: 0,
-            ),
-            border: const OutlineInputBorder(),
-            isDense: true,
+    return SizedBox(
+      height: 35,
+      child: TextFormField(
+        initialValue: value.toString(),
+        enabled: enabled,
+        keyboardType: TextInputType.number,
+        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+        decoration: InputDecoration(
+          labelText: label,
+          labelStyle: const TextStyle(fontSize: 10),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 8,
+            vertical: 0,
           ),
-          onChanged: onChanged,
+          border: const OutlineInputBorder(),
+          isDense: true,
+        ),
+        onChanged: onChanged,
+      ),
+    );
+  }
+
+  // FIX 3: Removed Expanded from this helper
+  Widget _erpInputSmall({
+    required String value,
+    String? label,
+    required Function(String) onChanged,
+  }) {
+    return SizedBox(
+      height: 30,
+      child: TextFormField(
+        initialValue: value,
+        keyboardType: TextInputType.number,
+        style: const TextStyle(fontSize: 11, color: Colors.red),
+        decoration: InputDecoration(
+          labelText: label,
+          labelStyle: const TextStyle(fontSize: 9),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+          border: const OutlineInputBorder(),
+          isDense: true,
+        ),
+        onChanged: onChanged,
+      ),
+    );
+  }
+
+  Widget _buildFinancialSummary() {
+    double prodCost =
+        _isEditingManifest ? liveProductCost : widget.shipment.totalAmount;
+    double carrCost =
+        _isEditingManifest ? liveCarrierCost : widget.shipment.totalCarrierFee;
+    double grandTot = prodCost + carrCost;
+
+    return Card(
+      margin: const EdgeInsets.only(top: 16, right: 16, left: 0),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: BorderSide(color: _isEditingManifest ? Colors.red : kBorderColor),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              _isEditingManifest ? "LIVE RECALCULATION" : "FINANCIAL SUMMARY",
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+                color: _isEditingManifest ? Colors.red : Colors.grey,
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            _summaryRow("Product Cost", controller.formatMoney(prodCost)),
+            _summaryRow("Carrier Cost", controller.formatMoney(carrCost)),
+            const Divider(),
+            _summaryRow(
+              "ORIGINAL BILL",
+              controller.formatMoney(grandTot),
+              isBold: true,
+            ),
+
+            if (!_isEditingManifest) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(8),
+                color: kBgColor,
+                child: Column(
+                  children: [
+                    _summaryRow(
+                      "Received Value",
+                      controller.formatMoney(totalReceivedValue),
+                    ),
+                    const SizedBox(height: 4),
+                    _diffRow(valueDifference, isCurrency: true),
+                  ],
+                ),
+              ),
+            ],
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildSummaryCard(String title, List<Widget> children) {
+  Widget _buildWeightSummary() {
+    double originalW =
+        _isEditingManifest ? liveTotalWeight : widget.shipment.totalWeight;
+
     return Card(
       margin: const EdgeInsets.only(top: 16, right: 16, left: 0),
       elevation: 0,
@@ -693,23 +1011,34 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              title,
-              style: const TextStyle(
+            const Text(
+              "WEIGHT SUMMARY",
+              style: TextStyle(
                 fontWeight: FontWeight.bold,
                 fontSize: 12,
                 color: Colors.grey,
               ),
             ),
             const SizedBox(height: 10),
-            ...children,
+            _summaryRow(
+              "Original Weight",
+              "${originalW.toStringAsFixed(2)} kg",
+            ),
+            if (!_isEditingManifest) ...[
+              _summaryRow(
+                "Recv. Weight",
+                "${currentReceivedWeight.toStringAsFixed(2)} kg",
+              ),
+              const Divider(),
+              _diffRow(weightDifference, isCurrency: false),
+            ],
           ],
         ),
       ),
     );
   }
 
-  Widget _summaryRow(String label, String value) {
+  Widget _summaryRow(String label, String value, {bool isBold = false}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Row(
@@ -717,11 +1046,19 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
         children: [
           Text(
             label,
-            style: const TextStyle(fontSize: 12, color: kHeaderColor),
+            style: TextStyle(
+              fontSize: 12,
+              color: isBold ? Colors.black : kHeaderColor,
+              fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+            ),
           ),
           Text(
             value,
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 13,
+              color: isBold ? kAccentColor : Colors.black,
+            ),
           ),
         ],
       ),
@@ -729,21 +1066,17 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
   }
 
   Widget _diffRow(double diff, {required bool isCurrency}) {
-    // If diff is positive: Original > Received (Shortage/Less Weight) -> Red
-    // If diff is negative: Original < Received (Surplus/More Weight) -> Green
-    // If diff is zero: Matched -> Grey
-
     Color color;
     String label;
     String sign = "";
 
     if (diff > 0.001) {
       color = Colors.red;
-      label = isCurrency ? "SHORTAGE" : "WEIGHT LOSS";
+      label = isCurrency ? "SHORTAGE" : "LOSS";
       sign = "-";
     } else if (diff < -0.001) {
       color = Colors.green;
-      label = isCurrency ? "SURPLUS" : "EXTRA WEIGHT";
+      label = isCurrency ? "SURPLUS" : "EXTRA";
       sign = "+";
     } else {
       color = Colors.grey;
@@ -864,7 +1197,6 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
       confirmTextColor: Colors.white,
       buttonColor: kHeaderColor,
       onConfirm: () {
-        // Construct the updated model
         final updatedShipment = ShipmentModel(
           docId: widget.shipment.docId,
           shipmentName: widget.shipment.shipmentName,
@@ -872,20 +1204,16 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
           vendorName: widget.shipment.vendorName,
           carrier: widget.shipment.carrier,
           exchangeRate: widget.shipment.exchangeRate,
-
-          // Preserve Original Data
           totalCartons: widget.shipment.totalCartons,
           totalWeight: widget.shipment.totalWeight,
           carrierCostPerCarton: widget.shipment.carrierCostPerCarton,
           totalCarrierFee: widget.shipment.totalCarrierFee,
           totalAmount: widget.shipment.totalAmount,
-
           isReceived: false,
           items: editedItems,
           carrierReport: reportCtrl.text,
         );
 
-        // Save & Process
         controller
             .updateShipmentDetails(
               updatedShipment,

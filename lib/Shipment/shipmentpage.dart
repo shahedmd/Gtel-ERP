@@ -168,6 +168,7 @@ class ShipmentPage extends StatelessWidget {
                             ),
                             dataRowHeight: 60,
                             dividerThickness: 1,
+                            columnSpacing: 20, // Reduced spacing
                             columns: const [
                               DataColumn(
                                 label: Text(
@@ -196,6 +197,13 @@ class ShipmentPage extends StatelessWidget {
                               DataColumn(
                                 label: Text(
                                   "Items",
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              // --- NEW COLUMN: CARTONS ---
+                              DataColumn(
+                                label: Text(
+                                  "Ctns",
                                   style: TextStyle(fontWeight: FontWeight.bold),
                                 ),
                               ),
@@ -243,11 +251,29 @@ class ShipmentPage extends StatelessWidget {
                                           ),
                                         ),
                                       ),
-                                      DataCell(Text(item.vendorName)),
+                                      DataCell(
+                                        SizedBox(
+                                          width: 120, // Limit width
+                                          child: Text(
+                                            item.vendorName,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ),
                                       DataCell(
                                         _buildCarrierBadge(item.carrier),
                                       ),
                                       DataCell(Text("${item.items.length}")),
+                                      // --- NEW CELL: CARTONS ---
+                                      DataCell(
+                                        Text(
+                                          "${item.totalCartons}",
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.blueGrey,
+                                          ),
+                                        ),
+                                      ),
                                       DataCell(
                                         Text(
                                           controller.formatMoney(
@@ -262,6 +288,7 @@ class ShipmentPage extends StatelessWidget {
                                       DataCell(_statusChip(item.isReceived)),
                                       DataCell(
                                         Row(
+                                          mainAxisSize: MainAxisSize.min,
                                           children: [
                                             IconButton(
                                               icon: const Icon(
@@ -392,10 +419,12 @@ class ShipmentPage extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 8),
+        // --- FIXED VENDOR DROPDOWN OVERFLOW ---
         Obx(
           () => SizedBox(
-            width: 150,
+            width: 200, // Fixed Width
             child: DropdownButtonFormField<String>(
+              isExpanded: true, // Key for overflow handling
               value:
                   ctrl.filterVendor.value.isEmpty
                       ? null
@@ -420,7 +449,7 @@ class ShipmentPage extends StatelessWidget {
                     child: Text(
                       v.name,
                       style: const TextStyle(fontSize: 12),
-                      overflow: TextOverflow.ellipsis,
+                      overflow: TextOverflow.ellipsis, // Truncate long names
                     ),
                   ),
                 ),
@@ -914,9 +943,11 @@ class ShipmentPage extends StatelessWidget {
           // ROW 2: VENDOR, CARRIER, GLOBAL RATE
           Row(
             children: [
+              // --- FIXED VENDOR DROPDOWN OVERFLOW IN FORM ---
               Expanded(
                 child: Obx(
                   () => DropdownButtonFormField<String>(
+                    isExpanded: true,
                     decoration: const InputDecoration(
                       labelText: "Vendor",
                       border: OutlineInputBorder(),
@@ -927,7 +958,10 @@ class ShipmentPage extends StatelessWidget {
                             .map(
                               (v) => DropdownMenuItem(
                                 value: v.docId,
-                                child: Text(v.name),
+                                child: Text(
+                                  v.name,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
                             )
                             .toList(),

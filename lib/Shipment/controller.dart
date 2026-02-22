@@ -12,7 +12,6 @@ import 'package:printing/printing.dart';
 import 'shipmodel.dart';
 
 // --- INTERNAL MODELS ---
-
 class IncomingDetail {
   final String shipmentName;
   final DateTime date;
@@ -100,8 +99,8 @@ class ShipmentController extends GetxController {
     "TRT",
     "GREEN",
     "DIAMOND",
-    "RS"
-        "Other",
+    "RS",
+    "Other",
   ];
   final RxString filterCarrier = ''.obs;
   final RxString filterVendor = ''.obs;
@@ -458,6 +457,57 @@ class ShipmentController extends GetxController {
     searchCtrl.clear();
   }
 
+  // --- NEW: EDIT & RECALCULATE MANIFEST ---
+  Future<void> saveEditedManifest({
+    required String docId,
+    required List<ShipmentItem> newItems,
+    required int newCartonCount,
+    required double newCarrierRate,
+    required String report,
+  }) async {
+    isLoading.value = true;
+    try {
+      // 1. Recalculate Totals based on Edited Items
+      double newTotalProductCost = newItems.fold(
+        0.0,
+        (sumv, item) => sumv + item.totalItemCost,
+      );
+      double newTotalWeight = newItems.fold(
+        0.0,
+        (sumv, item) =>
+            sumv + (item.unitWeightSnapshot * (item.seaQty + item.airQty)),
+      );
+      double newTotalCarrierFee = newCartonCount * newCarrierRate;
+
+      // 2. Update Firestore
+      await _firestore.collection('shipments').doc(docId).update({
+        'items': newItems.map((e) => e.toMap()).toList(),
+        'totalCartons': newCartonCount,
+        'carrierCostPerCarton': newCarrierRate,
+        'totalCarrierFee': newTotalCarrierFee,
+        'totalAmount': newTotalProductCost,
+        'totalWeight': newTotalWeight,
+        'carrierReport': report,
+      });
+
+      // Note: We are NOT updating Vendor Credit history here automatically
+      // because that might be complex (requires finding the old transaction).
+      // If you want that, we can add it later.
+
+      Get.snackbar(
+        "Success",
+        "Manifest Updated & Recalculated",
+        backgroundColor: Colors.green,
+        colorText: Colors.white,
+      );
+    } catch (e) {
+      Get.snackbar("Error", "$e");
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+  // OLD Update method (Just for Receiving state, not full edit)
   Future<void> updateShipmentDetails(
     ShipmentModel shipment,
     List<ShipmentItem> updatedItems,
