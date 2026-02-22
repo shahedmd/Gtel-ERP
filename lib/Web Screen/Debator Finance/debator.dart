@@ -19,7 +19,7 @@ class _DebatorpageState extends State<Debatorpage> {
   final DebatorController controller = Get.put(DebatorController());
   final TextEditingController _searchController = TextEditingController();
 
-  // --- ERP COLOR PALETTE (Kept exactly as yours) ---
+  // --- ERP COLOR PALETTE ---
   static const Color primaryColor = Color(0xFF4F46E5); // Indigo
   static const Color scaffoldBg = Color(0xFFF3F4F6); // Cool Grey
   static const Color surfaceWhite = Colors.white;
@@ -41,21 +41,19 @@ class _DebatorpageState extends State<Debatorpage> {
     super.dispose();
   }
 
-  // NOTE: Removed _onScroll and ScrollController because we are using Buttons now.
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: scaffoldBg,
       body: Column(
         children: [
-          // 1. Top Dashboard & Toolbar (Updated Search Logic)
+          // 1. Top Dashboard & Toolbar
           _buildDashboardSection(),
 
-          // 2. Data Table Header (Kept Same)
+          // 2. Data Table Header
           _buildTableHeader(),
 
-          // 3. Data Table Body (Updated List Source)
+          // 3. Data Table Body (UPDATED TO USE filteredBodies)
           Expanded(
             child: Obx(() {
               if (controller.isBodiesLoading.value) {
@@ -63,25 +61,26 @@ class _DebatorpageState extends State<Debatorpage> {
                   child: CircularProgressIndicator(color: primaryColor),
                 );
               }
-              // Switch to 'bodies' instead of 'filteredBodies' for server pagination
-              if (controller.bodies.isEmpty) {
+
+              // CRITICAL: We must use filteredBodies to see search results!
+              if (controller.filteredBodies.isEmpty) {
                 return _buildEmptyState();
               }
 
               return ListView.separated(
                 padding: EdgeInsets.zero,
-                itemCount: controller.bodies.length,
+                itemCount: controller.filteredBodies.length,
                 separatorBuilder:
                     (c, i) => const Divider(height: 1, color: borderCol),
                 itemBuilder: (context, index) {
-                  final debtor = controller.bodies[index];
+                  final debtor = controller.filteredBodies[index];
                   return _buildTableRow(debtor);
                 },
               );
             }),
           ),
 
-          // 4. NEW: Pagination Footer
+          // 4. Pagination Footer
           _buildPaginationFooter(),
         ],
       ),
@@ -120,15 +119,22 @@ class _DebatorpageState extends State<Debatorpage> {
                       letterSpacing: -0.5,
                     ),
                   ),
-                  Text(
+                  const Text(
                     "Manage receivables and customer accounts",
                     style: TextStyle(fontSize: 13, color: textLight),
                   ),
                 ],
               ),
-              // Reports Dropdown / Buttons
+              // Reports Dropdown / Buttons (ADDED REPAIR BUTTON)
               Row(
                 children: [
+                  _buildReportButton(
+                    icon: Icons.auto_fix_high,
+                    label: "Fix Search DB",
+                    onTap: () => _confirmRepairDialog(),
+                    color: Colors.blueAccent,
+                  ),
+                  const SizedBox(width: 10),
                   _buildReportButton(
                     icon: Icons.upload_file,
                     label: "Payables Rpt",
@@ -176,7 +182,7 @@ class _DebatorpageState extends State<Debatorpage> {
           ),
           const SizedBox(height: 20),
 
-          // Search Bar (UPDATED for Server Search)
+          // Search Bar (UPDATED to Live Typing)
           Row(
             children: [
               Expanded(
@@ -189,14 +195,14 @@ class _DebatorpageState extends State<Debatorpage> {
                   ),
                   child: TextField(
                     controller: _searchController,
-                    // TRIGGER SEARCH ON ENTER
-                    onSubmitted: (val) => controller.runServerSearch(val),
+                    // UPDATED: Now searches live as you type using debounce
+                    onChanged: (val) => controller.searchDebtors(val),
+                    onSubmitted: (val) => controller.searchDebtors(val),
                     decoration: InputDecoration(
-                      hintText: "Search name (Server) or Phone...",
+                      hintText: "Search name, description, or phone...",
                       prefixIcon: const Icon(Icons.search, color: textLight),
                       border: InputBorder.none,
                       contentPadding: const EdgeInsets.symmetric(vertical: 12),
-                      // ADD CLEAR BUTTON
                       suffixIcon: IconButton(
                         icon: const Icon(
                           Icons.clear,
@@ -205,9 +211,7 @@ class _DebatorpageState extends State<Debatorpage> {
                         ),
                         onPressed: () {
                           _searchController.clear();
-                          controller.runServerSearch(
-                            '',
-                          ); // Reset to default list
+                          controller.searchDebtors('');
                         },
                       ),
                     ),
@@ -215,10 +219,9 @@ class _DebatorpageState extends State<Debatorpage> {
                 ),
               ),
               const SizedBox(width: 10),
-              // ADD SEARCH BUTTON
               ElevatedButton(
                 onPressed:
-                    () => controller.runServerSearch(_searchController.text),
+                    () => controller.searchDebtors(_searchController.text),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: primaryColor,
                   minimumSize: const Size(50, 48),
@@ -239,11 +242,30 @@ class _DebatorpageState extends State<Debatorpage> {
   }
 
   // ==========================================
-  // 4. NEW: PAGINATION FOOTER
+  // DB REPAIR DIALOG
+  // ==========================================
+  void _confirmRepairDialog() {
+    Get.defaultDialog(
+      title: "Upgrade Search Data",
+      middleText:
+          "This will update all existing debtors in the database to support the new multi-word description search. This only needs to be done once.",
+      textConfirm: "Upgrade Now",
+      textCancel: "Cancel",
+      confirmTextColor: Colors.white,
+      buttonColor: primaryColor,
+      onConfirm: () {
+        Get.back();
+        controller.repairSearchKeywords();
+      },
+    );
+  }
+
+  // ==========================================
+  // 4. PAGINATION FOOTER
   // ==========================================
   Widget _buildPaginationFooter() {
     return Obx(() {
-      // Hide pagination if actively searching (server search usually returns specific results)
+      // Hide pagination if actively searching
       if (controller.isSearching.value) return const SizedBox.shrink();
 
       return Container(
@@ -254,12 +276,9 @@ class _DebatorpageState extends State<Debatorpage> {
         ),
         child: Row(
           children: [
-            // Previous Button
             ElevatedButton.icon(
               onPressed:
-                  controller.currentPage.value > 1
-                      ? controller.prevPage
-                      : null, // Disable if on Page 1
+                  controller.currentPage.value > 1 ? controller.prevPage : null,
               icon: const Icon(Icons.arrow_back_ios, size: 14),
               label: const Text("Previous"),
               style: ElevatedButton.styleFrom(
@@ -274,10 +293,9 @@ class _DebatorpageState extends State<Debatorpage> {
                 disabledForegroundColor: Colors.grey.shade400,
               ),
             ),
-
-            // Page Indicator
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              margin: const EdgeInsets.symmetric(horizontal: 10),
               decoration: BoxDecoration(
                 color: primaryColor.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(20),
@@ -290,17 +308,10 @@ class _DebatorpageState extends State<Debatorpage> {
                 ),
               ),
             ),
-
-            // Next Button
             ElevatedButton.icon(
-              onPressed:
-                  controller.hasMore.value
-                      ? controller.nextPage
-                      : null, // Disable if no more data
+              onPressed: controller.hasMore.value ? controller.nextPage : null,
               icon: const Icon(Icons.arrow_forward_ios, size: 14),
               label: const Text("Next"),
-              // Use direction: TextDirection.rtl to put icon on right if preferred,
-              // or just keep standard layout
               style: ElevatedButton.styleFrom(
                 backgroundColor: scaffoldBg,
                 foregroundColor: textDark,
@@ -320,7 +331,7 @@ class _DebatorpageState extends State<Debatorpage> {
   }
 
   // ==========================================
-  // WIDGET HELPERS (KEPT EXACTLY AS YOURS)
+  // WIDGET HELPERS
   // ==========================================
 
   Widget _buildKPICard({
@@ -368,7 +379,7 @@ class _DebatorpageState extends State<Debatorpage> {
               const SizedBox(height: 4),
               Text(
                 bdCurrency.format(value),
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w800,
                   color: textDark,
@@ -628,7 +639,7 @@ class _DebatorpageState extends State<Debatorpage> {
           ),
           const SizedBox(height: 16),
           const Text(
-            "No debtors found.",
+            "No matching debtors found.",
             style: TextStyle(
               color: textDark,
               fontSize: 16,
@@ -637,7 +648,7 @@ class _DebatorpageState extends State<Debatorpage> {
           ),
           const SizedBox(height: 5),
           const Text(
-            "Try adjusting your search query.",
+            "Try checking for spelling or using a different keyword.",
             style: TextStyle(color: textLight, fontSize: 14),
           ),
         ],

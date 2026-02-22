@@ -138,36 +138,58 @@ class LiveOrderSalesPage extends StatelessWidget {
               ],
             ),
 
-            // Toggle Switch
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(30),
-              ),
-              child: Row(
-                children: [
-                  Text(
-                    controller.isConditionSale.value
-                        ? "Switch to Direct Sale"
-                        : "Switch to Condition",
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                    ),
+            // Toggle Switch & Refresh Button
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
                   ),
-                  const SizedBox(width: 8),
-                  Switch(
-                    value: controller.isConditionSale.value,
-                    activeColor: Colors.white,
-                    activeTrackColor: Colors.orange.shade300,
-                    inactiveThumbColor: Colors.white,
-                    inactiveTrackColor: Colors.grey,
-                    onChanged: (val) => controller.isConditionSale.value = val,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(30),
                   ),
-                ],
-              ),
+                  child: Row(
+                    children: [
+                      Text(
+                        controller.isConditionSale.value
+                            ? "Switch to Direct Sale"
+                            : "Switch to Condition",
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Switch(
+                        value: controller.isConditionSale.value,
+                        activeColor: Colors.white,
+                        activeTrackColor: Colors.orange.shade300,
+                        inactiveThumbColor: Colors.white,
+                        inactiveTrackColor: Colors.grey,
+                        onChanged:
+                            (val) => controller.isConditionSale.value = val,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 16),
+
+                // --- NEW REFRESH BUTTON ---
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: IconButton(
+                    onPressed: controller.refreshPage,
+                    icon: const Icon(Icons.refresh, color: Colors.white),
+                    tooltip: "Refresh Page & Clear Data",
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -175,11 +197,10 @@ class LiveOrderSalesPage extends StatelessWidget {
     );
   }
 
-  // --- 2. CUSTOMER SECTION (FIXED) ---
+  // --- 2. CUSTOMER SECTION ---
   Widget _buildCustomerSection(LiveSalesController controller) {
     return Obx(() {
       bool isAgent = controller.customerType.value == "AGENT";
-      // bool isCondition = controller.isConditionSale.value; // No longer needed for hiding
 
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -194,8 +215,6 @@ class LiveOrderSalesPage extends StatelessWidget {
                   children:
                       ["WHOLESALE", "VIP", "AGENT"].map((type) {
                         bool isSelected = controller.customerType.value == type;
-
-                        // FIX: Removed the check that hid AGENT in condition mode
 
                         return Expanded(
                           child: InkWell(
@@ -248,22 +267,115 @@ class LiveOrderSalesPage extends StatelessWidget {
 
               const SizedBox(width: 16),
 
-              // 2.2 Agent Search Bar (FIXED: Now visible even if Condition is ON)
+              // 2.2 Agent Search Bar & Dropdown
               if (isAgent)
                 Expanded(
                   child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // SEARCH FIELD & INLINE DROPDOWN
                       Expanded(
                         flex: 5,
-                        child: _erpInput(
-                          controller.debtorPhoneSearch,
-                          "Search Existing Agent (Name/Phone)...",
-                          icon: Icons.search,
-                          highlight: true,
-                          fillColor: Colors.yellow.shade50,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _erpInput(
+                              controller.debtorPhoneSearch,
+                              "Search Existing Agent (Name/Phone)...",
+                              icon: Icons.search,
+                              highlight: true,
+                              fillColor: Colors.yellow.shade50,
+                            ),
+
+                            // --- NEW DROPDOWN LIST UI ---
+                            Obx(() {
+                              if (controller.filteredDebtors.isEmpty) {
+                                return const SizedBox.shrink();
+                              }
+                              return Container(
+                                constraints: const BoxConstraints(
+                                  maxHeight: 200,
+                                ),
+                                margin: const EdgeInsets.only(top: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  border: Border.all(
+                                    color: Colors.blue.shade200,
+                                  ),
+                                  borderRadius: BorderRadius.circular(6),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.1),
+                                      blurRadius: 8,
+                                      offset: const Offset(0, 4),
+                                    ),
+                                  ],
+                                ),
+                                child: ListView.separated(
+                                  shrinkWrap: true,
+                                  padding: EdgeInsets.zero,
+                                  itemCount: controller.filteredDebtors.length,
+                                  separatorBuilder:
+                                      (_, __) => const Divider(height: 1),
+                                  itemBuilder: (context, i) {
+                                    final debtor =
+                                        controller.filteredDebtors[i];
+                                    return InkWell(
+                                      onTap: () {
+                                        // Hide keyboard and select debtor
+                                        FocusScope.of(context).unfocus();
+                                        controller.selectDebtorFromDropdown(
+                                          debtor,
+                                        );
+                                      },
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 10,
+                                        ),
+                                        child: Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  debtor.name,
+                                                  style: const TextStyle(
+                                                    fontSize: 13,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Colors.blueAccent,
+                                                  ),
+                                                ),
+                                                Text(
+                                                  debtor.phone,
+                                                  style: const TextStyle(
+                                                    fontSize: 11,
+                                                    color: Colors.grey,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                            const Icon(
+                                              Icons.arrow_forward_ios,
+                                              size: 12,
+                                              color: Colors.grey,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              );
+                            }),
+                          ],
                         ),
                       ),
                       const SizedBox(width: 12),
+
                       // Verified Balance Badge
                       if (controller.selectedDebtor.value != null)
                         Expanded(
@@ -327,6 +439,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                         Expanded(
                           flex: 4,
                           child: Container(
+                            height: 40,
                             alignment: Alignment.centerLeft,
                             child: const Text(
                               "* To create NEW Agent, ignore search and fill info below.",
@@ -501,9 +614,6 @@ class LiveOrderSalesPage extends StatelessWidget {
       );
     });
   }
-
-  // ... (Rest of the UI code remains exactly the same as you provided) ...
-  // [I am omitting the unchanged parts to save space, but you should keep them]
 
   // --- 3. EXPANDED PAYMENT SECTION ---
   Widget _buildExpandedPaymentSection(LiveSalesController controller) {
@@ -869,9 +979,6 @@ class LiveOrderSalesPage extends StatelessWidget {
                 );
               }
 
-              // UPDATED LOGIC:
-              // VIP & AGENT = Fixed Price (Read-only)
-              // WHOLESALE = Editable
               bool isPriceFixed =
                   (controller.customerType.value == 'VIP' ||
                       controller.customerType.value == 'AGENT');
@@ -882,7 +989,6 @@ class LiveOrderSalesPage extends StatelessWidget {
                 separatorBuilder: (_, __) => const Divider(height: 1),
                 itemBuilder: (context, index) {
                   final item = filteredCart[index];
-                  // Important: Get real index for controller update
                   final originalIndex = controller.cart.indexOf(item);
                   final isLoss = item.isLoss;
 

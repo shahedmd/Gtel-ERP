@@ -1,5 +1,6 @@
 // ignore_for_file: deprecated_member_use, avoid_print, empty_catches
 
+import 'dart:async'; // --- ADDED FOR DEBOUNCE TIMER ---
 import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -47,7 +48,13 @@ class LiveSalesController extends GetxController {
   final RxBool isConditionSale = false.obs;
   final RxList<SalesCartItem> cart = <SalesCartItem>[].obs;
   final RxBool isProcessing = false.obs;
+
+  // Debtor Selection & Search State
   final Rxn<DebtorModel> selectedDebtor = Rxn<DebtorModel>();
+  final RxList<DebtorModel> filteredDebtors = <DebtorModel>[].obs;
+
+  // Search Debounce Timer
+  Timer? _searchDebounce;
 
   final List<String> customerTypesList = ['WHOLESALE', 'VIP', 'AGENT'];
 
@@ -121,24 +128,37 @@ class LiveSalesController extends GetxController {
     nagadC.addListener(updatePaymentCalculations);
     bankC.addListener(updatePaymentCalculations);
 
-    // DEBTOR SEARCH LISTENER
+    // --- DEBTOR SEARCH LISTENER ---
     debtorPhoneSearch.addListener(() {
       if (customerType.value != 'AGENT') return;
 
       String query = debtorPhoneSearch.text.trim();
-      if (query.isEmpty) {
+
+      // Detach the selected debtor if the user starts typing/modifying the text
+      if (selectedDebtor.value != null &&
+          query != selectedDebtor.value!.phone) {
         selectedDebtor.value = null;
+      }
+
+      if (query.isEmpty) {
+        filteredDebtors.clear();
         return;
       }
 
-      if (debtorCtrl.bodies.isNotEmpty) {
-        final match = debtorCtrl.bodies.firstWhereOrNull(
-          (e) =>
-              e.phone.contains(query) ||
-              e.name.toLowerCase().contains(query.toLowerCase()),
-        );
-        selectedDebtor.value = match;
+      // If the text matches exactly, hide the dropdown suggestion list
+      if (selectedDebtor.value != null &&
+          query == selectedDebtor.value!.phone) {
+        filteredDebtors.clear();
+        return;
       }
+
+      // Cancel the previous timer if the user is still typing
+      if (_searchDebounce?.isActive ?? false) _searchDebounce!.cancel();
+
+      // Wait for 500ms after the user stops typing to execute the search (Prevents database spamming)
+      _searchDebounce = Timer(const Duration(milliseconds: 500), () {
+        _searchGlobalAgent(query);
+      });
     });
 
     ever(customerType, (_) => _handleTypeChange());
@@ -169,9 +189,112 @@ class LiveSalesController extends GetxController {
     });
   }
 
+  // --- FULLY SYNCHRONIZED GLOBAL FIRESTORE SEARCH ---
+  Future<void> _searchGlobalAgent(String queryText) async {
+    try {
+      String q = queryText.trim();
+      String qLower = q.toLowerCase();
+      String qCap = qLower.capitalizeFirst ?? qLower;
+
+      Map<String, DebtorModel> results = {};
+
+      // 1. Primary Search via 'searchKeywords' (Most Accurate for Case Insensitive)
+      var kwSnap =
+          await _db
+              .collection('debatorbody')
+              .where('searchKeywords', arrayContains: qLower)
+              .limit(10)
+              .get();
+
+      // 2. Fallback: Phone Number Search
+      var phoneSnap =
+          await _db
+              .collection('debatorbody')
+              .where('phone', isGreaterThanOrEqualTo: q)
+              .where('phone', isLessThan: '$q\uf8ff')
+              .limit(10)
+              .get();
+
+      // 3. Fallback: Name Capitalized Search (e.g. "John")
+      var nameCapSnap =
+          await _db
+              .collection('debatorbody')
+              .where('name', isGreaterThanOrEqualTo: qCap)
+              .where('name', isLessThan: '$qCap\uf8ff')
+              .limit(10)
+              .get();
+
+      // 4. Fallback: Name Lowercase Search (e.g. "john")
+      var nameLowerSnap =
+          await _db
+              .collection('debatorbody')
+              .where('name', isGreaterThanOrEqualTo: qLower)
+              .where('name', isLessThan: '$qLower\uf8ff')
+              .limit(10)
+              .get();
+
+      // Merge all Firestore results securely to avoid duplicates
+      for (var doc in kwSnap.docs) {
+        results[doc.id] = DebtorModel.fromFirestore(doc);
+      }
+      for (var doc in phoneSnap.docs) {
+        results[doc.id] = DebtorModel.fromFirestore(doc);
+      }
+      for (var doc in nameCapSnap.docs) {
+        results[doc.id] = DebtorModel.fromFirestore(doc);
+      }
+      for (var doc in nameLowerSnap.docs) {
+        results[doc.id] = DebtorModel.fromFirestore(doc);
+      }
+
+      // 5. Always deeply search locally loaded pagination data from DebatorController
+      var localMatches =
+          debtorCtrl.bodies
+              .where(
+                (d) =>
+                    d.name.toLowerCase().contains(qLower) ||
+                    d.phone.contains(q) ||
+                    d.nid.contains(q) ||
+                    d.address.toLowerCase().contains(qLower),
+              )
+              .toList();
+
+      for (var m in localMatches) {
+        results[m.id] = m;
+      }
+
+      // Convert Map to List and update UI Dropdown
+      filteredDebtors.value = results.values.toList();
+    } catch (e) {
+      print("Global Agent Search Error: $e");
+    }
+  }
+
+  // --- Select Debtor From Dropdown ---
+  void selectDebtorFromDropdown(DebtorModel debtor) {
+    selectedDebtor.value = debtor;
+    debtorPhoneSearch.text = debtor.phone;
+    filteredDebtors.clear();
+  }
+
+  // --- Refresh Page Functionality ---
+  void refreshPage() {
+    _resetAll();
+    productCtrl.fetchProducts();
+    Get.snackbar(
+      "Refreshed",
+      "Page data has been reset.",
+      snackPosition: SnackPosition.BOTTOM,
+      backgroundColor: Colors.blueAccent,
+      colorText: Colors.white,
+      duration: const Duration(seconds: 1),
+    );
+  }
+
   void _handleTypeChange() {
     selectedDebtor.value = null;
     debtorPhoneSearch.clear();
+    filteredDebtors.clear();
     debtorOldDue.value = 0.0;
     debtorRunningDue.value = 0.0;
 
@@ -374,7 +497,10 @@ class LiveSalesController extends GetxController {
             'purchaseDue': 0.0,
             'createdAt': FieldValue.serverTimestamp(),
             'lastTransactionDate': FieldValue.serverTimestamp(),
-            'searchKeywords': _generateSearchKeywords(fName, fPhone),
+            'searchKeywords': _generateSearchKeywords(
+              fName,
+              fPhone,
+            ), // Uses UPDATED Keywords generator
           });
 
           await debtorCtrl.loadBodies();
@@ -434,16 +560,29 @@ class LiveSalesController extends GetxController {
     );
   }
 
+  // --- UPDATED SEARCH KEYWORDS GENERATOR ---
   List<String> _generateSearchKeywords(String name, String phone) {
     List<String> keywords = [];
     String lowerName = name.toLowerCase();
+
+    // Add name prefixes
     for (int i = 1; i <= lowerName.length; i++) {
       keywords.add(lowerName.substring(0, i));
     }
+    // Add phone prefixes
     for (int i = 1; i <= phone.length; i++) {
       keywords.add(phone.substring(0, i));
     }
-    return keywords;
+    // Add split name parts (for last names)
+    List<String> parts = lowerName.split(' ');
+    for (String part in parts) {
+      if (part.isNotEmpty) {
+        for (int i = 1; i <= part.length; i++) {
+          keywords.add(part.substring(0, i));
+        }
+      }
+    }
+    return keywords.toSet().toList(); // Ensure unique list
   }
 
   // --- TRANSACTION PROCESSING ---
@@ -635,9 +774,7 @@ class LiveSalesController extends GetxController {
           "pending": 0.0,
           "customerType": customerType.value.toLowerCase(),
           "timestamp": Timestamp.fromDate(saleDate),
-          "paymentMethod": _extractPaymentFor(
-            allocatedToInvoice,
-          ), // UPDATED FUNCTION USED HERE
+          "paymentMethod": _extractPaymentFor(allocatedToInvoice),
           "createdAt": FieldValue.serverTimestamp(),
           "source": "pos_sale",
           "transactionId": invNo,
@@ -939,14 +1076,13 @@ class LiveSalesController extends GetxController {
     double nagad = double.tryParse(nagadC.text) ?? 0;
     double bank = double.tryParse(bankC.text) ?? 0;
 
-    // Determine the type string for correct report labelling
     int types = 0;
     if (cash > 0) types++;
     if (bkash > 0) types++;
     if (nagad > 0) types++;
     if (bank > 0) types++;
 
-    String type = "Cash"; // Default
+    String type = "Cash";
     if (types > 1) {
       type = "Multi";
     } else if (bkash > 0) {
@@ -959,7 +1095,6 @@ class LiveSalesController extends GetxController {
 
     if (targetAmount <= 0) type = "Due";
 
-    // Return full breakdown with "method" key for reports
     return {
       "method": type,
       "cash": cash,
@@ -1046,6 +1181,7 @@ class LiveSalesController extends GetxController {
     selectedCourier.value = null;
     calculatedCourierDue.value = 0.0;
     selectedDebtor.value = null;
+    filteredDebtors.clear();
     debtorPhoneSearch.clear();
     debtorOldDue.value = 0.0;
     debtorRunningDue.value = 0.0;

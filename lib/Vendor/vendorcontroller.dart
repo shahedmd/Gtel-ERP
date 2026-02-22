@@ -398,7 +398,6 @@ class VendorController extends GetxController {
         'amount': amount,
         'method': method,
         'description': desc,
-        // Use the actual transaction date so reports match the back-dated entry
         'timestamp': Timestamp.fromDate(date),
         'source': 'vendor_transaction',
       });
@@ -407,8 +406,6 @@ class VendorController extends GetxController {
     }
   }
 
-  // --- NEW: DELETE TRANSACTION ---
-  // Reverses the financial impact and removes the record
   Future<void> deleteTransaction(
     String vendorId,
     VendorTransaction trans,
