@@ -573,8 +573,9 @@ class DebtorPurchasePage extends StatelessWidget {
     double total = double.tryParse(item['totalAmount'].toString()) ?? 0.0;
 
     DateTime dateObj = DateTime.now();
-    if (item['date'] is Timestamp)
+    if (item['date'] is Timestamp) {
       dateObj = (item['date'] as Timestamp).toDate();
+    }
 
     showDialog(
       context: context,

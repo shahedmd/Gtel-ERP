@@ -27,7 +27,7 @@ void showPurchaseDialog(BuildContext context, String debtorId) {
   const Color darkSlate = Color(0xFF111827);
 
   // Helper function to pick date
-  Future<void> _pickDate(BuildContext context) async {
+  Future<void> pickDate(BuildContext context) async {
     final DateTime? picked = await showDatePicker(
       context: context,
       initialDate: selectedDate.value,
@@ -100,7 +100,7 @@ void showPurchaseDialog(BuildContext context, String debtorId) {
                           horizontal: 10,
                         ),
                       ),
-                      onTap: () => _pickDate(context),
+                      onTap: () => pickDate(context),
                     ),
                   ),
                 ],
