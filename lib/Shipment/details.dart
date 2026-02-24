@@ -128,6 +128,14 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
       widget.shipment.totalWeight -
       currentReceivedWeight; // Positive = Weight Loss
 
+  // --- CURRENCY HELPER ---
+  String _formatDualCurrency(double val, double exRate) {
+    if (exRate > 0) {
+      return "${controller.formatMoney(val)}\n${controller.formatRMB(val / exRate)}";
+    }
+    return controller.formatMoney(val);
+  }
+
   // --- ACTIONS ---
 
   void _addNewProductWithDialog() {
@@ -298,7 +306,7 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
               ],
             ),
 
-          // ADD ITEM: Enabled in BOTH modes now, as per request
+          // ADD ITEM: Enabled in BOTH modes now
           if (!isReceived)
             TextButton.icon(
               icon: const Icon(Icons.add_circle_outline, color: kAccentColor),
@@ -353,7 +361,7 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
       ),
       body: Column(
         children: [
-          // 1. INFO HEADER (METADATA + CARTONS + RATE)
+          // 1. INFO HEADER (METADATA + CARTONS + RATE + RMB RATE)
           _buildInfoHeader(),
 
           // 2. MAIN CONTENT SPLIT
@@ -466,7 +474,7 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
                   child: SingleChildScrollView(
                     child: Column(
                       children: [
-                        _buildFinancialSummary(), // NEW DETAILED SUMMARY
+                        _buildFinancialSummary(), // INCLUDES RMB
                         _buildWeightSummary(),
                         _buildReportCard(isReceived),
                       ],
@@ -494,7 +502,6 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
           _headerItem("VENDOR", s.vendorName, Icons.store),
           _headerItem("CARRIER", s.carrier, Icons.local_shipping),
 
-          // EDITABLE HEADER FIELDS
           _isEditingManifest
               ? _editableHeaderField("CTNS", _cartonCountCtrl)
               : _headerItem(
@@ -506,10 +513,17 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
           _isEditingManifest
               ? _editableHeaderField("RATE", _carrierRateCtrl)
               : _headerItem(
-                "RATE",
+                "C. RATE",
                 s.carrierCostPerCarton.toString(),
                 Icons.monetization_on,
               ),
+
+          // ADDED EXCHANGE RATE HEADER ITEM
+          _headerItem(
+            "EX. RATE",
+            s.exchangeRate.toString(),
+            Icons.currency_exchange,
+          ),
 
           _headerItem(
             "DATE",
@@ -571,9 +585,7 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
           contentPadding: const EdgeInsets.all(4),
           border: const OutlineInputBorder(),
         ),
-        onChanged:
-            (val) =>
-                setState(() {}), // trigger recalculation of liveCarrierCost
+        onChanged: (val) => setState(() {}),
       ),
     );
   }
@@ -632,12 +644,11 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
             ),
           ),
 
-          // WEIGHT UNIT (Now Editable Without Edit Mode)
+          // WEIGHT UNIT
           Expanded(
             flex: 1,
             child:
                 !isReceived
-                    // FIX 1: Removed Expanded inside this call
                     ? _erpInputSmall(
                       value: item.unitWeightSnapshot.toString(),
                       onChanged: (val) {
@@ -655,21 +666,19 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
                     ),
           ),
 
-          // ORDERED QTY (Editable in Edit Mode)
+          // ORDERED QTY
           Expanded(
             flex: 2,
             child:
                 _isEditingManifest
                     ? Row(
                       children: [
-                        // FIX 2: Wrapped in Expanded here
                         Expanded(
                           child: _erpInputSmall(
                             value: item.seaQty.toString(),
                             label: "S",
                             onChanged: (v) {
                               int q = int.tryParse(v) ?? 0;
-                              // When editing ordered qty, auto-update received qty to match
                               _updateItem(
                                 index,
                                 _copyItemWith(
@@ -682,7 +691,6 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
                           ),
                         ),
                         const SizedBox(width: 4),
-                        // FIX 2: Wrapped in Expanded here
                         Expanded(
                           child: _erpInputSmall(
                             value: item.airQty.toString(),
@@ -708,15 +716,13 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
                     ),
           ),
 
-          // INPUTS (RECEIVED OR PRICES)
+          // INPUTS
           Expanded(
             flex: 3,
             child:
                 _isEditingManifest
-                    // EDIT MODE: SHOW PRICES
                     ? Row(
                       children: [
-                        // FIX 2: Wrapped in Expanded here
                         Expanded(
                           child: _erpInputSmall(
                             value: item.seaPriceSnapshot.toString(),
@@ -733,7 +739,6 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
                           ),
                         ),
                         const SizedBox(width: 4),
-                        // FIX 2: Wrapped in Expanded here
                         Expanded(
                           child: _erpInputSmall(
                             value: item.airPriceSnapshot.toString(),
@@ -751,10 +756,8 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
                         ),
                       ],
                     )
-                    // NORMAL MODE: SHOW RECEIVED INPUTS
                     : Row(
                       children: [
-                        // FIX 2: Wrapped in Expanded here
                         Expanded(
                           child: _erpInput(
                             value: item.receivedSeaQty,
@@ -770,7 +773,6 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        // FIX 2: Wrapped in Expanded here
                         Expanded(
                           child: _erpInput(
                             value: item.receivedAirQty,
@@ -850,7 +852,6 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
     );
   }
 
-  // Helper to copy item easily
   ShipmentItem _copyItemWith(
     ShipmentItem original, {
     String? cartonNo,
@@ -881,7 +882,6 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
     );
   }
 
-  // FIX 3: Removed Expanded from this helper
   Widget _erpInput({
     required int value,
     required String label,
@@ -910,7 +910,6 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
     );
   }
 
-  // FIX 3: Removed Expanded from this helper
   Widget _erpInputSmall({
     required String value,
     String? label,
@@ -940,6 +939,7 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
     double carrCost =
         _isEditingManifest ? liveCarrierCost : widget.shipment.totalCarrierFee;
     double grandTot = prodCost + carrCost;
+    double exRate = widget.shipment.exchangeRate;
 
     return Card(
       margin: const EdgeInsets.only(top: 16, right: 16, left: 0),
@@ -963,12 +963,12 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
             ),
             const SizedBox(height: 10),
 
-            _summaryRow("Product Cost", controller.formatMoney(prodCost)),
-            _summaryRow("Carrier Cost", controller.formatMoney(carrCost)),
+            _summaryRow("Product Cost", _formatDualCurrency(prodCost, exRate)),
+            _summaryRow("Carrier Cost", _formatDualCurrency(carrCost, exRate)),
             const Divider(),
             _summaryRow(
               "ORIGINAL BILL",
-              controller.formatMoney(grandTot),
+              _formatDualCurrency(grandTot, exRate),
               isBold: true,
             ),
 
@@ -981,7 +981,7 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
                   children: [
                     _summaryRow(
                       "Received Value",
-                      controller.formatMoney(totalReceivedValue),
+                      _formatDualCurrency(totalReceivedValue, exRate),
                     ),
                     const SizedBox(height: 4),
                     _diffRow(valueDifference, isCurrency: true),
@@ -1043,6 +1043,9 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
       padding: const EdgeInsets.only(bottom: 6),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment:
+            CrossAxisAlignment
+                .start, // Handles multi-line RMB strings elegantly
         children: [
           Text(
             label,
@@ -1054,6 +1057,7 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
           ),
           Text(
             value,
+            textAlign: TextAlign.right,
             style: TextStyle(
               fontWeight: FontWeight.bold,
               fontSize: 13,
@@ -1083,10 +1087,18 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
       label = "MATCHED";
     }
 
-    String valStr =
-        isCurrency
-            ? controller.formatMoney(diff.abs())
-            : "${diff.abs().toStringAsFixed(2)} kg";
+    String valStr;
+    if (isCurrency) {
+      double exRate = widget.shipment.exchangeRate;
+      if (exRate > 0) {
+        valStr =
+            "${controller.formatMoney(diff.abs())}  (${controller.formatRMB(diff.abs() / exRate)})";
+      } else {
+        valStr = controller.formatMoney(diff.abs());
+      }
+    } else {
+      valStr = "${diff.abs().toStringAsFixed(2)} kg";
+    }
 
     return Container(
       padding: const EdgeInsets.all(8),
@@ -1161,6 +1173,11 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
   }
 
   void _showReceiveConfirmation() {
+    String warningMoneyStr =
+        widget.shipment.exchangeRate > 0
+            ? "${controller.formatMoney(valueDifference)} / ${controller.formatRMB(valueDifference / widget.shipment.exchangeRate)}"
+            : controller.formatMoney(valueDifference);
+
     Get.defaultDialog(
       title: "Confirm Stock Receipt",
       contentPadding: const EdgeInsets.all(20),
@@ -1176,7 +1193,7 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
               padding: const EdgeInsets.all(10),
               color: Colors.red[50],
               child: Text(
-                "Warning: Shortage of ${controller.formatMoney(valueDifference)} detected. This will be logged as Vendor Loss.",
+                "Warning: Shortage of $warningMoneyStr detected. This will be logged as Vendor Loss.",
                 style: const TextStyle(
                   color: Colors.red,
                   fontSize: 12,

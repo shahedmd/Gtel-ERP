@@ -26,7 +26,7 @@ class _DebatordetailsState extends State<Debatordetails> {
   final controller = Get.find<DebatorController>();
 
   final TextEditingController _searchCtrl = TextEditingController();
-  final RxString _filterType = 'All'.obs; 
+  final RxString _filterType = 'All'.obs;
   final RxInt _currentPage = 1.obs;
   final int _rowsPerPage = 50;
 
@@ -40,9 +40,6 @@ class _DebatordetailsState extends State<Debatordetails> {
   void initState() {
     super.initState();
     controller.clearTransactionState();
-    // Load ALL transactions so we can filter/paginate locally
-    // Note: If you have massive data (>5000 tx), consider server-side pagination instead.
-    // For normal usage, loading all into memory is faster for sorting/filtering.
     controller.loadDebtorTransactions(widget.id, loadMore: true);
   }
 
@@ -52,13 +49,10 @@ class _DebatordetailsState extends State<Debatordetails> {
     super.dispose();
   }
 
-  // --- FILTERING & PAGINATION LOGIC ---
 
   List<TransactionModel> get _processedTransactions {
-    // 1. Get Base List
     List<TransactionModel> list = controller.currentTransactions;
 
-    // 2. Apply Type Filter
     if (_filterType.value == 'Sales') {
       list =
           list
@@ -116,20 +110,42 @@ class _DebatordetailsState extends State<Debatordetails> {
 
   @override
   Widget build(BuildContext context) {
-    // Re-fetch body safely
-    final debtor = controller.bodies.firstWhereOrNull((e) => e.id == widget.id);
+    // --- FIX: Search in BOTH bodies and filteredBodies safely ---
+    final debtor =
+        controller.bodies.firstWhereOrNull((e) => e.id == widget.id) ??
+        controller.filteredBodies.firstWhereOrNull((e) => e.id == widget.id);
 
-    if (debtor == null && controller.bodies.isEmpty) {
+    // If both lists are empty, it means data is still loading
+    if (debtor == null &&
+        controller.bodies.isEmpty &&
+        controller.filteredBodies.isEmpty) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
-    // Fallback if deleted externally
-    if (debtor == null && controller.bodies.isNotEmpty) {
-      return const Scaffold(body: Center(child: Text("Debtor Not Found")));
+
+    // Fallback if debtor is still not found in either list
+    if (debtor == null) {
+      return Scaffold(
+        appBar: AppBar(
+          title: Text(widget.name, style: const TextStyle(color: darkSlate)),
+          backgroundColor: Colors.white,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: darkSlate),
+            onPressed: () => Get.back(),
+          ),
+        ),
+        body: const Center(
+          child: Text(
+            "Debtor Not Found. Please refresh the previous page.",
+            style: TextStyle(color: textMuted, fontSize: 16),
+          ),
+        ),
+      );
     }
 
     return Scaffold(
       backgroundColor: bgGrey,
-      appBar: _buildAppBar(debtor!),
+      appBar: _buildAppBar(debtor),
       floatingActionButton: FloatingActionButton.extended(
         backgroundColor: darkSlate,
         onPressed: () => _showAddTransactionDialog(debtor),

@@ -139,9 +139,13 @@ class ShipmentController extends GetxController {
   StreamSubscription? _shipmentSubscription;
   StreamSubscription? _onHoldSubscription;
 
+  // --- CURRENCY FORMATTERS ---
   final NumberFormat _currencyFormatter = NumberFormat('#,##0.00', 'en_US');
   String formatMoney(double amount) =>
       "BDT ${_currencyFormatter.format(amount)}";
+
+  final NumberFormat _rmbFormatter = NumberFormat('#,##0.00', 'en_US');
+  String formatRMB(double amount) => "¥ ${_rmbFormatter.format(amount)}";
 
   // --- GETTERS ---
   double get calculatedTotalWeight => currentManifestItems.fold(
@@ -166,6 +170,22 @@ class ShipmentController extends GetxController {
 
   double get liveGrandTotal =>
       currentManifestProductCost + liveTotalCarrierCost;
+
+  // --- NEW RMB GETTERS ---
+  double get currentManifestProductCostRMB {
+    double rate = double.tryParse(globalExchangeRateCtrl.text) ?? 0.0;
+    return rate > 0 ? currentManifestProductCost / rate : 0.0;
+  }
+
+  double get liveTotalCarrierCostRMB {
+    double rate = double.tryParse(globalExchangeRateCtrl.text) ?? 0.0;
+    return rate > 0 ? liveTotalCarrierCost / rate : 0.0;
+  }
+
+  double get liveGrandTotalRMB {
+    double rate = double.tryParse(globalExchangeRateCtrl.text) ?? 0.0;
+    return rate > 0 ? liveGrandTotal / rate : 0.0;
+  }
 
   String get totalOnWayDisplay => formatMoney(totalOnWayValue);
   String get totalCompletedDisplay => formatMoney(totalCompletedValue);
@@ -405,6 +425,7 @@ class ShipmentController extends GetxController {
           double.tryParse(carrierCostPerCtnCtrl.text) ?? 0.0;
       int cartons = int.tryParse(totalCartonCtrl.text) ?? 0;
       double totalCarrierFee = carrierCostPerCtn * cartons;
+      double exchangeRate = double.tryParse(globalExchangeRateCtrl.text) ?? 0.0;
 
       final newShipment = ShipmentModel(
         shipmentName:
@@ -415,7 +436,7 @@ class ShipmentController extends GetxController {
         vendorId: selectedVendorId.value,
         vendorName: selectedVendorName.value ?? 'Unknown',
         carrier: selectedCarrier.value!,
-        exchangeRate: double.tryParse(globalExchangeRateCtrl.text) ?? 0.0,
+        exchangeRate: exchangeRate,
         totalCartons: cartons,
         totalWeight: calculatedTotalWeight,
         carrierCostPerCarton: carrierCostPerCtn,
@@ -425,7 +446,18 @@ class ShipmentController extends GetxController {
         isReceived: false,
       );
 
-      await _firestore.collection('shipments').add(newShipment.toMap());
+      final newShipmentMap = newShipment.toMap();
+
+      // Ensure initial RMB values are injected directly into Firestore Map
+      if (exchangeRate > 0) {
+        newShipmentMap['totalAmountRMB'] =
+            currentManifestProductCost / exchangeRate;
+        newShipmentMap['totalCarrierFeeRMB'] = totalCarrierFee / exchangeRate;
+        newShipmentMap['grandTotalRMB'] =
+            (currentManifestProductCost + totalCarrierFee) / exchangeRate;
+      }
+
+      await _firestore.collection('shipments').add(newShipmentMap);
       await vendorController.addAutomatedShipmentCredit(
         vendorId: newShipment.vendorId!,
         amount: newShipment.totalAmount,
@@ -478,21 +510,43 @@ class ShipmentController extends GetxController {
             sumv + (item.unitWeightSnapshot * (item.seaQty + item.airQty)),
       );
       double newTotalCarrierFee = newCartonCount * newCarrierRate;
+      double newGrandTotal = newTotalProductCost + newTotalCarrierFee;
 
-      // 2. Update Firestore
-      await _firestore.collection('shipments').doc(docId).update({
+      // Fetch the existing exchange rate to recalculate RMB
+      double currentExchangeRate = 0.0;
+      try {
+        var doc = await _firestore.collection('shipments').doc(docId).get();
+        if (doc.exists &&
+            doc.data() != null &&
+            doc.data()!.containsKey('exchangeRate')) {
+          currentExchangeRate = (doc.data()!['exchangeRate'] ?? 0.0).toDouble();
+        }
+      } catch (e) {
+        // Proceed safely if fetch fails
+      }
+
+      Map<String, dynamic> updateData = {
         'items': newItems.map((e) => e.toMap()).toList(),
         'totalCartons': newCartonCount,
         'carrierCostPerCarton': newCarrierRate,
         'totalCarrierFee': newTotalCarrierFee,
         'totalAmount': newTotalProductCost,
+        'grandTotal': newGrandTotal, // Add grandTotal safely
         'totalWeight': newTotalWeight,
         'carrierReport': report,
-      });
+      };
 
-      // Note: We are NOT updating Vendor Credit history here automatically
-      // because that might be complex (requires finding the old transaction).
-      // If you want that, we can add it later.
+      // 2. Add RMB Calculation based on fetched Exchange Rate
+      if (currentExchangeRate > 0) {
+        updateData['totalAmountRMB'] =
+            newTotalProductCost / currentExchangeRate;
+        updateData['totalCarrierFeeRMB'] =
+            newTotalCarrierFee / currentExchangeRate;
+        updateData['grandTotalRMB'] = newGrandTotal / currentExchangeRate;
+      }
+
+      // 3. Update Firestore
+      await _firestore.collection('shipments').doc(docId).update(updateData);
 
       Get.snackbar(
         "Success",
@@ -507,7 +561,7 @@ class ShipmentController extends GetxController {
     }
   }
 
-  // OLD Update method (Just for Receiving state, not full edit)
+  // OLD Update method updated to ensure Yuan calculation is preserved
   Future<void> updateShipmentDetails(
     ShipmentModel shipment,
     List<ShipmentItem> updatedItems,
@@ -516,10 +570,30 @@ class ShipmentController extends GetxController {
     if (shipment.docId == null) return;
     isLoading.value = true;
     try {
-      await _firestore.collection('shipments').doc(shipment.docId).update({
+      double newTotalProductCost = updatedItems.fold(
+        0.0,
+        (sumv, item) => sumv + item.totalItemCost,
+      );
+
+      Map<String, dynamic> updateMap = {
         'items': updatedItems.map((e) => e.toMap()).toList(),
         'carrierReport': report,
-      });
+        'totalAmount': newTotalProductCost,
+      };
+
+      if (shipment.exchangeRate > 0) {
+        updateMap['totalAmountRMB'] =
+            newTotalProductCost / shipment.exchangeRate;
+        updateMap['grandTotalRMB'] =
+            (newTotalProductCost + shipment.totalCarrierFee) /
+            shipment.exchangeRate;
+      }
+
+      await _firestore
+          .collection('shipments')
+          .doc(shipment.docId)
+          .update(updateMap);
+
       Get.snackbar(
         "Success",
         "Updated",
@@ -584,10 +658,14 @@ class ShipmentController extends GetxController {
         (sumv, i) => sumv + i.receivedItemValue,
       );
       double diff = shipment.totalAmount - totalRecVal;
+      double diffRmb =
+          shipment.exchangeRate > 0 ? diff / shipment.exchangeRate : 0.0;
+
       await _firestore.collection('shipments').doc(shipment.docId).update({
         'isReceived': true,
         'arrivalDate': Timestamp.fromDate(arrivalDate),
         'vendorLossAmount': (diff > 0) ? diff : 0.0,
+        'vendorLossAmountRMB': (diff > 0) ? diffRmb : 0.0,
       });
       Get.back();
       Get.snackbar(
@@ -624,7 +702,7 @@ class ShipmentController extends GetxController {
     }
   }
 
-  // --- UPDATED GENERATE PDF (With Carton Number) ---
+  // --- UPDATED GENERATE PDF (With RMB Values) ---
   Future<void> generatePdf(ShipmentModel shipment) async {
     final doc = pw.Document();
     final font = await PdfGoogleFonts.robotoRegular();
@@ -645,6 +723,15 @@ class ShipmentController extends GetxController {
     // Differences
     double valDiff = shipment.totalAmount - totalReceivedVal;
     double weightDiff = shipment.totalWeight - totalRecWeight;
+
+    // RMB Conversions for the PDF
+    double exRate = shipment.exchangeRate;
+    double productTotalRMB = exRate > 0 ? shipment.totalAmount / exRate : 0.0;
+    double carrierTotalRMB =
+        exRate > 0 ? shipment.totalCarrierFee / exRate : 0.0;
+    double grandTotalRMB = exRate > 0 ? shipment.grandTotal / exRate : 0.0;
+    double recValRMB = exRate > 0 ? totalReceivedVal / exRate : 0.0;
+    double valDiffRMB = exRate > 0 ? valDiff / exRate : 0.0;
 
     doc.addPage(
       pw.MultiPage(
@@ -683,7 +770,7 @@ class ShipmentController extends GetxController {
                         style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
                       ),
                       pw.Text("Carrier: ${shipment.carrier}"),
-                      pw.Text("Rate: ${shipment.exchangeRate}"),
+                      pw.Text("Rate: ${shipment.exchangeRate} BDT/RMB"),
                       pw.Text(
                         shipment.isReceived
                             ? "Status: RECEIVED"
@@ -702,7 +789,7 @@ class ShipmentController extends GetxController {
               ),
               pw.SizedBox(height: 20),
 
-              // ITEMS TABLE (Added 'Ctn' Column)
+              // ITEMS TABLE
               pw.Table.fromTextArray(
                 headers: [
                   'Ctn',
@@ -714,23 +801,30 @@ class ShipmentController extends GetxController {
                   'Total',
                 ],
                 data:
-                    shipment.items
-                        .map(
-                          (e) => [
-                            e.cartonNo, // <--- ADDED CARTON NUMBER HERE
-                            e.productModel,
-                            e.productName,
-                            "${e.seaQty + e.airQty}",
-                            "${e.receivedSeaQty + e.receivedAirQty}",
-                            formatMoney(
-                              e.seaPriceSnapshot > 0
-                                  ? e.seaPriceSnapshot
-                                  : e.airPriceSnapshot,
-                            ),
-                            formatMoney(e.totalItemCost),
-                          ],
-                        )
-                        .toList(),
+                    shipment.items.map((e) {
+                      double itemCost =
+                          e.seaPriceSnapshot > 0
+                              ? e.seaPriceSnapshot
+                              : e.airPriceSnapshot;
+
+                      String costStr = formatMoney(itemCost);
+                      String totalStr = formatMoney(e.totalItemCost);
+
+                      if (exRate > 0) {
+                        costStr += "\n${formatRMB(itemCost / exRate)}";
+                        totalStr += "\n${formatRMB(e.totalItemCost / exRate)}";
+                      }
+
+                      return [
+                        e.cartonNo,
+                        e.productModel,
+                        e.productName,
+                        "${e.seaQty + e.airQty}",
+                        "${e.receivedSeaQty + e.receivedAirQty}",
+                        costStr,
+                        totalStr,
+                      ];
+                    }).toList(),
                 headerStyle: pw.TextStyle(
                   fontWeight: pw.FontWeight.bold,
                   color: PdfColors.white,
@@ -740,23 +834,23 @@ class ShipmentController extends GetxController {
                   color: PdfColors.blueGrey800,
                 ),
                 cellStyle: const pw.TextStyle(fontSize: 9),
-                // Adjusted alignment for new column
                 cellAlignments: {
-                  0: pw.Alignment.center, // Ctn
-                  3: pw.Alignment.center, // Qty Ord
-                  4: pw.Alignment.center, // Qty Rec
-                  5: pw.Alignment.centerRight, // Cost
-                  6: pw.Alignment.centerRight, // Total
+                  0: pw.Alignment.center,
+                  3: pw.Alignment.center,
+                  4: pw.Alignment.center,
+                  5: pw.Alignment.centerRight,
+                  6: pw.Alignment.centerRight,
                 },
-                // Optional: Adjust column widths to fit 'Ctn' nicely
                 columnWidths: {
-                  0: const pw.FlexColumnWidth(0.8), // Ctn
-                  1: const pw.FlexColumnWidth(1.5), // Model
-                  2: const pw.FlexColumnWidth(2.5), // Name
-                  3: const pw.FlexColumnWidth(1), // Qty
-                  4: const pw.FlexColumnWidth(1), // Qty
-                  5: const pw.FlexColumnWidth(1.5), // Cost
-                  6: const pw.FlexColumnWidth(1.5), // Total
+                  0: const pw.FlexColumnWidth(0.8),
+                  1: const pw.FlexColumnWidth(1.5),
+                  2: const pw.FlexColumnWidth(2.5),
+                  3: const pw.FlexColumnWidth(1),
+                  4: const pw.FlexColumnWidth(1),
+                  5: const pw.FlexColumnWidth(1.5),
+                  6: const pw.FlexColumnWidth(
+                    1.8,
+                  ), // Slightly widened for RMB addition
                 },
               ),
               pw.SizedBox(height: 20),
@@ -839,16 +933,16 @@ class ShipmentController extends GetxController {
                       crossAxisAlignment: pw.CrossAxisAlignment.end,
                       children: [
                         pw.Text(
-                          "Product Total: ${formatMoney(shipment.totalAmount)}",
+                          "Product Total: ${formatMoney(shipment.totalAmount)}${exRate > 0 ? '  |  ${formatRMB(productTotalRMB)}' : ''}",
                         ),
                         pw.Text(
-                          "Carrier Fee: ${formatMoney(shipment.totalCarrierFee)}",
+                          "Carrier Fee: ${formatMoney(shipment.totalCarrierFee)}${exRate > 0 ? '  |  ${formatRMB(carrierTotalRMB)}' : ''}",
                         ),
                         pw.Text(
-                          "GRAND TOTAL: ${formatMoney(shipment.grandTotal)}",
+                          "GRAND TOTAL: ${formatMoney(shipment.grandTotal)}${exRate > 0 ? '  |  ${formatRMB(grandTotalRMB)}' : ''}",
                           style: pw.TextStyle(
                             fontWeight: pw.FontWeight.bold,
-                            fontSize: 14,
+                            fontSize: 13,
                           ),
                         ),
                         pw.SizedBox(height: 10),
@@ -869,14 +963,14 @@ class ShipmentController extends GetxController {
                             crossAxisAlignment: pw.CrossAxisAlignment.end,
                             children: [
                               pw.Text(
-                                "Recv. Value: ${formatMoney(totalReceivedVal)}",
+                                "Recv. Value: ${formatMoney(totalReceivedVal)}${exRate > 0 ? '  |  ${formatRMB(recValRMB)}' : ''}",
                                 style: const pw.TextStyle(fontSize: 10),
                               ),
                               if (valDiff.abs() > 1)
                                 pw.Text(
                                   valDiff > 0
-                                      ? "SHORTAGE: ${formatMoney(valDiff)}"
-                                      : "SURPLUS: ${formatMoney(valDiff.abs())}",
+                                      ? "SHORTAGE: ${formatMoney(valDiff)}${exRate > 0 ? '  |  ${formatRMB(valDiffRMB)}' : ''}"
+                                      : "SURPLUS: ${formatMoney(valDiff.abs())}${exRate > 0 ? '  |  ${formatRMB(valDiffRMB.abs())}' : ''}",
                                   style: pw.TextStyle(
                                     color:
                                         valDiff > 0

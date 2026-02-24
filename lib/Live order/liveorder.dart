@@ -495,7 +495,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                 flex: 2,
                 child: _erpInput(
                   controller.shopC,
-                  "Shop / Reference",
+                  "Shop Name",
                   icon: Icons.store,
                 ),
               ),
@@ -805,48 +805,6 @@ class LiveOrderSalesPage extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(width: 16),
-            // DISCOUNT BLOCK
-            Expanded(
-              flex: 2,
-              child: TextField(
-                controller: controller.discountC,
-                textAlign: TextAlign.center,
-                keyboardType: TextInputType.number,
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: Colors.red,
-                  fontSize: 15,
-                ),
-                decoration: InputDecoration(
-                  labelText: "DISCOUNT",
-                  labelStyle: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 11,
-                  ),
-                  prefixText: "- ",
-                  isDense: true,
-                  filled: true,
-                  fillColor: Colors.white,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(color: Colors.red.shade200),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(color: Colors.red.shade200),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 12,
-                  ),
-                ),
-                onChanged: (v) {
-                  controller.discountVal.value = double.tryParse(v) ?? 0.0;
-                  controller.updatePaymentCalculations();
-                },
-              ),
-            ),
           ],
         ),
       ],
@@ -1150,6 +1108,46 @@ class LiveOrderSalesPage extends StatelessWidget {
                   );
                 }),
                 const SizedBox(height: 16),
+                // DISCOUNT BLOCK
+                TextField(
+                  controller: controller.discountC,
+                  textAlign: TextAlign.center,
+                  keyboardType: TextInputType.number,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.red,
+                    fontSize: 15,
+                  ),
+                  decoration: InputDecoration(
+                    labelText: "DISCOUNT",
+                    labelStyle: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 11,
+                    ),
+                    prefixText: "- ",
+                    isDense: true,
+                    filled: true,
+                    fillColor: Colors.white,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: Colors.red.shade200),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: Colors.red.shade200),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 12,
+                    ),
+                  ),
+                  onChanged: (v) {
+                    controller.discountVal.value = double.tryParse(v) ?? 0.0;
+                    controller.updatePaymentCalculations();
+                  },
+                ),
+                const SizedBox(width: 16),
+
                 SizedBox(
                   width: double.infinity,
                   height: 50,
