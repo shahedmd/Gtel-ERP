@@ -15,7 +15,7 @@ class DrawerTransaction {
   final DateTime date;
   final String description;
   final double amount;
-  final String type; // 'sale', 'collection', 'expense', 'transfer'
+  final String type; // 'sale', 'collection', 'expense', 'transfer', 'withdraw'
   final String method; // 'Cash', 'Bank', 'Bkash', 'Nagad', 'Mixed'
   final String? bankName;
   final String? accountDetails;
@@ -303,8 +303,7 @@ class CashDrawerController extends GetxController {
             if (n > 0) activeMethods.add("Nagad");
 
             if (activeMethods.length > 1) {
-              displayMethod =
-                  "Multi"; // Or "Multi (${activeMethods.join('/')})"
+              displayMethod = "Multi";
             } else if (activeMethods.isNotEmpty) {
               displayMethod = activeMethods.first;
             }
@@ -383,7 +382,7 @@ class CashDrawerController extends GetxController {
               );
             }
           } else {
-            // Deposit/Withdraw
+            // Deposit / Withdraw / Cashout
             String methodStr = (data['method'] ?? 'Cash').toString();
             bool isBank = methodStr.toLowerCase().contains('bank');
             bool isBkash = methodStr.toLowerCase().contains('bkash');
@@ -400,6 +399,7 @@ class CashDrawerController extends GetxController {
               else
                 tCash += amt;
             } else {
+              // Treated as withdrawal/expense
               if (isInPeriod) periodExpenses += amt;
               if (isBank)
                 tBank -= amt;
@@ -429,7 +429,6 @@ class CashDrawerController extends GetxController {
           DrawerTransaction ex = item['data'];
           if (isInPeriod) periodExpenses += ex.amount;
 
-          // Waterfall Deduction for expenses (Default logic as expenses don't usually track method)
           double rem = ex.amount;
           if (tCash >= rem) {
             tCash -= rem;
@@ -529,6 +528,7 @@ class CashDrawerController extends GetxController {
     return list;
   }
 
+  // --- MANUAL DEPOSIT ---
   Future<void> addManualCash({
     required double amount,
     required String method,
@@ -549,6 +549,7 @@ class CashDrawerController extends GetxController {
     fetchData();
   }
 
+  // --- FUND TRANSFER ---
   Future<void> transferFund({
     required double amount,
     required String fromMethod,
@@ -570,6 +571,49 @@ class CashDrawerController extends GetxController {
     });
     fetchData();
     Get.back();
+  }
+
+  // --- NEW: WITHDRAW / CASHOUT ---
+  Future<void> withdrawFund({
+    required double amount,
+    required String method,
+    required String desc,
+    required DateTime date,
+    String? bankName,
+    String? accountNo,
+  }) async {
+    try {
+      await _db.collection('cash_ledger').add({
+        'type': 'withdraw',
+        'amount': amount,
+        'method': method,
+        'description': desc,
+        'bankName': (bankName == null || bankName.isEmpty) ? null : bankName,
+        'accountNo':
+            (accountNo == null || accountNo.isEmpty) ? null : accountNo,
+        'timestamp': Timestamp.fromDate(date), // Custom date properly saved
+        'source': 'manual_withdraw',
+      });
+
+      fetchData(); // Refresh records & balances
+      Get.back(); // Dismiss dialog if used
+
+      Get.snackbar(
+        'Success',
+        'Withdrawal recorded successfully.',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.green,
+        colorText: Colors.white,
+      );
+    } catch (e) {
+      Get.snackbar(
+        "Error",
+        "Failed to process withdrawal: $e",
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+    }
   }
 
   // --- PDF REPORT ---

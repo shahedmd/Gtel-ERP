@@ -85,44 +85,29 @@ class HotSalesController extends GetxController {
         List<dynamic> items = data['items'] ?? [];
 
         for (var item in items) {
-          // Robust ID handling (convert to string to ensure matching)
           String pId = item['productId'].toString();
-
-          // Skip invalid IDs
           if (pId == 'null' || pId.isEmpty || pId == '0') continue;
 
           int qty = int.tryParse(item['qty'].toString()) ?? 0;
           double subtotal = double.tryParse(item['subtotal'].toString()) ?? 0.0;
-
-          // Aggregate Qty & Revenue
           if (qtyMap.containsKey(pId)) {
             qtyMap[pId] = qtyMap[pId]! + qty;
             revMap[pId] = revMap[pId]! + subtotal;
           } else {
             qtyMap[pId] = qty;
             revMap[pId] = subtotal;
-
-            // Capture Name/Model from the SALES ORDER (Backup data)
-            // This ensures we can show the item even if it's missing from product list
             backupNameMap[pId] = item['name']?.toString() ?? 'Unknown Item';
             backupModelMap[pId] = item['model']?.toString() ?? '-';
           }
         }
       }
-
-      // 4. Build Final List
       List<HotSalesData> tempList = [];
-
       qtyMap.forEach((id, qty) {
-        // Try to find the real product
         Product? realProduct = productLookup[id];
 
         if (realProduct != null) {
-          // CASE A: Product exists in Inventory
           tempList.add(HotSalesData(realProduct, qty, revMap[id] ?? 0.0));
         } else {
-          // CASE B: Product NOT found (Deleted or Mismatch)
-          // Create a "Virtual" product so it still shows in the list
           Product virtualProduct = Product(
             id: int.tryParse(id) ?? 0,
             name: backupNameMap[id] ?? 'Deleted Product ($id)',
@@ -144,29 +129,19 @@ class HotSalesController extends GetxController {
             airStockQty: 0,
             localQty: 0,
           );
-
           tempList.add(HotSalesData(virtualProduct, qty, revMap[id] ?? 0.0));
         }
       });
-
-      // 5. Sort: Highest Qty Sold first
       tempList.sort((a, b) => b.totalSold.compareTo(a.totalSold));
-
       allHotProducts.assignAll(tempList);
-
-      // Reset Page
       currentPage.value = 1;
       _applySearchAndPagination();
-
-      // Debug Print
     } catch (e) {
       print("Error fetching hot sales: $e");
     } finally {
       isLoading.value = false;
     }
   }
-
-  // --- FILTER HELPERS ---
   bool _shouldIncludeOrder(Map<String, dynamic> data) {
     if (filterType.value == 'All') return true;
 
@@ -178,9 +153,7 @@ class HotSalesController extends GetxController {
     } else {
       return false;
     }
-
     DateTime target = selectedDate.value;
-
     if (filterType.value == 'Daily') {
       return orderDate.year == target.year &&
           orderDate.month == target.month &&
@@ -192,24 +165,19 @@ class HotSalesController extends GetxController {
     }
     return true;
   }
-
-  // --- UI HELPERS ---
   void setFilter(String type) {
     filterType.value = type;
     fetchSalesData();
   }
-
   void updateDate(DateTime newDate) {
     selectedDate.value = newDate;
     fetchSalesData();
   }
-
   void search(String query) {
     searchQuery.value = query;
     currentPage.value = 1;
     _applySearchAndPagination();
   }
-
   void _applySearchAndPagination() {
     List<HotSalesData> temp;
     if (searchQuery.value.isEmpty) {

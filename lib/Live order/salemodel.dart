@@ -1375,7 +1375,7 @@ class LiveSalesController extends GetxController {
                 boldFont,
                 regularFont,
                 invId,
-                "CONDITION CHALLAN",
+                "DELIVERY CHALLAN",
                 packagerName,
                 authorizedName,
                 invDue,
@@ -1392,23 +1392,19 @@ class LiveSalesController extends GetxController {
                 regularFont,
                 boldFont,
               ),
-              pw.SizedBox(height: 5),
-              _buildNewTable(items, boldFont, regularFont),
-              _buildNewSummary(
-                subTotal,
-                discount,
-                currentInvTotal,
-                totalPaidForInvoice,
-                paymentMethodsStr,
-                items,
-                boldFont,
+              pw.SizedBox(height: 20),
+              // NEW COURIER INFORMATION BOX
+              _buildCourierBox(
+                courier,
+                challan,
+                cartons,
                 regularFont,
+                boldFont,
               ),
-              pw.SizedBox(height: 15),
-              _buildConditionBox(boldFont, regularFont, invDue),
-              pw.SizedBox(height: 15),
-              _buildWordsBox(currentInvTotal, boldFont),
-              pw.SizedBox(height: 40),
+              pw.SizedBox(height: 60),
+              // REPLACED CONDITION BOX WITH NEW CHALLAN CENTER BOX
+              _buildChallanCenterBox(boldFont, regularFont, invDue),
+              pw.SizedBox(height: 100), // Spacing to push signatures down
               _buildNewSignatures(regularFont),
             ];
           },
@@ -1560,6 +1556,56 @@ class LiveSalesController extends GetxController {
     );
   }
 
+  // --- COMPONENT: COURIER BOX (NEW FOR CHALLAN) ---
+  pw.Widget _buildCourierBox(
+    String? courier,
+    String challan,
+    int? cartons,
+    pw.Font reg,
+    pw.Font bold,
+  ) {
+    return pw.Container(
+      width: double.infinity,
+      decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.5)),
+      padding: const pw.EdgeInsets.all(10),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(
+            "Courier Information",
+            style: pw.TextStyle(
+              font: bold,
+              fontSize: 12,
+              decoration: pw.TextDecoration.underline,
+            ),
+          ),
+          pw.SizedBox(height: 8),
+          _infoRow(
+            "Courier Name",
+            ": ${courier ?? 'N/A'}",
+            reg,
+            bold,
+            col1Width: 100,
+          ),
+          _infoRow(
+            "Booking/Challan No",
+            ": $challan",
+            reg,
+            bold,
+            col1Width: 100,
+          ),
+          _infoRow(
+            "Total Cartons",
+            ": ${cartons?.toString() ?? 'N/A'}",
+            reg,
+            bold,
+            col1Width: 100,
+          ),
+        ],
+      ),
+    );
+  }
+
   // --- COMPONENT: ITEMS TABLE ---
   pw.Widget _buildNewTable(
     List<Map<String, dynamic>> items,
@@ -1612,7 +1658,6 @@ class LiveSalesController extends GetxController {
     );
   }
 
-  // --- COMPONENT: SUMMARY CALCULATION ---
   pw.Widget _buildNewSummary(
     double subTotal,
     double discount,
@@ -1859,50 +1904,74 @@ class LiveSalesController extends GetxController {
     );
   }
 
-  // --- COMPONENT: CONDITION INSTRUCTION BOX ---
-  pw.Widget _buildConditionBox(pw.Font bold, pw.Font reg, double due) {
-    if (due <= 0) return pw.SizedBox();
+  // --- COMPONENT: NEW CHALLAN CENTER BOX (Replaces Condition Box) ---
+  pw.Widget _buildChallanCenterBox(pw.Font bold, pw.Font reg, double due) {
+    bool isPaid = due <= 0;
+
     return pw.Container(
       width: double.infinity,
-      padding: const pw.EdgeInsets.all(15),
+      padding: const pw.EdgeInsets.all(20),
       decoration: pw.BoxDecoration(
-        border: pw.Border.all(color: PdfColors.deepOrange700, width: 1.5),
+        border: pw.Border.all(
+          color: isPaid ? PdfColors.green700 : PdfColors.deepOrange700,
+          width: 2,
+        ),
         borderRadius: const pw.BorderRadius.all(pw.Radius.circular(5)),
-        color: PdfColors.deepOrange50,
+        color: isPaid ? PdfColors.green50 : PdfColors.deepOrange50,
       ),
       child: pw.Column(
         children: [
-          pw.Text(
-            "CONDITION PAYMENT INSTRUCTION FOR COURIER",
-            style: pw.TextStyle(
-              font: reg,
-              fontSize: 11,
-              color: PdfColors.deepOrange800,
+          if (isPaid) ...[
+            pw.Text(
+              "NON CONDITION",
+              style: pw.TextStyle(
+                font: bold,
+                fontSize: 24,
+                color: PdfColors.green800,
+              ),
             ),
-          ),
-          pw.SizedBox(height: 10),
-          pw.Row(
-            mainAxisAlignment: pw.MainAxisAlignment.center,
-            crossAxisAlignment: pw.CrossAxisAlignment.end,
-            children: [
-              pw.Text(
-                "PLEASE COLLECT: ",
-                style: pw.TextStyle(font: bold, fontSize: 16),
+            pw.SizedBox(height: 5),
+            pw.Text(
+              "+ Courier Charges",
+              style: pw.TextStyle(
+                font: bold,
+                fontSize: 16,
+                color: PdfColors.green800,
               ),
-              pw.Text(
-                "BDT ${due.toStringAsFixed(0)}",
-                style: pw.TextStyle(
-                  font: bold,
-                  fontSize: 24,
-                  color: PdfColors.deepOrange900,
+            ),
+          ] else ...[
+            pw.Text(
+              "CONDITION PAYMENT INSTRUCTION FOR COURIER",
+              style: pw.TextStyle(
+                font: reg,
+                fontSize: 11,
+                color: PdfColors.deepOrange800,
+              ),
+            ),
+            pw.SizedBox(height: 10),
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.center,
+              crossAxisAlignment: pw.CrossAxisAlignment.end,
+              children: [
+                pw.Text(
+                  "PLEASE COLLECT: ",
+                  style: pw.TextStyle(font: bold, fontSize: 16),
                 ),
-              ),
-              pw.Text(
-                " + Courier Charges",
-                style: pw.TextStyle(font: bold, fontSize: 14),
-              ),
-            ],
-          ),
+                pw.Text(
+                  "BDT ${due.toStringAsFixed(0)}",
+                  style: pw.TextStyle(
+                    font: bold,
+                    fontSize: 24,
+                    color: PdfColors.deepOrange900,
+                  ),
+                ),
+                pw.Text(
+                  " + Courier Charges",
+                  style: pw.TextStyle(font: bold, fontSize: 14),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );

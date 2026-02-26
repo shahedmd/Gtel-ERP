@@ -25,7 +25,7 @@ class DebatorController extends GetxController {
   RxBool isSearching = false.obs;
 
   // --- PAGINATION STATE ---
-  final int _limit = 20;
+  final int _limit = 30;
   List<DocumentSnapshot?> pageCursors = [null];
   RxInt currentPage = 1.obs;
   RxBool hasMore = true.obs;
@@ -51,7 +51,7 @@ class DebatorController extends GetxController {
   DocumentSnapshot? _lastTxDoc;
   final RxBool isTxLoading = false.obs;
   final RxBool hasMoreTx = true.obs;
-  final int _txLimit = 20;
+  final int _txLimit = 30;
 
   // --- FILTERS ---
   Rx<DateTimeRange?> selectedDateRange = Rx<DateTimeRange?>(null);

@@ -159,12 +159,11 @@ class CashDrawerView extends StatelessWidget {
                       ),
                       const SizedBox(height: 20),
 
-                      // B. SUMMARY ROW (MERGED Total Income)
+                      // B. SUMMARY ROW
                       Row(
                         children: [
                           _summaryItem(
                             "Total Income",
-                            // Summing Sales + Collections
                             controller.rawSalesTotal.value +
                                 controller.rawCollectionTotal.value,
                             Colors.green.shade700,
@@ -228,21 +227,30 @@ class CashDrawerView extends StatelessWidget {
                       ),
                       const SizedBox(height: 24),
 
-                      // D. QUICK ACTIONS
+                      // D. QUICK ACTIONS (Updated for 3 actions)
                       Row(
                         children: [
                           Expanded(
                             child: _actionBtn(
-                              "Manual Deposit",
+                              "Deposit",
                               Icons.add_circle_outline,
-                              accentBlue,
+                              Colors.teal.shade600,
                               () => _showAddDialog(),
                             ),
                           ),
-                          const SizedBox(width: 12),
+                          const SizedBox(width: 10),
                           Expanded(
                             child: _actionBtn(
-                              "Cash Out / Transfer",
+                              "Withdraw",
+                              Icons.remove_circle_outline,
+                              Colors.red.shade600,
+                              () => _showWithdrawDialog(context),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: _actionBtn(
+                              "Transfer",
                               Icons.swap_horiz_outlined,
                               Colors.orange.shade800,
                               () => _showTransferDialog(),
@@ -314,14 +322,13 @@ class CashDrawerView extends StatelessWidget {
 
                       const SizedBox(height: 16),
 
-                      // G. PAGINATION CONTROLS (ALWAYS VISIBLE if > 0 items)
+                      // G. PAGINATION CONTROLS
                       if (controller.totalItems.value > 0)
                         Container(
                           padding: const EdgeInsets.symmetric(vertical: 10),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              // Previous Button
                               _pageBtn(
                                 icon: Icons.chevron_left,
                                 onTap:
@@ -329,8 +336,6 @@ class CashDrawerView extends StatelessWidget {
                                         ? () => controller.previousPage()
                                         : null,
                               ),
-
-                              // Page Info
                               Padding(
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 20,
@@ -344,8 +349,6 @@ class CashDrawerView extends StatelessWidget {
                                   ),
                                 ),
                               ),
-
-                              // Next Button
                               _pageBtn(
                                 icon: Icons.chevron_right,
                                 onTap:
@@ -614,25 +617,35 @@ class CashDrawerView extends StatelessWidget {
     );
   }
 
+  // Re-designed action button to fit 3 items horizontally nicely
   Widget _actionBtn(
     String label,
     IconData icon,
     Color col,
     VoidCallback onTap,
   ) {
-    return ElevatedButton.icon(
+    return ElevatedButton(
       onPressed: onTap,
       style: ElevatedButton.styleFrom(
         backgroundColor: col,
         foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(vertical: 14),
+        padding: const EdgeInsets.symmetric(vertical: 12),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         elevation: 0,
       ),
-      icon: Icon(icon, size: 18),
-      label: Text(
-        label,
-        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 22),
+          const SizedBox(height: 6),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              label,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -746,7 +759,7 @@ class CashDrawerView extends StatelessWidget {
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 18,
-                    color: darkBlue,
+                    color: Colors.teal,
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -821,7 +834,7 @@ class CashDrawerView extends StatelessWidget {
                       }
                     },
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: accentBlue,
+                      backgroundColor: Colors.teal.shade600,
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
@@ -839,6 +852,196 @@ class CashDrawerView extends StatelessWidget {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  // --- NEW: WITHDRAW / CASHOUT DIALOG ---
+  void _showWithdrawDialog(BuildContext context) {
+    final amt = TextEditingController();
+    final note = TextEditingController();
+    final bankName = TextEditingController();
+    final accNo = TextEditingController();
+    String method = 'Bank';
+    DateTime selectedDate = DateTime.now();
+
+    Get.dialog(
+      Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: StatefulBuilder(
+          builder: (context, setState) {
+            return Container(
+              padding: const EdgeInsets.all(24),
+              width: 400,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "Withdraw / Cashout",
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
+                        color: Colors.red.shade600,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+
+                    // Date Picker
+                    InkWell(
+                      onTap: () async {
+                        DateTime? picked = await showDatePicker(
+                          context: context,
+                          initialDate: selectedDate,
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime(2030),
+                        );
+                        if (picked != null) {
+                          setState(() => selectedDate = picked);
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 14,
+                        ),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey.shade300),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.calendar_today,
+                              size: 18,
+                              color: Colors.grey,
+                            ),
+                            const SizedBox(width: 12),
+                            Text(
+                              DateFormat('dd MMM yyyy').format(selectedDate),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Method Selector
+                    DropdownButtonFormField<String>(
+                      value: method,
+                      dropdownColor: Colors.white,
+                      items:
+                          ['Cash', 'Bank', 'Bkash', 'Nagad']
+                              .map(
+                                (e) => DropdownMenuItem(
+                                  value: e,
+                                  child: Text(
+                                    e,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                      onChanged: (v) => setState(() => method = v!),
+                      decoration: _inputDeco(
+                        "Withdraw From",
+                        Icons.account_balance_wallet,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Amount
+                    TextField(
+                      controller: amt,
+                      keyboardType: TextInputType.number,
+                      decoration: _inputDeco(
+                        "Amount (BDT)",
+                        Icons.attach_money,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Note
+                    TextField(
+                      controller: note,
+                      decoration: _inputDeco(
+                        "Description / Note",
+                        Icons.description,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Extra Details if not Cash
+                    if (method != 'Cash') ...[
+                      TextField(
+                        controller: bankName,
+                        decoration: _inputDeco(
+                          "Bank/Provider (Optional)",
+                          Icons.business,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: accNo,
+                        decoration: _inputDeco(
+                          "Account/Ref No (Optional)",
+                          Icons.numbers,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () {
+                          if (amt.text.isEmpty || note.text.isEmpty) {
+                            Get.snackbar(
+                              "Required",
+                              "Amount and Note are required!",
+                              backgroundColor: Colors.red,
+                              colorText: Colors.white,
+                            );
+                            return;
+                          }
+                          controller.withdrawFund(
+                            amount: double.parse(amt.text),
+                            method: method,
+                            desc: note.text,
+                            date: selectedDate,
+                            bankName: bankName.text,
+                            accountNo: accNo.text,
+                          );
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red.shade600,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        child: const Text(
+                          "CONFIRM WITHDRAW",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
         ),
       ),
     );
@@ -869,7 +1072,7 @@ class CashDrawerView extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    "Cash Out / Transfer",
+                    "Fund Transfer",
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 18,
@@ -1039,7 +1242,7 @@ class CashDrawerView extends StatelessWidget {
                         }
                       },
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.deepOrange,
+                        backgroundColor: Colors.orange.shade800,
                         padding: const EdgeInsets.symmetric(vertical: 16),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),

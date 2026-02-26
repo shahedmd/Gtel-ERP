@@ -1,4 +1,4 @@
-// ignore_for_file: deprecated_member_use, empty_catches, avoid_print
+// ignore_for_file: deprecated_member_use, empty_catches, avoid_print, prefer_interpolation_to_compose_strings
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -419,9 +419,6 @@ class DailySalesController extends GetxController {
     }
   }
 
-  // ==========================================
-  // 5. DELETE & RESTORE STOCK
-  // ==========================================
   Future<void> deleteSale(String saleId) async {
     isLoading.value = true;
     try {
