@@ -1,4 +1,4 @@
-// ignore_for_file: deprecated_member_use, avoid_print, empty_catches
+// ignore_for_file: deprecated_member_use, avoid_print, empty_catches, prefer_interpolation_to_compose_strings
 
 import 'dart:async'; // --- ADDED FOR DEBOUNCE TIMER ---
 import 'dart:math';
@@ -751,8 +751,7 @@ class LiveSalesController extends GetxController {
 
       await batch.commit();
 
-      if (debtorId != null) debtorCtrl.loadDebtorTransactions(debtorId);
-
+      if (debtorId != null) debtorCtrl.loadTxPage(debtorId, 1);
       await _generatePdf(
         invNo,
         fName,

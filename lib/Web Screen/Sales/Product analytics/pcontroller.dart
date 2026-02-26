@@ -136,8 +136,6 @@ class HotSalesController extends GetxController {
       allHotProducts.assignAll(tempList);
       currentPage.value = 1;
       _applySearchAndPagination();
-    } catch (e) {
-      print("Error fetching hot sales: $e");
     } finally {
       isLoading.value = false;
     }

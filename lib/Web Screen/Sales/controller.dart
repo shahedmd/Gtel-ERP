@@ -507,9 +507,6 @@ class DailySalesController extends GetxController {
     }
   }
 
-  // ==========================================
-  // REPRINT LOGIC (ROBUST DATA FETCHING)
-  // ==========================================
   Future<void> reprintInvoice(String invoiceId) async {
     isLoading.value = true;
     try {
@@ -690,6 +687,20 @@ class DailySalesController extends GetxController {
       double snapRun = (data['snapshotRunningDue'] as num?)?.toDouble() ?? 0.0;
       double discountVal = (data['discount'] as num?)?.toDouble() ?? 0.0;
 
+      // --- NEW FIX: Extract Original Invoice Date ---
+      DateTime invoiceDate = DateTime.now(); // Fallback
+      if (data['timestamp'] != null) {
+        try {
+          // If using Firestore Timestamp object
+          invoiceDate = data['timestamp'].toDate();
+        } catch (_) {}
+      } else if (data['date'] != null) {
+        try {
+          // If parsing from string like "2026-02-09 17:02:13"
+          invoiceDate = DateTime.parse(data['date'].toString());
+        } catch (_) {}
+      }
+
       // 5. Get Seller Info
       String sellerName = "Joynal Abedin";
       String sellerPhone = "01720677206";
@@ -722,6 +733,7 @@ class DailySalesController extends GetxController {
         authorizedPhone: sellerPhone,
         discount: discountVal,
         packagerName: packagerName,
+        invoiceDate: invoiceDate, // Passed the extracted date here
       );
     } catch (e) {
       Get.snackbar("Error", "Could not reprint: $e");
@@ -751,6 +763,7 @@ class DailySalesController extends GetxController {
     required String authorizedPhone,
     double discount = 0.0,
     String? packagerName,
+    required DateTime invoiceDate, // New Required Parameter
   }) async {
     final pdf = pw.Document();
 
@@ -831,6 +844,7 @@ class DailySalesController extends GetxController {
               null,
               "",
               paymentMethodsStr,
+              invoiceDate, // Pass invoiceDate here
             ),
             _buildNewCustomerBox(
               name,
@@ -855,7 +869,11 @@ class DailySalesController extends GetxController {
             pw.SizedBox(height: 5),
             _buildNewDues(totalPreviousBalance, netTotalDue, regularFont),
             if (invDue <= 0 && !isCondition)
-              _buildPaidStamp(boldFont, regularFont),
+              _buildPaidStamp(
+                boldFont,
+                regularFont,
+                invoiceDate,
+              ), // Pass invoiceDate here
             if (invDue > 0 || isCondition) pw.SizedBox(height: 15),
             _buildWordsBox(currentInvTotal, boldFont),
             pw.SizedBox(height: 40),
@@ -887,6 +905,7 @@ class DailySalesController extends GetxController {
                 courier,
                 challan,
                 paymentMethodsStr,
+                invoiceDate, // Pass invoiceDate here
               ),
               _buildNewCustomerBox(
                 name,
@@ -936,6 +955,7 @@ class DailySalesController extends GetxController {
     String? courier,
     String challan,
     String paymentMethodsStr,
+    DateTime invoiceDate, // Added Parameter
   ) {
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -996,9 +1016,10 @@ class DailySalesController extends GetxController {
             child: pw.Column(
               children: [
                 _infoRow("Invoice No.", ": $invId", reg, bold),
+                // Replaced DateTime.now() with invoiceDate
                 _infoRow(
                   "Date",
-                  ": ${DateFormat('dd/MM/yyyy').format(DateTime.now())}",
+                  ": ${DateFormat('dd/MM/yyyy').format(invoiceDate)}",
                   reg,
                   bold,
                 ),
@@ -1009,9 +1030,10 @@ class DailySalesController extends GetxController {
                   reg,
                   bold,
                 ),
+                // Replaced DateTime.now() with invoiceDate
                 _infoRow(
                   "Entry Time",
-                  ": ${DateFormat('h:mm:ss a').format(DateTime.now())}",
+                  ": ${DateFormat('h:mm:ss a').format(invoiceDate)}",
                   reg,
                   bold,
                 ),
@@ -1224,7 +1246,7 @@ class DailySalesController extends GetxController {
   }
 
   // --- COMPONENT: PAID STAMP ---
-  pw.Widget _buildPaidStamp(pw.Font bold, pw.Font reg) {
+  pw.Widget _buildPaidStamp(pw.Font bold, pw.Font reg, DateTime invoiceDate) {
     return pw.Container(
       margin: const pw.EdgeInsets.symmetric(vertical: 20),
       alignment: pw.Alignment.center,
@@ -1247,7 +1269,8 @@ class DailySalesController extends GetxController {
             ),
             pw.SizedBox(height: 5),
             pw.Text(
-              DateFormat('dd MMM yyyy').format(DateTime.now()),
+              // Replaced DateTime.now() with invoiceDate
+              DateFormat('dd MMM yyyy').format(invoiceDate),
               style: pw.TextStyle(
                 color: PdfColors.blue800,
                 font: bold,
@@ -1416,6 +1439,7 @@ class DailySalesController extends GetxController {
               "Sales Billing Software By G TEL : 01720677206",
               style: pw.TextStyle(font: reg, fontSize: 7),
             ),
+            // Keeping DateTime.now() here is correct because this is the date the invoice was printed/re-printed.
             pw.Text(
               "Print Date & Time : ${DateFormat('dd/MM/yyyy h:mm a').format(DateTime.now())}",
               style: pw.TextStyle(font: reg, fontSize: 7),

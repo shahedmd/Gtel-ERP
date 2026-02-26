@@ -34,46 +34,42 @@ class DebtorPurchaseController extends GetxController {
   var totalPaid = 0.0.obs;
   double get currentPayable => totalPurchased.value - totalPaid.value;
 
-  // --- PAGINATION STATE ---
-  final int _pageSize = 10;
-  DocumentSnapshot? _lastDocument;
-  var hasMore = true.obs;
-  var isFirstPage = true.obs;
-  final List<DocumentSnapshot?> _pageStartStack = [];
+  // ==========================================
+  // 1. PAGINATION STATE (MATCHING DEBTOR CONTROLLER)
+  // ==========================================
+  final int _purchaseLimit = 20; // 20 Rows Per Page
+  List<DocumentSnapshot?> purchasePageCursors = [null];
+  RxInt currentPurchasePage = 1.obs;
+  RxBool hasMorePurchases = true.obs;
 
-
+  void clearPurchaseState() {
+    purchases.clear();
+    purchasePageCursors = [null];
+    currentPurchasePage.value = 1;
+    hasMorePurchases.value = true;
+    isLoading.value = false;
+  }
 
   Future<void> loadPurchases(String debtorId) async {
-    _pageStartStack.clear();
-    _lastDocument = null;
-    isFirstPage.value = true;
-    await _fetchPage(debtorId);
+    clearPurchaseState();
+    await loadPurchasePage(debtorId, 1);
     await _fetchAccurateStats(debtorId);
   }
 
-  Future<void> nextPage(String debtorId) async {
-    if (!hasMore.value || isLoading.value) return;
-    if (purchases.isNotEmpty && _lastDocument != null) {
-      _pageStartStack.add(purchases.first['snapshot']);
-      isFirstPage.value = false;
-      await _fetchPage(debtorId, startAfter: _lastDocument);
-    }
+  void nextPurchasePage(String debtorId) {
+    if (!hasMorePurchases.value) return;
+    loadPurchasePage(debtorId, currentPurchasePage.value + 1);
   }
 
-  Future<void> previousPage(String debtorId) async {
-    if (_pageStartStack.isEmpty || isLoading.value) return;
-    DocumentSnapshot? prevStart = _pageStartStack.removeLast();
-    if (_pageStartStack.isEmpty) {
-      isFirstPage.value = true;
-    }
-    await _fetchPage(debtorId, startAt: prevStart);
+  void prevPurchasePage(String debtorId) {
+    if (currentPurchasePage.value <= 1) return;
+    loadPurchasePage(debtorId, currentPurchasePage.value - 1);
   }
 
-  Future<void> _fetchPage(
-    String debtorId, {
-    DocumentSnapshot? startAfter,
-    DocumentSnapshot? startAt,
-  }) async {
+  Future<void> loadPurchasePage(String debtorId, int pageIndex) async {
+    if (pageIndex < 1) return;
+    if (pageIndex > purchasePageCursors.length) return;
+
     isLoading.value = true;
     try {
       Query query = _db
@@ -81,20 +77,16 @@ class DebtorPurchaseController extends GetxController {
           .doc(debtorId)
           .collection('purchases')
           .orderBy('date', descending: true)
-          .limit(_pageSize);
+          .limit(_purchaseLimit);
 
-      if (startAfter != null) {
-        query = query.startAfterDocument(startAfter);
-      } else if (startAt != null) {
-        query = query.startAtDocument(startAt);
+      DocumentSnapshot? startAfterDoc = purchasePageCursors[pageIndex - 1];
+      if (startAfterDoc != null) {
+        query = query.startAfterDocument(startAfterDoc);
       }
 
       QuerySnapshot snap = await query.get();
 
       if (snap.docs.isNotEmpty) {
-        _lastDocument = snap.docs.last;
-        hasMore.value = snap.docs.length == _pageSize;
-
         purchases.value =
             snap.docs.map((d) {
               var data = d.data() as Map<String, dynamic>;
@@ -102,9 +94,22 @@ class DebtorPurchaseController extends GetxController {
               data['snapshot'] = d;
               return data;
             }).toList();
+
+        if (snap.docs.length < _purchaseLimit) {
+          hasMorePurchases.value = false;
+        } else {
+          hasMorePurchases.value = true;
+          // Store cursor for the NEXT page
+          if (purchasePageCursors.length <= pageIndex) {
+            purchasePageCursors.add(snap.docs.last);
+          } else {
+            purchasePageCursors[pageIndex] = snap.docs.last;
+          }
+        }
+        currentPurchasePage.value = pageIndex;
       } else {
-        hasMore.value = false;
-        if (startAfter == null && startAt == null) purchases.clear();
+        if (pageIndex == 1) purchases.clear();
+        hasMorePurchases.value = false;
       }
     } catch (e) {
       Get.snackbar("Error", "Could not load data: $e");
@@ -147,7 +152,7 @@ class DebtorPurchaseController extends GetxController {
   }
 
   // ----------------------------------------------------------------
-  // 2. PURCHASE LOGIC (UPDATED WITH CUSTOM DATE)
+  // 2. PURCHASE LOGIC
   // ----------------------------------------------------------------
   void addToCart(
     Map<String, dynamic> product,
@@ -182,7 +187,7 @@ class DebtorPurchaseController extends GetxController {
   Future<void> finalizePurchase(
     String debtorId,
     String note, {
-    DateTime? customDate, // NEW OPTIONAL PARAMETER
+    DateTime? customDate,
   }) async {
     if (cartItems.isEmpty) return;
     isLoading.value = true;
@@ -200,7 +205,6 @@ class DebtorPurchaseController extends GetxController {
               .collection('purchases')
               .doc();
 
-      // Use custom date if provided, else server timestamp
       dynamic dateField =
           customDate != null
               ? Timestamp.fromDate(customDate)
@@ -256,7 +260,9 @@ class DebtorPurchaseController extends GetxController {
       await Future.wait(stockUpdates);
 
       cartItems.clear();
+      // Reload page 1 and recalculate stats immediately
       await loadPurchases(debtorId);
+
       Get.back();
       Get.snackbar("Success", "Purchase Recorded.");
     } catch (e) {
@@ -267,7 +273,7 @@ class DebtorPurchaseController extends GetxController {
   }
 
   // ----------------------------------------------------------------
-  // 3. PAYMENT LOGIC (UPDATED WITH CUSTOM DATE)
+  // 3. PAYMENT LOGIC
   // ----------------------------------------------------------------
   Future<void> makePayment({
     required String debtorId,
@@ -275,7 +281,7 @@ class DebtorPurchaseController extends GetxController {
     required double amount,
     required String method,
     String? note,
-    DateTime? customDate, // NEW OPTIONAL PARAMETER
+    DateTime? customDate,
   }) async {
     if (amount <= 0) return;
     isLoading.value = true;
@@ -288,7 +294,6 @@ class DebtorPurchaseController extends GetxController {
               .collection('purchases')
               .doc();
 
-      // Use custom date if provided, else server timestamp
       dynamic dateField =
           customDate != null
               ? Timestamp.fromDate(customDate)
@@ -313,7 +318,7 @@ class DebtorPurchaseController extends GetxController {
           "Payment to $debtorName",
           amount.toInt(),
           note: "Debtor Payment. Method: $method. ${note ?? ''}",
-          date: customDate ?? DateTime.now(), // Pass custom date to expense too
+          date: customDate ?? DateTime.now(),
         );
       } catch (e) {
         print("Expense Auto-add failed: $e");
@@ -332,7 +337,7 @@ class DebtorPurchaseController extends GetxController {
   Future<void> processContraAdjustment({
     required String debtorId,
     required double amount,
-    DateTime? customDate, // NEW OPTIONAL PARAMETER
+    DateTime? customDate,
   }) async {
     if (amount <= 0) return;
     isLoading.value = true;
@@ -381,8 +386,12 @@ class DebtorPurchaseController extends GetxController {
       batch.update(debtorRef, {'balance': FieldValue.increment(-amount)});
 
       await batch.commit();
+
       await loadPurchases(debtorId);
-      debtorCtrl.loadDebtorTransactions(debtorId);
+      debtorCtrl.loadTxPage(
+        debtorId,
+        debtorCtrl.currentTxPage.value,
+      ); // Reloads the current transaction page
 
       Get.back();
       Get.snackbar("Success", "Contra Adjusted.");

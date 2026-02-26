@@ -42,18 +42,19 @@ class DebatorController extends GetxController {
   // --- SEARCH DEBOUNCE ---
   Timer? _searchDebounce;
 
-  // --- PAGINATION STATE (INTERNAL) ---
   DocumentSnapshot? _lastDocument;
   final RxBool isMoreLoading = false.obs;
 
-  // --- TRANSACTIONS STATE ---
+  // ==========================================
+  // TRANSACTION PAGINATION STATES (UPDATED)
+  // ==========================================
   final RxList<TransactionModel> currentTransactions = <TransactionModel>[].obs;
-  DocumentSnapshot? _lastTxDoc;
   final RxBool isTxLoading = false.obs;
   final RxBool hasMoreTx = true.obs;
-  final int _txLimit = 30;
+  final int _txLimit = 20; // 20 Rows Per Page
+  List<DocumentSnapshot?> txPageCursors = [null];
+  RxInt currentTxPage = 1.obs;
 
-  // --- FILTERS ---
   Rx<DateTimeRange?> selectedDateRange = Rx<DateTimeRange?>(null);
 
   final NumberFormat bdCurrency = NumberFormat.currency(
@@ -72,23 +73,19 @@ class DebatorController extends GetxController {
   }
 
   void nextPage() {
-    if (isSearching.value) {
-      return;
-    }
+    if (isSearching.value) return;
     if (!hasMore.value) return;
     loadPage(currentPage.value + 1);
   }
 
   void prevPage() {
-    if (isSearching.value) {
-      return;
-    }
+    if (isSearching.value) return;
     if (currentPage.value <= 1) return;
     loadPage(currentPage.value - 1);
   }
 
   // =========================================================
-  // 1. ADVANCED GLOBAL SEARCH LOGIC (NO MATTER HOW YOU TYPE)
+  // 1. ADVANCED GLOBAL SEARCH LOGIC
   // =========================================================
 
   void searchDebtors(String queryText) {
@@ -113,17 +110,15 @@ class DebatorController extends GetxController {
       String qLower = queryText.trim().toLowerCase();
       Map<String, DebtorModel> results = {};
 
-      // Split typed query into multiple words (e.g. "bhuiyan mobile" -> ["bhuiyan", "mobile"])
       List<String> searchTerms = qLower.split(RegExp(r'\s+'));
       String primaryTerm = searchTerms.first;
 
-      // 1. Fetch from Firestore using the first typed word
       if (primaryTerm.isNotEmpty) {
         var kwSnap =
             await db
                 .collection('debatorbody')
                 .where('searchKeywords', arrayContains: primaryTerm)
-                .limit(50) // High limit to grab enough candidates
+                .limit(50)
                 .get();
 
         for (var doc in kwSnap.docs) {
@@ -131,27 +126,21 @@ class DebatorController extends GetxController {
         }
       }
 
-      // 2. Always merge with locally loaded paginated data so we don't miss anything on screen
       for (var m in bodies) {
         results[m.id] = m;
       }
 
-      // 3. FINAL SMART FILTER: Ensure ALL typed terms match anywhere in Name, Des, Phone, Address, NID
       List<DebtorModel> finalMatches =
           results.values.where((d) {
             String combinedString =
                 "${d.name} ${d.phone} ${d.nid} ${d.address}".toLowerCase();
 
-            // Safely extract 'des' in case it's newly added to your model
             try {
               combinedString += " ${(d as dynamic).des}".toLowerCase();
             } catch (_) {}
 
-            // Check if every word the user typed is found somewhere in this string
             for (String term in searchTerms) {
-              if (!combinedString.contains(term)) {
-                return false;
-              }
+              if (!combinedString.contains(term)) return false;
             }
             return true;
           }).toList();
@@ -168,7 +157,6 @@ class DebatorController extends GetxController {
     searchDebtors(queryText);
   }
 
-  // GENERATES EVERY POSSIBLE SUBSTRING FOR NAME, DES, PHONE
   List<String> _generateSearchKeywords(String name, String phone, String des) {
     Set<String> keywords = {};
 
@@ -176,11 +164,9 @@ class DebatorController extends GetxController {
     String lowerPhone = phone.trim().toLowerCase();
     String lowerDes = des.trim().toLowerCase();
 
-    // Helper to generate literally all substrings (e.g. "BHUIYAN" -> "B", "BH", "H", "HU", "HUIY"...)
     void addAllSubstrings(String text) {
       if (text.isEmpty) return;
 
-      // If a string is insanely long, just generate prefixes to save space
       if (text.length > 50) {
         List<String> words = text.split(RegExp(r'\s+'));
         for (String w in words) {
@@ -194,7 +180,6 @@ class DebatorController extends GetxController {
         return;
       }
 
-      // Generate all substrings
       for (int i = 0; i < text.length; i++) {
         for (int j = i + 1; j <= text.length; j++) {
           keywords.add(text.substring(i, j));
@@ -209,9 +194,6 @@ class DebatorController extends GetxController {
     return keywords.toList();
   }
 
-  // =========================================================
-  // FIX OLD DATA TOOL (CALL THIS ONCE FROM A BUTTON)
-  // =========================================================
   Future<void> repairSearchKeywords() async {
     gbIsLoading.value = true;
     try {
@@ -457,12 +439,13 @@ class DebatorController extends GetxController {
   }
 
   // =========================================================
-  // 2. TRANSACTION LOGIC
+  // 2. TRANSACTION PAGINATION LOGIC (NEW)
   // =========================================================
 
   void clearTransactionState() {
     currentTransactions.clear();
-    _lastTxDoc = null;
+    txPageCursors = [null];
+    currentTxPage.value = 1;
     hasMoreTx.value = true;
     isTxLoading.value = false;
     selectedDateRange.value = null;
@@ -470,29 +453,28 @@ class DebatorController extends GetxController {
 
   void setDateFilter(DateTimeRange? range, String debtorId) {
     selectedDateRange.value = range;
-    _lastTxDoc = null;
+    txPageCursors = [null];
+    currentTxPage.value = 1;
     hasMoreTx.value = true;
-    loadDebtorTransactions(debtorId, loadMore: false);
+    loadTxPage(debtorId, 1);
   }
 
-  Future<void> loadDebtorTransactions(
-    String debtorId, {
-    bool loadMore = false,
-  }) async {
-    if (!loadMore) {
-      _recalculateSingleDebtorBalance(debtorId);
-    }
+  void nextTxPage(String debtorId) {
+    if (!hasMoreTx.value) return;
+    loadTxPage(debtorId, currentTxPage.value + 1);
+  }
 
-    if (loadMore) {
-      if (isTxLoading.value || !hasMoreTx.value) return;
-    } else {
-      if (!loadMore) {
-        currentTransactions.clear();
-        _lastTxDoc = null;
-        hasMoreTx.value = true;
-      }
-      isTxLoading.value = true;
-    }
+  void prevTxPage(String debtorId) {
+    if (currentTxPage.value <= 1) return;
+    loadTxPage(debtorId, currentTxPage.value - 1);
+  }
+
+  Future<void> loadTxPage(String debtorId, int pageIndex) async {
+    if (pageIndex < 1) return;
+    if (pageIndex > txPageCursors.length) return;
+
+    isTxLoading.value = true;
+    _recalculateSingleDebtorBalance(debtorId);
 
     try {
       Query query = db
@@ -519,25 +501,32 @@ class DebatorController extends GetxController {
 
       query = query.limit(_txLimit);
 
-      if (loadMore && _lastTxDoc != null) {
-        query = query.startAfterDocument(_lastTxDoc!);
+      DocumentSnapshot? startAfterDoc = txPageCursors[pageIndex - 1];
+      if (startAfterDoc != null) {
+        query = query.startAfterDocument(startAfterDoc);
       }
 
       final snap = await query.get();
 
-      if (snap.docs.length < _txLimit) hasMoreTx.value = false;
-
       if (snap.docs.isNotEmpty) {
-        _lastTxDoc = snap.docs.last;
-        final newTx =
+        currentTransactions.value =
             snap.docs.map((d) => TransactionModel.fromFirestore(d)).toList();
-        if (loadMore) {
-          currentTransactions.addAll(newTx);
+
+        if (snap.docs.length < _txLimit) {
+          hasMoreTx.value = false;
         } else {
-          currentTransactions.assignAll(newTx);
+          hasMoreTx.value = true;
+          // Store cursor for the NEXT page
+          if (txPageCursors.length <= pageIndex) {
+            txPageCursors.add(snap.docs.last);
+          } else {
+            txPageCursors[pageIndex] = snap.docs.last;
+          }
         }
+        currentTxPage.value = pageIndex;
       } else {
-        if (!loadMore) hasMoreTx.value = false;
+        if (pageIndex == 1) currentTransactions.clear();
+        hasMoreTx.value = false;
       }
     } catch (e) {
       print("Error loading transactions: $e");
@@ -727,6 +716,9 @@ class DebatorController extends GetxController {
       await _recalculateSingleDebtorBalance(debtorId);
       await loadBodies(loadMore: false);
 
+      // Force refresh page 1 of transactions so the new entry shows instantly
+      loadTxPage(debtorId, 1);
+
       if (Get.isRegistered<DailySalesController>()) {
         await Get.find<DailySalesController>().loadDailySales();
       }
@@ -838,7 +830,7 @@ class DebatorController extends GetxController {
       }
 
       await _recalculateSingleDebtorBalance(debtorId);
-      loadDebtorTransactions(debtorId);
+      loadTxPage(debtorId, currentTxPage.value);
       loadBodies();
 
       Get.snackbar("Deleted", "Transaction removed & Balance corrected");
@@ -896,7 +888,7 @@ class DebatorController extends GetxController {
         });
       }
 
-      loadDebtorTransactions(debtorId);
+      loadTxPage(debtorId, currentTxPage.value);
       loadBodies();
       Get.back();
       Get.snackbar("Success", "Updated successfully");
@@ -930,7 +922,7 @@ class DebatorController extends GetxController {
         "searchKeywords": _generateSearchKeywords(
           name.trim(),
           phone.trim(),
-          des.trim(), // <--- INCLUDED DES IN KEYWORDS GENERATOR
+          des.trim(),
         ),
         "createdAt": FieldValue.serverTimestamp(),
         "lastTransactionDate": FieldValue.serverTimestamp(),
@@ -966,7 +958,7 @@ class DebatorController extends GetxController {
         "searchKeywords": _generateSearchKeywords(
           newName.trim(),
           phone.trim(),
-          des.trim(), // <--- INCLUDED DES IN KEYWORDS GENERATOR
+          des.trim(),
         ),
       };
 

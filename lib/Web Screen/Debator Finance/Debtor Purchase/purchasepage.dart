@@ -498,22 +498,32 @@ class DebtorPurchasePage extends StatelessWidget {
     );
   }
 
+  // ===========================================================================
+  // 5. PAGINATION FOOTER (UPDATED FOR NEW CONTROLLER)
+  // ===========================================================================
   Widget _buildPaginationFooter() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-      decoration: const BoxDecoration(
-        color: surfaceWhite,
-        border: Border(top: BorderSide(color: borderCol)),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Obx(
-            () => ElevatedButton.icon(
+    return Obx(() {
+      // Hide pagination if there is only 1 page and no more data
+      if (controller.currentPurchasePage.value == 1 &&
+          !controller.hasMorePurchases.value) {
+        return const SizedBox.shrink();
+      }
+
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+        decoration: const BoxDecoration(
+          color: surfaceWhite,
+          border: Border(top: BorderSide(color: borderCol)),
+        ),
+        child: Row(
+          mainAxisAlignment:
+              MainAxisAlignment.end, // Changed to match Debatordetails
+          children: [
+            ElevatedButton.icon(
               onPressed:
-                  controller.isFirstPage.value
-                      ? null
-                      : () => controller.previousPage(debtorId),
+                  controller.currentPurchasePage.value > 1
+                      ? () => controller.prevPurchasePage(debtorId)
+                      : null,
               icon: const Icon(Icons.chevron_left, size: 16),
               label: const Text("Previous"),
               style: ElevatedButton.styleFrom(
@@ -521,50 +531,59 @@ class DebtorPurchasePage extends StatelessWidget {
                 foregroundColor: textDark,
                 elevation: 0,
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
+                  horizontal: 20,
                   vertical: 12,
                 ),
                 side: const BorderSide(color: borderCol),
-                disabledBackgroundColor: bgGrey,
                 disabledForegroundColor: textMuted,
               ),
             ),
-          ),
-          Obx(
-            () => ElevatedButton(
+            const SizedBox(width: 15),
+
+            // Current Page Indicator Badge
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: activeAccent.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                "Page ${controller.currentPurchasePage.value}",
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: activeAccent,
+                ),
+              ),
+            ),
+
+            const SizedBox(width: 15),
+            ElevatedButton.icon(
               onPressed:
-                  controller.hasMore.value
-                      ? () => controller.nextPage(debtorId)
+                  controller.hasMorePurchases.value
+                      ? () => controller.nextPurchasePage(debtorId)
                       : null,
+              icon: const Icon(Icons.chevron_right, size: 16),
+              label: const Text("Next"),
               style: ElevatedButton.styleFrom(
                 backgroundColor: surfaceWhite,
                 foregroundColor: textDark,
                 elevation: 0,
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
+                  horizontal: 20,
                   vertical: 12,
                 ),
                 side: const BorderSide(color: borderCol),
-                disabledBackgroundColor: bgGrey,
                 disabledForegroundColor: textMuted,
               ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: const [
-                  Text("Next"),
-                  SizedBox(width: 8),
-                  Icon(Icons.chevron_right, size: 16),
-                ],
-              ),
             ),
-          ),
-        ],
-      ),
-    );
+          ],
+        ),
+      );
+    });
   }
 
   // ===========================================================================
-  // 5. DIALOG LOGIC
+  // 6. DIALOG LOGIC
   // ===========================================================================
 
   void _showPurchaseDetails(BuildContext context, Map<String, dynamic> item) {

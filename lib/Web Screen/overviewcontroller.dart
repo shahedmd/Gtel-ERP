@@ -177,7 +177,6 @@ class OverviewController extends GetxController {
 
       _processLedgerData();
     } catch (e) {
-      print(e);
     } finally {
       isLoadingHistory.value = false;
     }

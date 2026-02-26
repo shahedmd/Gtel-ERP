@@ -27,8 +27,6 @@ class _DebatordetailsState extends State<Debatordetails> {
 
   final TextEditingController _searchCtrl = TextEditingController();
   final RxString _filterType = 'All'.obs;
-  final RxInt _currentPage = 1.obs;
-  final int _rowsPerPage = 50;
 
   // --- COLORS ---
   static const Color darkSlate = Color(0xFF111827);
@@ -40,7 +38,8 @@ class _DebatordetailsState extends State<Debatordetails> {
   void initState() {
     super.initState();
     controller.clearTransactionState();
-    controller.loadDebtorTransactions(widget.id, loadMore: true);
+    // Load exactly Page 1 from server
+    controller.loadTxPage(widget.id, 1);
   }
 
   @override
@@ -49,9 +48,9 @@ class _DebatordetailsState extends State<Debatordetails> {
     super.dispose();
   }
 
-
+  // Filters within the CURRENT fetched page (20 items max)
   List<TransactionModel> get _processedTransactions {
-    List<TransactionModel> list = controller.currentTransactions;
+    List<TransactionModel> list = controller.currentTransactions.toList();
 
     if (_filterType.value == 'Sales') {
       list =
@@ -75,7 +74,6 @@ class _DebatordetailsState extends State<Debatordetails> {
               .toList();
     }
 
-    // 3. Apply Search (Invoice / Bank / Note)
     if (_searchCtrl.text.isNotEmpty) {
       String q = _searchCtrl.text.toLowerCase();
       list =
@@ -85,44 +83,24 @@ class _DebatordetailsState extends State<Debatordetails> {
             if (t.paymentMethod != null) {
               method = t.paymentMethod.toString().toLowerCase();
             }
-            // Check Note (Invoice ID) OR Method (Bank Acc)
             return note.contains(q) || method.contains(q);
           }).toList();
     }
     return list;
   }
 
-  List<TransactionModel> get _paginatedTransactions {
-    List<TransactionModel> filtered = _processedTransactions;
-    int start = (_currentPage.value - 1) * _rowsPerPage;
-    int end = start + _rowsPerPage;
-
-    if (start >= filtered.length) return [];
-    if (end > filtered.length) end = filtered.length;
-
-    return filtered.sublist(start, end);
-  }
-
-  int get _totalPages {
-    if (_processedTransactions.isEmpty) return 1;
-    return (_processedTransactions.length / _rowsPerPage).ceil();
-  }
-
   @override
   Widget build(BuildContext context) {
-    // --- FIX: Search in BOTH bodies and filteredBodies safely ---
     final debtor =
         controller.bodies.firstWhereOrNull((e) => e.id == widget.id) ??
         controller.filteredBodies.firstWhereOrNull((e) => e.id == widget.id);
 
-    // If both lists are empty, it means data is still loading
     if (debtor == null &&
         controller.bodies.isEmpty &&
         controller.filteredBodies.isEmpty) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    // Fallback if debtor is still not found in either list
     if (debtor == null) {
       return Scaffold(
         appBar: AppBar(
@@ -157,22 +135,14 @@ class _DebatordetailsState extends State<Debatordetails> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 1. Top Balance Cards
             _buildLiveBalanceSection(),
             const SizedBox(height: 24),
-
-            // 2. Advanced Toolbar (Search + Filter)
             _buildAdvancedToolbar(),
             const SizedBox(height: 16),
-
-            // 3. Data Table
             _buildTableSection(debtor),
-
-            // 4. Pagination Footer
             const SizedBox(height: 16),
             _buildPaginationFooter(),
-
-            const SizedBox(height: 80), // Space for FAB
+            const SizedBox(height: 80),
           ],
         ),
       ),
@@ -409,15 +379,12 @@ class _DebatordetailsState extends State<Debatordetails> {
       ),
       child: Row(
         children: [
-          // Search Box
           Expanded(
             flex: 2,
             child: TextField(
               controller: _searchCtrl,
               onChanged: (val) {
-                // Reset to page 1 when searching
-                _currentPage.value = 1;
-                setState(() {}); // Trigger rebuild to filter
+                setState(() {});
               },
               decoration: InputDecoration(
                 hintText: "Search Invoice, Note, Bank Acc...",
@@ -443,8 +410,6 @@ class _DebatordetailsState extends State<Debatordetails> {
             ),
           ),
           const SizedBox(width: 16),
-
-          // Filter Dropdown
           Expanded(
             flex: 1,
             child: Obx(
@@ -481,7 +446,6 @@ class _DebatordetailsState extends State<Debatordetails> {
                     onChanged: (v) {
                       if (v != null) {
                         _filterType.value = v;
-                        _currentPage.value = 1;
                       }
                     },
                   ),
@@ -515,13 +479,7 @@ class _DebatordetailsState extends State<Debatordetails> {
               );
             }
 
-            // Force rebuild when search/filter/page changes
-            // ignore: unused_local_variable
-            final page = _currentPage.value;
-            // ignore: unused_local_variable
-            final search = _searchCtrl.text;
-
-            final txList = _paginatedTransactions;
+            final txList = _processedTransactions;
 
             if (txList.isEmpty) {
               return const Padding(
@@ -594,7 +552,6 @@ class _DebatordetailsState extends State<Debatordetails> {
     IconData typeIcon = Icons.circle;
     String typeLabel = tx.type;
 
-    // Define styles based on type
     if (tx.type == 'credit') {
       typeColor = const Color(0xFFEF4444);
       typeIcon = FontAwesomeIcons.fileInvoiceDollar;
@@ -719,19 +676,22 @@ class _DebatordetailsState extends State<Debatordetails> {
   }
 
   // ==========================================
-  // PAGINATION FOOTER
+  // PAGINATION FOOTER (UPDATED FOR FIREBASE API)
   // ==========================================
   Widget _buildPaginationFooter() {
     return Obx(() {
-      final totalP = _totalPages;
-      if (totalP <= 1) return const SizedBox.shrink();
+      if (controller.currentTxPage.value == 1 && !controller.hasMoreTx.value) {
+        return const SizedBox.shrink(); // Hide footer if only 1 page exist
+      }
 
       return Row(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
           ElevatedButton.icon(
             onPressed:
-                _currentPage.value > 1 ? () => _currentPage.value-- : null,
+                controller.currentTxPage.value > 1
+                    ? () => controller.prevTxPage(widget.id)
+                    : null,
             icon: const Icon(Icons.chevron_left, size: 16),
             label: const Text("Previous"),
             style: ElevatedButton.styleFrom(
@@ -750,7 +710,7 @@ class _DebatordetailsState extends State<Debatordetails> {
               borderRadius: BorderRadius.circular(20),
             ),
             child: Text(
-              "Page ${_currentPage.value} of $totalP",
+              "Page ${controller.currentTxPage.value}",
               style: const TextStyle(
                 fontWeight: FontWeight.bold,
                 color: activeAccent,
@@ -760,7 +720,9 @@ class _DebatordetailsState extends State<Debatordetails> {
           const SizedBox(width: 15),
           ElevatedButton.icon(
             onPressed:
-                _currentPage.value < totalP ? () => _currentPage.value++ : null,
+                controller.hasMoreTx.value
+                    ? () => controller.nextTxPage(widget.id)
+                    : null,
             icon: const Icon(Icons.chevron_right, size: 16),
             label: const Text("Next"),
             style: ElevatedButton.styleFrom(
@@ -786,7 +748,6 @@ class _DebatordetailsState extends State<Debatordetails> {
     final RxString selectedType = 'credit'.obs;
     final Rx<DateTime> selectedDate = DateTime.now().obs;
 
-    // Payment States
     final RxString payMethodType = 'cash'.obs;
     final bankNameC = TextEditingController();
     final accountNoC = TextEditingController();
@@ -875,7 +836,6 @@ class _DebatordetailsState extends State<Debatordetails> {
                             mobileNoC,
                           ),
                         ],
-
                         const SizedBox(height: 24),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.end,
@@ -895,7 +855,6 @@ class _DebatordetailsState extends State<Debatordetails> {
                               ),
                               onPressed: () async {
                                 if (amountC.text.isEmpty) return;
-                                // Construct Payment Data
                                 Map<String, dynamic> pm = {'type': 'cash'};
                                 if ([
                                   'debit',
@@ -1178,7 +1137,7 @@ class _DebatordetailsState extends State<Debatordetails> {
   }
 
   // ==========================================
-  // HELPERS (Payment Fields, Headers, etc)
+  // HELPERS
   // ==========================================
 
   Widget _buildDynamicPaymentSection(
@@ -1352,7 +1311,6 @@ class _DebatordetailsState extends State<Debatordetails> {
   }
 }
 
-// Global Helper
 String formatDynamicPayment(Map<String, dynamic> pm) {
   String type = (pm['type'] ?? 'Cash').toString().toUpperCase();
   if (type == 'BANK') {

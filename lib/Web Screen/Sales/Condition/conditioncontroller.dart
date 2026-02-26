@@ -391,6 +391,18 @@ class ConditionSalesController extends GetxController {
       List<Map<String, dynamic>> items =
           rawItems.map((e) => e as Map<String, dynamic>).toList();
 
+      // --- NEW: EXTRACT INVOICE DATE ---
+      DateTime invoiceDate = DateTime.now();
+      if (data['timestamp'] is Timestamp) {
+        invoiceDate = (data['timestamp'] as Timestamp).toDate();
+      } else if (data['date'] != null) {
+        try {
+          invoiceDate = DateFormat('yyyy-MM-dd HH:mm:ss').parse(data['date']);
+        } catch (e) {
+          invoiceDate = DateTime.now();
+        }
+      }
+
       // 1. Get Initial Payment Details (Initial Advance)
       Map<String, dynamic> paymentMap = Map<String, dynamic>.from(
         data['paymentDetails'] ?? {},
@@ -401,7 +413,6 @@ class ConditionSalesController extends GetxController {
       double historyTotal = 0.0;
 
       // 3. MERGE: Add history breakdown to the initial paymentMap
-      // This ensures the PDF shows the TOTAL collected per method (Initial + History)
       for (var h in history) {
         if (h is Map) {
           String method = h['method']?.toString().toLowerCase() ?? 'cash';
@@ -457,8 +468,9 @@ class ConditionSalesController extends GetxController {
         order.invoiceId,
         order.customerName,
         order.customerPhone,
-        paymentMap, // Contains MERGED amounts
+        paymentMap,
         items,
+        invoiceDate: invoiceDate, // Pass the extracted date here
         isCondition: true,
         challan: order.challanNo,
         address: address,
@@ -488,6 +500,7 @@ class ConditionSalesController extends GetxController {
     String phone,
     Map<String, dynamic> payMap,
     List<Map<String, dynamic>> items, {
+    required DateTime invoiceDate, // <--- Add invoiceDate parameter
     bool isCondition = false,
     String challan = "",
     String address = "",
@@ -580,6 +593,7 @@ class ConditionSalesController extends GetxController {
               null,
               "",
               paymentMethodsStr,
+              invoiceDate, // Pass original invoice date
             ),
             _buildNewCustomerBox(
               name,
@@ -604,7 +618,11 @@ class ConditionSalesController extends GetxController {
             pw.SizedBox(height: 5),
             _buildNewDues(totalPreviousBalance, netTotalDue, regularFont),
             if (invDue <= 0 && !isCondition)
-              _buildPaidStamp(boldFont, regularFont),
+              _buildPaidStamp(
+                boldFont,
+                regularFont,
+                invoiceDate,
+              ), // Pass original invoice date
             if (invDue > 0 || isCondition) pw.SizedBox(height: 15),
             _buildWordsBox(currentInvTotal, boldFont),
             pw.SizedBox(height: 40),
@@ -636,6 +654,7 @@ class ConditionSalesController extends GetxController {
                 courier,
                 challan,
                 paymentMethodsStr,
+                invoiceDate, // Pass original invoice date
               ),
               _buildNewCustomerBox(
                 name,
@@ -646,7 +665,6 @@ class ConditionSalesController extends GetxController {
                 boldFont,
               ),
               pw.SizedBox(height: 20),
-              // NEW COURIER INFORMATION BOX
               _buildCourierBox(
                 courier,
                 challan,
@@ -655,7 +673,6 @@ class ConditionSalesController extends GetxController {
                 boldFont,
               ),
               pw.SizedBox(height: 60),
-              // DYNAMIC INSTRUCTION BOX (PAID vs DUE)
               _buildChallanCenterBox(boldFont, regularFont, invDue),
               pw.SizedBox(height: 100),
               _buildNewSignatures(regularFont),
@@ -681,6 +698,7 @@ class ConditionSalesController extends GetxController {
     String? courier,
     String challan,
     String paymentMethodsStr,
+    DateTime invoiceDate, // <--- Add this parameter
   ) {
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -743,7 +761,7 @@ class ConditionSalesController extends GetxController {
                 _infoRow("Invoice No.", ": $invId", reg, bold),
                 _infoRow(
                   "Date",
-                  ": ${DateFormat('dd/MM/yyyy').format(DateTime.now())}",
+                  ": ${DateFormat('dd/MM/yyyy').format(invoiceDate)}", // <--- USE ORIGINAL INVOICE DATE
                   reg,
                   bold,
                 ),
@@ -756,7 +774,7 @@ class ConditionSalesController extends GetxController {
                 ),
                 _infoRow(
                   "Entry Time",
-                  ": ${DateFormat('h:mm:ss a').format(DateTime.now())}",
+                  ": ${DateFormat('h:mm:ss a').format(invoiceDate)}", // <--- USE ORIGINAL INVOICE TIME
                   reg,
                   bold,
                 ),
@@ -777,6 +795,55 @@ class ConditionSalesController extends GetxController {
           ),
         ),
       ],
+    );
+  }
+
+  // --- COMPONENT: PAID STAMP ---
+  pw.Widget _buildPaidStamp(pw.Font bold, pw.Font reg, DateTime invoiceDate) {
+    // <--- Add this parameter
+    return pw.Container(
+      margin: const pw.EdgeInsets.symmetric(vertical: 20),
+      alignment: pw.Alignment.center,
+      child: pw.Container(
+        padding: const pw.EdgeInsets.symmetric(horizontal: 40, vertical: 10),
+        decoration: pw.BoxDecoration(
+          border: pw.Border.all(color: PdfColors.blue800, width: 2),
+          borderRadius: const pw.BorderRadius.all(pw.Radius.circular(5)),
+        ),
+        child: pw.Column(
+          children: [
+            pw.Text(
+              "P A I D",
+              style: pw.TextStyle(
+                color: PdfColors.blue800,
+                font: bold,
+                fontSize: 24,
+                letterSpacing: 2,
+              ),
+            ),
+            pw.SizedBox(height: 5),
+            pw.Text(
+              DateFormat(
+                'dd MMM yyyy',
+              ).format(invoiceDate), // <--- USE ORIGINAL INVOICE DATE
+              style: pw.TextStyle(
+                color: PdfColors.blue800,
+                font: bold,
+                fontSize: 12,
+              ),
+            ),
+            pw.SizedBox(height: 5),
+            pw.Text(
+              "G TEL",
+              style: pw.TextStyle(
+                color: PdfColors.blue800,
+                font: bold,
+                fontSize: 14,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -885,6 +952,7 @@ class ConditionSalesController extends GetxController {
             children: [
               _td((index + 1).toString(), reg, align: pw.TextAlign.center),
               _td(
+                // ignore: prefer_interpolation_to_compose_strings
                 "${item['name']}${item['model'] != null ? ' - ' + item['model'] : ''}",
                 reg,
               ),
@@ -1018,51 +1086,7 @@ class ConditionSalesController extends GetxController {
     );
   }
 
-  // --- COMPONENT: PAID STAMP ---
-  pw.Widget _buildPaidStamp(pw.Font bold, pw.Font reg) {
-    return pw.Container(
-      margin: const pw.EdgeInsets.symmetric(vertical: 20),
-      alignment: pw.Alignment.center,
-      child: pw.Container(
-        padding: const pw.EdgeInsets.symmetric(horizontal: 40, vertical: 10),
-        decoration: pw.BoxDecoration(
-          border: pw.Border.all(color: PdfColors.blue800, width: 2),
-          borderRadius: const pw.BorderRadius.all(pw.Radius.circular(5)),
-        ),
-        child: pw.Column(
-          children: [
-            pw.Text(
-              "P A I D",
-              style: pw.TextStyle(
-                color: PdfColors.blue800,
-                font: bold,
-                fontSize: 24,
-                letterSpacing: 2,
-              ),
-            ),
-            pw.SizedBox(height: 5),
-            pw.Text(
-              DateFormat('dd MMM yyyy').format(DateTime.now()),
-              style: pw.TextStyle(
-                color: PdfColors.blue800,
-                font: bold,
-                fontSize: 12,
-              ),
-            ),
-            pw.SizedBox(height: 5),
-            pw.Text(
-              "G TEL",
-              style: pw.TextStyle(
-                color: PdfColors.blue800,
-                font: bold,
-                fontSize: 14,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+
 
   // --- COMPONENT: TAKA IN WORDS BOX ---
   pw.Widget _buildWordsBox(double currentInvTotal, pw.Font bold) {
