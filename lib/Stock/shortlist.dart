@@ -25,6 +25,10 @@ class OrderCartItem {
 class OrderCartController extends GetxController {
   var cartItems = <OrderCartItem>[].obs;
 
+  // NEW: Added variables for Company Name and Delivery Method
+  var companyName = ''.obs;
+  var deliveryMethod = 'Sea'.obs;
+
   void addToCart(Product product, int qty) {
     var existing = cartItems.firstWhereOrNull(
       (item) => item.product.id == product.id,
@@ -50,6 +54,13 @@ class OrderCartController extends GetxController {
 
   void removeFromCart(Product product) {
     cartItems.removeWhere((item) => item.product.id == product.id);
+  }
+
+  // Clear cart entirely after successfully generating PO
+  void clearCart() {
+    cartItems.clear();
+    companyName.value = '';
+    deliveryMethod.value = 'Sea';
   }
 }
 
@@ -861,6 +872,10 @@ class _ShortlistPageState extends State<ShortlistPage> {
 
   // --- Order Cart Dialog (View/Edit/Delete) --- //
   void _showOrderCartDialog() {
+    // Reset fields when opening cart
+    cartController.companyName.value = '';
+    cartController.deliveryMethod.value = 'Sea';
+
     Get.dialog(
       Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -958,8 +973,61 @@ class _ShortlistPageState extends State<ShortlistPage> {
                   );
                 }),
               ),
+
+              // NEW: Company Name & Delivery Method Input fields
               const Divider(thickness: 1),
               const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      onChanged:
+                          (val) => cartController.companyName.value = val,
+                      decoration: const InputDecoration(
+                        labelText: "Company Name",
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Obx(
+                      () => DropdownButtonFormField<String>(
+                        value: cartController.deliveryMethod.value,
+                        decoration: const InputDecoration(
+                          labelText: "Delivery Via",
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                        ),
+                        items:
+                            ['Sea', 'Air']
+                                .map(
+                                  (e) => DropdownMenuItem(
+                                    value: e,
+                                    child: Text(e),
+                                  ),
+                                )
+                                .toList(),
+                        onChanged: (val) {
+                          if (val != null) {
+                            cartController.deliveryMethod.value = val;
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              // Save Button
               SizedBox(
                 width: double.infinity,
                 child: Obx(
@@ -1000,9 +1068,16 @@ class _ShortlistPageState extends State<ShortlistPage> {
     );
 
     try {
-      // 1. Save to Firebase
+      String compName = cartController.companyName.value.trim();
+      if (compName.isEmpty) compName = 'N/A';
+      String dlvryMethod = cartController.deliveryMethod.value;
+
+      // 1. Save to Firebase with new required fields
       await FirebaseFirestore.instance.collection('order_history').add({
         'date': FieldValue.serverTimestamp(),
+        'company_name': compName,
+        'delivery_method': dlvryMethod,
+        'status': 'Pending', // Setting default status
         'total_items': cartController.cartItems.length,
         'items':
             cartController.cartItems
@@ -1017,13 +1092,15 @@ class _ShortlistPageState extends State<ShortlistPage> {
                 .toList(),
       });
 
-      // 2. Generate and Download PDF Report
+      // 2. Generate and Download PDF Report including the new fields
       await OrderPdfGenerator.generateOrderCartPdf(
         cartController.cartItems.toList(),
+        compName,
+        dlvryMethod,
       );
 
-      // 3. Clear cart upon success
-      cartController.cartItems.clear();
+      // 3. Clear cart entirely upon success
+      cartController.clearCart();
 
       Get.back(); // close progress dialog
       Get.back(); // close cart dialog
@@ -1047,7 +1124,11 @@ class _ShortlistPageState extends State<ShortlistPage> {
 
 // --- Professional Order PDF Generator --- //
 class OrderPdfGenerator {
-  static Future<void> generateOrderCartPdf(List<OrderCartItem> items) async {
+  static Future<void> generateOrderCartPdf(
+    List<OrderCartItem> items,
+    String company,
+    String delivery,
+  ) async {
     final pdf = pw.Document();
 
     pdf.addPage(
@@ -1079,6 +1160,42 @@ class OrderPdfGenerator {
                 ],
               ),
             ),
+            pw.SizedBox(height: 10),
+
+            // Company, Delivery Method, and Status display block
+            pw.Container(
+              padding: const pw.EdgeInsets.all(10),
+              decoration: pw.BoxDecoration(
+                color: PdfColors.grey100,
+                border: pw.Border.all(color: PdfColors.grey300),
+              ),
+              child: pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text(
+                        "Company Name: $company",
+                        style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                      ),
+                      pw.Text(
+                        "Delivery Via: $delivery",
+                        style: const pw.TextStyle(color: PdfColors.grey800),
+                      ),
+                    ],
+                  ),
+                  pw.Text(
+                    "Status: Pending",
+                    style: pw.TextStyle(
+                      fontWeight: pw.FontWeight.bold,
+                      color: PdfColors.orange800,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
             pw.SizedBox(height: 20),
             pw.Text(
               "Authorized Generated Report",
