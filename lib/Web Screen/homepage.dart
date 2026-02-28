@@ -5,6 +5,7 @@ import 'package:gtel_erp/Cash/page.dart';
 import 'package:gtel_erp/Customer/cusotmerpage.dart';
 import 'package:gtel_erp/Staff%20Sale%20Report/ui.dart';
 import 'package:gtel_erp/Stock/Service/servicepage.dart';
+import 'package:gtel_erp/Stock/orderhistory.dart';
 import 'package:gtel_erp/Vendor/vendorpage.dart';
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/purchasehistorypage.dart';
 import 'package:gtel_erp/Web%20Screen/Sales/Condition/conditionpage.dart';
@@ -108,6 +109,9 @@ class _AdminHomepageState extends State<AdminHomepage> {
                   }
                   if (settings.name == Routes.PURCHASE) {
                     return GetPageRoute(page: () => GlobalPurchasePage());
+                  }
+                   if (settings.name == Routes.ORDERLIST) {
+                    return GetPageRoute(page: () => OrderHistoryPage());
                   }
                   return GetPageRoute(
                     page: () => const Center(child: Text("Not Found")),

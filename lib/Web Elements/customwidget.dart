@@ -328,6 +328,11 @@ class SidebarMenu extends StatelessWidget {
                       title: "Purchase Hirstory",
                       isSubItem: true,
                     ),
+                    _NavTile(
+                      id: Routes.ORDERLIST,
+                      title: "China Order List",
+                      isSubItem: true,
+                    )
                   ],
                 ),
 

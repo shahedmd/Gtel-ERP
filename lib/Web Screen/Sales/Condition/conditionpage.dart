@@ -614,10 +614,6 @@ class ConditionSalesPage extends StatelessWidget {
     );
   }
 
-  // ==============================================================================
-  // 5. DIALOGS
-  // ==============================================================================
-
   void _showEditChallanDialog(
     BuildContext context,
     ConditionSalesController ctrl,
@@ -685,127 +681,198 @@ class ConditionSalesPage extends StatelessWidget {
     Get.dialog(
       Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: Container(
-          width: 420,
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                "Receive from ${order.courierName}",
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: darkSlate,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: bgGrey,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+        child: StatefulBuilder(
+          builder: (context, setState) {
+            // Dynamically change the reference input label based on payment method
+            String refLabel = "Reference Note";
+            String refHint = "Optional";
+            if (method == "Bank") {
+              refLabel = "Bank Name & Account No.";
+              refHint = "Required (e.g., BRAC 1029...)";
+            } else if (method == "Bkash") {
+              refLabel = "Bkash Number";
+              refHint = "Required (e.g., 017...)";
+            } else if (method == "Nagad") {
+              refLabel = "Nagad Number";
+              refHint = "Required (e.g., 017...)";
+            }
+
+            return Container(
+              width: 420,
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Receive from ${order.courierName}",
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: darkSlate, // Assuming you have this defined
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: bgGrey, // Assuming you have this defined
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          "Invoice: ${order.invoiceId}",
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                "Invoice: ${order.invoiceId}",
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              Text(
+                                order.customerName,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color:
+                                      textMuted, // Assuming you have this defined
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
                           ),
                         ),
+                        const SizedBox(width: 8),
                         Text(
-                          order.customerName,
+                          "Due: ৳${order.courierDue}",
                           style: const TextStyle(
-                            fontSize: 12,
-                            color: textMuted,
+                            fontWeight: FontWeight.bold,
+                            color: alertRed, // Assuming you have this defined
                           ),
                         ),
                       ],
                     ),
-                    Text(
-                      "Due: ৳${order.courierDue}",
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: alertRed,
+                  ),
+                  const SizedBox(height: 24),
+                  TextField(
+                    controller: amountC,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: const InputDecoration(
+                      labelText: "Received Amount",
+                      prefixText: "৳ ",
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<String>(
+                    value: method,
+                    items:
+                        ["Cash", "Bank", "Bkash", "Nagad"]
+                            .map(
+                              (e) => DropdownMenuItem(value: e, child: Text(e)),
+                            )
+                            .toList(),
+                    onChanged: (v) {
+                      if (v != null) {
+                        setState(() {
+                          method = v;
+                          refC.clear(); // Clear reference when changing method
+                        });
+                      }
+                    },
+                    decoration: const InputDecoration(
+                      labelText: "Payment Method",
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: refC,
+                    decoration: InputDecoration(
+                      labelText: refLabel,
+                      hintText: refHint,
+                      border: const OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: Obx(
+                      () => ElevatedButton(
+                        // Disable button while loading to prevent double-clicks
+                        onPressed:
+                            ctrl.isLoading.value
+                                ? null
+                                : () {
+                                  double amt =
+                                      double.tryParse(amountC.text) ?? 0;
+
+                                  // Validation
+                                  if (amt <= 0) {
+                                    Get.snackbar(
+                                      "Error",
+                                      "Please enter a valid amount",
+                                    );
+                                    return;
+                                  }
+
+                                  if (method != "Cash" &&
+                                      refC.text.trim().isEmpty) {
+                                    Get.snackbar(
+                                      "Error",
+                                      "$refLabel is required for $method payments",
+                                    );
+                                    return;
+                                  }
+
+                                  ctrl.receiveConditionPayment(
+                                    order: order,
+                                    receivedAmount: amt,
+                                    method: method,
+                                    refNumber: refC.text.trim(),
+                                  );
+                                },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor:
+                              successGreen, // Assuming you have this defined
+                          disabledBackgroundColor: Colors.grey.shade400,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        child:
+                            ctrl.isLoading.value
+                                ? const SizedBox(
+                                  height: 20,
+                                  width: 20,
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                                : const Text(
+                                  "CONFIRM COLLECTION",
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                    letterSpacing: 1,
+                                  ),
+                                ),
                       ),
                     ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 24),
-              TextField(
-                controller: amountC,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: "Received Amount",
-                  prefixText: "৳ ",
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 16),
-              DropdownButtonFormField<String>(
-                value: method,
-                items:
-                    ["Cash", "Bank", "Bkash", "Nagad"]
-                        .map((e) => DropdownMenuItem(value: e, child: Text(e)))
-                        .toList(),
-                onChanged: (v) => method = v!,
-                decoration: const InputDecoration(
-                  labelText: "Payment Method",
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: refC,
-                decoration: const InputDecoration(
-                  labelText: "Reference / Transaction ID",
-                  hintText: "Optional",
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: ElevatedButton(
-                  onPressed: () {
-                    double amt = double.tryParse(amountC.text) ?? 0;
-                    if (amt > 0) {
-                      ctrl.receiveConditionPayment(
-                        order: order,
-                        receivedAmount: amt,
-                        method: method,
-                        refNumber: refC.text,
-                      );
-                    }
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: successGreen,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
                   ),
-                  child: const Text(
-                    "CONFIRM COLLECTION",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                      letterSpacing: 1,
-                    ),
-                  ),
-                ),
+                ],
               ),
-            ],
-          ),
+            );
+          },
         ),
       ),
     );

@@ -268,9 +268,6 @@ class ConditionSalesController extends GetxController {
     courierBalances.value = cBalances;
   }
 
-  // ==============================================================================
-  // 2. PAYMENT RECEIVING (FIXED OVERWRITE BUG)
-  // ==============================================================================
   Future<void> receiveConditionPayment({
     required ConditionOrderModel order,
     required double receivedAmount,
@@ -296,23 +293,53 @@ class ConditionSalesController extends GetxController {
       DocumentSnapshot latestSnap = await orderRef.get();
       Map<String, dynamic> data = latestSnap.data() as Map<String, dynamic>;
       Map<String, dynamic> paymentDetails = data['paymentDetails'] ?? {};
+      Map<String, dynamic> soldBy = data['soldBy'] ?? {};
 
-      // FIX: Check 'actualReceived' first, if null/0, fallback to 'paidForInvoice' (Initial Advance)
+      // Parse existing payment variables carefully
       double currentPaid =
-          double.tryParse(paymentDetails['actualReceived'].toString()) ?? 0.0;
-      if (currentPaid == 0) {
-        currentPaid =
-            double.tryParse(paymentDetails['paidForInvoice'].toString()) ?? 0.0;
-      }
+          double.tryParse(paymentDetails['paidForInvoice']?.toString() ?? '') ??
+          double.tryParse(paymentDetails['actualReceived']?.toString() ?? '') ??
+          0.0;
+      double currentTotalPaidInput =
+          double.tryParse(paymentDetails['totalPaidInput']?.toString() ?? '') ??
+          0.0;
+
+      double currentBank =
+          double.tryParse(paymentDetails['bank']?.toString() ?? '') ?? 0.0;
+      double currentCash =
+          double.tryParse(paymentDetails['cash']?.toString() ?? '') ?? 0.0;
+      double currentBkash =
+          double.tryParse(paymentDetails['bkash']?.toString() ?? '') ?? 0.0;
+      double currentNagad =
+          double.tryParse(paymentDetails['nagad']?.toString() ?? '') ?? 0.0;
+
+      // Determine payment distribution
+      String mtd = method.toLowerCase();
+      double addBank = mtd.contains('bank') ? receivedAmount : 0;
+      double addBkash = mtd.contains('bkash') ? receivedAmount : 0;
+      double addNagad = mtd.contains('nagad') ? receivedAmount : 0;
+      double addCash =
+          (!mtd.contains('bank') &&
+                  !mtd.contains('bkash') &&
+                  !mtd.contains('nagad'))
+              ? receivedAmount
+              : 0;
 
       double newPaidTotal = currentPaid + receivedAmount;
       double newDue =
           double.parse(data['courierDue'].toString()) - receivedAmount;
       if (newDue < 0) newDue = 0;
 
-      batch.update(orderRef, {
+      // 1. UPDATE SALES_ORDERS DOCUMENT (Following your provided structure)
+      Map<String, dynamic> orderUpdateData = {
         "courierDue": newDue,
-        "paymentDetails.actualReceived": newPaidTotal,
+        "paymentDetails.paidForInvoice": newPaidTotal,
+        "paymentDetails.totalPaidInput": currentTotalPaidInput + receivedAmount,
+        "paymentDetails.due": newDue,
+        "paymentDetails.bank": currentBank + addBank,
+        "paymentDetails.cash": currentCash + addCash,
+        "paymentDetails.bkash": currentBkash + addBkash,
+        "paymentDetails.nagad": currentNagad + addNagad,
         "lastPaymentDate": FieldValue.serverTimestamp(),
         "status": newDue <= 1 ? "completed" : "on_delivery",
         "isFullyPaid": newDue <= 1,
@@ -321,12 +348,24 @@ class ConditionSalesController extends GetxController {
             "amount": receivedAmount,
             "date": Timestamp.now(),
             "method": method.toLowerCase(),
-            "ref": refNumber,
+            "ref": refNumber ?? "",
             "type": "courier_collection",
           },
         ]),
-      });
+      };
 
+      if (addBank > 0) {
+        orderUpdateData["paymentDetails.bankName"] = method;
+        orderUpdateData["paymentDetails.accountNumber"] = refNumber ?? "";
+      } else if (addBkash > 0) {
+        orderUpdateData["paymentDetails.bkashNumber"] = refNumber ?? "";
+      } else if (addNagad > 0) {
+        orderUpdateData["paymentDetails.nagadNumber"] = refNumber ?? "";
+      }
+
+      batch.update(orderRef, orderUpdateData);
+
+      // 2. UPDATE COURIER LEDGER
       DocumentReference courierRef = _db
           .collection('courier_ledgers')
           .doc(order.courierName);
@@ -335,6 +374,7 @@ class ConditionSalesController extends GetxController {
         "lastUpdated": FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
+      // 3. UPDATE CUSTOMER LEDGER
       DocumentReference custRef = _db
           .collection('condition_customers')
           .doc(order.customerPhone);
@@ -342,22 +382,40 @@ class ConditionSalesController extends GetxController {
         "totalCourierDue": FieldValue.increment(-receivedAmount),
       });
 
-      await batch.commit();
-
-      await dailyCtrl.addSale(
-        name: "${order.courierName} (Ref: ${order.invoiceId})",
-        amount: receivedAmount,
-        customerType: "courier_payment",
-        date: DateTime.now(),
-        source: "condition_recovery",
-        isPaid: true,
-        paymentMethod: {
-          "type": method.toLowerCase(),
-          "details": refNumber ?? "Collection from ${order.courierName}",
-          "courier": order.courierName,
+      // 4. CREATE NEW DAILY SALES DOCUMENT (Replaces dailyCtrl.addSale so it commits atomically)
+      // *Note: Adjust 'daily_sales' if your collection name is different (e.g. 'sales')
+      DocumentReference dailySaleRef = _db.collection('daily_sales').doc();
+      batch.set(dailySaleRef, {
+        "amount": receivedAmount,
+        "createdAt": FieldValue.serverTimestamp(),
+        "customerType": data['customerType'] ?? "wholesale",
+        "invoiceId": order.invoiceId,
+        "name": data['customerName'] ?? "Unknown",
+        "packagerName": data['packagerName'] ?? "",
+        "paid": receivedAmount,
+        "paymentMethod": {
+          "accountNumber": addBank > 0 ? (refNumber ?? "") : "",
+          "bank": addBank,
+          "bankName": addBank > 0 ? method : "",
+          "bkash": addBkash,
+          "bkashNumber": addBkash > 0 ? (refNumber ?? "") : "",
+          "cash": addCash,
+          "currency": "BDT",
+          "method": method,
+          "nagad": addNagad,
+          "nagadNumber": addNagad > 0 ? (refNumber ?? "") : "",
         },
-        transactionId: order.invoiceId,
-      );
+        "pending": 0,
+        "soldByName": soldBy['name'] ?? "",
+        "soldByNumber": soldBy['phone'] ?? "",
+        "soldByUid": soldBy['uid'] ?? "",
+        "source": "condition_recovery", // Marks transaction source clearly
+        "timestamp": FieldValue.serverTimestamp(),
+        "transactionId": order.invoiceId,
+      });
+
+      // Commit all changes atomically!
+      await batch.commit();
 
       if (selectedFilter.value == "All Time") {
         loadConditionSales(loadMore: false);
@@ -368,7 +426,7 @@ class ConditionSalesController extends GetxController {
       Get.back();
       Get.snackbar(
         "Success",
-        "Payment Received",
+        "Payment Received Successfully",
         backgroundColor: Colors.green,
         colorText: Colors.white,
       );
@@ -1085,8 +1143,6 @@ class ConditionSalesController extends GetxController {
       ),
     );
   }
-
-
 
   // --- COMPONENT: TAKA IN WORDS BOX ---
   pw.Widget _buildWordsBox(double currentInvTotal, pw.Font bold) {
