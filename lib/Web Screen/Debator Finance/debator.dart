@@ -53,7 +53,7 @@ class _DebatorpageState extends State<Debatorpage> {
           // 2. Data Table Header
           _buildTableHeader(),
 
-          // 3. Data Table Body (UPDATED TO USE filteredBodies)
+          // 3. Data Table Body
           Expanded(
             child: Obx(() {
               if (controller.isBodiesLoading.value) {
@@ -62,7 +62,6 @@ class _DebatorpageState extends State<Debatorpage> {
                 );
               }
 
-              // CRITICAL: We must use filteredBodies to see search results!
               if (controller.filteredBodies.isEmpty) {
                 return _buildEmptyState();
               }
@@ -125,7 +124,7 @@ class _DebatorpageState extends State<Debatorpage> {
                   ),
                 ],
               ),
-              // Reports Dropdown / Buttons (ADDED REPAIR BUTTON)
+              // Reports Dropdown / Buttons
               Row(
                 children: [
                   _buildReportButton(
@@ -182,7 +181,7 @@ class _DebatorpageState extends State<Debatorpage> {
           ),
           const SizedBox(height: 20),
 
-          // Search Bar (UPDATED to Live Typing)
+          // Search Bar
           Row(
             children: [
               Expanded(
@@ -195,7 +194,6 @@ class _DebatorpageState extends State<Debatorpage> {
                   ),
                   child: TextField(
                     controller: _searchController,
-                    // UPDATED: Now searches live as you type using debounce
                     onChanged: (val) => controller.searchDebtors(val),
                     onSubmitted: (val) => controller.searchDebtors(val),
                     decoration: InputDecoration(
@@ -242,7 +240,7 @@ class _DebatorpageState extends State<Debatorpage> {
   }
 
   // ==========================================
-  // DB REPAIR DIALOG
+  // DIALOGS (Repair & Delete)
   // ==========================================
   void _confirmRepairDialog() {
     Get.defaultDialog(
@@ -260,12 +258,56 @@ class _DebatorpageState extends State<Debatorpage> {
     );
   }
 
+  void _confirmDeleteDebtor(dynamic debtor) {
+    Get.dialog(
+      AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: dangerRed, size: 28),
+            SizedBox(width: 10),
+            Text(
+              "Delete Debtor",
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        content: Text(
+          "Are you sure you want to permanently delete '${debtor.name}'?\n\nThis will also delete ALL associated transactions for this debtor. This action cannot be undone.",
+          style: const TextStyle(color: textDark, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Get.back(),
+            child: const Text("Cancel", style: TextStyle(color: textLight)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: dangerRed,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            onPressed: () {
+              Get.back(); // close dialog
+              controller.deleteDebtor(debtor.id);
+            },
+            child: const Text(
+              "Delete Forever",
+              style: TextStyle(color: Colors.white),
+            ),
+          ),
+        ],
+      ),
+      barrierDismissible: false,
+    );
+  }
+
   // ==========================================
   // 4. PAGINATION FOOTER
   // ==========================================
   Widget _buildPaginationFooter() {
     return Obx(() {
-      // Hide pagination if actively searching
       if (controller.isSearching.value) return const SizedBox.shrink();
 
       return Container(
@@ -333,7 +375,6 @@ class _DebatorpageState extends State<Debatorpage> {
   // ==========================================
   // WIDGET HELPERS
   // ==========================================
-
   Widget _buildKPICard({
     required String title,
     required double value,
@@ -440,7 +481,20 @@ class _DebatorpageState extends State<Debatorpage> {
           _colHeader("CONTACT INFO", flex: 2),
           _colHeader("BALANCE STATUS", flex: 2, align: TextAlign.right),
           _colHeader("LOCATION", flex: 2),
-          const SizedBox(width: 50),
+          // Actions Header Column
+          Container(
+            width: 70,
+            alignment: Alignment.center,
+            child: const Text(
+              "ACTION",
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: textLight,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -609,10 +663,55 @@ class _DebatorpageState extends State<Debatorpage> {
               ),
             ),
 
-            // 5. Action
-            const SizedBox(
-              width: 50,
-              child: Icon(Icons.chevron_right, color: Colors.grey),
+            // 5. Action Menu (Updated)
+            SizedBox(
+              width: 70,
+              child: PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert, color: textLight),
+                tooltip: "Options",
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                onSelected: (value) {
+                  if (value == 'view') {
+                    Get.to(
+                      () => Debatordetails(id: debtor.id, name: debtor.name),
+                    );
+                  } else if (value == 'delete') {
+                    _confirmDeleteDebtor(debtor);
+                  }
+                },
+                itemBuilder:
+                    (context) => [
+                      const PopupMenuItem(
+                        value: 'view',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.visibility,
+                              color: primaryColor,
+                              size: 20,
+                            ),
+                            SizedBox(width: 10),
+                            Text("View Account"),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'delete',
+                        child: Row(
+                          children: [
+                            Icon(Icons.delete, color: dangerRed, size: 20),
+                            SizedBox(width: 10),
+                            Text(
+                              "Delete Debtor",
+                              style: TextStyle(color: dangerRed),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+              ),
             ),
           ],
         ),

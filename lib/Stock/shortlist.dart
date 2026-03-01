@@ -828,10 +828,8 @@ class _ShortlistPageState extends State<ShortlistPage> {
     );
 
     try {
-      // Get all paginated data from the controller first
       List<Product> allData = await controller.fetchAllShortListForExport();
 
-      // NEW: Filter the export dataset based on the current search query
       String searchQuery = _searchCtrl.text.trim().toLowerCase();
       if (searchQuery.isNotEmpty) {
         allData =
@@ -870,9 +868,7 @@ class _ShortlistPageState extends State<ShortlistPage> {
     }
   }
 
-  // --- Order Cart Dialog (View/Edit/Delete) --- //
   void _showOrderCartDialog() {
-    // Reset fields when opening cart
     cartController.companyName.value = '';
     cartController.deliveryMethod.value = 'Sea';
 
@@ -974,7 +970,6 @@ class _ShortlistPageState extends State<ShortlistPage> {
                 }),
               ),
 
-              // NEW: Company Name & Delivery Method Input fields
               const Divider(thickness: 1),
               const SizedBox(height: 10),
               Row(
@@ -1026,8 +1021,6 @@ class _ShortlistPageState extends State<ShortlistPage> {
                 ],
               ),
               const SizedBox(height: 16),
-
-              // Save Button
               SizedBox(
                 width: double.infinity,
                 child: Obx(

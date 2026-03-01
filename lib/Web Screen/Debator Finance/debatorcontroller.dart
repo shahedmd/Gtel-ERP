@@ -516,7 +516,6 @@ class DebatorController extends GetxController {
           hasMoreTx.value = false;
         } else {
           hasMoreTx.value = true;
-          // Store cursor for the NEXT page
           if (txPageCursors.length <= pageIndex) {
             txPageCursors.add(snap.docs.last);
           } else {
@@ -570,13 +569,25 @@ class DebatorController extends GetxController {
               : debtorRef.collection('transactions').doc();
       String finalTxId = newTxRef.id;
 
+      // ==========================================
+      // NULLIFY PAYMENT METHOD FOR BILLS/DEBT
+      // ==========================================
+      Map<String, dynamic>? finalPaymentMethod = paymentMethodData;
+      if ([
+        'credit',
+        'previous_due',
+        'advance_given',
+      ].contains(type.toLowerCase())) {
+        finalPaymentMethod = null; // Don't save payment method for debts/bills
+      }
+
       await newTxRef.set({
         'transactionId': finalTxId,
         'amount': amount,
         'note': note,
         'type': type,
         'date': Timestamp.fromDate(date),
-        'paymentMethod': paymentMethodData,
+        'paymentMethod': finalPaymentMethod,
         'createdAt': FieldValue.serverTimestamp(),
       });
 
@@ -716,7 +727,6 @@ class DebatorController extends GetxController {
       await _recalculateSingleDebtorBalance(debtorId);
       await loadBodies(loadMore: false);
 
-      // Force refresh page 1 of transactions so the new entry shows instantly
       loadTxPage(debtorId, 1);
 
       if (Get.isRegistered<DailySalesController>()) {
@@ -854,6 +864,18 @@ class DebatorController extends GetxController {
   }) async {
     gbIsLoading.value = true;
     try {
+      // ==========================================
+      // NULLIFY PAYMENT METHOD FOR BILLS/DEBT
+      // ==========================================
+      Map<String, dynamic>? finalPaymentMethod = paymentMethod;
+      if ([
+        'credit',
+        'previous_due',
+        'advance_given',
+      ].contains(newType.toLowerCase())) {
+        finalPaymentMethod = null;
+      }
+
       await db
           .collection('debatorbody')
           .doc(debtorId)
@@ -864,7 +886,7 @@ class DebatorController extends GetxController {
             'type': newType,
             'note': note,
             'date': Timestamp.fromDate(date),
-            'paymentMethod': paymentMethod,
+            'paymentMethod': finalPaymentMethod,
           });
 
       await _recalculateSingleDebtorBalance(debtorId);
@@ -992,6 +1014,46 @@ class DebatorController extends GetxController {
     }
   }
 
+  // --- DELETE BODY ---
+  Future<void> deleteDebtor(String id) async {
+    gbIsLoading.value = true;
+    try {
+      final txSnap =
+          await db
+              .collection('debatorbody')
+              .doc(id)
+              .collection('transactions')
+              .get();
+
+      WriteBatch batch = db.batch();
+      int count = 0;
+
+      for (var doc in txSnap.docs) {
+        batch.delete(doc.reference);
+        count++;
+        if (count >= 490) {
+          await batch.commit();
+          batch = db.batch();
+          count = 0;
+        }
+      }
+
+      batch.delete(db.collection('debatorbody').doc(id));
+      await batch.commit();
+
+      bodies.removeWhere((element) => element.id == id);
+      filteredBodies.removeWhere((element) => element.id == id);
+
+      calculateTotalOutstanding();
+
+      Get.snackbar("Success", "Debtor account deleted successfully.");
+    } catch (e) {
+      Get.snackbar("Error", "Failed to delete debtor: $e");
+    } finally {
+      gbIsLoading.value = false;
+    }
+  }
+
   // ------------------------------------------------------------------
   // 4. HELPER & PDF
   // ------------------------------------------------------------------
@@ -1017,7 +1079,18 @@ class DebatorController extends GetxController {
     }
   }
 
-  String _formatMethodForPdf(dynamic pm) {
+  // --- UPDATED PDF FORMATTER to handle no payment method logic ---
+  String _formatMethodForPdf(dynamic pm, [String? txType]) {
+    // Return empty dash if it's a bill type
+    if (txType != null &&
+        [
+          'credit',
+          'previous_due',
+          'advance_given',
+        ].contains(txType.toLowerCase())) {
+      return "-";
+    }
+
     if (pm == null) return "Cash";
     if (pm is String) return pm;
     if (pm is Map) {
@@ -1113,7 +1186,10 @@ class DebatorController extends GetxController {
                         ),
                         t['type'].toString().toUpperCase().replaceAll('_', ' '),
                         t['note'] ?? "",
-                        _formatMethodForPdf(t['paymentMethod']),
+                        _formatMethodForPdf(
+                          t['paymentMethod'],
+                          t['type'].toString(),
+                        ), // PASSED TYPE HERE
                         bdCurrency.format((t['amount'] as num)),
                       ];
                     }).toList(),
