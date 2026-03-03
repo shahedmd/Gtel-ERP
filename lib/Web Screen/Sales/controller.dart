@@ -529,24 +529,12 @@ class DailySalesController extends GetxController {
       // 3. Logic Branch: Condition vs Regular (Debtor/Cash)
       if (isCond) {
         // --- SCENARIO A: CONDITION SALE ---
-        List<dynamic> history = data['collectionHistory'] ?? [];
-        double historyTotal = 0.0;
+        // The `paymentDetails` from Firestore already contains the fully updated
+        // paid amounts (including any courier collections).
+        // We do not need to add the `collectionHistory` amounts again.
 
-        for (var h in history) {
-          if (h is Map) {
-            String method = h['method']?.toString().toLowerCase() ?? 'cash';
-            double amount = double.tryParse(h['amount'].toString()) ?? 0.0;
-            historyTotal += amount;
-
-            double existing =
-                double.tryParse(payMap[method]?.toString() ?? '0') ?? 0.0;
-            payMap[method] = existing + amount;
-          }
-        }
-        double initialPaid =
-            double.tryParse(payMap['paidForInvoice'].toString()) ?? 0.0;
-        payMap['paidForInvoice'] = initialPaid + historyTotal;
-        payMap['due'] = double.tryParse(data['courierDue'].toString()) ?? 0.0;
+        payMap['due'] =
+            double.tryParse(data['courierDue']?.toString() ?? '0') ?? 0.0;
       } else {
         // --- SCENARIO B: DEBTOR / REGULAR SALE ---
 
@@ -564,7 +552,6 @@ class DailySalesController extends GetxController {
           double realTimePaid = (dailyData['paid'] as num?)?.toDouble() ?? 0.0;
           List<dynamic> paymentHistory = dailyData['paymentHistory'] ?? [];
 
-          // A. Recalculate Invoice Totals
           List<Map<String, dynamic>> items = List<Map<String, dynamic>>.from(
             data['items'] ?? [],
           );
@@ -574,13 +561,9 @@ class DailySalesController extends GetxController {
           );
           double discountVal = (data['discount'] as num?)?.toDouble() ?? 0.0;
           double grandTotal = subTotal - discountVal;
-
-          // Update Paid & Due Amount
           payMap['paidForInvoice'] = realTimePaid;
           double newDue = grandTotal - realTimePaid;
           payMap['due'] = newDue < 0 ? 0 : newDue;
-
-          // --- FIX START: CLEAR OLD KEYS ---
           payMap.remove('cash');
           payMap.remove('bank');
           payMap.remove('bkash');
@@ -589,14 +572,9 @@ class DailySalesController extends GetxController {
           payMap.remove('nagadNumber');
           payMap.remove('bankName');
           payMap.remove('accountNumber');
-          // --- FIX END ---
-
-          // B. RE-POPULATE PAYMENT METHOD (ROBUST)
           if (paymentHistory.isNotEmpty) {
-            // Option 1: Aggregate from History
             for (var h in paymentHistory) {
               if (h is Map) {
-                // DETECT TYPE if missing
                 String type = (h['type'] ?? '').toString().toLowerCase();
                 String bankVal = (h['bankName'] ?? '').toString();
 
@@ -607,7 +585,6 @@ class DailySalesController extends GetxController {
 
                 double amt = (h['amount'] as num?)?.toDouble() ?? 0.0;
 
-                // Add to PDF specific keys
                 double current =
                     double.tryParse(payMap[type]?.toString() ?? '0') ?? 0.0;
                 payMap[type] = current + amt;
@@ -621,20 +598,14 @@ class DailySalesController extends GetxController {
               }
             }
           } else if (realTimePaid > 0) {
-            // Option 2: No history, use 'paymentMethod' map
             var pm = dailyData['paymentMethod'];
             if (pm != null && pm is Map) {
-              // --- ROBUST DETECTION LOGIC ---
-              String detectedType = 'cash'; // Default
-
-              // Check values
+              String detectedType = 'cash';
               String valBank = (pm['bankName'] ?? '').toString().trim();
               String valBkash = (pm['bkashNumber'] ?? '').toString().trim();
               String valNagad = (pm['nagadNumber'] ?? '').toString().trim();
               String explicitType =
                   (pm['type'] ?? '').toString().trim().toLowerCase();
-
-              // Prioritize values because 'type' key might be missing
               if (valBank.isNotEmpty) {
                 detectedType = 'bank';
               } else if (valBkash.isNotEmpty) {
@@ -644,16 +615,10 @@ class DailySalesController extends GetxController {
               } else if (explicitType.isNotEmpty && explicitType != 'cash') {
                 detectedType = explicitType;
               }
-
-              // Assign the FULL paid amount to this detected type
               payMap[detectedType] = realTimePaid;
-
-              // Map details for the PDF
               if (pm['number'] != null) {
                 payMap['${detectedType}Number'] = pm['number'];
               }
-
-              // Explicitly map these regardless of detected type
               if (valBank.isNotEmpty) payMap['bankName'] = valBank;
               if (valBkash.isNotEmpty) payMap['bkashNumber'] = valBkash;
               if (valNagad.isNotEmpty) payMap['nagadNumber'] = valNagad;
@@ -662,7 +627,6 @@ class DailySalesController extends GetxController {
                 payMap['accountNumber'] = pm['accountNumber'];
               }
             } else {
-              // Option 3: Paid exists but no method info -> Default to CASH
               payMap['cash'] = realTimePaid;
             }
           }
@@ -687,21 +651,17 @@ class DailySalesController extends GetxController {
       double snapRun = (data['snapshotRunningDue'] as num?)?.toDouble() ?? 0.0;
       double discountVal = (data['discount'] as num?)?.toDouble() ?? 0.0;
 
-      // --- NEW FIX: Extract Original Invoice Date ---
-      DateTime invoiceDate = DateTime.now(); // Fallback
+      DateTime invoiceDate = DateTime.now();
       if (data['timestamp'] != null) {
         try {
-          // If using Firestore Timestamp object
           invoiceDate = data['timestamp'].toDate();
         } catch (_) {}
       } else if (data['date'] != null) {
         try {
-          // If parsing from string like "2026-02-09 17:02:13"
           invoiceDate = DateTime.parse(data['date'].toString());
         } catch (_) {}
       }
 
-      // 5. Get Seller Info
       String sellerName = "Joynal Abedin";
       String sellerPhone = "01720677206";
       if (data['soldBy'] != null) {
@@ -714,7 +674,6 @@ class DailySalesController extends GetxController {
         }
       }
 
-      // 6. Generate PDF (Using your finalized Layout)
       await _generatePdf(
         invoiceId,
         name,
@@ -733,7 +692,7 @@ class DailySalesController extends GetxController {
         authorizedPhone: sellerPhone,
         discount: discountVal,
         packagerName: packagerName,
-        invoiceDate: invoiceDate, // Passed the extracted date here
+        invoiceDate: invoiceDate,
       );
     } catch (e) {
       Get.snackbar("Error", "Could not reprint: $e");
@@ -742,9 +701,6 @@ class DailySalesController extends GetxController {
     }
   }
 
-  // ==========================================
-  // FINALIZED PDF GENERATOR (From your memory)
-  // ==========================================
   Future<void> _generatePdf(
     String invId,
     String name,
@@ -763,7 +719,7 @@ class DailySalesController extends GetxController {
     required String authorizedPhone,
     double discount = 0.0,
     String? packagerName,
-    required DateTime invoiceDate, // New Required Parameter
+    required DateTime invoiceDate,
   }) async {
     final pdf = pw.Document();
 
@@ -771,7 +727,6 @@ class DailySalesController extends GetxController {
     final regularFont = await PdfGoogleFonts.robotoRegular();
     final italicFont = await PdfGoogleFonts.robotoItalic();
 
-    // Calculate Paid Amounts
     double paidOld = double.tryParse(payMap['paidForOldDue'].toString()) ?? 0.0;
     double paidPrevRun =
         double.tryParse(payMap['paidForPrevRunning'].toString()) ?? 0.0;
@@ -779,7 +734,6 @@ class DailySalesController extends GetxController {
     double totalPaidForInvoice =
         double.tryParse(payMap['paidForInvoice']?.toString() ?? '0') ?? 0.0;
 
-    // Detect Payment Methods for String Generation
     List<String> methodsUsed = [];
     if ((double.tryParse(payMap['cash']?.toString() ?? '0') ?? 0) > 0) {
       methodsUsed.add('Cash');
@@ -823,9 +777,6 @@ class DailySalesController extends GetxController {
       ),
     );
 
-    // ---------------------------------------------------------
-    // PAGE 1: MAIN INVOICE
-    // ---------------------------------------------------------
     pdf.addPage(
       pw.MultiPage(
         pageTheme: pageTheme,
@@ -883,9 +834,6 @@ class DailySalesController extends GetxController {
       ),
     );
 
-    // ---------------------------------------------------------
-    // PAGE 2: CONDITION CHALLAN (If Applicable)
-    // ---------------------------------------------------------
     if (isCondition) {
       pdf.addPage(
         pw.MultiPage(
@@ -955,12 +903,11 @@ class DailySalesController extends GetxController {
     String? courier,
     String challan,
     String paymentMethodsStr,
-    DateTime invoiceDate, // Added Parameter
+    DateTime invoiceDate,
   ) {
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        // Left Side: Company Info
         pw.Expanded(
           flex: 6,
           child: pw.Column(
@@ -1007,7 +954,6 @@ class DailySalesController extends GetxController {
           ),
         ),
         pw.SizedBox(width: 10),
-        // Right Side: Invoice Info Box
         pw.Expanded(
           flex: 4,
           child: pw.Container(
@@ -1016,7 +962,6 @@ class DailySalesController extends GetxController {
             child: pw.Column(
               children: [
                 _infoRow("Invoice No.", ": $invId", reg, bold),
-                // Replaced DateTime.now() with invoiceDate
                 _infoRow(
                   "Date",
                   ": ${DateFormat('dd/MM/yyyy').format(invoiceDate)}",
@@ -1030,7 +975,6 @@ class DailySalesController extends GetxController {
                   reg,
                   bold,
                 ),
-                // Replaced DateTime.now() with invoiceDate
                 _infoRow(
                   "Entry Time",
                   ": ${DateFormat('h:mm:ss a').format(invoiceDate)}",
@@ -1057,7 +1001,6 @@ class DailySalesController extends GetxController {
     );
   }
 
-  // --- COMPONENT: CUSTOMER BOX ---
   pw.Widget _buildNewCustomerBox(
     String name,
     String address,
@@ -1081,7 +1024,6 @@ class DailySalesController extends GetxController {
     );
   }
 
-  // --- COMPONENT: ITEMS TABLE ---
   pw.Widget _buildNewTable(
     List<Map<String, dynamic>> items,
     pw.Font bold,
@@ -1133,7 +1075,6 @@ class DailySalesController extends GetxController {
     );
   }
 
-  // --- COMPONENT: SUMMARY CALCULATION ---
   pw.Widget _buildNewSummary(
     double subTotal,
     double discount,
@@ -1269,7 +1210,6 @@ class DailySalesController extends GetxController {
             ),
             pw.SizedBox(height: 5),
             pw.Text(
-              // Replaced DateTime.now() with invoiceDate
               DateFormat('dd MMM yyyy').format(invoiceDate),
               style: pw.TextStyle(
                 color: PdfColors.blue800,
@@ -1292,7 +1232,6 @@ class DailySalesController extends GetxController {
     );
   }
 
-  // --- COMPONENT: TAKA IN WORDS BOX ---
   pw.Widget _buildWordsBox(double currentInvTotal, pw.Font bold) {
     return pw.Container(
       width: double.infinity,
@@ -1378,7 +1317,6 @@ class DailySalesController extends GetxController {
     return result.trim();
   }
 
-  // --- COMPONENT: SIGNATURES ---
   pw.Widget _buildNewSignatures(pw.Font reg) {
     return pw.Row(
       mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
@@ -1417,7 +1355,6 @@ class DailySalesController extends GetxController {
     );
   }
 
-  // --- COMPONENT: FOOTER ---
   pw.Widget _buildNewFooter(pw.Context context, pw.Font reg) {
     return pw.Column(
       mainAxisSize: pw.MainAxisSize.min,
@@ -1439,7 +1376,6 @@ class DailySalesController extends GetxController {
               "Sales Billing Software By G TEL : 01720677206",
               style: pw.TextStyle(font: reg, fontSize: 7),
             ),
-            // Keeping DateTime.now() here is correct because this is the date the invoice was printed/re-printed.
             pw.Text(
               "Print Date & Time : ${DateFormat('dd/MM/yyyy h:mm a').format(DateTime.now())}",
               style: pw.TextStyle(font: reg, fontSize: 7),
@@ -1503,7 +1439,6 @@ class DailySalesController extends GetxController {
     );
   }
 
-  // HELPER FOR ROWS IN PDF
   pw.Widget _infoRow(
     String label,
     String value,

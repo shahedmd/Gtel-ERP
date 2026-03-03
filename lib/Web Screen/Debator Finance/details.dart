@@ -7,10 +7,37 @@ import 'package:get/get.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:intl/intl.dart';
 import 'debatorcontroller.dart';
+import '../Sales/controller.dart';
 import 'model.dart';
 import 'dart:js_interop';
 import 'package:web/web.dart' as web;
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/Debtor%20Purchase/purchasepage.dart';
+
+// --- WRAPPER WITH SPLIT ACCOUNTING COLUMNS ---
+class DisplayTx {
+  final String id;
+  final double billedAmount; // Billed (+)
+  final double paidAmount; // Paid (-)
+  final String note;
+  final String type;
+  final DateTime date;
+  final Map<String, dynamic>? paymentMethod;
+
+  final TransactionModel originalTx;
+  final TransactionModel? pairedTx;
+
+  DisplayTx({
+    required this.id,
+    required this.billedAmount,
+    required this.paidAmount,
+    required this.note,
+    required this.type,
+    required this.date,
+    this.paymentMethod,
+    required this.originalTx,
+    this.pairedTx,
+  });
+}
 
 class Debatordetails extends StatefulWidget {
   final String id;
@@ -24,7 +51,6 @@ class Debatordetails extends StatefulWidget {
 
 class _DebatordetailsState extends State<Debatordetails> {
   final controller = Get.find<DebatorController>();
-
   final TextEditingController _searchCtrl = TextEditingController();
   final RxString _filterType = 'All'.obs;
 
@@ -38,7 +64,6 @@ class _DebatordetailsState extends State<Debatordetails> {
   void initState() {
     super.initState();
     controller.clearTransactionState();
-    // Load exactly Page 1 from server
     controller.loadTxPage(widget.id, 1);
   }
 
@@ -48,45 +73,105 @@ class _DebatordetailsState extends State<Debatordetails> {
     super.dispose();
   }
 
-  // Filters within the CURRENT fetched page (20 items max)
-  List<TransactionModel> get _processedTransactions {
-    List<TransactionModel> list = controller.currentTransactions.toList();
+  // --- PROCESSING LOGIC FOR SPLIT LEDGER ---
+  List<DisplayTx> get _processedTransactions {
+    List<TransactionModel> rawList = controller.currentTransactions.toList();
+    List<DisplayTx> mergedList = [];
+    Set<String> skipIds = {};
 
-    if (_filterType.value == 'Sales') {
-      list =
-          list
-              .where(
-                (t) =>
-                    t.type == 'credit' ||
-                    t.type == 'advance_given' ||
-                    t.type == 'previous_due',
-              )
-              .toList();
-    } else if (_filterType.value == 'Payments') {
-      list =
-          list
-              .where(
-                (t) =>
-                    t.type == 'debit' ||
-                    t.type == 'advance_received' ||
-                    t.type == 'loan_payment',
-              )
-              .toList();
+    for (var tx in rawList) {
+      if (skipIds.contains(tx.id)) continue;
+
+      // 1. Visually Merge Instant Pair (Cash Sales)
+      if (tx.type == 'credit' || tx.type == 'debit') {
+        String creditId =
+            tx.type == 'credit' ? tx.id : tx.id.replaceAll('_pay', '');
+        String payId = '${creditId}_pay';
+
+        var creditTx = rawList.firstWhereOrNull((t) => t.id == creditId);
+        var payTx = rawList.firstWhereOrNull((t) => t.id == payId);
+
+        // If paid instantly, merge into a single row showing Billed & Paid simultaneously
+        if (creditTx != null &&
+            payTx != null &&
+            creditTx.amount == payTx.amount) {
+          mergedList.add(
+            DisplayTx(
+              id: creditTx.id,
+              billedAmount: creditTx.amount,
+              paidAmount: payTx.amount,
+              note: creditTx.note,
+              type: 'paid_sale',
+              date: creditTx.date,
+              paymentMethod: payTx.paymentMethod,
+              originalTx: creditTx,
+              pairedTx: payTx,
+            ),
+          );
+          skipIds.add(creditId);
+          skipIds.add(payId);
+          continue;
+        }
+      }
+
+      // 2. Map standard transactions to Accounting Ledger Columns
+      bool isBilled = [
+        'credit',
+        'previous_due',
+        'advance_given',
+      ].contains(tx.type);
+
+      mergedList.add(
+        DisplayTx(
+          id: tx.id,
+          billedAmount: isBilled ? tx.amount : 0.0,
+          paidAmount: !isBilled ? tx.amount : 0.0,
+          note: tx.note,
+          type: tx.type,
+          date: tx.date,
+          paymentMethod: tx.paymentMethod,
+          originalTx: tx,
+          pairedTx: null,
+        ),
+      );
     }
 
+    // Filters
+    if (_filterType.value == 'Sales') {
+      mergedList = mergedList.where((t) => t.billedAmount > 0).toList();
+    } else if (_filterType.value == 'Payments') {
+      mergedList = mergedList.where((t) => t.paidAmount > 0).toList();
+    }
+
+    // Search
     if (_searchCtrl.text.isNotEmpty) {
       String q = _searchCtrl.text.toLowerCase();
-      list =
-          list.where((t) {
+      mergedList =
+          mergedList.where((t) {
             String note = (t.note).toLowerCase();
-            String method = "";
-            if (t.paymentMethod != null) {
-              method = t.paymentMethod.toString().toLowerCase();
-            }
+            String method = (t.paymentMethod?.toString() ?? "").toLowerCase();
             return note.contains(q) || method.contains(q);
           }).toList();
     }
-    return list;
+
+    return mergedList;
+  }
+
+  void _printInvoice(String invoiceId) async {
+    Get.dialog(
+      const Center(child: CircularProgressIndicator(color: activeAccent)),
+      barrierDismissible: false,
+    );
+    try {
+      if (!Get.isRegistered<DailySalesController>()) {
+        Get.put(DailySalesController());
+      }
+      await Get.find<DailySalesController>().reprintInvoice(invoiceId);
+    } catch (e) {
+      Get.snackbar("Error", "Could not load invoice: $e");
+    } finally {
+      if (Get.isDialogOpen ?? false) Get.back();
+    }
   }
 
   @override
@@ -106,18 +191,15 @@ class _DebatordetailsState extends State<Debatordetails> {
         appBar: AppBar(
           title: Text(widget.name, style: const TextStyle(color: darkSlate)),
           backgroundColor: Colors.white,
-          elevation: 0,
           leading: IconButton(
             icon: const Icon(Icons.arrow_back, color: darkSlate),
-            onPressed: () {
-              if (mounted) Navigator.pop(context);
-            },
+            onPressed: () => Navigator.pop(context),
           ),
         ),
         body: const Center(
           child: Text(
-            "Debtor Not Found. Please refresh the previous page.",
-            style: TextStyle(color: textMuted, fontSize: 16),
+            "Debtor Not Found. Please refresh.",
+            style: TextStyle(color: textMuted),
           ),
         ),
       );
@@ -151,18 +233,13 @@ class _DebatordetailsState extends State<Debatordetails> {
     );
   }
 
-  // ==========================================
-  // APP BAR & HEADER
-  // ==========================================
   AppBar _buildAppBar(DebtorModel debtor) {
     return AppBar(
       backgroundColor: Colors.white,
       elevation: 0.5,
       leading: IconButton(
         icon: const Icon(Icons.arrow_back, color: darkSlate),
-        onPressed: () {
-          if (mounted) Navigator.pop(context);
-        },
+        onPressed: () => Navigator.pop(context),
       ),
       title: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -239,10 +316,6 @@ class _DebatordetailsState extends State<Debatordetails> {
       stream: controller.getDebtorBreakdown(widget.id),
       builder: (context, snap) {
         final data = snap.data ?? {'loan': 0.0, 'running': 0.0, 'total': 0.0};
-        double loan = data['loan']!;
-        double running = data['running']!;
-        double total = data['total']!;
-
         return Column(
           children: [
             Container(
@@ -276,7 +349,7 @@ class _DebatordetailsState extends State<Debatordetails> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        "Tk ${total.toStringAsFixed(0)}",
+                        "Tk ${data['total']!.toStringAsFixed(0)}",
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 32,
@@ -307,7 +380,7 @@ class _DebatordetailsState extends State<Debatordetails> {
                   child: _balanceCard(
                     FontAwesomeIcons.clockRotateLeft,
                     "PREVIOUS LOAN",
-                    loan,
+                    data['loan']!,
                     Colors.orange,
                   ),
                 ),
@@ -316,7 +389,7 @@ class _DebatordetailsState extends State<Debatordetails> {
                   child: _balanceCard(
                     FontAwesomeIcons.receipt,
                     "RUNNING BILLS",
-                    running,
+                    data['running']!,
                     activeAccent,
                   ),
                 ),
@@ -381,9 +454,7 @@ class _DebatordetailsState extends State<Debatordetails> {
             flex: 2,
             child: TextField(
               controller: _searchCtrl,
-              onChanged: (val) {
-                setState(() {});
-              },
+              onChanged: (_) => setState(() {}),
               decoration: InputDecoration(
                 hintText: "Search Invoice, Note, Bank Acc...",
                 prefixIcon: const Icon(
@@ -397,10 +468,6 @@ class _DebatordetailsState extends State<Debatordetails> {
                   vertical: 12,
                 ),
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: Colors.grey.shade300),
-                ),
-                enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                   borderSide: BorderSide(color: Colors.grey.shade300),
                 ),
@@ -441,11 +508,7 @@ class _DebatordetailsState extends State<Debatordetails> {
                         child: Text("Payments Only"),
                       ),
                     ],
-                    onChanged: (v) {
-                      if (v != null) {
-                        _filterType.value = v;
-                      }
-                    },
+                    onChanged: (v) => _filterType.value = v!,
                   ),
                 ),
               ),
@@ -457,7 +520,7 @@ class _DebatordetailsState extends State<Debatordetails> {
   }
 
   // ==========================================
-  // DATA TABLE
+  // SPLIT LEDGER TABLE
   // ==========================================
   Widget _buildTableSection(DebtorModel debtor) {
     return Container(
@@ -476,9 +539,7 @@ class _DebatordetailsState extends State<Debatordetails> {
                 child: CircularProgressIndicator(),
               );
             }
-
             final txList = _processedTransactions;
-
             if (txList.isEmpty) {
               return const Padding(
                 padding: EdgeInsets.all(40),
@@ -488,7 +549,6 @@ class _DebatordetailsState extends State<Debatordetails> {
                 ),
               );
             }
-
             return ListView.separated(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
@@ -503,6 +563,12 @@ class _DebatordetailsState extends State<Debatordetails> {
     );
   }
 
+  static const TextStyle _headStyle = TextStyle(
+    fontWeight: FontWeight.bold,
+    fontSize: 11,
+    color: textMuted,
+  );
+
   Widget _tableHeader() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
@@ -516,12 +582,22 @@ class _DebatordetailsState extends State<Debatordetails> {
       child: Row(
         children: const [
           Expanded(flex: 2, child: Text("DATE", style: _headStyle)),
-          Expanded(flex: 2, child: Text("TYPE", style: _headStyle)),
-          Expanded(flex: 3, child: Text("DETAILS / METHOD", style: _headStyle)),
+          Expanded(
+            flex: 3,
+            child: Text("DETAILS / INVOICE", style: _headStyle),
+          ),
           Expanded(
             flex: 2,
             child: Text(
-              "AMOUNT",
+              "BILLED (+)",
+              textAlign: TextAlign.right,
+              style: _headStyle,
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text(
+              "PAID (-)",
               textAlign: TextAlign.right,
               style: _headStyle,
             ),
@@ -539,13 +615,7 @@ class _DebatordetailsState extends State<Debatordetails> {
     );
   }
 
-  static const TextStyle _headStyle = TextStyle(
-    fontWeight: FontWeight.bold,
-    fontSize: 11,
-    color: textMuted,
-  );
-
-  Widget _tableRow(TransactionModel tx, DebtorModel debtor) {
+  Widget _tableRow(DisplayTx tx, DebtorModel debtor) {
     Color typeColor = Colors.grey;
     IconData typeIcon = Icons.circle;
     String typeLabel = tx.type;
@@ -553,7 +623,11 @@ class _DebatordetailsState extends State<Debatordetails> {
     if (tx.type == 'credit') {
       typeColor = const Color(0xFFEF4444);
       typeIcon = FontAwesomeIcons.fileInvoiceDollar;
-      typeLabel = "BILL / SALE";
+      typeLabel = "INVOICE / DUE";
+    } else if (tx.type == 'paid_sale') {
+      typeColor = const Color(0xFF0D9488);
+      typeIcon = FontAwesomeIcons.checkDouble;
+      typeLabel = "CASH SALE";
     } else if (tx.type == 'debit') {
       typeColor = const Color(0xFF10B981);
       typeIcon = FontAwesomeIcons.handHoldingDollar;
@@ -576,10 +650,22 @@ class _DebatordetailsState extends State<Debatordetails> {
       typeLabel = "LOAN COLLECT";
     }
 
+    // Invoice Link Detection
+    String? invId;
+    if (tx.id.startsWith('GTEL')) {
+      invId = tx.id.replaceAll('_pay', '');
+    } else if (tx.note.contains('GTEL-')) {
+      RegExp reg = RegExp(r'GTEL-\d+-\d+');
+      var match = reg.firstMatch(tx.note);
+      if (match != null) invId = match.group(0);
+    }
+    bool isInvoice = invId != null;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
       child: Row(
         children: [
+          // 1. DATE
           Expanded(
             flex: 2,
             child: Text(
@@ -587,67 +673,127 @@ class _DebatordetailsState extends State<Debatordetails> {
               style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
             ),
           ),
-          Expanded(
-            flex: 2,
-            child: Row(
-              children: [
-                Icon(typeIcon, size: 12, color: typeColor),
-                const SizedBox(width: 8),
-                Text(
-                  typeLabel,
-                  style: TextStyle(
-                    color: typeColor,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 11,
-                  ),
-                ),
-              ],
-            ),
-          ),
+
+          // 2. DETAILS & INVOICE
           Expanded(
             flex: 3,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (tx.paymentMethod != null)
+                Row(
+                  children: [
+                    Icon(typeIcon, size: 10, color: typeColor),
+                    const SizedBox(width: 4),
+                    Text(
+                      typeLabel,
+                      style: TextStyle(
+                        color: typeColor,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 9,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+
+                if (isInvoice)
+                  InkWell(
+                    onTap: () => _printInvoice(invId!),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            tx.note.isEmpty ? "-" : tx.note,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: activeAccent,
+                              fontWeight: FontWeight.bold,
+                              decoration: TextDecoration.underline,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        const Icon(Icons.print, size: 12, color: activeAccent),
+                      ],
+                    ),
+                  )
+                else
                   Text(
-                    formatDynamicPayment(tx.paymentMethod!),
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: darkSlate,
+                    tx.note.isEmpty ? "-" : tx.note,
+                    style: const TextStyle(fontSize: 12, color: darkSlate),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+
+                if (tx.paymentMethod != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      formatDynamicPayment(tx.paymentMethod!),
+                      style: const TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        color: textMuted,
+                      ),
                     ),
                   ),
-                Text(
-                  tx.note.isEmpty ? "-" : tx.note,
-                  style: const TextStyle(fontSize: 11, color: textMuted),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
               ],
             ),
           ),
+
+          // 3. BILLED AMOUNT (Debit)
           Expanded(
             flex: 2,
             child: Text(
-              "Tk ${tx.amount.toStringAsFixed(0)}",
+              tx.billedAmount > 0
+                  ? "Tk ${tx.billedAmount.toStringAsFixed(0)}"
+                  : "-",
               textAlign: TextAlign.right,
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
+              style: TextStyle(
+                fontWeight:
+                    tx.billedAmount > 0 ? FontWeight.bold : FontWeight.normal,
                 color: darkSlate,
               ),
             ),
           ),
+
+          // 4. PAID AMOUNT (Credit)
+          Expanded(
+            flex: 2,
+            child: Text(
+              tx.paidAmount > 0
+                  ? "Tk ${tx.paidAmount.toStringAsFixed(0)}"
+                  : "-",
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontWeight:
+                    tx.paidAmount > 0 ? FontWeight.bold : FontWeight.normal,
+                color: const Color(0xFF10B981),
+              ),
+            ),
+          ),
+
+          // 5. ACTION
           SizedBox(
             width: 80,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _iconBtn(
-                  Icons.edit,
-                  activeAccent,
-                  () => _showEditTransactionDialog(tx, debtor),
-                ),
+                _iconBtn(Icons.edit, activeAccent, () {
+                  if (tx.type == 'paid_sale') {
+                    Get.snackbar(
+                      "Action Denied",
+                      "This is an instant paid sale.\nPlease edit this directly from the Sales module.",
+                      backgroundColor: Colors.orange.shade800,
+                      colorText: Colors.white,
+                    );
+                  } else {
+                    _showEditTransactionDialog(tx.originalTx, debtor);
+                  }
+                }),
                 const SizedBox(width: 8),
                 _iconBtn(
                   Icons.delete,
@@ -676,9 +822,8 @@ class _DebatordetailsState extends State<Debatordetails> {
   Widget _buildPaginationFooter() {
     return Obx(() {
       if (controller.currentTxPage.value == 1 && !controller.hasMoreTx.value) {
-        return const SizedBox.shrink(); // Hide footer if only 1 page exist
+        return const SizedBox.shrink();
       }
-
       return Row(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
@@ -734,21 +879,17 @@ class _DebatordetailsState extends State<Debatordetails> {
   }
 
   // ==========================================
-  // DIALOGS
+  // DIALOGS & OTHERS REMAIN THE SAME BELOW
   // ==========================================
-
   void _showAddTransactionDialog(DebtorModel debtor) {
     final amountC = TextEditingController();
     final noteC = TextEditingController();
     final RxString selectedType = 'credit'.obs;
     final Rx<DateTime> selectedDate = DateTime.now().obs;
-
     final RxString payMethodType = 'cash'.obs;
     final bankNameC = TextEditingController();
     final accountNoC = TextEditingController();
     final mobileNoC = TextEditingController();
-
-    // Added loading state
     final RxBool isSubmitting = false.obs;
 
     Get.dialog(
@@ -873,10 +1014,7 @@ class _DebatordetailsState extends State<Debatordetails> {
                                           ? null
                                           : () async {
                                             if (amountC.text.isEmpty) return;
-
-                                            isSubmitting.value =
-                                                true; // Start Loading
-
+                                            isSubmitting.value = true;
                                             try {
                                               Map<String, dynamic> pm = {
                                                 'type': 'cash',
@@ -909,7 +1047,6 @@ class _DebatordetailsState extends State<Debatordetails> {
                                                   };
                                                 }
                                               }
-
                                               await controller.addTransaction(
                                                 debtorId: debtor.id,
                                                 amount:
@@ -922,11 +1059,8 @@ class _DebatordetailsState extends State<Debatordetails> {
                                                 date: selectedDate.value,
                                                 paymentMethodData: pm,
                                               );
-
                                               if (dialogContext.mounted) {
-                                                Navigator.pop(
-                                                  dialogContext,
-                                                ); // Close Dialog safely
+                                                Navigator.pop(dialogContext);
                                               }
                                             } catch (e) {
                                               Get.snackbar(
@@ -934,8 +1068,7 @@ class _DebatordetailsState extends State<Debatordetails> {
                                                 "Failed to add transaction",
                                               );
                                             } finally {
-                                              isSubmitting.value =
-                                                  false; // Stop Loading
+                                              isSubmitting.value = false;
                                             }
                                           },
                                   child:
@@ -968,8 +1101,7 @@ class _DebatordetailsState extends State<Debatordetails> {
           );
         },
       ),
-      barrierDismissible:
-          false, // Prevent closing by tapping outside while loading
+      barrierDismissible: false,
     );
   }
 
@@ -978,15 +1110,12 @@ class _DebatordetailsState extends State<Debatordetails> {
     final noteC = TextEditingController(text: tx.note);
     final RxString selectedType = tx.type.obs;
     final Rx<DateTime> selectedDate = tx.date.obs;
-
     final map = tx.paymentMethod ?? {'type': 'cash'};
     final RxString payMethodType =
         (map['type'] ?? 'cash').toString().toLowerCase().obs;
     final bankNameC = TextEditingController(text: map['bankName'] ?? '');
     final accountNoC = TextEditingController(text: map['accountNo'] ?? '');
     final mobileNoC = TextEditingController(text: map['number'] ?? '');
-
-    // Added loading state
     final RxBool isSubmitting = false.obs;
 
     Get.dialog(
@@ -1086,8 +1215,7 @@ class _DebatordetailsState extends State<Debatordetails> {
                                       isSubmitting.value
                                           ? null
                                           : () async {
-                                            isSubmitting.value =
-                                                true; // Start Loading
+                                            isSubmitting.value = true;
                                             try {
                                               Map<String, dynamic> pm = {
                                                 'type': 'cash',
@@ -1120,7 +1248,6 @@ class _DebatordetailsState extends State<Debatordetails> {
                                                   };
                                                 }
                                               }
-
                                               await controller.editTransaction(
                                                 debtorId: debtor.id,
                                                 transactionId: tx.id,
@@ -1136,11 +1263,8 @@ class _DebatordetailsState extends State<Debatordetails> {
                                                 date: selectedDate.value,
                                                 paymentMethod: pm,
                                               );
-
                                               if (dialogContext.mounted) {
-                                                Navigator.pop(
-                                                  dialogContext,
-                                                ); // Close Dialog safely
+                                                Navigator.pop(dialogContext);
                                               }
                                             } catch (e) {
                                               Get.snackbar(
@@ -1148,8 +1272,7 @@ class _DebatordetailsState extends State<Debatordetails> {
                                                 "Failed to update transaction",
                                               );
                                             } finally {
-                                              isSubmitting.value =
-                                                  false; // Stop Loading
+                                              isSubmitting.value = false;
                                             }
                                           },
                                   child:
@@ -1192,7 +1315,6 @@ class _DebatordetailsState extends State<Debatordetails> {
     final nidC = TextEditingController(text: debtor.nid);
     final addressC = TextEditingController(text: debtor.address);
     final desC = TextEditingController(text: debtor.des);
-
     final RxBool isSubmitting = false.obs;
 
     Get.dialog(
@@ -1255,9 +1377,7 @@ class _DebatordetailsState extends State<Debatordetails> {
                                 payments: debtor.payments,
                               );
                               if (dialogContext.mounted) {
-                                Navigator.pop(
-                                  dialogContext,
-                                ); // Close dialog safely
+                                Navigator.pop(dialogContext);
                               }
                             } catch (e) {
                               Get.snackbar("Error", "Failed to update profile");
@@ -1289,9 +1409,8 @@ class _DebatordetailsState extends State<Debatordetails> {
     );
   }
 
-  void _confirmDelete(TransactionModel tx) {
+  void _confirmDelete(DisplayTx tx) {
     final RxBool isDeleting = false.obs;
-
     Get.dialog(
       Builder(
         builder: (dialogContext) {
@@ -1301,7 +1420,7 @@ class _DebatordetailsState extends State<Debatordetails> {
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
             content: Text(
-              "Are you sure you want to delete this transaction of Tk ${tx.amount}?",
+              "Are you sure you want to delete this transaction of Tk ${tx.billedAmount > 0 ? tx.billedAmount : tx.paidAmount}?",
             ),
             actions: [
               Obx(
@@ -1326,14 +1445,23 @@ class _DebatordetailsState extends State<Debatordetails> {
                           : () async {
                             isDeleting.value = true;
                             try {
-                              await controller.deleteTransaction(
-                                widget.id,
-                                tx.id,
-                              );
+                              if (tx.pairedTx != null) {
+                                await controller.deleteTransaction(
+                                  widget.id,
+                                  tx.originalTx.id,
+                                );
+                                await controller.deleteTransaction(
+                                  widget.id,
+                                  tx.pairedTx!.id,
+                                );
+                              } else {
+                                await controller.deleteTransaction(
+                                  widget.id,
+                                  tx.originalTx.id,
+                                );
+                              }
                               if (dialogContext.mounted) {
-                                Navigator.pop(
-                                  dialogContext,
-                                ); // Close dialog safely
+                                Navigator.pop(dialogContext);
                               }
                             } catch (e) {
                               Get.snackbar(
@@ -1404,10 +1532,6 @@ class _DebatordetailsState extends State<Debatordetails> {
     anchor.click();
     web.URL.revokeObjectURL(url);
   }
-
-  // ==========================================
-  // HELPERS
-  // ==========================================
 
   Widget _buildDynamicPaymentSection(
     RxString methodType,

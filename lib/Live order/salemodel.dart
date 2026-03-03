@@ -1,6 +1,6 @@
 // ignore_for_file: deprecated_member_use, avoid_print, empty_catches, prefer_interpolation_to_compose_strings
 
-import 'dart:async'; // --- ADDED FOR DEBOUNCE TIMER ---
+import 'dart:async';
 import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -574,10 +574,13 @@ class LiveSalesController extends GetxController {
     double oldDueSnap = debtorOldDue.value,
         runningDueSnap = debtorRunningDue.value;
 
+    // --- LOGIC TO ALLOCATE PAYMENT (PRIORITY: OLD DUE -> CURRENT INVOICE -> PREV RUNNING DUE) ---
     if (customerType.value == "AGENT" &&
         !isConditionSale.value &&
         debtorId != null) {
       double remaining = totalPaidInputVal;
+
+      // 1. Pay Old Due (Historic)
       if (oldDueSnap > 0 && remaining > 0) {
         if (remaining >= oldDueSnap) {
           allocatedToOldDue = oldDueSnap;
@@ -587,6 +590,8 @@ class LiveSalesController extends GetxController {
           remaining = 0.0;
         }
       }
+
+      // 2. Pay Current Invoice
       if (remaining > 0) {
         if (remaining >= grandTotal) {
           allocatedToInvoice = grandTotal;
@@ -596,6 +601,8 @@ class LiveSalesController extends GetxController {
           remaining = 0.0;
         }
       }
+
+      // 3. Pay Running Due (Previous Invoices)
       if (remaining > 0) allocatedToPrevRunningDue = remaining;
     } else {
       allocatedToInvoice =
@@ -693,7 +700,8 @@ class LiveSalesController extends GetxController {
           masterPaymentMap,
         );
       } else if (customerType.value == "AGENT" && debtorId != null) {
-        _handleAgentTransaction(
+        // --- UPDATED AGENT HANDLING (AWAIT for automatic bill payment) ---
+        await _handleAgentTransaction(
           batch,
           debtorId,
           invNo,
@@ -876,7 +884,10 @@ class LiveSalesController extends GetxController {
     }
   }
 
-  void _handleAgentTransaction(
+  // ------------------------------------------------------------------------
+  // UPDATED: _handleAgentTransaction with Automatic Bill Reconciliation
+  // ------------------------------------------------------------------------
+  Future<void> _handleAgentTransaction(
     WriteBatch batch,
     String debtorId,
     String invNo,
@@ -890,7 +901,8 @@ class LiveSalesController extends GetxController {
     double allocatedToPrevRunningDue,
     Map masterPaymentMap,
     String sellerUid,
-  ) {
+  ) async {
+    // 1. Analytics / History
     DocumentReference analyticsRef = _db
         .collection('debtor_transaction_history')
         .doc(invNo);
@@ -908,6 +920,7 @@ class LiveSalesController extends GetxController {
       "soldByPhone": sellerPhone,
     });
 
+    // 2. Handle Old Loan Payment (If any)
     if (allocatedToOldDue > 0) {
       DocumentReference oldPayRef =
           _db
@@ -915,9 +928,12 @@ class LiveSalesController extends GetxController {
               .doc(debtorId)
               .collection('transactions')
               .doc();
+
+      String oldPayTxId = oldPayRef.id;
+
       batch.set(oldPayRef, {
         "amount": allocatedToOldDue,
-        "transactionId": oldPayRef.id,
+        "transactionId": oldPayTxId,
         "type": "loan_payment",
         "date": Timestamp.fromDate(saleDate),
         "createdAt": FieldValue.serverTimestamp(),
@@ -936,12 +952,13 @@ class LiveSalesController extends GetxController {
         'description': "Loan Repayment: $fName (Inv $invNo)",
         'timestamp': FieldValue.serverTimestamp(),
         'linkedDebtorId': debtorId,
-        'linkedTxId': oldPayRef.id,
+        'linkedTxId': oldPayTxId,
         'source': 'pos_old_due',
         'userUid': sellerUid,
       });
     }
 
+    // 3. Record the Current Sale (Credit)
     DocumentReference creditRef = _db
         .collection('debatorbody')
         .doc(debtorId)
@@ -958,6 +975,7 @@ class LiveSalesController extends GetxController {
       "soldByPhone": sellerPhone,
     });
 
+    // 4. Record Payment for Current Sale (Debit)
     if (allocatedToInvoice > 0) {
       DocumentReference debitRef = _db
           .collection('debatorbody')
@@ -977,15 +995,19 @@ class LiveSalesController extends GetxController {
       });
     }
 
+    // 5. Handle Surplus / Running Due Payment (The Fix)
     if (allocatedToPrevRunningDue > 0) {
+      String surplusTxId = "${invNo}_surplus";
+
       DocumentReference surplusRef = _db
           .collection('debatorbody')
           .doc(debtorId)
           .collection('transactions')
-          .doc("${invNo}_surplus");
+          .doc(surplusTxId);
+
       batch.set(surplusRef, {
         "amount": allocatedToPrevRunningDue,
-        "transactionId": "${invNo}_surplus",
+        "transactionId": surplusTxId,
         "type": "debit",
         "date": Timestamp.fromDate(saleDate),
         "createdAt": FieldValue.serverTimestamp(),
@@ -1003,14 +1025,86 @@ class LiveSalesController extends GetxController {
         'description': "Unmatched Surplus: $fName (Inv $invNo)",
         'timestamp': FieldValue.serverTimestamp(),
         'linkedDebtorId': debtorId,
-        'linkedTxId': surplusRef.id,
+        'linkedTxId': surplusTxId,
         'source': 'pos_running_collection',
         'userUid': sellerUid,
       });
+
+      // --- START NEW LOGIC: FIND AND PAY PREVIOUS BILLS ---
+      try {
+        QuerySnapshot salesSnap =
+            await _db
+                .collection('daily_sales')
+                .where('name', isEqualTo: fName)
+                .get();
+
+        List<DocumentSnapshot> pendingBills =
+            salesSnap.docs.where((doc) {
+              final data = doc.data() as Map<String, dynamic>;
+              double p = double.tryParse(data['pending'].toString()) ?? 0.0;
+              return p > 0.5; // Small tolerance
+            }).toList();
+
+        // Sort: Pay oldest bills first
+        pendingBills.sort((a, b) {
+          Timestamp t1 = a['timestamp'] as Timestamp;
+          Timestamp t2 = b['timestamp'] as Timestamp;
+          return t1.compareTo(t2);
+        });
+
+        double remainingToAllocate = allocatedToPrevRunningDue;
+
+        for (var doc in pendingBills) {
+          if (remainingToAllocate <= 0.01) break;
+
+          Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+          double currentPending =
+              double.tryParse(data['pending'].toString()) ?? 0.0;
+          double currentPaid = double.tryParse(data['paid'].toString()) ?? 0.0;
+          double currentLedgerPaid =
+              double.tryParse(data['ledgerPaid']?.toString() ?? '0') ?? 0.0;
+
+          double take =
+              (remainingToAllocate >= currentPending)
+                  ? currentPending
+                  : remainingToAllocate;
+
+          final newHistoryEntry = {
+            'type': 'Surplus from $invNo',
+            'amount': take,
+            'paidAt': Timestamp.now(),
+            'sourceTxId': surplusTxId,
+          };
+
+          batch.update(doc.reference, {
+            "paid": currentPaid + take,
+            "pending": currentPending - take,
+            "ledgerPaid": currentLedgerPaid + take,
+            "status": (currentPending - take) <= 0.5 ? "paid" : "partial",
+            "paymentHistory": FieldValue.arrayUnion([newHistoryEntry]),
+          });
+
+          // Optional: Update sales_orders if ID matches
+          String saleTxId = data['transactionId'] ?? '';
+          if (saleTxId.isNotEmpty) {
+            DocumentReference orderRef = _db
+                .collection('sales_orders')
+                .doc(saleTxId);
+            batch.update(orderRef, {"paid": FieldValue.increment(take)});
+          }
+
+          remainingToAllocate -= take;
+        }
+      } catch (e) {
+        print("Error allocating surplus to old bills: $e");
+      }
+      // --- END NEW LOGIC ---
     }
 
+    // 6. Create Daily Sales Entry for CURRENT Invoice
     DocumentReference dailyRef = _db.collection('daily_sales').doc();
     double due = grandTotal - allocatedToInvoice;
+
     batch.set(dailyRef, {
       "name": fName,
       "amount": grandTotal,
@@ -1018,12 +1112,14 @@ class LiveSalesController extends GetxController {
       "pending": due,
       "customerType": "agent",
       "timestamp": Timestamp.fromDate(saleDate),
-      "paymentMethod": _extractPaymentFor(allocatedToInvoice),
+      "paymentMethod": _extractPaymentFor(
+        allocatedToInvoice,
+      ), // NOW RETURNS CORRECTED CASH
       "createdAt": FieldValue.serverTimestamp(),
       "source": "pos_sale",
       "transactionId": invNo,
       "invoiceId": invNo,
-      "status": due <= 0 ? "paid" : "due",
+      "status": due <= 0.5 ? "paid" : "due",
       "packagerName": selectedPackager.value,
       "soldByUid": sellerUid,
       "soldByName": sellerName,
@@ -1031,37 +1127,81 @@ class LiveSalesController extends GetxController {
     });
   }
 
+  // --- UPDATED EXTRACTION LOGIC: Scales payments to match targetAmount ---
   Map<String, dynamic> _extractPaymentFor(double targetAmount) {
-    double cash = double.tryParse(cashC.text) ?? 0;
-    double bkash = double.tryParse(bkashC.text) ?? 0;
-    double nagad = double.tryParse(nagadC.text) ?? 0;
-    double bank = double.tryParse(bankC.text) ?? 0;
+    double rawCash = double.tryParse(cashC.text) ?? 0;
+    double rawBkash = double.tryParse(bkashC.text) ?? 0;
+    double rawNagad = double.tryParse(nagadC.text) ?? 0;
+    double rawBank = double.tryParse(bankC.text) ?? 0;
+
+    double totalInput = rawCash + rawBkash + rawNagad + rawBank;
+
+    // Calculate scaled amounts
+    double finalCash = 0.0;
+    double finalBkash = 0.0;
+    double finalNagad = 0.0;
+    double finalBank = 0.0;
+
+    if (totalInput > 0 && targetAmount > 0) {
+      double ratio = targetAmount / totalInput;
+
+      // If the target matches total input (within floating point error), just use raw
+      if ((targetAmount - totalInput).abs() < 0.01) {
+        finalCash = rawCash;
+        finalBkash = rawBkash;
+        finalNagad = rawNagad;
+        finalBank = rawBank;
+      } else {
+        // Apply ratio to scale down/up the payments
+        finalCash = _round(rawCash * ratio);
+        finalBkash = _round(rawBkash * ratio);
+        finalNagad = _round(rawNagad * ratio);
+        finalBank = _round(rawBank * ratio);
+
+        // Fix rounding difference (e.g. 33.33 + 33.33 + 33.33 = 99.99 vs 100)
+        double currentSum = finalCash + finalBkash + finalNagad + finalBank;
+        double diff = targetAmount - currentSum;
+
+        // Add diff to the largest component to minimize visual weirdness
+        if (diff.abs() > 0.001) {
+          if (finalCash > 0) {
+            finalCash += diff;
+          } else if (finalBkash > 0) {
+            finalBkash += diff;
+          } else if (finalNagad > 0) {
+            finalNagad += diff;
+          } else {
+            finalBank += diff;
+          }
+        }
+      }
+    }
 
     int types = 0;
-    if (cash > 0) types++;
-    if (bkash > 0) types++;
-    if (nagad > 0) types++;
-    if (bank > 0) types++;
+    if (finalCash > 0) types++;
+    if (finalBkash > 0) types++;
+    if (finalNagad > 0) types++;
+    if (finalBank > 0) types++;
 
     String type = "Cash";
     if (types > 1) {
       type = "Multi";
-    } else if (bkash > 0) {
+    } else if (finalBkash > 0) {
       type = "Bkash";
-    } else if (nagad > 0) {
+    } else if (finalNagad > 0) {
       type = "Nagad";
-    } else if (bank > 0) {
+    } else if (finalBank > 0) {
       type = "Bank";
     }
 
-    if (targetAmount <= 0) type = "Due";
+    if (targetAmount <= 0.01) type = "Due";
 
     return {
       "method": type,
-      "cash": cash,
-      "bkash": bkash,
-      "nagad": nagad,
-      "bank": bank,
+      "cash": _round(finalCash),
+      "bkash": _round(finalBkash),
+      "nagad": _round(finalNagad),
+      "bank": _round(finalBank),
       "currency": "BDT",
       "bkashNumber": bkashNumberC.text.trim(),
       "nagadNumber": nagadNumberC.text.trim(),

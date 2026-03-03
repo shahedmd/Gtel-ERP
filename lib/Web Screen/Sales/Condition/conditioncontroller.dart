@@ -461,39 +461,18 @@ class ConditionSalesController extends GetxController {
         }
       }
 
-      // 1. Get Initial Payment Details (Initial Advance)
+      // 1. Get Current Payment Details
       Map<String, dynamic> paymentMap = Map<String, dynamic>.from(
         data['paymentDetails'] ?? {},
       );
 
-      // 2. Get Collection History (Payments made LATER)
-      List<dynamic> history = data['collectionHistory'] ?? [];
-      double historyTotal = 0.0;
+      // 2. The `paymentDetails` map from Firestore already contains the fully updated
+      // paid amounts (including any courier collections added later).
+      // We DO NOT need to loop through `collectionHistory` and add them again.
 
-      // 3. MERGE: Add history breakdown to the initial paymentMap
-      for (var h in history) {
-        if (h is Map) {
-          String method = h['method']?.toString().toLowerCase() ?? 'cash';
-          double amount = double.tryParse(h['amount'].toString()) ?? 0.0;
-          historyTotal += amount;
-
-          // Add to the existing method bucket
-          double existing =
-              double.tryParse(paymentMap[method]?.toString() ?? '0') ?? 0.0;
-          paymentMap[method] = existing + amount;
-        }
-      }
-
-      // 4. Calculate Correct Total Paid
-      double initialPaid =
-          double.tryParse(paymentMap['paidForInvoice'].toString()) ?? 0.0;
-      double totalPaidNow = initialPaid + historyTotal;
-
-      // Update map to show full total
-      paymentMap['paidForInvoice'] = totalPaidNow;
-
-      // 5. Use Current Database Due and Discount
-      double realDue = double.tryParse(data['courierDue'].toString()) ?? 0.0;
+      // 3. Use Current Database Due and Discount
+      double realDue =
+          double.tryParse(data['courierDue']?.toString() ?? '0') ?? 0.0;
       paymentMap['due'] = realDue;
 
       double discountVal = (data['discount'] as num?)?.toDouble() ?? 0.0;
@@ -1462,7 +1441,7 @@ class ConditionSalesController extends GetxController {
     }
     isLoading.value = true;
     try {
-      WriteBatch batch = _db.batch();
+      WriteBatch batch = _db.batch(); 
       DocumentReference masterRef = _db
           .collection('sales_orders')
           .doc(invoiceId);
@@ -1498,4 +1477,4 @@ class ConditionSalesController extends GetxController {
       isLoading.value = false;
     }
   }
-}
+} 

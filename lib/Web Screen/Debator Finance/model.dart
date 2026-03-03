@@ -13,7 +13,7 @@ class DebtorModel {
   final DateTime? createdAt;
   final DateTime? lastTransactionDate;
   final double balance; // Receivable (Sales Due)
-  final double purchaseDue; // Payable (Purchase Due)
+  final double purchaseDue; 
 
   DebtorModel({
     required this.id,
