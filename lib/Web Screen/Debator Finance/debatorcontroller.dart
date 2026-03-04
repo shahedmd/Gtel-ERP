@@ -46,7 +46,7 @@ class DebatorController extends GetxController {
   final RxBool isMoreLoading = false.obs;
 
   // ==========================================
-  // TRANSACTION PAGINATION STATES (UPDATED)
+  // TRANSACTION PAGINATION STATES
   // ==========================================
   final RxList<TransactionModel> currentTransactions = <TransactionModel>[].obs;
   final RxBool isTxLoading = false.obs;
@@ -439,7 +439,7 @@ class DebatorController extends GetxController {
   }
 
   // =========================================================
-  // 2. TRANSACTION PAGINATION LOGIC (NEW)
+  // 2. TRANSACTION PAGINATION LOGIC
   // =========================================================
 
   void clearTransactionState() {
@@ -633,20 +633,25 @@ class DebatorController extends GetxController {
         });
       }
 
+      // =========================================================
+      // UPDATED BILL ALLOCATION LOGIC (FIXES SALES ORDER STATUS)
+      // =========================================================
       if (isCollection) {
         double remainingToAllocate = amount;
 
+        // 1. Fetch pending bills
         QuerySnapshot salesSnap =
             await db
                 .collection('daily_sales')
                 .where('name', isEqualTo: debtorName)
                 .get();
 
+        // 2. Filter & Sort
         List<DocumentSnapshot> pendingBills =
             salesSnap.docs.where((doc) {
               final data = doc.data() as Map<String, dynamic>;
               double p = double.tryParse(data['pending'].toString()) ?? 0.0;
-              return p > 0.5;
+              return p > 0.5; // Tolerance
             }).toList();
 
         pendingBills.sort((a, b) {
@@ -675,6 +680,9 @@ class DebatorController extends GetxController {
                     ? currentPending
                     : remainingToAllocate;
 
+            // Check if this payment completely clears the bill
+            bool isNowFullyPaid = (currentPending - take) <= 0.5;
+
             final newHistoryEntry = {
               'type': paymentMethodData['type'] ?? 'cash',
               'amount': take,
@@ -682,37 +690,35 @@ class DebatorController extends GetxController {
               'sourceTxId': finalTxId,
             };
 
+            // A. Update Daily Sales
             batch.update(doc.reference, {
               "paid": currentPaid + take,
               "pending": currentPending - take,
               "ledgerPaid": currentLedgerPaid + take,
-              "status": (currentPending - take) <= 0.5 ? "paid" : "partial",
+              "status": isNowFullyPaid ? "paid" : "partial",
               "paymentHistory": FieldValue.arrayUnion([newHistoryEntry]),
             });
             hasUpdates = true;
 
+            // B. Update Sales Order (Synchronous Batch Update)
             String saleTxId = data['transactionId'] ?? '';
             if (saleTxId.isNotEmpty) {
-              db
+              // Direct reference to the sales_order using the invoice ID
+              DocumentReference orderRef = db
                   .collection('sales_orders')
-                  .where('transactionId', isEqualTo: saleTxId)
-                  .limit(1)
-                  .get()
-                  .then((orderSnap) {
-                    if (orderSnap.docs.isNotEmpty) {
-                      var oDoc = orderSnap.docs.first;
-                      double oPaid =
-                          double.tryParse(oDoc['paid'].toString()) ?? 0.0;
-                      oDoc.reference.update({
-                        "paid": oPaid + take,
-                        "due": (currentPending - take),
-                        "status":
-                            (currentPending - take) <= 0.5
-                                ? "completed"
-                                : "pending",
-                      });
-                    }
-                  });
+                  .doc(saleTxId);
+
+              Map<String, dynamic> orderUpdate = {
+                "paid": FieldValue.increment(take),
+                "paymentDetails.due": FieldValue.increment(-take),
+              };
+
+              if (isNowFullyPaid) {
+                orderUpdate["isFullyPaid"] = true;
+                orderUpdate["status"] = "completed";
+              }
+
+              batch.update(orderRef, orderUpdate);
             }
 
             remainingToAllocate -= take;
@@ -723,6 +729,7 @@ class DebatorController extends GetxController {
           }
         }
       }
+      // =========================================================
 
       await _recalculateSingleDebtorBalance(debtorId);
       await loadBodies(loadMore: false);

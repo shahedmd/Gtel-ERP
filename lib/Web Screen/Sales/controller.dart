@@ -355,9 +355,6 @@ class DailySalesController extends GetxController {
     }
   }
 
-  // ==========================================
-  // 4. REVERSE PAYMENT
-  // ==========================================
   Future<void> reverseDebtorPayment(
     String debtorName,
     double amount,
@@ -452,25 +449,48 @@ class DailySalesController extends GetxController {
           final List<dynamic> items = invData['items'] ?? [];
 
           if (invData['status'] != 'deleted') {
-            List<Map<String, dynamic>> restockUpdates = [];
+            List<Map<String, dynamic>> returnAdditions = [];
+
             for (var item in items) {
-              String? pId = item['productId'] ?? item['id'];
-              int qty = item['qty'] ?? 0;
-              if (pId != null && qty > 0) {
-                restockUpdates.add({'id': pId, 'qty': -qty});
+              // 1. FIX TYPE ERROR: Safely parse Product ID to int
+              String pIdStr =
+                  (item['productId'] ?? item['id'] ?? '').toString();
+              int safePidInt = int.tryParse(pIdStr) ?? 0;
+
+              // 2. FIX TYPE ERROR: Safely parse Quantity
+              int qty = (item['qty'] as num?)?.toInt() ?? 0;
+
+              // Safely parse cost rate (needed for return payload)
+              double cRate = (item['costRate'] as num?)?.toDouble() ?? 0.0;
+
+              if (safePidInt > 0 && qty > 0) {
+                // 3. ADD TO SEA STOCK
+                returnAdditions.add({
+                  'id': safePidInt,
+                  'sea_qty': qty, // Adding quantity to Sea Stock
+                  'air_qty': 0,
+                  'local_qty': 0,
+                  'local_price': cRate,
+                });
               }
             }
-            bool restockSuccess = await Get.find<ProductController>()
-                .updateStockBulk(restockUpdates);
-            if (!restockSuccess) {
-              Get.snackbar(
-                "Error",
-                "Failed to restore stock. Sale not deleted.",
-              );
-              return;
+
+            if (returnAdditions.isNotEmpty) {
+              // Using bulkAddStockMixed instead of updateStockBulk to target Sea Stock
+              bool restockSuccess = await Get.find<ProductController>()
+                  .bulkAddStockMixed(returnAdditions);
+
+              if (!restockSuccess) {
+                Get.snackbar(
+                  "Error",
+                  "Failed to restore stock to Sea. Sale not deleted.",
+                );
+                return; // Stop deletion if stock fails
+              }
             }
           }
 
+          // Delete from Firestore cleanly
           await _db.runTransaction((transaction) async {
             DocumentReference invRef = _db
                 .collection("sales_orders")
@@ -495,9 +515,9 @@ class DailySalesController extends GetxController {
 
       await loadDailySales();
       Get.snackbar(
-        "Deleted",
-        "Sale deleted & Stock restored.",
-        backgroundColor: Colors.redAccent,
+        "Deleted Successfully",
+        "Sale deleted & Stock restored to SEA.",
+        backgroundColor: Colors.green,
         colorText: Colors.white,
       );
     } catch (e) {
@@ -526,13 +546,7 @@ class DailySalesController extends GetxController {
         data['paymentDetails'] ?? {},
       );
 
-      // 3. Logic Branch: Condition vs Regular (Debtor/Cash)
       if (isCond) {
-        // --- SCENARIO A: CONDITION SALE ---
-        // The `paymentDetails` from Firestore already contains the fully updated
-        // paid amounts (including any courier collections).
-        // We do not need to add the `collectionHistory` amounts again.
-
         payMap['due'] =
             double.tryParse(data['courierDue']?.toString() ?? '0') ?? 0.0;
       } else {
@@ -1509,5 +1523,138 @@ class DailySalesController extends GetxController {
         style: pw.TextStyle(font: font, fontSize: 9),
       ),
     );
+  }
+
+  Future<void> collectNormalCustomerDue({
+    required String transactionId,
+    required double currentPending,
+    required double collectedAmount,
+    required String method,
+    String? refNumber,
+  }) async {
+    // Validation
+    if (collectedAmount <= 0) {
+      Get.snackbar("Error", "Please enter a valid amount");
+      return;
+    }
+    if (collectedAmount > currentPending + 1.0) {
+      // +1.0 for float tolerance
+      Get.snackbar("Error", "Collected amount cannot exceed the pending due");
+      return;
+    }
+
+    isLoading.value = true;
+    try {
+      WriteBatch batch = _db.batch();
+      double amount = _round(collectedAmount);
+
+      // --- 1. Fetch Daily Sales Record ---
+      QuerySnapshot dailySnap =
+          await _db
+              .collection('daily_sales')
+              .where('transactionId', isEqualTo: transactionId)
+              .limit(1)
+              .get();
+
+      if (dailySnap.docs.isEmpty) throw "Daily sales record not found!";
+      DocumentSnapshot dailyDoc = dailySnap.docs.first;
+      Map<String, dynamic> dailyData = dailyDoc.data() as Map<String, dynamic>;
+
+      String cType = (dailyData['customerType'] ?? '').toString().toLowerCase();
+      if (cType == 'agent' || cType == 'debtor') {
+        throw "Agent dues must be collected from the Debtor Ledger.";
+      }
+      if (cType == 'condition_advance') {
+        throw "Condition dues must be collected from the Condition Sales page.";
+      }
+
+      double currentPaid =
+          double.tryParse(dailyData['paid']?.toString() ?? '0') ?? 0.0;
+      double newPending = _round(currentPending - amount);
+      if (newPending < 0) newPending = 0.0;
+
+      // Prepare Payment Increments
+      String lowerMethod = method.toLowerCase();
+      double addCash = lowerMethod == 'cash' ? amount : 0.0;
+      double addBkash = lowerMethod == 'bkash' ? amount : 0.0;
+      double addNagad = lowerMethod == 'nagad' ? amount : 0.0;
+      double addBank = lowerMethod == 'bank' ? amount : 0.0;
+
+      // Create History Entry
+      Map<String, dynamic> historyEntry = {
+        'type': lowerMethod,
+        'amount': amount,
+        'timestamp': Timestamp.now(),
+        'note': 'Late Due Collection',
+      };
+      if (refNumber != null && refNumber.isNotEmpty) {
+        if (lowerMethod == 'bank') {
+          historyEntry['bankName'] = method;
+          historyEntry['accountNumber'] = refNumber;
+        } else if (lowerMethod == 'bkash') {
+          historyEntry['bkashNumber'] = refNumber;
+        } else if (lowerMethod == 'nagad') {
+          historyEntry['nagadNumber'] = refNumber;
+        }
+      }
+
+      // Update Daily Sales Doc
+      batch.update(dailyDoc.reference, {
+        'paid': _round(currentPaid + amount),
+        'pending': newPending,
+        'status': newPending <= 0.5 ? 'paid' : 'partial',
+        'paymentMethod.cash': FieldValue.increment(addCash),
+        'paymentMethod.bkash': FieldValue.increment(addBkash),
+        'paymentMethod.nagad': FieldValue.increment(addNagad),
+        'paymentMethod.bank': FieldValue.increment(addBank),
+        'paymentHistory': FieldValue.arrayUnion([historyEntry]),
+      });
+
+      // --- 2. Fetch & Update Sales Orders (Master Record) ---
+      DocumentReference orderRef = _db
+          .collection('sales_orders')
+          .doc(transactionId);
+      DocumentSnapshot orderSnap = await orderRef.get();
+
+      if (orderSnap.exists) {
+        Map<String, dynamic> updateData = {
+          'paymentDetails.cash': FieldValue.increment(addCash),
+          'paymentDetails.bkash': FieldValue.increment(addBkash),
+          'paymentDetails.nagad': FieldValue.increment(addNagad),
+          'paymentDetails.bank': FieldValue.increment(addBank),
+          'paymentDetails.paidForInvoice': FieldValue.increment(amount),
+          'paymentDetails.totalPaidInput': FieldValue.increment(amount),
+          'paymentDetails.due': newPending, // Syncing due directly
+        };
+
+        if (newPending <= 0.5) {
+          updateData['isFullyPaid'] = true;
+          updateData['status'] = 'completed';
+        }
+
+        batch.update(orderRef, updateData);
+      }
+
+      // Commit all changes
+      await batch.commit();
+      await loadDailySales();
+
+      Get.back(); // Close Dialog
+      Get.snackbar(
+        "Success",
+        "৳$amount collected successfully!",
+        backgroundColor: Colors.green,
+        colorText: Colors.white,
+      );
+    } catch (e) {
+      Get.snackbar(
+        "Error",
+        e.toString(),
+        backgroundColor: Colors.redAccent,
+        colorText: Colors.white,
+      );
+    } finally {
+      isLoading.value = false;
+    }
   }
 }

@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Web%20Screen/Sales/Condition/cmodel.dart';
 import 'package:intl/intl.dart';
-import 'conditioncontroller.dart';
+import 'conditioncontroller.dart'; // Ensure the path matches your controller file
 
 class ConditionSalesPage extends StatelessWidget {
   const ConditionSalesPage({super.key});
@@ -36,7 +36,7 @@ class ConditionSalesPage extends StatelessWidget {
   }
 
   // ==============================================================================
-  // 1. HEADER (Updated: Removed Return Button)
+  // 1. HEADER
   // ==============================================================================
   Widget _buildHeader(BuildContext context, ConditionSalesController ctrl) {
     return Container(
@@ -72,15 +72,12 @@ class ConditionSalesPage extends StatelessWidget {
                 ),
               ),
               Text(
-                "Track shipments, collect due, and print invoices",
+                "Track shipments, collect due, and manage condition sales",
                 style: TextStyle(fontSize: 12, color: textMuted),
               ),
             ],
           ),
           const Spacer(),
-
-          // REMOVED: Process Return Button
-          const SizedBox(width: 20),
           Obx(
             () => _headerCard(
               "TOTAL COURIER DUE",
@@ -185,7 +182,7 @@ class ConditionSalesPage extends StatelessWidget {
   }
 
   // ==============================================================================
-  // 3. FILTERS
+  // 3. FILTERS & SEARCH
   // ==============================================================================
   Widget _buildFilters(BuildContext context, ConditionSalesController ctrl) {
     return Container(
@@ -203,11 +200,65 @@ class ConditionSalesPage extends StatelessWidget {
           _filterChip(ctrl, "All Time"),
           const SizedBox(width: 8),
           _customDateChip(context, ctrl),
+          const SizedBox(width: 16),
+
+          // Courier Dropdown Filter
+          Obx(() {
+            List<String> couriers = ["All", ...ctrl.courierBalances.keys];
+            // Ensure selected value exists in the list
+            if (!couriers.contains(ctrl.selectedCourierFilter.value)) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                ctrl.selectedCourierFilter.value = "All";
+              });
+            }
+
+            return Container(
+              height: 35,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey.shade300),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value:
+                      couriers.contains(ctrl.selectedCourierFilter.value)
+                          ? ctrl.selectedCourierFilter.value
+                          : "All",
+                  isDense: true,
+                  icon: const Icon(Icons.arrow_drop_down, color: textMuted),
+                  items:
+                      couriers.map((c) {
+                        return DropdownMenuItem(
+                          value: c,
+                          child: Text(
+                            c == "All" ? "All Couriers" : c,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: darkSlate,
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                  onChanged: (val) {
+                    if (val != null) {
+                      ctrl.selectedCourierFilter.value = val;
+                      ctrl.filteredOrders
+                          .refresh(); // Trigger client side filter
+                    }
+                  },
+                ),
+              ),
+            );
+          }),
+
           const Spacer(),
           // Search Bar
           Container(
-            width: 320,
-            height: 45,
+            width: 300,
+            height: 40,
             padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
               color: Colors.white,
@@ -217,7 +268,8 @@ class ConditionSalesPage extends StatelessWidget {
             child: TextField(
               onChanged: (v) => ctrl.searchQuery.value = v,
               decoration: const InputDecoration(
-                hintText: "Search Invoice ID, Phone or Challan...",
+                hintText: "Search Invoice, Phone, Challan...",
+                hintStyle: TextStyle(fontSize: 13),
                 border: InputBorder.none,
                 icon: Icon(Icons.search, size: 20, color: Colors.grey),
                 isDense: true,
@@ -266,7 +318,7 @@ class ConditionSalesPage extends StatelessWidget {
       String label = "Custom Date";
       if (isCustom && ctrl.customDateRange.value != null) {
         label =
-            "${DateFormat('dd/MM').format(ctrl.customDateRange.value!.start)} - ${DateFormat('dd/MM').format(ctrl.customDateRange.value!.end)}";
+            "${DateFormat('dd/MM/yy').format(ctrl.customDateRange.value!.start)} - ${DateFormat('dd/MM/yy').format(ctrl.customDateRange.value!.end)}";
       }
 
       return ActionChip(
@@ -312,11 +364,11 @@ class ConditionSalesPage extends StatelessWidget {
   }
 
   // ==============================================================================
-  // 4. DATA TABLE
+  // 4. DATA TABLE & PAGINATION
   // ==============================================================================
   Widget _buildDataTable(ConditionSalesController ctrl, BuildContext context) {
     return Obx(() {
-      if (ctrl.isLoading.value) {
+      if (ctrl.isLoading.value && ctrl.allOrders.isEmpty) {
         return const Center(child: CircularProgressIndicator());
       }
       if (ctrl.filteredOrders.isEmpty) {
@@ -426,16 +478,40 @@ class ConditionSalesPage extends StatelessWidget {
                 ],
               ),
             ),
-            // Body
+            // Body with Infinite Scroll Notification Listener
             Expanded(
-              child: ListView.separated(
-                itemCount: ctrl.filteredOrders.length,
-                separatorBuilder:
-                    (_, __) => const Divider(height: 1, thickness: 0.5),
-                itemBuilder: (context, index) {
-                  final order = ctrl.filteredOrders[index];
-                  return _orderRow(order, context, ctrl);
+              child: NotificationListener<ScrollNotification>(
+                onNotification: (ScrollNotification scrollInfo) {
+                  // Trigger load more when reaching the bottom
+                  if (!ctrl.isLoading.value &&
+                      !ctrl.isMoreLoading.value &&
+                      ctrl.hasMore.value &&
+                      scrollInfo.metrics.pixels >=
+                          scrollInfo.metrics.maxScrollExtent - 200) {
+                    ctrl.loadConditionSales(loadMore: true);
+                  }
+                  return false;
                 },
+                child: ListView.separated(
+                  itemCount:
+                      ctrl.filteredOrders.length +
+                      (ctrl.isMoreLoading.value ? 1 : 0),
+                  separatorBuilder:
+                      (_, __) => const Divider(height: 1, thickness: 0.5),
+                  itemBuilder: (context, index) {
+                    // Show Loading Indicator at bottom
+                    if (index == ctrl.filteredOrders.length) {
+                      return const Padding(
+                        padding: EdgeInsets.all(16.0),
+                        child: Center(
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      );
+                    }
+                    final order = ctrl.filteredOrders[index];
+                    return _orderRow(order, context, ctrl);
+                  },
+                ),
               ),
             ),
           ],
@@ -452,7 +528,7 @@ class ConditionSalesPage extends StatelessWidget {
     bool isPaid = order.courierDue <= 1.0; // Tolerance for float
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       child: Row(
         children: [
           // 1. Date
@@ -570,6 +646,16 @@ class ConditionSalesPage extends StatelessWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
+                // Delete Button
+                IconButton(
+                  onPressed: () => _confirmDeleteDialog(context, ctrl, order),
+                  icon: const Icon(
+                    Icons.delete_outline,
+                    size: 20,
+                    color: alertRed,
+                  ),
+                  tooltip: "Delete Condition Sale",
+                ),
                 // Print Button
                 IconButton(
                   onPressed: () => ctrl.printInvoice(order),
@@ -610,6 +696,104 @@ class ConditionSalesPage extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  // ==============================================================================
+  // DIALOGS
+  // ==============================================================================
+
+  void _confirmDeleteDialog(
+    BuildContext context,
+    ConditionSalesController ctrl,
+    ConditionOrderModel order,
+  ) {
+    Get.dialog(
+      Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          width: 350,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: alertRed.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.warning_amber_rounded,
+                  size: 40,
+                  color: alertRed,
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                "Delete Condition Sale?",
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: darkSlate,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                "Invoice: ${order.invoiceId}\nAre you sure you want to delete this sale? The products will be restored to the SEA stock automatically.",
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 13, color: textMuted),
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Get.back(),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: const Text(
+                        "Cancel",
+                        style: TextStyle(
+                          color: darkSlate,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        // Dialog closes inside the controller function
+                        ctrl.deleteConditionSale(order);
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: alertRed,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: const Text(
+                        "Delete",
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -674,7 +858,9 @@ class ConditionSalesPage extends StatelessWidget {
     ConditionSalesController ctrl,
     ConditionOrderModel order,
   ) {
-    final amountC = TextEditingController(text: order.courierDue.toString());
+    final amountC = TextEditingController(
+      text: order.courierDue.toStringAsFixed(0),
+    );
     final refC = TextEditingController();
     String method = "Cash";
 
@@ -683,7 +869,6 @@ class ConditionSalesPage extends StatelessWidget {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: StatefulBuilder(
           builder: (context, setState) {
-            // Dynamically change the reference input label based on payment method
             String refLabel = "Reference Note";
             String refHint = "Optional";
             if (method == "Bank") {
@@ -709,14 +894,14 @@ class ConditionSalesPage extends StatelessWidget {
                     style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
-                      color: darkSlate, // Assuming you have this defined
+                      color: darkSlate,
                     ),
                   ),
                   const SizedBox(height: 8),
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: bgGrey, // Assuming you have this defined
+                      color: bgGrey,
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Row(
@@ -737,8 +922,7 @@ class ConditionSalesPage extends StatelessWidget {
                                 order.customerName,
                                 style: const TextStyle(
                                   fontSize: 12,
-                                  color:
-                                      textMuted, // Assuming you have this defined
+                                  color: textMuted,
                                 ),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
@@ -748,10 +932,10 @@ class ConditionSalesPage extends StatelessWidget {
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          "Due: ৳${order.courierDue}",
+                          "Due: ৳${order.courierDue.toStringAsFixed(0)}",
                           style: const TextStyle(
                             fontWeight: FontWeight.bold,
-                            color: alertRed, // Assuming you have this defined
+                            color: alertRed,
                           ),
                         ),
                       ],
@@ -782,7 +966,7 @@ class ConditionSalesPage extends StatelessWidget {
                       if (v != null) {
                         setState(() {
                           method = v;
-                          refC.clear(); // Clear reference when changing method
+                          refC.clear();
                         });
                       }
                     },
@@ -806,15 +990,12 @@ class ConditionSalesPage extends StatelessWidget {
                     height: 50,
                     child: Obx(
                       () => ElevatedButton(
-                        // Disable button while loading to prevent double-clicks
                         onPressed:
                             ctrl.isLoading.value
                                 ? null
                                 : () {
                                   double amt =
                                       double.tryParse(amountC.text) ?? 0;
-
-                                  // Validation
                                   if (amt <= 0) {
                                     Get.snackbar(
                                       "Error",
@@ -822,7 +1003,6 @@ class ConditionSalesPage extends StatelessWidget {
                                     );
                                     return;
                                   }
-
                                   if (method != "Cash" &&
                                       refC.text.trim().isEmpty) {
                                     Get.snackbar(
@@ -831,7 +1011,6 @@ class ConditionSalesPage extends StatelessWidget {
                                     );
                                     return;
                                   }
-
                                   ctrl.receiveConditionPayment(
                                     order: order,
                                     receivedAmount: amt,
@@ -840,8 +1019,7 @@ class ConditionSalesPage extends StatelessWidget {
                                   );
                                 },
                         style: ElevatedButton.styleFrom(
-                          backgroundColor:
-                              successGreen, // Assuming you have this defined
+                          backgroundColor: successGreen,
                           disabledBackgroundColor: Colors.grey.shade400,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8),

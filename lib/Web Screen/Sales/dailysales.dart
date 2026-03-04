@@ -9,7 +9,6 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 import 'controller.dart';
-// Ensure this path matches your project structure
 import 'package:gtel_erp/Web%20Screen/Sales/Condition/conditioncontroller.dart';
 import 'model.dart';
 
@@ -84,7 +83,7 @@ class DailySalesPage extends StatelessWidget {
               source.contains('payment');
 
           if (!isRecovery) {
-            if (type.contains('debtor')) {
+            if (type.contains('debtor') || type.contains('agent')) {
               revenueDebtor += sale.amount;
               collectedDebtor += sale.paid;
             } else {
@@ -96,7 +95,9 @@ class DailySalesPage extends StatelessWidget {
           if (isRecovery) {
             if (source.contains('condition') || type.contains('courier')) {
               collectedCondition += sale.paid;
-            } else if (type.contains('debtor') || source.contains('payment')) {
+            } else if (type.contains('debtor') ||
+                type.contains('agent') ||
+                source.contains('payment')) {
               collectedDebtor += sale.paid;
             }
           }
@@ -248,7 +249,7 @@ class DailySalesPage extends StatelessWidget {
                           ),
                           const Divider(height: 1),
                           _buildTableHead(),
-                          _buildTransactionList(tableList),
+                          _buildTransactionList(context, tableList),
                         ],
                       ),
                     ),
@@ -550,7 +551,7 @@ class DailySalesPage extends StatelessWidget {
             ),
           ),
           SizedBox(
-            width: 90,
+            width: 120,
             child: Center(
               child: Text(
                 "ACTIONS",
@@ -567,7 +568,7 @@ class DailySalesPage extends StatelessWidget {
     );
   }
 
-  Widget _buildTransactionList(List<SaleModel> list) {
+  Widget _buildTransactionList(BuildContext context, List<SaleModel> list) {
     if (list.isEmpty) {
       return const Padding(
         padding: EdgeInsets.all(30),
@@ -582,13 +583,18 @@ class DailySalesPage extends StatelessWidget {
       separatorBuilder: (_, __) => const Divider(height: 1, thickness: 0.5),
       itemBuilder: (context, index) {
         final sale = list[index];
-        bool isDebtor = (sale.customerType).toLowerCase().contains("debtor");
-        String source = (sale.source).toLowerCase();
+        bool isDebtor =
+            sale.customerType.toLowerCase().contains("debtor") ||
+            sale.customerType.toLowerCase().contains("agent");
+        String source = sale.source.toLowerCase();
 
+        bool isConditionAdvance =
+            sale.customerType.toLowerCase() == "condition_advance";
         bool isRecovery =
             source.contains("condition") ||
             source.contains("payment") ||
             source.contains("recovery");
+
         String badgeText = "NORMAL";
         Color badgeColor = primaryBlue;
 
@@ -596,9 +602,13 @@ class DailySalesPage extends StatelessWidget {
           badgeText = "COLLECTION";
           badgeColor = successGreen;
         } else if (isDebtor) {
-          badgeText = "DEBTOR SALE";
+          badgeText = "AGENT SALE";
           badgeColor = purpleDebtor;
         }
+
+        // Logic for "Collect Due" Button
+        bool hasPending = sale.pending > 0.5;
+        bool canCollectDue = hasPending && !isDebtor && !isConditionAdvance;
 
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
@@ -659,19 +669,17 @@ class DailySalesPage extends StatelessWidget {
                   ),
                 ),
               ),
-              // 3. Payment Method (UPDATED)
+              // 3. Payment Method
               Expanded(
                 flex: 3,
                 child: Text(
-                  // FIX: Pass sale.paid here so the controller knows to hide details if paid is 0
                   dailyCtrl.formatPaymentMethod(sale.paymentMethod, sale.paid),
                   style: const TextStyle(
                     fontSize: 11,
-                    height: 1.4, // Increased height for readability
+                    height: 1.4,
                     color: Color(0xFF475569),
                     fontWeight: FontWeight.w500,
                   ),
-                  // FIX: Increased maxLines to 6 to allow 3 methods to show
                   maxLines: 6,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -692,23 +700,53 @@ class DailySalesPage extends StatelessWidget {
               // 5. Paid
               Expanded(
                 flex: 2,
-                child: Text(
-                  "৳${NumberFormat('#,##0').format(sale.paid)}",
-                  textAlign: TextAlign.right,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: successGreen,
-                    fontSize: 13,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      "৳${NumberFormat('#,##0').format(sale.paid)}",
+                      textAlign: TextAlign.right,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: successGreen,
+                        fontSize: 13,
+                      ),
+                    ),
+                    if (hasPending)
+                      Text(
+                        "Due: ৳${NumberFormat('#,##0').format(sale.pending)}",
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: alertRed,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                  ],
                 ),
               ),
-              // 6. ACTIONS
+              // 6. ACTIONS (Updated Width & Logic)
               SizedBox(
-                width: 90,
+                width: 120, // Increased width to fit 3 icons
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    if (canCollectDue) ...[
+                      IconButton(
+                        icon: const Icon(
+                          Icons.payments_outlined,
+                          size: 20,
+                          color: successGreen,
+                        ),
+                        tooltip: "Collect Due Payment",
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        onPressed:
+                            () =>
+                                _showCollectDueDialog(context, dailyCtrl, sale),
+                      ),
+                      const SizedBox(width: 12),
+                    ],
                     IconButton(
                       icon: const Icon(
                         Icons.print_outlined,
@@ -723,7 +761,7 @@ class DailySalesPage extends StatelessWidget {
                             sale.transactionId ?? "",
                           ),
                     ),
-                    const SizedBox(width: 15),
+                    const SizedBox(width: 12),
                     IconButton(
                       icon: const Icon(
                         Icons.delete_outline,
@@ -746,6 +784,198 @@ class DailySalesPage extends StatelessWidget {
     );
   }
 
+  // ==========================================================
+  // 🟢 NEW: COLLECT DUE DIALOG
+  // ==========================================================
+  void _showCollectDueDialog(
+    BuildContext context,
+    DailySalesController ctrl,
+    SaleModel sale,
+  ) {
+    if (sale.customerType == 'agent' || sale.customerType == 'debtor') {
+      Get.snackbar(
+        "Notice",
+        "Please collect Agent dues from the Debtor Ledger.",
+      );
+      return;
+    }
+    if (sale.customerType == 'condition_advance') {
+      Get.snackbar(
+        "Notice",
+        "Please collect Condition dues from the Condition Sales page.",
+      );
+      return;
+    }
+
+    final amountC = TextEditingController(
+      text: sale.pending.toStringAsFixed(0),
+    );
+    final refC = TextEditingController();
+    String method = "Cash";
+
+    Get.dialog(
+      Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: StatefulBuilder(
+          builder: (context, setState) {
+            String refLabel =
+                method == "Bank" ? "Bank Name & Account No." : "$method Number";
+            String refHint = method == "Cash" ? "Optional" : "Required";
+
+            return Container(
+              width: 400,
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    "Collect Pending Due",
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: darkText,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: warningOrange.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            "Customer: ${sale.name}",
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: darkText,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        Text(
+                          "Due: ৳${sale.pending.toStringAsFixed(0)}",
+                          style: const TextStyle(
+                            color: alertRed,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  TextField(
+                    controller: amountC,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: "Received Amount",
+                      prefixText: "৳ ",
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<String>(
+                    value: method,
+                    items:
+                        ["Cash", "Bank", "Bkash", "Nagad"]
+                            .map(
+                              (e) => DropdownMenuItem(value: e, child: Text(e)),
+                            )
+                            .toList(),
+                    onChanged: (v) {
+                      if (v != null) {
+                        setState(() {
+                          method = v;
+                          refC.clear();
+                        });
+                      }
+                    },
+                    decoration: const InputDecoration(
+                      labelText: "Payment Method",
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  if (method != "Cash")
+                    TextField(
+                      controller: refC,
+                      decoration: InputDecoration(
+                        labelText: refLabel,
+                        hintText: refHint,
+                        border: const OutlineInputBorder(),
+                      ),
+                    ),
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: Obx(
+                      () => ElevatedButton(
+                        onPressed:
+                            ctrl.isLoading.value
+                                ? null
+                                : () {
+                                  double amt =
+                                      double.tryParse(amountC.text) ?? 0;
+                                  if (amt <= 0) {
+                                    Get.snackbar(
+                                      "Error",
+                                      "Valid amount required",
+                                    );
+                                    return;
+                                  }
+                                  if (method != "Cash" &&
+                                      refC.text.trim().isEmpty) {
+                                    Get.snackbar(
+                                      "Error",
+                                      "Reference details required for $method",
+                                    );
+                                    return;
+                                  }
+
+                                  ctrl.collectNormalCustomerDue(
+                                    transactionId: sale.transactionId ?? '',
+                                    currentPending: sale.pending,
+                                    collectedAmount: amt,
+                                    method: method,
+                                    refNumber: refC.text.trim(),
+                                  );
+                                },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: successGreen,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        child:
+                            ctrl.isLoading.value
+                                ? const CircularProgressIndicator(
+                                  color: Colors.white,
+                                )
+                                : const Text(
+                                  "CONFIRM PAYMENT",
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 1,
+                                  ),
+                                ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
   void _confirmDelete(BuildContext context, String saleId, String name) {
     Get.defaultDialog(
       title: "Confirm Delete",
@@ -762,7 +992,6 @@ class DailySalesPage extends StatelessWidget {
     );
   }
 
-  // ... [Keep _generateDailyReportPDF, _pdfSummaryItem, _pdfRow exactly the same] ...
   Future<void> _generateDailyReportPDF(
     double rN,
     double rD,

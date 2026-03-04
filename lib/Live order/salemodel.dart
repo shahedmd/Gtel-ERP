@@ -885,7 +885,7 @@ class LiveSalesController extends GetxController {
   }
 
   // ------------------------------------------------------------------------
-  // UPDATED: _handleAgentTransaction with Automatic Bill Reconciliation
+  // UPDATED: _handleAgentTransaction (Fixes isFullyPaid in sales_orders)
   // ------------------------------------------------------------------------
   Future<void> _handleAgentTransaction(
     WriteBatch batch,
@@ -1042,7 +1042,7 @@ class LiveSalesController extends GetxController {
             salesSnap.docs.where((doc) {
               final data = doc.data() as Map<String, dynamic>;
               double p = double.tryParse(data['pending'].toString()) ?? 0.0;
-              return p > 0.5; // Small tolerance
+              return p > 0.5; // Small tolerance to find unpaid bills
             }).toList();
 
         // Sort: Pay oldest bills first
@@ -1069,6 +1069,9 @@ class LiveSalesController extends GetxController {
                   ? currentPending
                   : remainingToAllocate;
 
+          // Check if this payment fully clears the bill
+          bool isNowFullyPaid = (currentPending - take) <= 0.5;
+
           final newHistoryEntry = {
             'type': 'Surplus from $invNo',
             'amount': take,
@@ -1076,21 +1079,36 @@ class LiveSalesController extends GetxController {
             'sourceTxId': surplusTxId,
           };
 
+          // Update daily_sales
           batch.update(doc.reference, {
             "paid": currentPaid + take,
             "pending": currentPending - take,
             "ledgerPaid": currentLedgerPaid + take,
-            "status": (currentPending - take) <= 0.5 ? "paid" : "partial",
+            "status": isNowFullyPaid ? "paid" : "partial",
             "paymentHistory": FieldValue.arrayUnion([newHistoryEntry]),
           });
 
-          // Optional: Update sales_orders if ID matches
+          // Update sales_orders (The fix for isFullyPaid)
           String saleTxId = data['transactionId'] ?? '';
           if (saleTxId.isNotEmpty) {
             DocumentReference orderRef = _db
                 .collection('sales_orders')
                 .doc(saleTxId);
-            batch.update(orderRef, {"paid": FieldValue.increment(take)});
+
+            Map<String, dynamic> orderUpdate = {
+              "paid": FieldValue.increment(take), // Root paid field
+              "paymentDetails.due": FieldValue.increment(
+                -take,
+              ), // Update nested due
+            };
+
+            // If fully paid, flip the boolean and status
+            if (isNowFullyPaid) {
+              orderUpdate["isFullyPaid"] = true;
+              orderUpdate["status"] = "completed";
+            }
+
+            batch.update(orderRef, orderUpdate);
           }
 
           remainingToAllocate -= take;
@@ -1112,9 +1130,7 @@ class LiveSalesController extends GetxController {
       "pending": due,
       "customerType": "agent",
       "timestamp": Timestamp.fromDate(saleDate),
-      "paymentMethod": _extractPaymentFor(
-        allocatedToInvoice,
-      ), // NOW RETURNS CORRECTED CASH
+      "paymentMethod": _extractPaymentFor(allocatedToInvoice),
       "createdAt": FieldValue.serverTimestamp(),
       "source": "pos_sale",
       "transactionId": invNo,

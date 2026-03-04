@@ -1,9 +1,9 @@
-// ignore_for_file: deprecated_member_use, file_names, empty_catches, avoid_print
+// ignore_for_file: deprecated_member_use, avoid_print, empty_catches, file_names
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import '../Stock/controller.dart';
+import '../Stock/controller.dart'; // Ensure correct path to ProductController
 
 class SaleReturnController extends GetxController {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -14,38 +14,31 @@ class SaleReturnController extends GetxController {
   var isLoading = false.obs;
 
   // Invoice Data
-  var orderData = Rxn<Map<String, dynamic>>(); // Holds the full invoice map
-  var orderItems = <Map<String, dynamic>>[].obs;
+  var orderData = Rxn<Map<String, dynamic>>();
 
-  // Search Collisions
+  // The interactive list of items
+  var modifiedItems = <Map<String, dynamic>>[].obs;
   var multipleSearchResults = <Map<String, dynamic>>[].obs;
 
-  // Return Inputs
-  var returnQuantities = <String, int>{}.obs;
+  // Maps productId to a Destination ("Local", "Sea", "Air") for returned items
   var returnDestinations = <String, String>{}.obs;
 
   // --- HELPERS ---
-  double toDouble(dynamic val) {
-    if (val == null) return 0.0;
-    return double.tryParse(val.toString()) ?? 0.0;
-  }
-
-  int toInt(dynamic val) {
-    if (val == null) return 0;
-    return int.tryParse(val.toString()) ?? 0;
-  }
-
+  double toDouble(dynamic val) =>
+      double.tryParse(val?.toString() ?? '0') ?? 0.0;
+  int toInt(dynamic val) => int.tryParse(val?.toString() ?? '0') ?? 0;
   String toStr(dynamic val) => val?.toString() ?? "";
 
   // ========================================================================
-  // 1. SEARCH LOGIC
+  // 1. SEARCH INVOICE LOGIC
   // ========================================================================
 
   Future<void> smartSearch(String input) async {
     if (input.trim().isEmpty) return;
     multipleSearchResults.clear();
     orderData.value = null;
-    orderItems.clear();
+    modifiedItems.clear();
+    returnDestinations.clear();
     String query = input.trim();
 
     if (query.length <= 5) {
@@ -69,10 +62,7 @@ class SaleReturnController extends GetxController {
       for (var doc in snap.docs) {
         if (doc.id.endsWith(shortCode)) {
           var data = doc.data();
-          // Filter out deleted orders
-          if (data['status'] != 'deleted') {
-            matches.add(data);
-          }
+          if (data['status'] != 'deleted') matches.add(data);
         }
       }
 
@@ -109,28 +99,24 @@ class SaleReturnController extends GetxController {
 
   void _parseOrderData(Map<String, dynamic> data) {
     orderData.value = data;
-    returnQuantities.clear();
+    modifiedItems.clear();
     returnDestinations.clear();
-    orderItems.clear();
 
     List<dynamic> rawItems = data['items'] ?? [];
     for (var item in rawItems) {
       if (item is Map) {
-        Map<String, dynamic> safeItem = {
-          "productId": toStr(item['productId']),
+        String pid = toStr(item['productId'] ?? item['id']);
+        returnDestinations[pid] = "Local"; // Default return destination
+
+        modifiedItems.add({
+          "productId": pid,
           "name": toStr(item['name']),
           "model": toStr(item['model']),
           "qty": toInt(item['qty']),
           "saleRate": toDouble(item['saleRate']),
           "costRate": toDouble(item['costRate']),
           "subtotal": toDouble(item['subtotal']),
-        };
-        orderItems.add(safeItem);
-        String pid = safeItem['productId'];
-        if (pid.isNotEmpty) {
-          returnQuantities[pid] = 0;
-          returnDestinations[pid] = "Local";
-        }
+        });
       }
     }
     multipleSearchResults.clear();
@@ -180,52 +166,145 @@ class SaleReturnController extends GetxController {
   }
 
   // ========================================================================
-  // 2. INPUT HANDLERS
+  // 2. EDIT INVOICE UI HANDLERS
   // ========================================================================
-
-  void incrementReturn(String productId, int maxQty) {
-    int current = returnQuantities[productId] ?? 0;
-    if (current < maxQty) returnQuantities[productId] = current + 1;
-  }
-
-  void decrementReturn(String productId) {
-    int current = returnQuantities[productId] ?? 0;
-    if (current > 0) returnQuantities[productId] = current - 1;
-  }
 
   void setDestination(String productId, String dest) {
     returnDestinations[productId] = dest;
   }
 
-  // Value of items currently selected for return
-  double get currentReturnTotal {
-    double total = 0.0;
-    for (var item in orderItems) {
-      String pid = toStr(item['productId']);
-      int qty = returnQuantities[pid] ?? 0;
-      double rate = toDouble(item['saleRate']);
-      total += (qty * rate);
+  void increaseQty(int index) {
+    var item = modifiedItems[index];
+    item['qty'] = (item['qty'] as int) + 1;
+    item['subtotal'] = item['qty'] * item['saleRate'];
+    modifiedItems[index] = item;
+  }
+
+  void decreaseQty(int index) {
+    var item = modifiedItems[index];
+    if (item['qty'] > 0) {
+      item['qty'] = (item['qty'] as int) - 1;
+      item['subtotal'] = item['qty'] * item['saleRate'];
+      modifiedItems[index] = item;
     }
-    return total;
+  }
+
+  void removeProduct(int index) {
+    var item = modifiedItems[index];
+    item['qty'] = 0;
+    item['subtotal'] = 0.0;
+    modifiedItems[index] = item;
+  }
+
+  double get currentModifiedTotal {
+    return modifiedItems.fold(
+      0.0,
+      (sumv, item) => sumv + (item['subtotal'] as double),
+    );
   }
 
   // ========================================================================
-  // 3. RETURN PROCESSING (UPDATED FOR CONDITION FIX)
+  // 3. ADDING NEW / EXISTING PRODUCTS TO INVOICE
   // ========================================================================
 
-  Future<void> processProductReturn() async {
-    // A. Validation
-    if (currentReturnTotal <= 0) {
-      Get.snackbar("Error", "No items selected for return.");
-      return;
-    }
-    if (orderData.value == null) return;
+  Future<List<Map<String, dynamic>>> searchStockProducts(String query) async {
+    return await productCtrl.searchProductsForDropdown(query);
+  }
 
+  void addNewProductToInvoice(
+    Map<String, dynamic> product,
+    int addQty,
+    double saleRate,
+    double costRate,
+  ) {
+    String pid = toStr(product['id'] ?? product['productId']);
+    int existingIndex = modifiedItems.indexWhere(
+      (element) => element['productId'] == pid,
+    );
+
+    if (existingIndex != -1) {
+      var item = modifiedItems[existingIndex];
+      item['qty'] = (item['qty'] as int) + addQty;
+      item['subtotal'] = item['qty'] * item['saleRate'];
+      modifiedItems[existingIndex] = item;
+    } else {
+      returnDestinations[pid] = "Local"; // Default return behavior
+      modifiedItems.add({
+        "productId": pid,
+        "name": toStr(product['name']),
+        "model": toStr(product['model']),
+        "qty": addQty,
+        "saleRate": saleRate,
+        "costRate": costRate,
+        "subtotal": addQty * saleRate,
+      });
+    }
+  }
+
+  Future<void> createAndAddNewProductToInvoice({
+    required String name,
+    required String model,
+    required int qty,
+    required double saleRate,
+    required double costRate,
+  }) async {
     isLoading.value = true;
+    try {
+      Map<String, dynamic> newProductData = {
+        'name': name,
+        'model': model,
+        'brand': 'LOCAL',
+        'category_id': 1,
+        'supplier_id': 1,
+        'stock_qty': 0,
+        'alert_qty': 5,
+        'avg_purchase_price': costRate,
+        'agent': saleRate,
+        'wholesale': saleRate,
+        'retail': saleRate,
+      };
+
+      int? newId = await productCtrl.createProductReturnId(newProductData);
+
+      if (newId != null) {
+        addNewProductToInvoice(
+          {'id': newId.toString(), 'name': name, 'model': model},
+          qty,
+          saleRate,
+          costRate,
+        );
+        Get.snackbar(
+          "Success",
+          "New product created and added to invoice.",
+          backgroundColor: Colors.green,
+          colorText: Colors.white,
+        );
+      } else {
+        Get.snackbar(
+          "Error",
+          "Failed to get ID from server. Product not added.",
+        );
+      }
+    } catch (e) {
+      Get.snackbar("Creation Error", e.toString());
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+  // ========================================================================
+  // 4. MASTER PROCESSING: PROCESS EDITS / RETURNS
+  // ========================================================================
+
+  Future<void> processEditInvoice({
+    double extraCollectedAmount = 0.0,
+    String extraCollectedMethod = 'Cash',
+  }) async {
+    if (orderData.value == null) return;
+    isLoading.value = true;
+
     String invoiceId = toStr(orderData.value!['invoiceId']);
     String debtorId = toStr(orderData.value!['debtorId']);
-
-    // --- Detect Condition Info ---
     bool isCondition = orderData.value!['isCondition'] == true;
     String courierName = toStr(orderData.value!['courierName']);
     String customerPhone = toStr(orderData.value!['customerPhone']);
@@ -233,93 +312,97 @@ class SaleReturnController extends GetxController {
     WriteBatch batch = _db.batch();
 
     try {
-      // B. Fetch Latest Invoice Data
+      // A. Fetch Latest DB Documents
       DocumentReference orderRef = _db
           .collection('sales_orders')
           .doc(invoiceId);
       DocumentSnapshot orderSnap = await orderRef.get();
       if (!orderSnap.exists) throw "Invoice not found in database.";
-
       Map<String, dynamic> currentOrder =
           orderSnap.data() as Map<String, dynamic>;
 
-      // C. Calculate New Item List & Financial Reductions
-      double refundAmt = 0.0;
-      double profitReduce = 0.0;
-      double costReduce = 0.0;
-      List<String> returnLog = [];
+      QuerySnapshot dailySnap =
+          await _db
+              .collection('daily_sales')
+              .where('transactionId', isEqualTo: invoiceId)
+              .limit(1)
+              .get();
+      DocumentReference? dailyRef =
+          dailySnap.docs.isNotEmpty ? dailySnap.docs.first.reference : null;
+      Map<String, dynamic>? dailyData =
+          dailySnap.docs.isNotEmpty
+              ? dailySnap.docs.first.data() as Map<String, dynamic>
+              : null;
 
-      List<dynamic> oldItemsList = currentOrder['items'] ?? [];
-      List<Map<String, dynamic>> newItemsList = [];
+      // B. Build the Clean "Final Items" List (Excludes 0 Qty)
+      List<Map<String, dynamic>> finalItemsList = [];
+      double newGT = 0.0, newCost = 0.0, newProfit = 0.0;
 
-      for (var rawItem in oldItemsList) {
-        if (rawItem is! Map) continue;
-
-        String pid = toStr(rawItem['productId']);
-        String name = toStr(rawItem['name']);
-        String model = toStr(rawItem['model']);
-
-        int dbQty = toInt(rawItem['qty']);
-        double sRate = toDouble(rawItem['saleRate']);
-        double cRate = toDouble(rawItem['costRate']);
-
-        int retQty = returnQuantities[pid] ?? 0;
-
-        if (retQty > 0) {
-          if (retQty > dbQty) {
-            throw "Return qty ($retQty) exceeds purchased qty ($dbQty) for $name";
-          }
-
-          refundAmt += (retQty * sRate);
-          costReduce += (retQty * cRate);
-          profitReduce += ((sRate - cRate) * retQty);
-
-          dbQty -= retQty;
-          returnLog.add("$model (Ret x$retQty)");
+      for (var item in modifiedItems) {
+        int qty = toInt(item['qty']);
+        if (qty > 0) {
+          double sRate = toDouble(item['saleRate']);
+          double cRate = toDouble(item['costRate']);
+          item['subtotal'] = qty * sRate;
+          newGT += qty * sRate;
+          newCost += qty * cRate;
+          newProfit += (sRate - cRate) * qty;
+          finalItemsList.add(item);
         }
-
-        newItemsList.add({
-          "productId": pid,
-          "name": name,
-          "model": model,
-          "qty": dbQty,
-          "saleRate": sRate,
-          "costRate": cRate,
-          "subtotal": toDouble(dbQty * sRate),
-        });
       }
 
-      // D. Financial Recalculation
-      double oldGT = toDouble(currentOrder['grandTotal']);
-      double oldP = toDouble(currentOrder['profit']);
-      double oldC = toDouble(currentOrder['totalCost']);
-
-      double newGT = oldGT - refundAmt;
-      double newP = oldP - profitReduce;
-      double newC = oldC - costReduce;
+      // Apply existing discount
+      double discount = toDouble(currentOrder['discount']);
+      newGT -= discount;
       if (newGT < 0) newGT = 0;
-      if (newC < 0) newC = 0;
 
-      // E. Payment Logic
-      Map<String, dynamic> oldPay = Map<String, dynamic>.from(
+      double oldGT = toDouble(currentOrder['grandTotal']);
+      double deltaGT = newGT - oldGT;
+
+      // Payment logic base
+      Map<String, dynamic> oldPayDetails = Map<String, dynamic>.from(
         currentOrder['paymentDetails'] ?? {},
       );
-
-      double oldTotalPaid = toDouble(oldPay['actualReceived']);
-      if (oldTotalPaid == 0) {
-        oldTotalPaid = toDouble(oldPay['totalPaidInput']);
+      double realPaidAmount = toDouble(oldPayDetails['actualReceived']);
+      if (realPaidAmount == 0) {
+        realPaidAmount = toDouble(oldPayDetails['totalPaidInput']);
       }
 
-      double pCash = toDouble(oldPay['cash']);
-      double pBkash = toDouble(oldPay['bkash']);
-      double pNagad = toDouble(oldPay['nagad']);
-      double pBank = toDouble(oldPay['bank']);
-
-      double amountToSlash = 0.0;
-      if (oldTotalPaid > newGT) {
-        amountToSlash = oldTotalPaid - newGT;
+      if (dailyData != null && toDouble(dailyData['paid']) > realPaidAmount) {
+        realPaidAmount = toDouble(dailyData['paid']);
       }
 
+      double pCash = toDouble(oldPayDetails['cash']);
+      double pBkash = toDouble(oldPayDetails['bkash']);
+      double pNagad = toDouble(oldPayDetails['nagad']);
+      double pBank = toDouble(oldPayDetails['bank']);
+
+      if (deltaGT > 0 && extraCollectedAmount > 0) {
+        String method = extraCollectedMethod.toLowerCase();
+        if (method == 'bkash') {
+          pBkash += extraCollectedAmount;
+        } else if (method == 'nagad') {
+          pNagad += extraCollectedAmount;
+        } else if (method == 'bank') {
+          pBank += extraCollectedAmount;
+        } else {
+          pCash += extraCollectedAmount; // Default to cash
+        }
+
+        realPaidAmount += extraCollectedAmount;
+      }
+
+      double newDue = newGT - realPaidAmount;
+      double refundToCustomer = 0.0;
+
+      if (newDue < 0) {
+        refundToCustomer = newDue.abs();
+        realPaidAmount = newGT;
+        newDue = 0.0;
+      }
+
+      // If returning items (Delta < 0), slash payments down
+      double amountToSlash = refundToCustomer;
       if (amountToSlash > 0) {
         if (pCash >= amountToSlash) {
           pCash -= amountToSlash;
@@ -328,7 +411,6 @@ class SaleReturnController extends GetxController {
           amountToSlash -= pCash;
           pCash = 0;
         }
-
         if (amountToSlash > 0 && pBkash >= amountToSlash) {
           pBkash -= amountToSlash;
           amountToSlash = 0;
@@ -336,7 +418,6 @@ class SaleReturnController extends GetxController {
           amountToSlash -= pBkash;
           pBkash = 0;
         }
-
         if (amountToSlash > 0 && pNagad >= amountToSlash) {
           pNagad -= amountToSlash;
           amountToSlash = 0;
@@ -344,7 +425,6 @@ class SaleReturnController extends GetxController {
           amountToSlash -= pNagad;
           pNagad = 0;
         }
-
         if (amountToSlash > 0 && pBank >= amountToSlash) {
           pBank -= amountToSlash;
           amountToSlash = 0;
@@ -354,72 +434,95 @@ class SaleReturnController extends GetxController {
         }
       }
 
-      double newTotalPaid = pCash + pBkash + pNagad + pBank;
-      double newDue = newGT - newTotalPaid;
-      if (newDue < 0) newDue = 0;
-
-      // --- CONDITION SPECIFIC CALCULATION ---
+      // -----------------------------------------------------------------
+      // FIX 1 & 2: CORRECT CONDITION PAYMENT / LEDGER CALCULATION
+      // -----------------------------------------------------------------
       double newCourierDue = 0.0;
+      double deltaCourierDue =
+          0.0; // Tracks EXACTLY how much the courier's ledger should change
+
       if (isCondition) {
         double oldCourierDue = toDouble(currentOrder['courierDue']);
-        newCourierDue = oldCourierDue - refundAmt;
-        if (newCourierDue < 0) newCourierDue = 0;
+
+        if (oldCourierDue > 0) {
+          // Condition is ONGOING. Adjust based on added/removed items,
+          // MINUS what was paid directly to the shop during this edit.
+          newCourierDue = oldCourierDue + deltaGT - extraCollectedAmount;
+          if (newCourierDue < 0) newCourierDue = 0; // Floor at 0
+
+          deltaCourierDue = newCourierDue - oldCourierDue;
+        } else {
+          // Condition sale was ALREADY COMPLETED (Courier already paid us).
+          // Returns/Edits here are handled by the shop directly.
+          // The courier ledger DOES NOT CHANGE.
+          newCourierDue = 0.0;
+          deltaCourierDue = 0.0;
+        }
       }
 
       Map<String, dynamic> newPayDetails = {
-        ...oldPay,
+        ...oldPayDetails,
         "cash": pCash,
         "bkash": pBkash,
         "nagad": pNagad,
         "bank": pBank,
-        "actualReceived": newTotalPaid,
-        "totalPaidInput": newTotalPaid,
+        "actualReceived": realPaidAmount,
+        "totalPaidInput": realPaidAmount,
         "due": newDue,
-        "paidForInvoice": newTotalPaid,
+        "paidForInvoice": realPaidAmount,
       };
 
-      // G. Database Updates
-
-      // 1. Sales Order
+      // 1. Update sales_orders Master
       Map<String, dynamic> updateData = {
-        'items': newItemsList,
+        'items': finalItemsList,
         'grandTotal': newGT,
-        'subtotal': newGT,
-        'profit': newP,
-        'totalCost': newC,
+        'subtotal': newGT + discount,
+        'profit': newProfit,
+        'totalCost': newCost,
         'paymentDetails': newPayDetails,
+        // FIX 3: Match ConditionSalesController status tags exactly
         'status':
-            (isCondition ? newCourierDue <= 0 : newDue <= 0)
-                ? 'returned_completed'
-                : 'returned_partial',
-        'lastReturnDate': FieldValue.serverTimestamp(),
+            isCondition
+                ? (newCourierDue <= 1 ? 'completed' : 'on_delivery')
+                : (newDue <= 1 ? 'completed' : 'partial'),
+        'lastModifiedAt': FieldValue.serverTimestamp(),
       };
 
       if (isCondition) {
         updateData['courierDue'] = newCourierDue;
+        updateData['isFullyPaid'] = newCourierDue <= 1;
       }
 
       batch.update(orderRef, updateData);
 
-      // 2. Daily Sales
-      QuerySnapshot dailySnap =
-          await _db
-              .collection('daily_sales')
-              .where('transactionId', isEqualTo: invoiceId)
-              .limit(1)
-              .get();
-
-      if (dailySnap.docs.isNotEmpty) {
-        DocumentReference dailyRef = dailySnap.docs.first.reference;
-        batch.update(dailyRef, {
+      // 2. Update daily_sales (And inject payment history if extra cash was paid)
+      if (dailyRef != null) {
+        // FIX 4: Update fields gracefully without overwriting the specific paymentMethod schema
+        Map<String, dynamic> dailyUpdate = {
           'amount': newGT,
-          'paid': newTotalPaid,
+          'paid': realPaidAmount,
           'pending': newDue,
-          'paymentMethod': newPayDetails,
-        });
+          'paymentMethod.cash': pCash,
+          'paymentMethod.bkash': pBkash,
+          'paymentMethod.nagad': pNagad,
+          'paymentMethod.bank': pBank,
+        };
+
+        // Push the extra payment into today's accounting
+        if (deltaGT > 0 && extraCollectedAmount > 0) {
+          dailyUpdate['paymentHistory'] = FieldValue.arrayUnion([
+            {
+              'type': extraCollectedMethod.toLowerCase(),
+              'amount': extraCollectedAmount,
+              'timestamp': Timestamp.now(),
+              'note': 'Invoice Edit: Extra Payment Added',
+            },
+          ]);
+        }
+        batch.update(dailyRef, dailyUpdate);
       }
 
-      // 3. Debtor Updates
+      // 3. Update Debtor Ledger
       if (debtorId.isNotEmpty) {
         DocumentReference debtorTxRef = _db
             .collection('debatorbody')
@@ -430,78 +533,116 @@ class SaleReturnController extends GetxController {
         if (dtSnap.exists) {
           batch.update(debtorTxRef, {
             'amount': newGT,
-            'note': "Inv $invoiceId (Ret: -${refundAmt.toStringAsFixed(0)})",
+            'note':
+                "Inv $invoiceId (Edited: Delta ${deltaGT > 0 ? '+' : ''}${deltaGT.toStringAsFixed(0)})",
           });
         }
-        DocumentReference analyticsRef = _db
-            .collection('debtor_transaction_history')
-            .doc(invoiceId);
-        batch.set(analyticsRef, {
-          "saleAmount": newGT,
-          "costAmount": newC,
-          "profit": newP,
-          "returnLog": FieldValue.arrayUnion(returnLog),
-        }, SetOptions(merge: true));
+        batch.set(
+          _db.collection('debtor_transaction_history').doc(invoiceId),
+          {"saleAmount": newGT, "costAmount": newCost, "profit": newProfit},
+          SetOptions(merge: true),
+        );
       }
 
-      // 4. *** COURIER & CONDITION UPDATES ***
-      if (isCondition && courierName.isNotEmpty) {
-        // Update Courier Ledger
-        DocumentReference courierRef = _db
-            .collection('courier_ledgers')
-            .doc(courierName);
-        batch.update(courierRef, {
-          "totalDue": FieldValue.increment(-refundAmt),
+      // 4. Update Courier & Condition Ledger
+      // FIX: ONLY update ledgers if there is an actual change in Courier Due (deltaCourierDue != 0)
+      if (isCondition && courierName.isNotEmpty && deltaCourierDue != 0) {
+        batch.update(_db.collection('courier_ledgers').doc(courierName), {
+          "totalDue": FieldValue.increment(deltaCourierDue),
           "lastUpdated": FieldValue.serverTimestamp(),
         });
 
-        // Update Customer Ledger
         DocumentReference custRef = _db
             .collection('condition_customers')
             .doc(customerPhone);
         batch.update(custRef, {
-          "totalCourierDue": FieldValue.increment(-refundAmt),
+          "totalCourierDue": FieldValue.increment(deltaCourierDue),
         });
 
-        // Update Customer Sub-Order
-        DocumentReference subOrderRef = custRef
-            .collection('orders')
-            .doc(invoiceId);
-        batch.set(subOrderRef, {
+        batch.set(custRef.collection('orders').doc(invoiceId), {
           "grandTotal": newGT,
           "courierDue": newCourierDue,
-          "status":
-              newCourierDue <= 0 ? 'returned_completed' : 'returned_partial',
+          "status": newCourierDue <= 1 ? 'completed' : 'on_delivery',
         }, SetOptions(merge: true));
       }
 
-      // H. Commit
-      await batch.commit();
+      // G. BUG FIX: SEPARATE DEDUCTIONS (SALES) AND ADDITIONS (RETURNS TO BUCKETS)
+      List<Map<String, dynamic>> salesDeductions = [];
+      List<Map<String, dynamic>> returnAdditions = [];
 
-      // I. Stock Restoration
-      for (var pid in returnQuantities.keys) {
-        int qty = returnQuantities[pid]!;
-        if (qty > 0) {
-          String dest = returnDestinations[pid] ?? "Local";
-          var itemInfo = orderItems.firstWhere(
-            (e) => toStr(e['productId']) == pid,
-          );
-          double cost = toDouble(itemInfo['costRate']);
+      Map<String, int> oldQtyMap = {
+        for (var e in (currentOrder['items'] ?? []))
+          toStr(e['productId']): toInt(e['qty']),
+      };
+      Map<String, int> newQtyMap = {
+        for (var e in finalItemsList) toStr(e['productId']): toInt(e['qty']),
+      };
 
-          await productCtrl.addMixedStock(
-            productId: int.tryParse(pid) ?? 0,
-            localQty: dest == "Local" ? qty : 0,
-            airQty: dest == "Air" ? qty : 0,
-            seaQty: dest == "Sea" ? qty : 0,
-            localUnitPrice: cost,
-          );
+      Set<String> allPids = {...oldQtyMap.keys, ...newQtyMap.keys};
+      for (var pid in allPids) {
+        if (pid.isEmpty) continue;
+        int oldQ = oldQtyMap[pid] ?? 0;
+        int newQ = newQtyMap[pid] ?? 0;
+        int diff = newQ - oldQ;
+
+        int safePidInt = int.tryParse(pid) ?? 0;
+        if (safePidInt > 0) {
+          if (diff > 0) {
+            salesDeductions.add({'id': safePidInt, 'qty': diff});
+          } else if (diff < 0) {
+            int returnQty = diff.abs();
+            String dest = returnDestinations[pid] ?? "Local";
+
+            double cRate = 0.0;
+            var itemInFinal = finalItemsList.firstWhere(
+              (e) => toStr(e['productId']) == pid,
+              orElse: () => <String, dynamic>{},
+            );
+            if (itemInFinal.isEmpty) {
+              List rawItems = currentOrder['items'] ?? [];
+              var oldItem = rawItems.firstWhere(
+                (e) => toStr(e['productId'] ?? e['id']) == pid,
+                orElse: () => {},
+              );
+              cRate = toDouble(oldItem['costRate']);
+            } else {
+              cRate = toDouble(itemInFinal['costRate']);
+            }
+
+            returnAdditions.add({
+              'id': safePidInt,
+              'sea_qty': dest == 'Sea' ? returnQty : 0,
+              'air_qty': dest == 'Air' ? returnQty : 0,
+              'local_qty': dest == 'Local' ? returnQty : 0,
+              'local_price': cRate,
+            });
+          }
         }
       }
 
+      if (salesDeductions.isNotEmpty) {
+        bool restockSuccess = await productCtrl.updateStockBulk(
+          salesDeductions,
+        );
+        if (!restockSuccess) {
+          throw "Failed to deduct extra stock from general inventory.";
+        }
+      }
+
+      if (returnAdditions.isNotEmpty) {
+        bool addSuccess = await productCtrl.bulkAddStockMixed(returnAdditions);
+        if (!addSuccess) {
+          throw "Failed to restore returned items to their stock buckets.";
+        }
+      }
+
+      // H. Commit to Database
+      await batch.commit();
+
       Get.back();
       Get.snackbar(
-        "Return Processed",
-        "Adjusted Bill: ৳${newGT.toStringAsFixed(0)}\nRecorded Paid: ৳${newTotalPaid.toStringAsFixed(0)}",
+        "Invoice Updated Successfully",
+        "New Total: ৳${newGT.toStringAsFixed(0)} | Paid: ৳${realPaidAmount.toStringAsFixed(0)}",
         backgroundColor: Colors.green,
         colorText: Colors.white,
         duration: const Duration(seconds: 4),
@@ -510,8 +651,9 @@ class SaleReturnController extends GetxController {
       // Cleanup
       orderData.value = null;
       searchController.clear();
-      orderItems.clear();
+      modifiedItems.clear();
       multipleSearchResults.clear();
+      returnDestinations.clear();
     } catch (e) {
       Get.snackbar(
         "Failure",

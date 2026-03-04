@@ -1441,7 +1441,7 @@ class ConditionSalesController extends GetxController {
     }
     isLoading.value = true;
     try {
-      WriteBatch batch = _db.batch(); 
+      WriteBatch batch = _db.batch();
       DocumentReference masterRef = _db
           .collection('sales_orders')
           .doc(invoiceId);
@@ -1477,4 +1477,142 @@ class ConditionSalesController extends GetxController {
       isLoading.value = false;
     }
   }
-} 
+  // ==============================================================================
+  // 2. DELETE CONDITION SALE
+  // ==============================================================================
+
+  Future<void> deleteConditionSale(ConditionOrderModel order) async {
+    isLoading.value = true;
+    try {
+      String invoiceId = order.invoiceId;
+
+      // 1. Fetch the latest Master Document
+      DocumentSnapshot masterSnap =
+          await _db.collection('sales_orders').doc(invoiceId).get();
+
+      if (!masterSnap.exists) {
+        Get.snackbar("Error", "Order not found in database.");
+        isLoading.value = false;
+        return;
+      }
+
+      Map<String, dynamic> data = masterSnap.data() as Map<String, dynamic>;
+      List<dynamic> items = data['items'] ?? [];
+
+      // Calculate exactly how much is due on the courier ledger right now
+      double currentCourierDue =
+          double.tryParse(data['courierDue']?.toString() ?? '0') ?? 0.0;
+      String courierName = data['courierName'] ?? "";
+      String customerPhone = data['customerPhone'] ?? "";
+
+      // 2. RESTORE STOCK (To Sea Stock)
+      List<Map<String, dynamic>> returnAdditions = [];
+      for (var item in items) {
+        // Safe parsing for Product ID & Qty
+        String pIdStr = (item['productId'] ?? item['id'] ?? '').toString();
+        int safePidInt = int.tryParse(pIdStr) ?? 0;
+        int qty = (item['qty'] as num?)?.toInt() ?? 0;
+        double cRate = (item['costRate'] as num?)?.toDouble() ?? 0.0;
+
+        if (safePidInt > 0 && qty > 0) {
+          returnAdditions.add({
+            'id': safePidInt,
+            'sea_qty': qty, // Adding back to Sea Stock
+            'air_qty': 0,
+            'local_qty': 0,
+            'local_price': cRate,
+          });
+        }
+      }
+
+      if (returnAdditions.isNotEmpty) {
+        bool restockSuccess = await productCtrl.bulkAddStockMixed(
+          returnAdditions,
+        );
+        if (!restockSuccess) {
+          Get.snackbar(
+            "Error",
+            "Failed to restore stock to SEA. Deletion aborted.",
+          );
+          isLoading.value = false;
+          return;
+        }
+      }
+
+      // 3. FIREBASE BATCH DELETIONS & LEDGER ADJUSTMENTS
+      WriteBatch batch = _db.batch();
+
+      // A. Adjust Courier Ledger (Only deduct what is currently due)
+      if (courierName.isNotEmpty && currentCourierDue > 0) {
+        DocumentReference courierRef = _db
+            .collection('courier_ledgers')
+            .doc(courierName);
+        batch.update(courierRef, {
+          "totalDue": FieldValue.increment(-currentCourierDue),
+          "lastUpdated": FieldValue.serverTimestamp(),
+        });
+      }
+
+      // B. Adjust Condition Customer Ledger & Delete Sub-Order
+      if (customerPhone.isNotEmpty) {
+        DocumentReference custRef = _db
+            .collection('condition_customers')
+            .doc(customerPhone);
+
+        // Adjust the customer's total courier due
+        if (currentCourierDue > 0) {
+          batch.update(custRef, {
+            "totalCourierDue": FieldValue.increment(-currentCourierDue),
+          });
+        }
+
+        // Delete the order from the customer's sub-collection
+        DocumentReference subOrderRef = custRef
+            .collection('orders')
+            .doc(invoiceId);
+        batch.delete(subOrderRef);
+      }
+
+      // C. Delete the Master Order Document
+      batch.delete(masterSnap.reference);
+
+      // D. Delete All Associated Daily Sales (Including Partial Recoveries)
+      QuerySnapshot dailySnaps =
+          await _db
+              .collection('daily_sales')
+              .where('transactionId', isEqualTo: invoiceId)
+              .get();
+
+      for (var doc in dailySnaps.docs) {
+        batch.delete(doc.reference);
+      }
+
+      // Commit the entire batch atomically
+      await batch.commit();
+
+      // 4. Update UI Automatically
+      allOrders.removeWhere((o) => o.invoiceId == invoiceId);
+      _applyClientSideFilters();
+
+      // If called from a dialog, this will close it
+      if (Get.isDialogOpen ?? false) Get.back();
+
+      Get.snackbar(
+        "Deleted Successfully",
+        "Condition Sale removed & Stock restored to SEA.",
+        backgroundColor: Colors.green,
+        colorText: Colors.white,
+      );
+    } catch (e) {
+      print("Delete Condition Error: $e");
+      Get.snackbar(
+        "Error",
+        "Could not delete order: $e",
+        backgroundColor: Colors.redAccent,
+        colorText: Colors.white,
+      );
+    } finally {
+      isLoading.value = false;
+    }
+  }
+}
