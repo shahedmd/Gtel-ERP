@@ -23,4 +23,6 @@ abstract class Routes {
   static const String PRODUCTOVERVIEW = '/productoverview';
   static const String PURCHASE = '/purchase';
   static const String ORDERLIST = '/orderlist';
+  static const String LOCALPURCHASE = '/localpurchase';
 }
+ 

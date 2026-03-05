@@ -1,8 +1,12 @@
 // ignore_for_file: deprecated_member_use, avoid_print
 
+import 'dart:async'; // Added for Timer
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:gtel_erp/Stock/controller.dart';
+import 'package:gtel_erp/Web%20Screen/Debator%20Finance/debatorcontroller.dart';
+import 'package:gtel_erp/Web%20Screen/Expenses/dailycontroller.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -13,16 +17,24 @@ enum HistoryFilter { daily, monthly, yearly, custom }
 class GlobalPurchaseHistoryController extends GetxController {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
+  // --- DEPENDENCIES ---
+  ProductController get stockCtrl => Get.find<ProductController>();
+  DebatorController get debtorCtrl => Get.find<DebatorController>();
+  DailyExpensesController get dailyExpenseCtrl =>
+      Get.isRegistered<DailyExpensesController>()
+          ? Get.find<DailyExpensesController>()
+          : Get.put(DailyExpensesController());
+
   // --- OBSERVABLES ---
   var purchaseList = <Map<String, dynamic>>[].obs;
   var isLoading = false.obs;
-  var isPdfLoading = false.obs; // For Bulk PDF
-  var isSinglePdfLoading = false.obs; // For Single Invoice PDF
+  var isPdfLoading = false.obs;
+  var isSinglePdfLoading = false.obs;
 
-  // Name Cache (To store Debtor Names so we don't re-fetch them constantly)
+  // Name Cache
   var debtorNameCache = <String, String>{}.obs;
 
-  // Filter State
+  // --- FILTER & DATE STATE ---
   var activeFilter = HistoryFilter.monthly.obs;
   var dateRange =
       DateTimeRange(
@@ -32,7 +44,15 @@ class GlobalPurchaseHistoryController extends GetxController {
 
   var totalAmount = 0.0.obs;
 
-  // Pagination
+  // ========================================================
+  // SUPPLIER SEARCH STATE
+  // ========================================================
+  var selectedDebtorId = Rx<String?>(null);
+  var isSearchingSupplier = false.obs;
+  var searchedSuppliers = <Map<String, dynamic>>[].obs;
+  Timer? _searchDebounce;
+
+  // Pagination for Purchases
   final int _pageSize = 20;
   DocumentSnapshot? _lastDocument;
   var hasMore = true.obs;
@@ -45,7 +65,96 @@ class GlobalPurchaseHistoryController extends GetxController {
     applyFilter(HistoryFilter.monthly);
   }
 
-  // --- 1. FILTER LOGIC ---
+  // ========================================================
+  // 1. ADVANCED GLOBAL SEARCH LOGIC (Cloned from DebatorController)
+  // ========================================================
+
+  void searchSupplier(String queryText) {
+    if (_searchDebounce?.isActive ?? false) _searchDebounce!.cancel();
+
+    if (queryText.trim().isEmpty) {
+      isSearchingSupplier.value = false;
+      searchedSuppliers.clear();
+      return;
+    }
+
+    _searchDebounce = Timer(const Duration(milliseconds: 500), () {
+      _performSupplierSearch(queryText);
+    });
+  }
+
+  Future<void> _performSupplierSearch(String queryText) async {
+    isSearchingSupplier.value = true;
+
+    try {
+      String qLower = queryText.trim().toLowerCase();
+      Map<String, Map<String, dynamic>> results = {};
+
+      List<String> searchTerms = qLower.split(RegExp(r'\s+'));
+      String primaryTerm = searchTerms.first;
+
+      if (primaryTerm.isNotEmpty) {
+        // Query database using the exact same keyword array logic as your debtor controller
+        var kwSnap =
+            await _db
+                .collection('debatorbody')
+                .where('searchKeywords', arrayContains: primaryTerm)
+                .limit(50)
+                .get();
+
+        for (var doc in kwSnap.docs) {
+          results[doc.id] = {...doc.data(), 'id': doc.id};
+        }
+      }
+
+      List<Map<String, dynamic>> finalMatches = [];
+
+      for (var d in results.values) {
+        String name = d['name']?.toString() ?? 'Unknown';
+        String phone = d['phone']?.toString() ?? '';
+        String nid = d['nid']?.toString() ?? '';
+        String address = d['address']?.toString() ?? '';
+        String des = d['des']?.toString() ?? '';
+
+        // Combine string exactly like DebatorController
+        String combinedString = "$name $phone $nid $address $des".toLowerCase();
+
+        bool isMatch = true;
+        for (String term in searchTerms) {
+          if (!combinedString.contains(term)) {
+            isMatch = false;
+            break;
+          }
+        }
+
+        if (isMatch) {
+          finalMatches.add({
+            'id': d['id'],
+            'name': name,
+            'phone': phone,
+            'address': address,
+          });
+        }
+      }
+
+      searchedSuppliers.value = finalMatches;
+    } catch (e) {
+      print("Supplier Search Error: $e");
+    } finally {
+      isSearchingSupplier.value = false;
+    }
+  }
+
+  void setSupplierFilter(String? debtorId) {
+    selectedDebtorId.value = debtorId;
+    searchedSuppliers.clear(); // Clear search UI dropdown
+    _resetPagination();
+    fetchPurchases();
+  }
+
+  // ========================================================
+  // 2. FILTER LOGIC
+  // ========================================================
   Future<void> applyFilter(HistoryFilter filter) async {
     activeFilter.value = filter;
     DateTime now = DateTime.now();
@@ -91,18 +200,36 @@ class GlobalPurchaseHistoryController extends GetxController {
       }
     }
 
-    _pageStartStack.clear();
-    _lastDocument = null;
-    isFirstPage.value = true;
+    _resetPagination();
     fetchPurchases();
   }
 
-  // --- 2. DATA FETCHING ---
+  void _resetPagination() {
+    _pageStartStack.clear();
+    _lastDocument = null;
+    isFirstPage.value = true;
+  }
+
+  // ========================================================
+  // 3. DATA FETCHING (PURCHASES)
+  // ========================================================
   Future<void> fetchPurchases({bool next = false, bool prev = false}) async {
     isLoading.value = true;
     try {
-      Query query = _db
-          .collectionGroup('purchases')
+      Query query;
+
+      // Filter by supplier if selected
+      if (selectedDebtorId.value != null &&
+          selectedDebtorId.value!.isNotEmpty) {
+        query = _db
+            .collection('debatorbody')
+            .doc(selectedDebtorId.value)
+            .collection('purchases');
+      } else {
+        query = _db.collectionGroup('purchases');
+      }
+
+      query = query
           .where('date', isGreaterThanOrEqualTo: dateRange.value.start)
           .where('date', isLessThanOrEqualTo: dateRange.value.end)
           .orderBy('date', descending: true)
@@ -126,7 +253,6 @@ class GlobalPurchaseHistoryController extends GetxController {
       if (snap.docs.isNotEmpty) {
         _lastDocument = snap.docs.last;
         hasMore.value = snap.docs.length == _pageSize;
-
         List<Map<String, dynamic>> tempList = [];
 
         for (var doc in snap.docs) {
@@ -134,15 +260,12 @@ class GlobalPurchaseHistoryController extends GetxController {
           data['id'] = doc.id;
           data['snapshot'] = doc;
 
-          // EXTRACT DEBTOR ID from path: /debatorbody/{debtorId}/purchases/{docId}
           String debtorId = doc.reference.parent.parent?.id ?? 'Unknown';
           data['debtorId'] = debtorId;
 
-          // Pre-fetch name if not cached
           if (!debtorNameCache.containsKey(debtorId)) {
-            _fetchDebtorName(debtorId);
+            await _fetchDebtorName(debtorId);
           }
-
           tempList.add(data);
         }
         purchaseList.value = tempList;
@@ -155,13 +278,12 @@ class GlobalPurchaseHistoryController extends GetxController {
         }
       }
     } catch (e) {
-      print("Error: $e");
+      print("Error fetching purchases: $e");
     } finally {
       isLoading.value = false;
     }
   }
 
-  // Helper to fetch Name and cache it
   Future<void> _fetchDebtorName(String id) async {
     try {
       if (id == 'Unknown') return;
@@ -191,7 +313,166 @@ class GlobalPurchaseHistoryController extends GetxController {
   void nextPage() => fetchPurchases(next: true);
   void prevPage() => fetchPurchases(prev: true);
 
-  // --- 3. BULK REPORT PDF ---
+  // ========================================================
+  // 4. MAKE PAYMENT
+  // ========================================================
+  Future<void> makePayment({
+    required String debtorId,
+    required String debtorName,
+    required double amount,
+    required String method,
+    String? note,
+    DateTime? customDate,
+  }) async {
+    if (amount <= 0) return;
+    isLoading.value = true;
+    try {
+      WriteBatch batch = _db.batch();
+      DocumentReference histRef =
+          _db
+              .collection('debatorbody')
+              .doc(debtorId)
+              .collection('purchases')
+              .doc();
+
+      dynamic dateField =
+          customDate != null
+              ? Timestamp.fromDate(customDate)
+              : FieldValue.serverTimestamp();
+
+      batch.set(histRef, {
+        'date': dateField,
+        'type': 'payment',
+        'amount': amount,
+        'method': method,
+        'note': note,
+        'isAdjustment': false,
+      });
+
+      DocumentReference debtorRef = _db.collection('debatorbody').doc(debtorId);
+      batch.update(debtorRef, {'purchaseDue': FieldValue.increment(-amount)});
+
+      await batch.commit();
+
+      try {
+        await dailyExpenseCtrl.addDailyExpense(
+          "Payment to $debtorName",
+          amount.toInt(),
+          note: "Debtor Payment. Method: $method. ${note ?? ''}",
+          date: customDate ?? DateTime.now(),
+        );
+      } catch (e) {
+        print("Expense Auto-add failed: $e");
+      }
+
+      await fetchPurchases();
+      if (Get.isDialogOpen ?? false) Get.back();
+      Get.snackbar("Success", "Payment Recorded.");
+    } catch (e) {
+      Get.snackbar(
+        "Error",
+        e.toString(),
+        backgroundColor: Colors.redAccent,
+        colorText: Colors.white,
+      );
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+  // ========================================================
+  // 5. EDIT PURCHASE
+  // ========================================================
+  Future<void> editPurchase({
+    required String debtorId,
+    required String purchaseId,
+    required List<Map<String, dynamic>> oldItems,
+    required List<Map<String, dynamic>> newItems,
+    required double oldTotal,
+    required double newTotal,
+    String? note,
+    DateTime? customDate,
+  }) async {
+    isLoading.value = true;
+    try {
+      WriteBatch batch = _db.batch();
+      DocumentReference purchaseRef = _db
+          .collection('debatorbody')
+          .doc(debtorId)
+          .collection('purchases')
+          .doc(purchaseId);
+
+      batch.update(purchaseRef, {
+        'items': newItems,
+        'totalAmount': newTotal,
+        'note': note,
+        if (customDate != null) 'date': Timestamp.fromDate(customDate),
+      });
+
+      double difference = newTotal - oldTotal;
+      if (difference != 0) {
+        DocumentReference debtorRef = _db
+            .collection('debatorbody')
+            .doc(debtorId);
+        batch.update(debtorRef, {
+          'purchaseDue': FieldValue.increment(difference),
+        });
+      }
+
+      await batch.commit();
+
+      List<Future> stockUpdates = [];
+
+      for (var item in oldItems) {
+        int pid = int.tryParse(item['productId'].toString()) ?? 0;
+        String loc = item['location'] ?? 'Local';
+        int qty = item['qty'] ?? 0;
+        stockUpdates.add(
+          stockCtrl.addMixedStock(
+            productId: pid,
+            localQty: loc == "Local" ? -qty : 0,
+            airQty: loc == "Air" ? -qty : 0,
+            seaQty: loc == "Sea" ? -qty : 0,
+            localUnitPrice: item['cost'] ?? 0.0,
+          ),
+        );
+      }
+
+      for (var item in newItems) {
+        int pid = int.tryParse(item['productId'].toString()) ?? 0;
+        String loc = item['location'] ?? 'Local';
+        int qty = item['qty'] ?? 0;
+        stockUpdates.add(
+          stockCtrl.addMixedStock(
+            productId: pid,
+            localQty: loc == "Local" ? qty : 0,
+            airQty: loc == "Air" ? qty : 0,
+            seaQty: loc == "Sea" ? qty : 0,
+            localUnitPrice: item['cost'] ?? 0.0,
+          ),
+        );
+      }
+
+      await Future.wait(stockUpdates);
+
+      await fetchPurchases();
+      if (Get.isDialogOpen ?? false) Get.back();
+      Get.snackbar("Success", "Purchase Invoice successfully updated.");
+    } catch (e) {
+      Get.snackbar(
+        "Error",
+        "Update failed: $e",
+        backgroundColor: Colors.redAccent,
+        colorText: Colors.white,
+      );
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+  // ========================================================
+  // 6. BULK PDF LOGIC
+  // ========================================================
   Future<void> downloadBulkPdf() async {
     isPdfLoading.value = true;
     try {
@@ -199,9 +480,16 @@ class GlobalPurchaseHistoryController extends GetxController {
       final font = await PdfGoogleFonts.robotoRegular();
       final bold = await PdfGoogleFonts.robotoBold();
 
+      Query query =
+          (selectedDebtorId.value != null && selectedDebtorId.value!.isNotEmpty)
+              ? _db
+                  .collection('debatorbody')
+                  .doc(selectedDebtorId.value)
+                  .collection('purchases')
+              : _db.collectionGroup('purchases');
+
       QuerySnapshot allSnap =
-          await _db
-              .collectionGroup('purchases')
+          await query
               .where('date', isGreaterThanOrEqualTo: dateRange.value.start)
               .where('date', isLessThanOrEqualTo: dateRange.value.end)
               .orderBy('date', descending: true)
@@ -211,10 +499,9 @@ class GlobalPurchaseHistoryController extends GetxController {
       final dataList = <List<String>>[];
       double totalPeriod = 0.0;
 
-      for (var doc in allSnap.docs) {
-        var item = doc.data() as Map<String, dynamic>;
-        // Get name synchronously if cached, otherwise "Loading..."
-        String debtorId = doc.reference.parent.parent?.id ?? '';
+      for (var docSnap in allSnap.docs) {
+        var item = docSnap.data() as Map<String, dynamic>;
+        String debtorId = docSnap.reference.parent.parent?.id ?? '';
         String debtorName = debtorNameCache[debtorId] ?? "Debtor #$debtorId";
 
         DateTime date = (item['date'] as Timestamp).toDate();
@@ -276,7 +563,6 @@ class GlobalPurchaseHistoryController extends GetxController {
               ],
         ),
       );
-
       await Printing.layoutPdf(onLayout: (f) => doc.save());
     } catch (e) {
       Get.snackbar("Error", "PDF Failed: $e");
@@ -285,7 +571,9 @@ class GlobalPurchaseHistoryController extends GetxController {
     }
   }
 
-  // --- 4. SINGLE INVOICE PDF (Like Debtor Page) ---
+  // ========================================================
+  // 7. SINGLE INVOICE PDF
+  // ========================================================
   Future<void> generateSingleInvoicePdf(Map<String, dynamic> data) async {
     isSinglePdfLoading.value = true;
     try {
@@ -390,7 +678,6 @@ class GlobalPurchaseHistoryController extends GetxController {
           },
         ),
       );
-
       await Printing.layoutPdf(onLayout: (format) => pdf.save());
     } catch (e) {
       Get.snackbar("Error", e.toString());

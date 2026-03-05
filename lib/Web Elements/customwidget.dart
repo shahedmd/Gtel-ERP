@@ -214,6 +214,13 @@ class SidebarMenu extends StatelessWidget {
 
                   isSubItem: false,
                 ),
+                _NavTile(
+                  id: Routes.LOCALPURCHASE,
+                  title: "LOCAL PURCHASE",
+                  icon: FontAwesomeIcons.productHunt,
+
+                  isSubItem: false,
+                ),
                 // --- FINANCE ---
                 _NavGroup(
                   title: "Finance",

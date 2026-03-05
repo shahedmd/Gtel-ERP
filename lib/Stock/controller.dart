@@ -13,9 +13,6 @@ class ProductController extends GetxController {
   // ==========================================
   static const baseUrl = 'https://dart-server-1zun.onrender.com';
 
-  // ==========================================
-  // STATE VARIABLES
-  // ==========================================
   final RxList<Product> allProducts = <Product>[].obs;
   // NEW: Internal list to hold ALL data when sorting by loss
   List<Product> _masterList = [];
