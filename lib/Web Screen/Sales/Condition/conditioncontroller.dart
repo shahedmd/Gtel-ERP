@@ -1,4 +1,4 @@
-// ignore_for_file: deprecated_member_use, avoid_print, empty_catches
+// ignore_for_file: deprecated_member_use, avoid_print, empty_catches, prefer_interpolation_to_compose_strings
 
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -25,7 +25,6 @@ class ConditionSalesController extends GetxController {
       <ConditionOrderModel>[].obs;
   final RxBool isLoading = false.obs;
 
-  // --- PAGINATION & FILTER STATE ---
   final int _limit = 20;
   DocumentSnapshot? _lastDocument;
   final RxBool hasMore = true.obs;
@@ -78,6 +77,8 @@ class ConditionSalesController extends GetxController {
     }
   }
 
+  // ✨ FIX 1: By removing 'isCondition' from the database query and doing it in Dart,
+  // we bypass the missing index error that was returning 0 results.
   Future<void> _performServerSideSearch(String query) async {
     isLoading.value = true;
     allOrders.clear();
@@ -90,7 +91,6 @@ class ConditionSalesController extends GetxController {
           await _db
               .collection('sales_orders')
               .where('invoiceId', isEqualTo: query.trim())
-              .where('isCondition', isEqualTo: true)
               .get();
 
       if (snap.docs.isEmpty) {
@@ -98,7 +98,6 @@ class ConditionSalesController extends GetxController {
             await _db
                 .collection('sales_orders')
                 .where('customerPhone', isEqualTo: query.trim())
-                .where('isCondition', isEqualTo: true)
                 .orderBy('timestamp', descending: true)
                 .limit(20)
                 .get();
@@ -109,14 +108,19 @@ class ConditionSalesController extends GetxController {
             await _db
                 .collection('sales_orders')
                 .where('challanNo', isEqualTo: query.trim())
-                .where('isCondition', isEqualTo: true)
                 .get();
       }
 
-      allOrders.value =
-          snap.docs
-              .map((doc) => ConditionOrderModel.fromFirestore(doc))
-              .toList();
+      // Filter locally in Dart to avoid Composite Index crash
+      List<ConditionOrderModel> tempOrders = [];
+      for (var doc in snap.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        if (data['isCondition'] == true) {
+          tempOrders.add(ConditionOrderModel.fromFirestore(doc));
+        }
+      }
+
+      allOrders.value = tempOrders;
       filteredOrders.value = allOrders;
       _calculateStats();
     } catch (e) {
@@ -177,6 +181,7 @@ class ConditionSalesController extends GetxController {
     }
   }
 
+  // ✨ FIX 2: Bypassing the Composite Index trap on Date Filters.
   Future<void> fetchReportData() async {
     isLoading.value = true;
     allOrders.clear();
@@ -213,10 +218,10 @@ class ConditionSalesController extends GetxController {
     }
 
     try {
+      // ONLY querying the timestamp bypasses the index error.
       QuerySnapshot snap =
           await _db
               .collection('sales_orders')
-              .where('isCondition', isEqualTo: true)
               .where(
                 'timestamp',
                 isGreaterThanOrEqualTo: Timestamp.fromDate(start),
@@ -225,10 +230,16 @@ class ConditionSalesController extends GetxController {
               .orderBy('timestamp', descending: true)
               .get();
 
-      allOrders.value =
-          snap.docs
-              .map((doc) => ConditionOrderModel.fromFirestore(doc))
-              .toList();
+      // Filter locally in Dart to only show condition sales
+      List<ConditionOrderModel> tempOrders = [];
+      for (var doc in snap.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        if (data['isCondition'] == true) {
+          tempOrders.add(ConditionOrderModel.fromFirestore(doc));
+        }
+      }
+
+      allOrders.value = tempOrders;
       _applyClientSideFilters();
       _calculateStats();
     } catch (e) {
@@ -250,22 +261,49 @@ class ConditionSalesController extends GetxController {
     _calculateStats();
   }
 
-  void _calculateStats() {
-    double total = 0.0;
-    Map<String, double> cBalances = {};
-    for (var order in filteredOrders) {
-      if (order.courierDue > 0) {
-        total += order.courierDue;
-        double due = double.parse(order.courierDue.toStringAsFixed(2));
-        if (cBalances.containsKey(order.courierName)) {
-          cBalances[order.courierName] = cBalances[order.courierName]! + due;
-        } else {
-          cBalances[order.courierName] = due;
+  void _calculateStats() async {
+    // 1. If looking at "All Time", fetch the real total from courier ledgers instantly!
+    if (selectedFilter.value == "All Time" && searchQuery.value.isEmpty) {
+      try {
+        final snap = await _db.collection('courier_ledgers').get();
+        double total = 0.0;
+        Map<String, double> cBalances = {};
+
+        for (var doc in snap.docs) {
+          double due =
+              double.tryParse(doc.data()['totalDue']?.toString() ?? '0') ?? 0.0;
+          if (due > 0) {
+            cBalances[doc.id] = due;
+            total += due;
+          }
         }
+
+        courierBalances.value = cBalances;
+        totalPendingAmount.value = total;
+      } catch (e) {
+        print("Global Stat Error: $e");
       }
     }
-    totalPendingAmount.value = total;
-    courierBalances.value = cBalances;
+    // 2. If filtering or searching, sum up the currently loaded items
+    else {
+      double total = 0.0;
+      Map<String, double> cBalances = {};
+
+      for (var order in filteredOrders) {
+        if (order.courierDue > 0) {
+          total += order.courierDue;
+          double due = double.parse(order.courierDue.toStringAsFixed(2));
+          if (cBalances.containsKey(order.courierName)) {
+            cBalances[order.courierName] = cBalances[order.courierName]! + due;
+          } else {
+            cBalances[order.courierName] = due;
+          }
+        }
+      }
+
+      totalPendingAmount.value = total;
+      courierBalances.value = cBalances;
+    }
   }
 
   Future<void> receiveConditionPayment({
@@ -295,7 +333,6 @@ class ConditionSalesController extends GetxController {
       Map<String, dynamic> paymentDetails = data['paymentDetails'] ?? {};
       Map<String, dynamic> soldBy = data['soldBy'] ?? {};
 
-      // Parse existing payment variables carefully
       double currentPaid =
           double.tryParse(paymentDetails['paidForInvoice']?.toString() ?? '') ??
           double.tryParse(paymentDetails['actualReceived']?.toString() ?? '') ??
@@ -313,7 +350,6 @@ class ConditionSalesController extends GetxController {
       double currentNagad =
           double.tryParse(paymentDetails['nagad']?.toString() ?? '') ?? 0.0;
 
-      // Determine payment distribution
       String mtd = method.toLowerCase();
       double addBank = mtd.contains('bank') ? receivedAmount : 0;
       double addBkash = mtd.contains('bkash') ? receivedAmount : 0;
@@ -330,7 +366,6 @@ class ConditionSalesController extends GetxController {
           double.parse(data['courierDue'].toString()) - receivedAmount;
       if (newDue < 0) newDue = 0;
 
-      // 1. UPDATE SALES_ORDERS DOCUMENT (Following your provided structure)
       Map<String, dynamic> orderUpdateData = {
         "courierDue": newDue,
         "paymentDetails.paidForInvoice": newPaidTotal,
@@ -365,7 +400,6 @@ class ConditionSalesController extends GetxController {
 
       batch.update(orderRef, orderUpdateData);
 
-      // 2. UPDATE COURIER LEDGER
       DocumentReference courierRef = _db
           .collection('courier_ledgers')
           .doc(order.courierName);
@@ -374,7 +408,6 @@ class ConditionSalesController extends GetxController {
         "lastUpdated": FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
-      // 3. UPDATE CUSTOMER LEDGER
       DocumentReference custRef = _db
           .collection('condition_customers')
           .doc(order.customerPhone);
@@ -382,8 +415,6 @@ class ConditionSalesController extends GetxController {
         "totalCourierDue": FieldValue.increment(-receivedAmount),
       });
 
-      // 4. CREATE NEW DAILY SALES DOCUMENT (Replaces dailyCtrl.addSale so it commits atomically)
-      // *Note: Adjust 'daily_sales' if your collection name is different (e.g. 'sales')
       DocumentReference dailySaleRef = _db.collection('daily_sales').doc();
       batch.set(dailySaleRef, {
         "amount": receivedAmount,
@@ -409,12 +440,11 @@ class ConditionSalesController extends GetxController {
         "soldByName": soldBy['name'] ?? "",
         "soldByNumber": soldBy['phone'] ?? "",
         "soldByUid": soldBy['uid'] ?? "",
-        "source": "condition_recovery", // Marks transaction source clearly
+        "source": "condition_recovery",
         "timestamp": FieldValue.serverTimestamp(),
         "transactionId": order.invoiceId,
       });
 
-      // Commit all changes atomically!
       await batch.commit();
 
       if (selectedFilter.value == "All Time") {
@@ -449,7 +479,6 @@ class ConditionSalesController extends GetxController {
       List<Map<String, dynamic>> items =
           rawItems.map((e) => e as Map<String, dynamic>).toList();
 
-      // --- NEW: EXTRACT INVOICE DATE ---
       DateTime invoiceDate = DateTime.now();
       if (data['timestamp'] is Timestamp) {
         invoiceDate = (data['timestamp'] as Timestamp).toDate();
@@ -461,23 +490,16 @@ class ConditionSalesController extends GetxController {
         }
       }
 
-      // 1. Get Current Payment Details
       Map<String, dynamic> paymentMap = Map<String, dynamic>.from(
         data['paymentDetails'] ?? {},
       );
 
-      // 2. The `paymentDetails` map from Firestore already contains the fully updated
-      // paid amounts (including any courier collections added later).
-      // We DO NOT need to loop through `collectionHistory` and add them again.
-
-      // 3. Use Current Database Due and Discount
       double realDue =
           double.tryParse(data['courierDue']?.toString() ?? '0') ?? 0.0;
       paymentMap['due'] = realDue;
 
       double discountVal = (data['discount'] as num?)?.toDouble() ?? 0.0;
 
-      // --- Other Info ---
       double oldDueSnap =
           double.tryParse(data['snapshotOldDue']?.toString() ?? "0") ?? 0.0;
       double runningDueSnap =
@@ -500,14 +522,13 @@ class ConditionSalesController extends GetxController {
         }
       }
 
-      // Generate PDF using the Finalized A4 Layout
       await _generatePdf(
         order.invoiceId,
         order.customerName,
         order.customerPhone,
         paymentMap,
         items,
-        invoiceDate: invoiceDate, // Pass the extracted date here
+        invoiceDate: invoiceDate,
         isCondition: true,
         challan: order.challanNo,
         address: address,
@@ -528,16 +549,13 @@ class ConditionSalesController extends GetxController {
     }
   }
 
-  // ==========================================
-  // FINALIZED PDF GENERATOR (A4 Layout)
-  // ==========================================
   Future<void> _generatePdf(
     String invId,
     String name,
     String phone,
     Map<String, dynamic> payMap,
     List<Map<String, dynamic>> items, {
-    required DateTime invoiceDate, // <--- Add invoiceDate parameter
+    required DateTime invoiceDate,
     bool isCondition = false,
     String challan = "",
     String address = "",
@@ -557,7 +575,6 @@ class ConditionSalesController extends GetxController {
     final regularFont = await PdfGoogleFonts.robotoRegular();
     final italicFont = await PdfGoogleFonts.robotoItalic();
 
-    // Calculate Paid Amounts
     double paidOld = double.tryParse(payMap['paidForOldDue'].toString()) ?? 0.0;
     double paidPrevRun =
         double.tryParse(payMap['paidForPrevRunning'].toString()) ?? 0.0;
@@ -565,7 +582,6 @@ class ConditionSalesController extends GetxController {
     double totalPaidForInvoice =
         double.tryParse(payMap['paidForInvoice']?.toString() ?? '0') ?? 0.0;
 
-    // Detect Payment Methods for String Generation
     List<String> methodsUsed = [];
     if ((double.tryParse(payMap['cash']?.toString() ?? '0') ?? 0) > 0) {
       methodsUsed.add('Cash');
@@ -609,9 +625,6 @@ class ConditionSalesController extends GetxController {
       ),
     );
 
-    // ---------------------------------------------------------
-    // PAGE 1: MAIN INVOICE
-    // ---------------------------------------------------------
     pdf.addPage(
       pw.MultiPage(
         pageTheme: pageTheme,
@@ -630,7 +643,7 @@ class ConditionSalesController extends GetxController {
               null,
               "",
               paymentMethodsStr,
-              invoiceDate, // Pass original invoice date
+              invoiceDate,
             ),
             _buildNewCustomerBox(
               name,
@@ -655,11 +668,7 @@ class ConditionSalesController extends GetxController {
             pw.SizedBox(height: 5),
             _buildNewDues(totalPreviousBalance, netTotalDue, regularFont),
             if (invDue <= 0 && !isCondition)
-              _buildPaidStamp(
-                boldFont,
-                regularFont,
-                invoiceDate,
-              ), // Pass original invoice date
+              _buildPaidStamp(boldFont, regularFont, invoiceDate),
             if (invDue > 0 || isCondition) pw.SizedBox(height: 15),
             _buildWordsBox(currentInvTotal, boldFont),
             pw.SizedBox(height: 40),
@@ -669,9 +678,6 @@ class ConditionSalesController extends GetxController {
       ),
     );
 
-    // ---------------------------------------------------------
-    // PAGE 2: CONDITION CHALLAN (If Applicable)
-    // ---------------------------------------------------------
     if (isCondition) {
       pdf.addPage(
         pw.MultiPage(
@@ -691,7 +697,7 @@ class ConditionSalesController extends GetxController {
                 courier,
                 challan,
                 paymentMethodsStr,
-                invoiceDate, // Pass original invoice date
+                invoiceDate,
               ),
               _buildNewCustomerBox(
                 name,
@@ -722,7 +728,6 @@ class ConditionSalesController extends GetxController {
     await Printing.layoutPdf(onLayout: (f) => pdf.save());
   }
 
-  // --- COMPONENT: TOP HEADER ---
   pw.Widget _buildNewHeader(
     pw.Font bold,
     pw.Font reg,
@@ -735,12 +740,11 @@ class ConditionSalesController extends GetxController {
     String? courier,
     String challan,
     String paymentMethodsStr,
-    DateTime invoiceDate, // <--- Add this parameter
+    DateTime invoiceDate,
   ) {
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        // Left Side: Company Info
         pw.Expanded(
           flex: 6,
           child: pw.Column(
@@ -787,7 +791,6 @@ class ConditionSalesController extends GetxController {
           ),
         ),
         pw.SizedBox(width: 10),
-        // Right Side: Invoice Info Box
         pw.Expanded(
           flex: 4,
           child: pw.Container(
@@ -798,7 +801,7 @@ class ConditionSalesController extends GetxController {
                 _infoRow("Invoice No.", ": $invId", reg, bold),
                 _infoRow(
                   "Date",
-                  ": ${DateFormat('dd/MM/yyyy').format(invoiceDate)}", // <--- USE ORIGINAL INVOICE DATE
+                  ": ${DateFormat('dd/MM/yyyy').format(invoiceDate)}",
                   reg,
                   bold,
                 ),
@@ -811,7 +814,7 @@ class ConditionSalesController extends GetxController {
                 ),
                 _infoRow(
                   "Entry Time",
-                  ": ${DateFormat('h:mm:ss a').format(invoiceDate)}", // <--- USE ORIGINAL INVOICE TIME
+                  ": ${DateFormat('h:mm:ss a').format(invoiceDate)}",
                   reg,
                   bold,
                 ),
@@ -835,9 +838,7 @@ class ConditionSalesController extends GetxController {
     );
   }
 
-  // --- COMPONENT: PAID STAMP ---
   pw.Widget _buildPaidStamp(pw.Font bold, pw.Font reg, DateTime invoiceDate) {
-    // <--- Add this parameter
     return pw.Container(
       margin: const pw.EdgeInsets.symmetric(vertical: 20),
       alignment: pw.Alignment.center,
@@ -860,9 +861,7 @@ class ConditionSalesController extends GetxController {
             ),
             pw.SizedBox(height: 5),
             pw.Text(
-              DateFormat(
-                'dd MMM yyyy',
-              ).format(invoiceDate), // <--- USE ORIGINAL INVOICE DATE
+              DateFormat('dd MMM yyyy').format(invoiceDate),
               style: pw.TextStyle(
                 color: PdfColors.blue800,
                 font: bold,
@@ -884,7 +883,6 @@ class ConditionSalesController extends GetxController {
     );
   }
 
-  // --- COMPONENT: CUSTOMER BOX ---
   pw.Widget _buildNewCustomerBox(
     String name,
     String address,
@@ -908,7 +906,6 @@ class ConditionSalesController extends GetxController {
     );
   }
 
-  // --- COMPONENT: COURIER BOX (NEW FOR CHALLAN) ---
   pw.Widget _buildCourierBox(
     String? courier,
     String challan,
@@ -958,7 +955,6 @@ class ConditionSalesController extends GetxController {
     );
   }
 
-  // --- COMPONENT: ITEMS TABLE ---
   pw.Widget _buildNewTable(
     List<Map<String, dynamic>> items,
     pw.Font bold,
@@ -989,7 +985,6 @@ class ConditionSalesController extends GetxController {
             children: [
               _td((index + 1).toString(), reg, align: pw.TextAlign.center),
               _td(
-                // ignore: prefer_interpolation_to_compose_strings
                 "${item['name']}${item['model'] != null ? ' - ' + item['model'] : ''}",
                 reg,
               ),
@@ -1011,7 +1006,6 @@ class ConditionSalesController extends GetxController {
     );
   }
 
-  // --- COMPONENT: SUMMARY CALCULATION ---
   pw.Widget _buildNewSummary(
     double subTotal,
     double discount,
@@ -1102,7 +1096,6 @@ class ConditionSalesController extends GetxController {
     );
   }
 
-  // --- COMPONENT: DUES SECTION ---
   pw.Widget _buildNewDues(double prevDue, double netDue, pw.Font reg) {
     return pw.Container(
       width: 200,
@@ -1123,7 +1116,6 @@ class ConditionSalesController extends GetxController {
     );
   }
 
-  // --- COMPONENT: TAKA IN WORDS BOX ---
   pw.Widget _buildWordsBox(double currentInvTotal, pw.Font bold) {
     return pw.Container(
       width: double.infinity,
@@ -1209,7 +1201,6 @@ class ConditionSalesController extends GetxController {
     return result.trim();
   }
 
-  // --- COMPONENT: SIGNATURES ---
   pw.Widget _buildNewSignatures(pw.Font reg) {
     return pw.Row(
       mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
@@ -1248,7 +1239,6 @@ class ConditionSalesController extends GetxController {
     );
   }
 
-  // --- COMPONENT: FOOTER ---
   pw.Widget _buildNewFooter(pw.Context context, pw.Font reg) {
     return pw.Column(
       mainAxisSize: pw.MainAxisSize.min,
@@ -1284,7 +1274,6 @@ class ConditionSalesController extends GetxController {
     );
   }
 
-  // --- COMPONENT: NEW CHALLAN CENTER BOX (Replaces Condition Box) ---
   pw.Widget _buildChallanCenterBox(pw.Font bold, pw.Font reg, double due) {
     bool isPaid = due <= 0;
 
@@ -1357,7 +1346,6 @@ class ConditionSalesController extends GetxController {
     );
   }
 
-  // HELPER FOR ROWS IN PDF
   pw.Widget _infoRow(
     String label,
     String value,
@@ -1477,16 +1465,12 @@ class ConditionSalesController extends GetxController {
       isLoading.value = false;
     }
   }
-  // ==============================================================================
-  // 2. DELETE CONDITION SALE
-  // ==============================================================================
 
   Future<void> deleteConditionSale(ConditionOrderModel order) async {
     isLoading.value = true;
     try {
       String invoiceId = order.invoiceId;
 
-      // 1. Fetch the latest Master Document
       DocumentSnapshot masterSnap =
           await _db.collection('sales_orders').doc(invoiceId).get();
 
@@ -1499,16 +1483,13 @@ class ConditionSalesController extends GetxController {
       Map<String, dynamic> data = masterSnap.data() as Map<String, dynamic>;
       List<dynamic> items = data['items'] ?? [];
 
-      // Calculate exactly how much is due on the courier ledger right now
       double currentCourierDue =
           double.tryParse(data['courierDue']?.toString() ?? '0') ?? 0.0;
       String courierName = data['courierName'] ?? "";
       String customerPhone = data['customerPhone'] ?? "";
 
-      // 2. RESTORE STOCK (To Sea Stock)
       List<Map<String, dynamic>> returnAdditions = [];
       for (var item in items) {
-        // Safe parsing for Product ID & Qty
         String pIdStr = (item['productId'] ?? item['id'] ?? '').toString();
         int safePidInt = int.tryParse(pIdStr) ?? 0;
         int qty = (item['qty'] as num?)?.toInt() ?? 0;
@@ -1517,7 +1498,7 @@ class ConditionSalesController extends GetxController {
         if (safePidInt > 0 && qty > 0) {
           returnAdditions.add({
             'id': safePidInt,
-            'sea_qty': qty, // Adding back to Sea Stock
+            'sea_qty': qty,
             'air_qty': 0,
             'local_qty': 0,
             'local_price': cRate,
@@ -1539,10 +1520,8 @@ class ConditionSalesController extends GetxController {
         }
       }
 
-      // 3. FIREBASE BATCH DELETIONS & LEDGER ADJUSTMENTS
       WriteBatch batch = _db.batch();
 
-      // A. Adjust Courier Ledger (Only deduct what is currently due)
       if (courierName.isNotEmpty && currentCourierDue > 0) {
         DocumentReference courierRef = _db
             .collection('courier_ledgers')
@@ -1553,30 +1532,25 @@ class ConditionSalesController extends GetxController {
         });
       }
 
-      // B. Adjust Condition Customer Ledger & Delete Sub-Order
       if (customerPhone.isNotEmpty) {
         DocumentReference custRef = _db
             .collection('condition_customers')
             .doc(customerPhone);
 
-        // Adjust the customer's total courier due
         if (currentCourierDue > 0) {
           batch.update(custRef, {
             "totalCourierDue": FieldValue.increment(-currentCourierDue),
           });
         }
 
-        // Delete the order from the customer's sub-collection
         DocumentReference subOrderRef = custRef
             .collection('orders')
             .doc(invoiceId);
         batch.delete(subOrderRef);
       }
 
-      // C. Delete the Master Order Document
       batch.delete(masterSnap.reference);
 
-      // D. Delete All Associated Daily Sales (Including Partial Recoveries)
       QuerySnapshot dailySnaps =
           await _db
               .collection('daily_sales')
@@ -1587,14 +1561,11 @@ class ConditionSalesController extends GetxController {
         batch.delete(doc.reference);
       }
 
-      // Commit the entire batch atomically
       await batch.commit();
 
-      // 4. Update UI Automatically
       allOrders.removeWhere((o) => o.invoiceId == invoiceId);
       _applyClientSideFilters();
 
-      // If called from a dialog, this will close it
       if (Get.isDialogOpen ?? false) Get.back();
 
       Get.snackbar(

@@ -378,115 +378,156 @@ void showShipmentEntryDialog(
               decoration: const BoxDecoration(
                 border: Border(top: BorderSide(color: Colors.grey)),
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () => Get.back(),
-                    child: const Text(
-                      "Cancel",
-                      style: TextStyle(color: Colors.grey),
+              child: Obx(() {
+                // Listen to the controller's loading state
+                final bool isDialogLoading = shipCtrl.isLoading.value;
+
+                return Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    // Cancel Button
+                    TextButton(
+                      onPressed: isDialogLoading ? null : () => Get.back(),
+                      child: Text(
+                        "Cancel",
+                        style: TextStyle(
+                          color:
+                              isDialogLoading ? Colors.grey[300] : Colors.grey,
+                        ),
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  ElevatedButton(
-                    onPressed: () {
-                      // 1. Validation
-                      if (modelC.text.isEmpty || nameC.text.isEmpty) {
-                        Get.snackbar("Required", "Model and Name are missing");
-                        return;
-                      }
+                    const SizedBox(width: 12),
 
-                      // Capture calculated costs
-                      double sCost = double.tryParse(seaPriceC.text) ?? 0.0;
-                      double aCost = double.tryParse(airPriceC.text) ?? 0.0;
+                    // Submit Button
+                    ElevatedButton(
+                      onPressed:
+                          isDialogLoading
+                              ? null // Disables the button while loading
+                              : () async {
+                                // 1. Validation
+                                if (modelC.text.isEmpty || nameC.text.isEmpty) {
+                                  Get.snackbar(
+                                    "Required",
+                                    "Model and Name are missing",
+                                    backgroundColor: Colors.redAccent,
+                                    colorText: Colors.white,
+                                  );
+                                  return;
+                                }
 
-                      // 2. Prepare Data Map (FIXED AVG PURCHASE PRICE)
-                      final Map<String, dynamic> data = {
-                        'name': nameC.text,
-                        'category': categoryC.text,
-                        'brand': brandC.text,
-                        'model': modelC.text,
-                        'yuan': double.tryParse(yuanC.text) ?? 0.0,
-                        'weight': double.tryParse(weightC.text) ?? 0.0,
-                        'currency': double.tryParse(currencyC.text) ?? 0.0,
-                        'shipmenttax': double.tryParse(seaTaxC.text) ?? 0.0,
-                        'shipmenttaxair': double.tryParse(airTaxC.text) ?? 0.0,
+                                // Capture calculated costs
+                                double sCost =
+                                    double.tryParse(seaPriceC.text) ?? 0.0;
+                                double aCost =
+                                    double.tryParse(airPriceC.text) ?? 0.0;
 
-                        // Calculated Costs
-                        'sea': sCost,
-                        'air': aCost,
+                                // 2. Prepare Data Map (FIXED AVG PURCHASE PRICE)
+                                final Map<String, dynamic> data = {
+                                  'name': nameC.text,
+                                  'category': categoryC.text,
+                                  'brand': brandC.text,
+                                  'model': modelC.text,
+                                  'yuan': double.tryParse(yuanC.text) ?? 0.0,
+                                  'weight':
+                                      double.tryParse(weightC.text) ?? 0.0,
+                                  'currency':
+                                      double.tryParse(currencyC.text) ?? 0.0,
+                                  'shipmenttax':
+                                      double.tryParse(seaTaxC.text) ?? 0.0,
+                                  'shipmenttaxair':
+                                      double.tryParse(airTaxC.text) ?? 0.0,
+                                  'sea': sCost,
+                                  'air': aCost,
+                                  'avg_purchase_price':
+                                      sCost > 0 ? sCost : aCost,
+                                  'agent': double.tryParse(agentC.text) ?? 0.0,
+                                  'wholesale':
+                                      double.tryParse(wholesaleC.text) ?? 0.0,
+                                  'alert_qty':
+                                      int.tryParse(alertQtyC.text) ?? 5,
+                                };
 
-                        // *** FIX: Explicitly set avg_purchase_price ***
-                        'avg_purchase_price': sCost > 0 ? sCost : aCost,
+                                // 3. Preserve Stock Logic
+                                if (!isNewProduct) {
+                                  data['stock_qty'] = p.stockQty;
+                                  data['sea_stock_qty'] = p.seaStockQty;
+                                  data['air_stock_qty'] = p.airStockQty;
+                                  data['local_qty'] = p.localQty;
+                                } else {
+                                  data['stock_qty'] = 0;
+                                  data['sea_stock_qty'] = 0;
+                                  data['air_stock_qty'] = 0;
+                                  data['local_qty'] = 0;
+                                }
 
-                        'agent': double.tryParse(agentC.text) ?? 0.0,
-                        'wholesale': double.tryParse(wholesaleC.text) ?? 0.0,
-                        'alert_qty': int.tryParse(alertQtyC.text) ?? 5,
-                      };
+                                int sQty = int.tryParse(addSeaQtyC.text) ?? 0;
+                                int aQty = int.tryParse(addAirQtyC.text) ?? 0;
 
-                      // 3. Preserve Stock Logic
-                      if (!isNewProduct) {
-                        data['stock_qty'] = p.stockQty;
-                        data['sea_stock_qty'] = p.seaStockQty;
-                        data['air_stock_qty'] = p.airStockQty;
-                        data['local_qty'] = p.localQty;
-                      } else {
-                        data['stock_qty'] = 0;
-                        data['sea_stock_qty'] = 0;
-                        data['air_stock_qty'] = 0;
-                        data['local_qty'] = 0;
-                      }
-
-                      int sQty = int.tryParse(addSeaQtyC.text) ?? 0;
-                      int aQty = int.tryParse(addAirQtyC.text) ?? 0;
-
-                      // 4. Submit
-                      if (onSubmit != null) {
-                        // Edit Existing Item in Manifest List
-                        final newItem = ShipmentItem(
-                          productId: isNewProduct ? 0 : p.id,
-                          productName: nameC.text,
-                          productModel: modelC.text,
-                          productBrand: brandC.text,
-                          productCategory: categoryC.text,
-                          unitWeightSnapshot:
-                              double.tryParse(weightC.text) ?? 0,
-                          seaQty: 0,
-                          airQty: 0,
-                          receivedSeaQty: sQty,
-                          receivedAirQty: aQty,
-                          cartonNo: cartonNoC.text,
-                          seaPriceSnapshot: sCost,
-                          airPriceSnapshot: aCost,
-                          ignoreMissing: true,
-                        );
-                        onSubmit(newItem);
-                        Get.back();
-                      } else {
-                        // Add New to Controller
-                        shipCtrl.addToManifestAndVerify(
-                          productId: isNewProduct ? null : p.id,
-                          productData: data,
-                          seaQty: sQty,
-                          airQty: aQty,
-                          cartonNo: cartonNoC.text,
-                        );
-                      }
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor:
-                          isNewProduct
-                              ? const Color(0xFF0F766E)
-                              : const Color(0xFF1E293B),
+                                // 4. Submit
+                                if (onSubmit != null) {
+                                  // Edit Existing Item in Manifest List (Synchronous)
+                                  final newItem = ShipmentItem(
+                                    productId: isNewProduct ? 0 : p.id,
+                                    productName: nameC.text,
+                                    productModel: modelC.text,
+                                    productBrand: brandC.text,
+                                    productCategory: categoryC.text,
+                                    unitWeightSnapshot:
+                                        double.tryParse(weightC.text) ?? 0,
+                                    seaQty: 0,
+                                    airQty: 0,
+                                    receivedSeaQty: sQty,
+                                    receivedAirQty: aQty,
+                                    cartonNo: cartonNoC.text,
+                                    seaPriceSnapshot: sCost,
+                                    airPriceSnapshot: aCost,
+                                    ignoreMissing: true,
+                                  );
+                                  onSubmit(newItem);
+                                  Get.back(); // Close immediately for synchronous local edit
+                                } else {
+                                  // Add New to Controller (Asynchronous)
+                                  // We use await here so the button stays disabled until it finishes
+                                  await shipCtrl.addToManifestAndVerify(
+                                    productId: isNewProduct ? null : p.id,
+                                    productData: data,
+                                    seaQty: sQty,
+                                    airQty: aQty,
+                                    cartonNo: cartonNoC.text,
+                                  );
+                                  // Note: shipCtrl.addToManifestAndVerify already calls Get.back() automatically on success!
+                                }
+                              },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor:
+                            isNewProduct
+                                ? const Color(0xFF0F766E)
+                                : const Color(0xFF1E293B),
+                        disabledBackgroundColor:
+                            Colors.grey[400], // Visual cue when disabled
+                        minimumSize: const Size(140, 45),
+                      ),
+                      child:
+                          isDialogLoading
+                              ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.5,
+                                  color: Colors.white,
+                                ),
+                              )
+                              : Text(
+                                isNewProduct ? "CREATE & ADD" : "UPDATE & ADD",
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                     ),
-                    child: Text(
-                      isNewProduct ? "CREATE & ADD" : "UPDATE & ADD",
-                      style: const TextStyle(color: Colors.white),
-                    ),
-                  ),
-                ],
-              ),
+                  ],
+                );
+              }),
             ),
           ],
         ),

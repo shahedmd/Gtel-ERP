@@ -1209,38 +1209,77 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
           ),
         ],
       ),
-      textConfirm: "CONFIRM & RECEIVE",
-      textCancel: "Cancel",
-      confirmTextColor: Colors.white,
-      buttonColor: kHeaderColor,
-      onConfirm: () {
-        final updatedShipment = ShipmentModel(
-          docId: widget.shipment.docId,
-          shipmentName: widget.shipment.shipmentName,
-          purchaseDate: widget.shipment.purchaseDate,
-          vendorName: widget.shipment.vendorName,
-          carrier: widget.shipment.carrier,
-          exchangeRate: widget.shipment.exchangeRate,
-          totalCartons: widget.shipment.totalCartons,
-          totalWeight: widget.shipment.totalWeight,
-          carrierCostPerCarton: widget.shipment.carrierCostPerCarton,
-          totalCarrierFee: widget.shipment.totalCarrierFee,
-          totalAmount: widget.shipment.totalAmount,
-          isReceived: false,
-          items: editedItems,
-          carrierReport: reportCtrl.text,
+      // --- REACTIVE CANCEL BUTTON ---
+      cancel: Obx(() {
+        final isLoading = controller.isLoading.value;
+        return TextButton(
+          onPressed: isLoading ? null : () => Get.back(),
+          child: Text(
+            "Cancel",
+            style: TextStyle(color: isLoading ? Colors.grey[300] : Colors.grey),
+          ),
         );
+      }),
+      // --- REACTIVE CONFIRM BUTTON ---
+      confirm: Obx(() {
+        final isLoading = controller.isLoading.value;
+        return ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: kHeaderColor,
+            disabledBackgroundColor: Colors.grey[400],
+            minimumSize: const Size(150, 40),
+          ),
+          onPressed:
+              isLoading
+                  ? null // Disables button while loading
+                  : () async {
+                    final updatedShipment = ShipmentModel(
+                      docId: widget.shipment.docId,
+                      shipmentName: widget.shipment.shipmentName,
+                      purchaseDate: widget.shipment.purchaseDate,
+                      vendorName: widget.shipment.vendorName,
+                      carrier: widget.shipment.carrier,
+                      exchangeRate: widget.shipment.exchangeRate,
+                      totalCartons: widget.shipment.totalCartons,
+                      totalWeight: widget.shipment.totalWeight,
+                      carrierCostPerCarton:
+                          widget.shipment.carrierCostPerCarton,
+                      totalCarrierFee: widget.shipment.totalCarrierFee,
+                      totalAmount: widget.shipment.totalAmount,
+                      isReceived: false,
+                      items: editedItems,
+                      carrierReport: reportCtrl.text,
+                    );
 
-        controller
-            .updateShipmentDetails(
-              updatedShipment,
-              editedItems,
-              reportCtrl.text,
-            )
-            .then((_) {
-              controller.receiveShipmentFast(updatedShipment, DateTime.now());
-            });
-      },
+                    // 1. Await the update details
+                    await controller.updateShipmentDetails(
+                      updatedShipment,
+                      editedItems,
+                      reportCtrl.text,
+                    );
+
+                    // 2. Await the final receive process
+                    await controller.receiveShipmentFast(
+                      updatedShipment,
+                      DateTime.now(),
+                    );
+                  },
+          child:
+              isLoading
+                  ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      color: Colors.white,
+                    ),
+                  )
+                  : const Text(
+                    "CONFIRM & RECEIVE",
+                    style: TextStyle(color: Colors.white),
+                  ),
+        );
+      }),
     );
   }
 }

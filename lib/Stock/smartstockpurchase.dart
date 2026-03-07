@@ -21,7 +21,6 @@ const Color textDark = Color(0xFF334155);
 const Color textLight = Color(0xFF94A3B8);
 
 class SmartPurchaseScreen extends StatelessWidget {
-  
   SmartPurchaseScreen({super.key}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (debtorCtrl.bodies.isEmpty) debtorCtrl.loadBodies();
@@ -92,7 +91,6 @@ class SmartPurchaseScreen extends StatelessWidget {
     }
     costController.text = calculatedCost.toStringAsFixed(2);
   }
-
 
   void _addToCart() {
     if (selectedProduct.value == null) {
@@ -326,8 +324,36 @@ class SmartPurchaseScreen extends StatelessWidget {
 
               String qLower = queryText.toLowerCase();
               List<String> searchTerms = qLower.split(RegExp(r'\s+'));
+              String primaryTerm = searchTerms.first;
 
-              return debtorCtrl.bodies.where((d) {
+              Map<String, DebtorModel> combinedResults = {};
+
+              // 1. GLOBAL SEARCH: Query Firestore directly for the first term
+              if (primaryTerm.isNotEmpty) {
+                try {
+                  var snap =
+                      await debtorCtrl.db
+                          .collection('debatorbody')
+                          .where('searchKeywords', arrayContains: primaryTerm)
+                          .limit(20)
+                          .get();
+
+                  for (var doc in snap.docs) {
+                    combinedResults[doc.id] = DebtorModel.fromFirestore(doc);
+                  }
+                } catch (e) {
+                  // Silently fallback to local list if internet/query fails
+                  debugPrint("Global Search Error: $e");
+                }
+              }
+
+              // 2. LOCAL SEARCH: Add currently loaded bodies just in case
+              for (var d in debtorCtrl.bodies) {
+                combinedResults[d.id] = d;
+              }
+
+              // 3. FILTER MATCHES: Ensure ALL search terms match the combined list
+              return combinedResults.values.where((d) {
                 String combined =
                     "${d.name} ${d.phone} ${d.nid} ${d.address}".toLowerCase();
                 for (String term in searchTerms) {

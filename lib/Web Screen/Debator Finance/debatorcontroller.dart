@@ -591,6 +591,7 @@ class DebatorController extends GetxController {
         'createdAt': FieldValue.serverTimestamp(),
       });
 
+      // ALL kinds of collections (including old due payments like 'loan_payment')
       bool isCollection = [
         'debit',
         'loan_payment',
@@ -610,6 +611,7 @@ class DebatorController extends GetxController {
           method = 'Bkash';
         }
 
+        // 1. THIS CREATES THE CASH LEDGER ENTRY FOR BOTH OLD DUE AND RUNNING BILLS
         await db.collection('cash_ledger').add({
           'type': 'deposit',
           'amount': amount,
@@ -636,17 +638,24 @@ class DebatorController extends GetxController {
       // =========================================================
       // UPDATED BILL ALLOCATION LOGIC (FIXES SALES ORDER STATUS)
       // =========================================================
-      if (isCollection) {
+
+      // We explicitly EXCLUDE 'loan_payment' (old due) from allocating to daily sales bills
+      bool isRunningBillPayment = [
+        'debit',
+        'collection',
+        'payment',
+        'received',
+      ].contains(type.toLowerCase());
+
+      if (isRunningBillPayment) {
         double remainingToAllocate = amount;
 
-        // 1. Fetch pending bills
         QuerySnapshot salesSnap =
             await db
                 .collection('daily_sales')
                 .where('name', isEqualTo: debtorName)
                 .get();
 
-        // 2. Filter & Sort
         List<DocumentSnapshot> pendingBills =
             salesSnap.docs.where((doc) {
               final data = doc.data() as Map<String, dynamic>;
@@ -680,7 +689,6 @@ class DebatorController extends GetxController {
                     ? currentPending
                     : remainingToAllocate;
 
-            // Check if this payment completely clears the bill
             bool isNowFullyPaid = (currentPending - take) <= 0.5;
 
             final newHistoryEntry = {
@@ -703,7 +711,6 @@ class DebatorController extends GetxController {
             // B. Update Sales Order (Synchronous Batch Update)
             String saleTxId = data['transactionId'] ?? '';
             if (saleTxId.isNotEmpty) {
-              // Direct reference to the sales_order using the invoice ID
               DocumentReference orderRef = db
                   .collection('sales_orders')
                   .doc(saleTxId);
@@ -729,7 +736,6 @@ class DebatorController extends GetxController {
           }
         }
       }
-      // =========================================================
 
       await _recalculateSingleDebtorBalance(debtorId);
       await loadBodies(loadMore: false);

@@ -574,13 +574,15 @@ class LiveSalesController extends GetxController {
     double oldDueSnap = debtorOldDue.value,
         runningDueSnap = debtorRunningDue.value;
 
-    // --- LOGIC TO ALLOCATE PAYMENT (PRIORITY: OLD DUE -> CURRENT INVOICE -> PREV RUNNING DUE) ---
+    // ==============================================================================
+    // LOGIC TO ALLOCATE PAYMENT (PRIORITY: OLD DUE -> PREV RUNNING DUE -> CURRENT INVOICE)
+    // ==============================================================================
     if (customerType.value == "AGENT" &&
         !isConditionSale.value &&
         debtorId != null) {
       double remaining = totalPaidInputVal;
 
-      // 1. Pay Old Due (Historic)
+      // 1. Pay Old Due (Historic Loan)
       if (oldDueSnap > 0 && remaining > 0) {
         if (remaining >= oldDueSnap) {
           allocatedToOldDue = oldDueSnap;
@@ -591,23 +593,33 @@ class LiveSalesController extends GetxController {
         }
       }
 
-      // 2. Pay Current Invoice
+      // 2. Pay Running Due (Previous Unpaid Bills)
+      if (runningDueSnap > 0 && remaining > 0) {
+        if (remaining >= runningDueSnap) {
+          allocatedToPrevRunningDue = runningDueSnap;
+          remaining = _round(remaining - runningDueSnap);
+        } else {
+          allocatedToPrevRunningDue = remaining;
+          remaining = 0.0;
+        }
+      }
+
+      // 3. Pay Current Invoice (The new bill)
       if (remaining > 0) {
         if (remaining >= grandTotal) {
-          allocatedToInvoice = grandTotal;
+          allocatedToInvoice =
+              grandTotal; // Clamp it so we don't overpay the bill
           remaining = _round(remaining - grandTotal);
         } else {
           allocatedToInvoice = remaining;
           remaining = 0.0;
         }
       }
-
-      // 3. Pay Running Due (Previous Invoices)
-      if (remaining > 0) allocatedToPrevRunningDue = remaining;
     } else {
       allocatedToInvoice =
           totalPaidInputVal > grandTotal ? grandTotal : totalPaidInputVal;
     }
+    // ==============================================================================
 
     double invoiceDueAmount = _round(grandTotal - allocatedToInvoice);
     if (invoiceDueAmount < 0) invoiceDueAmount = 0;
@@ -700,7 +712,7 @@ class LiveSalesController extends GetxController {
           masterPaymentMap,
         );
       } else if (customerType.value == "AGENT" && debtorId != null) {
-        // --- UPDATED AGENT HANDLING (AWAIT for automatic bill payment) ---
+        // Handle Agent Transaction (Ledgers, Running Due payment, etc.)
         await _handleAgentTransaction(
           batch,
           debtorId,
@@ -760,6 +772,7 @@ class LiveSalesController extends GetxController {
       await batch.commit();
 
       if (debtorId != null) debtorCtrl.loadTxPage(debtorId, 1);
+
       await _generatePdf(
         invNo,
         fName,
@@ -1152,7 +1165,6 @@ class LiveSalesController extends GetxController {
 
     double totalInput = rawCash + rawBkash + rawNagad + rawBank;
 
-    // Calculate scaled amounts
     double finalCash = 0.0;
     double finalBkash = 0.0;
     double finalNagad = 0.0;
@@ -1161,24 +1173,18 @@ class LiveSalesController extends GetxController {
     if (totalInput > 0 && targetAmount > 0) {
       double ratio = targetAmount / totalInput;
 
-      // If the target matches total input (within floating point error), just use raw
       if ((targetAmount - totalInput).abs() < 0.01) {
         finalCash = rawCash;
         finalBkash = rawBkash;
         finalNagad = rawNagad;
         finalBank = rawBank;
       } else {
-        // Apply ratio to scale down/up the payments
         finalCash = _round(rawCash * ratio);
         finalBkash = _round(rawBkash * ratio);
         finalNagad = _round(rawNagad * ratio);
         finalBank = _round(rawBank * ratio);
-
-        // Fix rounding difference (e.g. 33.33 + 33.33 + 33.33 = 99.99 vs 100)
         double currentSum = finalCash + finalBkash + finalNagad + finalBank;
         double diff = targetAmount - currentSum;
-
-        // Add diff to the largest component to minimize visual weirdness
         if (diff.abs() > 0.001) {
           if (finalCash > 0) {
             finalCash += diff;
@@ -1306,11 +1312,6 @@ class LiveSalesController extends GetxController {
     customerType.value = "WHOLESALE";
   }
 
-  // ===========================================================================
-  // --- PROFESSIONAL A4 PDF GENERATION ---
-  // ===========================================================================
-
-  // Helper function to convert numeric amount to words (Taka)
   String _numberToWords(double number) {
     if (number == 0) return "Zero";
     int num = number.floor();

@@ -40,10 +40,7 @@ class DebtorModel {
       phone: (data['phone'] ?? '').toString(),
       address: (data['address'] ?? '').toString(),
 
-      // Receivables
       balance: _parseSafeDouble(data['balance']),
-
-      // Payables (New Field)
       purchaseDue: _parseSafeDouble(data['purchaseDue']),
 
       payments:

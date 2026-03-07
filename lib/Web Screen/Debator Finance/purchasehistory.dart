@@ -381,7 +381,7 @@ class GlobalPurchaseHistoryController extends GetxController {
   }
 
   // ========================================================
-  // 5. EDIT PURCHASE
+  // 5. EDIT PURCHASE (FIXED: Net Stock Calculation)
   // ========================================================
   Future<void> editPurchase({
     required String debtorId,
@@ -396,6 +396,8 @@ class GlobalPurchaseHistoryController extends GetxController {
     isLoading.value = true;
     try {
       WriteBatch batch = _db.batch();
+
+      // 1. Update the Invoice Document
       DocumentReference purchaseRef = _db
           .collection('debatorbody')
           .doc(debtorId)
@@ -409,6 +411,7 @@ class GlobalPurchaseHistoryController extends GetxController {
         if (customDate != null) 'date': Timestamp.fromDate(customDate),
       });
 
+      // 2. Update Supplier Payable Balance
       double difference = newTotal - oldTotal;
       if (difference != 0) {
         DocumentReference debtorRef = _db
@@ -421,39 +424,77 @@ class GlobalPurchaseHistoryController extends GetxController {
 
       await batch.commit();
 
+      // ----------------------------------------------------------------
+      // 3. CALCULATE NET DIFFERENCE TO PREVENT STOCK DUPLICATION
+      // ----------------------------------------------------------------
+      Map<String, Map<String, dynamic>> netStockChanges = {};
+
+      // A. Subtract Old Quantities
+      for (var item in oldItems) {
+        String pid = item['productId'].toString();
+        String loc = item['location'] ?? 'Local';
+        String key = "${pid}_$loc";
+        int qty = item['qty'] ?? 0;
+
+        if (!netStockChanges.containsKey(key)) {
+          netStockChanges[key] = {
+            'productId': pid,
+            'location': loc,
+            'qty': 0,
+            'cost': item['cost'] ?? 0.0,
+          };
+        }
+        netStockChanges[key]!['qty'] -= qty;
+      }
+
+      // B. Add New Quantities
+      for (var item in newItems) {
+        String pid = item['productId'].toString();
+        String loc = item['location'] ?? 'Local';
+        String key = "${pid}_$loc";
+        int qty = item['qty'] ?? 0;
+        double cost = item['cost'] ?? 0.0;
+
+        if (!netStockChanges.containsKey(key)) {
+          netStockChanges[key] = {
+            'productId': pid,
+            'location': loc,
+            'qty': 0,
+            'cost': cost,
+          };
+        }
+        netStockChanges[key]!['qty'] += qty;
+        netStockChanges[key]!['cost'] = cost; // Prioritize new cost
+      }
+
+      // C. Only execute Stock Updates if the Quantity actually changed!
       List<Future> stockUpdates = [];
 
-      for (var item in oldItems) {
-        int pid = int.tryParse(item['productId'].toString()) ?? 0;
-        String loc = item['location'] ?? 'Local';
-        int qty = item['qty'] ?? 0;
-        stockUpdates.add(
-          stockCtrl.addMixedStock(
-            productId: pid,
-            localQty: loc == "Local" ? -qty : 0,
-            airQty: loc == "Air" ? -qty : 0,
-            seaQty: loc == "Sea" ? -qty : 0,
-            localUnitPrice: item['cost'] ?? 0.0,
-          ),
-        );
+      for (var change in netStockChanges.values) {
+        int netQty = change['qty'] as int;
+
+        // If netQty is 0 (meaning you ONLY changed the price, not the quantity),
+        // we completely bypass the stock controller to prevent false additions!
+        if (netQty != 0) {
+          int pid = int.tryParse(change['productId'].toString()) ?? 0;
+          String loc = change['location'] as String;
+
+          stockUpdates.add(
+            stockCtrl.addMixedStock(
+              productId: pid,
+              localQty: loc == "Local" ? netQty : 0,
+              airQty: loc == "Air" ? netQty : 0,
+              seaQty: loc == "Sea" ? netQty : 0,
+              localUnitPrice: change['cost'],
+            ),
+          );
+        }
       }
 
-      for (var item in newItems) {
-        int pid = int.tryParse(item['productId'].toString()) ?? 0;
-        String loc = item['location'] ?? 'Local';
-        int qty = item['qty'] ?? 0;
-        stockUpdates.add(
-          stockCtrl.addMixedStock(
-            productId: pid,
-            localQty: loc == "Local" ? qty : 0,
-            airQty: loc == "Air" ? qty : 0,
-            seaQty: loc == "Sea" ? qty : 0,
-            localUnitPrice: item['cost'] ?? 0.0,
-          ),
-        );
+      // Wait for any required stock updates to finish
+      if (stockUpdates.isNotEmpty) {
+        await Future.wait(stockUpdates);
       }
-
-      await Future.wait(stockUpdates);
 
       await fetchPurchases();
       if (Get.isDialogOpen ?? false) Get.back();

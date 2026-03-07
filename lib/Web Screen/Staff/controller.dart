@@ -1,6 +1,7 @@
-// ignore_for_file: deprecated_member_use, constant_identifier_names, avoid_web_libraries_in_flutter
+// ignore_for_file: deprecated_member_use, constant_identifier_names, avoid_web_libraries_in_flutter, curly_braces_in_flow_control_structures
 import 'dart:typed_data';
 import 'dart:js_interop';
+import 'package:gtel_erp/Cash/controller.dart';
 import 'package:web/web.dart' as web; // For Web Download
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -10,10 +11,10 @@ import 'package:gtel_erp/Web%20Screen/Expenses/dailycontroller.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-
 import 'model.dart';
 
-enum StaffTransactionType { SALARY, ADVANCE, REPAYMENT }
+// --- UPDATE 2: Added BONUS to Transaction Types ---
+enum StaffTransactionType { SALARY, ADVANCE, REPAYMENT, BONUS }
 
 class StaffController extends GetxController {
   final FirebaseFirestore db = FirebaseFirestore.instance;
@@ -40,12 +41,11 @@ class StaffController extends GetxController {
   static const Color darkSlate = Color(0xFF111827);
 
   // ------------------------------------------------------------------
-  // 1. LOAD & FILTER STAFF (UPDATED: SORT BY SALARY)
+  // 1. LOAD & FILTER STAFF
   // ------------------------------------------------------------------
   Future<void> loadStaff() async {
     try {
       isLoading.value = true;
-      // UPDATE 3: Serial staff according to salary amount (Descending)
       final snap =
           await db
               .collection("staff")
@@ -54,7 +54,7 @@ class StaffController extends GetxController {
 
       staffList.value =
           snap.docs.map((d) => StaffModel.fromFirestore(d)).toList();
-      filterStaff(); // Re-apply filter if any
+      filterStaff();
     } catch (e) {
       Get.snackbar(
         "Error",
@@ -84,7 +84,7 @@ class StaffController extends GetxController {
   }
 
   // ------------------------------------------------------------------
-  // 2. ADD & EDIT STAFF (UPDATED)
+  // 2. ADD & EDIT STAFF
   // ------------------------------------------------------------------
   Future<void> addStaff({
     required String name,
@@ -124,7 +124,6 @@ class StaffController extends GetxController {
     }
   }
 
-  // UPDATE 1: Edit Staff Method
   Future<void> updateStaff({
     required String id,
     required String name,
@@ -145,7 +144,7 @@ class StaffController extends GetxController {
         "joiningDate": Timestamp.fromDate(joinDate),
       });
       await loadStaff();
-      Get.back(); // Close dialog
+      Get.back();
       Get.snackbar(
         "Updated",
         "Staff details updated successfully",
@@ -160,7 +159,7 @@ class StaffController extends GetxController {
   }
 
   // ------------------------------------------------------------------
-  // 3. ADD TRANSACTION
+  // 3. ADD TRANSACTION (UPDATED WITH REPAYMENT & BONUS LOGIC)
   // ------------------------------------------------------------------
   Future<void> addTransaction({
     required String staffId,
@@ -170,11 +169,13 @@ class StaffController extends GetxController {
     required DateTime date,
     required StaffTransactionType type,
     String? month,
+    String paymentMethod = "Cash", // Let you specify payment method if needed
   }) async {
     try {
       isLoading.value = true;
       final staffRef = db.collection("staff").doc(staffId);
       final transactionRef = staffRef.collection("salaries").doc();
+      final String finalMonth = month ?? DateFormat('MMMM yyyy').format(date);
 
       await db.runTransaction((transaction) async {
         DocumentSnapshot staffSnap = await transaction.get(staffRef);
@@ -190,25 +191,36 @@ class StaffController extends GetxController {
           newDebt = currentDebt - amount;
         }
 
+        // NOTE: SALARY and BONUS do not change the staff's "debt" balance.
+
         transaction.update(staffRef, {'currentDebt': newDebt});
         transaction.set(transactionRef, {
           "amount": amount,
           "note": note,
-          "month": month ?? DateFormat('MMMM yyyy').format(date),
+          "month": finalMonth,
           "date": Timestamp.fromDate(date),
           "type": type.name,
           "createdAt": FieldValue.serverTimestamp(),
         });
       });
 
+      // --- EXPENSE / CASH LEDGER ALLOCATION LOGIC ---
       if (type == StaffTransactionType.SALARY ||
-          type == StaffTransactionType.ADVANCE) {
+          type == StaffTransactionType.ADVANCE ||
+          type == StaffTransactionType.BONUS) {
+        // Outflow -> Record as Daily Expense
         if (Get.isRegistered<DailyExpensesController>()) {
           final dailyCtrl = Get.find<DailyExpensesController>();
-          String expenseName =
-              type == StaffTransactionType.SALARY
-                  ? "Salary: $staffName ($month)"
-                  : "Advance to $staffName";
+          String expenseName = "";
+
+          if (type == StaffTransactionType.SALARY) {
+            expenseName = "Salary: $staffName ($finalMonth)";
+          } else if (type == StaffTransactionType.ADVANCE) {
+            expenseName = "Advance to $staffName";
+          } else if (type == StaffTransactionType.BONUS) {
+            expenseName = "Festival/Bonus: $staffName ($finalMonth)";
+          }
+
           await dailyCtrl.addDailyExpense(
             expenseName,
             amount.toInt(),
@@ -216,9 +228,25 @@ class StaffController extends GetxController {
             date: date,
           );
         }
+      } else if (type == StaffTransactionType.REPAYMENT) {
+        await db.collection('cash_ledger').add({
+          'type': 'deposit',
+          'amount': amount,
+          'method': paymentMethod,
+          'description': "Loan Repayment from $staffName",
+          'timestamp': Timestamp.fromDate(date),
+          'source': 'staff_repayment',
+        });
+
+        // Auto-refresh the Cash Drawer if it's currently loaded
+        if (Get.isRegistered<CashDrawerController>()) {
+          Get.find<CashDrawerController>().fetchData();
+        }
       }
+
       await loadStaff();
       if (Get.isDialogOpen ?? false) Get.back();
+
       Get.snackbar(
         "Success",
         "Transaction successful.",
@@ -249,10 +277,8 @@ class StaffController extends GetxController {
         );
   }
 
-  // ... inside StaffController ...
-
   // ------------------------------------------------------------------
-  // 4. MONTHLY PAYROLL REPORT (UPDATED WITH DUE CALCULATION)
+  // 4. MONTHLY PAYROLL REPORT
   // ------------------------------------------------------------------
   Future<void> downloadMonthlyPayroll(String month) async {
     isLoading.value = true;
@@ -263,10 +289,7 @@ class StaffController extends GetxController {
 
       List<List<String>> reportData = [];
 
-      // Loop through all staff
       for (var staff in staffList) {
-        // Query logic: Get records where 'month' matches EXACTLY the string (e.g., "January 2026")
-        // regardless of the actual created date.
         QuerySnapshot salarySnap =
             await db
                 .collection('staff')
@@ -281,13 +304,12 @@ class StaffController extends GetxController {
           paidAmount += (doc['amount'] as num).toDouble();
         }
 
-        // Only add to report if there is a salary defined or payment made
         if (staff.salary > 0 || paidAmount > 0) {
           totalDisbursed += paidAmount;
           totalLiability += staff.salary;
 
           double due = staff.salary - paidAmount;
-          if (due < 0) due = 0; // Prevent negative if overpaid
+          if (due < 0) due = 0;
 
           String status = "";
 
@@ -302,15 +324,14 @@ class StaffController extends GetxController {
           reportData.add([
             staff.name,
             staff.des,
-            staff.salary.toString(), // Base
-            paidAmount.toStringAsFixed(0), // Paid
-            due.toStringAsFixed(0), // Due
+            staff.salary.toString(),
+            paidAmount.toStringAsFixed(0),
+            due.toStringAsFixed(0),
             status,
           ]);
         }
       }
 
-      // Generate PDF
       pdf.addPage(
         pw.MultiPage(
           pageFormat: PdfPageFormat.a4,
@@ -458,7 +479,7 @@ class StaffController extends GetxController {
   }
 
   // ------------------------------------------------------------------
-  // 5. INDIVIDUAL LEDGER PDF
+  // 5. INDIVIDUAL LEDGER PDF (UPDATED TO SHOW BONUS)
   // ------------------------------------------------------------------
   Future<Uint8List> generateProfessionalPDF(
     StaffModel staff,
@@ -467,13 +488,16 @@ class StaffController extends GetxController {
     final pdf = pw.Document();
     double totalSalaryPaid = 0;
     double totalAdvanceTaken = 0;
+    double totalBonusPaid = 0; // Added
 
     for (var t in transactions) {
       if (t.type == "ADVANCE") {
         totalAdvanceTaken += t.amount;
-      } else if (t.type == "SALARY" || t.type == null)
-        // ignore: curly_braces_in_flow_control_structures
+      } else if (t.type == "BONUS") {
+        totalBonusPaid += t.amount;
+      } else if (t.type == "SALARY" || t.type == null) {
         totalSalaryPaid += t.amount;
+      }
     }
 
     final formattedDate = DateFormat('dd MMM yyyy').format(DateTime.now());
@@ -620,6 +644,30 @@ class StaffController extends GetxController {
                             ),
                           ],
                         ),
+                        // Added Bonus Paid Display
+                        if (totalBonusPaid > 0) ...[
+                          pw.SizedBox(height: 4),
+                          pw.Row(
+                            mainAxisAlignment:
+                                pw.MainAxisAlignment.spaceBetween,
+                            children: [
+                              pw.Text(
+                                "Total Bonus Paid:",
+                                style: pw.TextStyle(
+                                  fontSize: 10,
+                                  color: PdfColors.green900,
+                                ),
+                              ),
+                              pw.Text(
+                                totalBonusPaid.toStringAsFixed(2),
+                                style: pw.TextStyle(
+                                  fontSize: 10,
+                                  color: PdfColors.green900,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                         pw.Row(
                           mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                           children: [
@@ -650,7 +698,9 @@ class StaffController extends GetxController {
                               ),
                             ),
                             pw.Text(
-                              (totalSalaryPaid + totalAdvanceTaken)
+                              (totalSalaryPaid +
+                                      totalAdvanceTaken +
+                                      totalBonusPaid)
                                   .toStringAsFixed(2),
                               style: pw.TextStyle(
                                 fontWeight: pw.FontWeight.bold,
@@ -668,6 +718,339 @@ class StaffController extends GetxController {
       ),
     );
     return pdf.save();
+  }
+
+  // ------------------------------------------------------------------
+  // 6. DOWNLOAD BONUS SLIP (NEW FEATURE)
+  // ------------------------------------------------------------------
+  Future<void> downloadBonusSlip(
+    StaffModel staff,
+    double amount,
+    String month,
+    String note,
+    DateTime date,
+  ) async {
+    try {
+      final pdf = pw.Document();
+
+      pdf.addPage(
+        pw.Page(
+          pageFormat: PdfPageFormat.a5.landscape, // Payslip size
+          margin: const pw.EdgeInsets.all(30),
+          build:
+              (context) => pw.Container(
+                decoration: pw.BoxDecoration(
+                  border: pw.Border.all(color: PdfColors.blue900, width: 2),
+                ),
+                padding: const pw.EdgeInsets.all(20),
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Center(
+                      child: pw.Text(
+                        "G-TEL ERP",
+                        style: pw.TextStyle(
+                          fontSize: 24,
+                          fontWeight: pw.FontWeight.bold,
+                          color: PdfColors.blue900,
+                        ),
+                      ),
+                    ),
+                    pw.Center(
+                      child: pw.Text(
+                        "FESTIVAL / BONUS SLIP",
+                        style: pw.TextStyle(
+                          fontSize: 14,
+                          fontWeight: pw.FontWeight.bold,
+                          letterSpacing: 2,
+                        ),
+                      ),
+                    ),
+                    pw.SizedBox(height: 20),
+                    pw.Divider(),
+                    pw.SizedBox(height: 10),
+                    pw.Row(
+                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                      children: [
+                        pw.Column(
+                          crossAxisAlignment: pw.CrossAxisAlignment.start,
+                          children: [
+                            _pdfRow("Staff Name:", staff.name),
+                            _pdfRow("Designation:", staff.des),
+                            _pdfRow("Phone:", staff.phone),
+                          ],
+                        ),
+                        pw.Column(
+                          crossAxisAlignment: pw.CrossAxisAlignment.end,
+                          children: [
+                            pw.Text(
+                              "Date: ${DateFormat('dd MMM yyyy').format(date)}",
+                            ),
+                            pw.Text("Period: $month"),
+                          ],
+                        ),
+                      ],
+                    ),
+                    pw.SizedBox(height: 20),
+                    pw.Container(
+                      padding: const pw.EdgeInsets.all(15),
+                      color: PdfColors.grey100,
+                      child: pw.Row(
+                        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                        children: [
+                          pw.Text(
+                            "BONUS AMOUNT:",
+                            style: pw.TextStyle(
+                              fontSize: 14,
+                              fontWeight: pw.FontWeight.bold,
+                            ),
+                          ),
+                          pw.Text(
+                            "${amount.toStringAsFixed(2)} BDT",
+                            style: pw.TextStyle(
+                              fontSize: 18,
+                              fontWeight: pw.FontWeight.bold,
+                              color: PdfColors.green800,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    pw.SizedBox(height: 10),
+                    pw.Text(
+                      "Narration / Note:",
+                      style: pw.TextStyle(
+                        fontWeight: pw.FontWeight.bold,
+                        fontSize: 10,
+                      ),
+                    ),
+                    pw.Text(
+                      note.isEmpty ? "Bonus / Incentive" : note,
+                      style: const pw.TextStyle(fontSize: 10),
+                    ),
+
+                    pw.Spacer(),
+                    pw.Row(
+                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                      children: [
+                        pw.Container(
+                          width: 100,
+                          decoration: const pw.BoxDecoration(
+                            border: pw.Border(top: pw.BorderSide(width: 1)),
+                          ),
+                          child: pw.Center(
+                            child: pw.Text(
+                              "Authorized By",
+                              style: const pw.TextStyle(fontSize: 10),
+                            ),
+                          ),
+                        ),
+                        pw.Container(
+                          width: 100,
+                          decoration: const pw.BoxDecoration(
+                            border: pw.Border(top: pw.BorderSide(width: 1)),
+                          ),
+                          child: pw.Center(
+                            child: pw.Text(
+                              "Receiver Signature",
+                              style: const pw.TextStyle(fontSize: 10),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+        ),
+      );
+
+      final Uint8List bytes = await pdf.save();
+      _downloadWebPdf(
+        bytes,
+        "BonusSlip_${staff.name.replaceAll(' ', '_')}.pdf",
+      );
+    } catch (e) {
+      Get.snackbar("Error", "Could not generate Bonus Slip: $e");
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // 7. MONTHLY BONUS REPORT (NEW FEATURE)
+  // ------------------------------------------------------------------
+  Future<void> downloadMonthlyBonusReport(String month) async {
+    isLoading.value = true;
+    try {
+      final pdf = pw.Document();
+      double totalBonusDisbursed = 0.0;
+
+      List<List<String>> reportData = [];
+
+      for (var staff in staffList) {
+        QuerySnapshot bonusSnap =
+            await db
+                .collection('staff')
+                .doc(staff.id)
+                .collection('salaries')
+                .where('month', isEqualTo: month)
+                .where('type', isEqualTo: 'BONUS')
+                .get();
+
+        double staffTotalBonus = 0.0;
+        String notes = "";
+        for (var doc in bonusSnap.docs) {
+          staffTotalBonus += (doc['amount'] as num).toDouble();
+          String n = doc['note']?.toString() ?? "";
+          if (n.isNotEmpty) {
+            notes += notes.isEmpty ? n : ", $n";
+          }
+        }
+
+        if (staffTotalBonus > 0) {
+          totalBonusDisbursed += staffTotalBonus;
+          reportData.add([
+            staff.name,
+            staff.des,
+            staff.phone,
+            notes.isEmpty ? "Bonus/Festival" : notes,
+            staffTotalBonus.toStringAsFixed(0),
+          ]);
+        }
+      }
+
+      if (reportData.isEmpty) {
+        Get.snackbar(
+          "No Data",
+          "No bonuses were given in $month",
+          backgroundColor: Colors.orange,
+          colorText: Colors.white,
+        );
+        isLoading.value = false;
+        return;
+      }
+
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(30),
+          build:
+              (context) => [
+                pw.Header(
+                  level: 0,
+                  child: pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text(
+                            "MONTHLY BONUS REPORT",
+                            style: pw.TextStyle(
+                              fontWeight: pw.FontWeight.bold,
+                              fontSize: 18,
+                            ),
+                          ),
+                          pw.Text(
+                            "G-TEL ERP",
+                            style: const pw.TextStyle(
+                              fontSize: 10,
+                              color: PdfColors.grey,
+                            ),
+                          ),
+                        ],
+                      ),
+                      pw.Text(
+                        "Period: $month",
+                        style: pw.TextStyle(
+                          fontWeight: pw.FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                pw.SizedBox(height: 20),
+
+                // Summary Box
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(15),
+                  decoration: pw.BoxDecoration(
+                    border: pw.Border.all(color: PdfColors.amber700, width: 2),
+                    color: PdfColors.amber50,
+                  ),
+                  child: pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Text(
+                        "Total Bonus Disbursed:",
+                        style: pw.TextStyle(
+                          fontSize: 14,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      ),
+                      pw.Text(
+                        "${totalBonusDisbursed.toStringAsFixed(2)} BDT",
+                        style: pw.TextStyle(
+                          fontSize: 16,
+                          fontWeight: pw.FontWeight.bold,
+                          color: PdfColors.green800,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                pw.SizedBox(height: 15),
+
+                pw.Table.fromTextArray(
+                  headers: [
+                    "Staff Name",
+                    "Designation",
+                    "Phone",
+                    "Note",
+                    "Amount Paid",
+                  ],
+                  data: reportData,
+                  headerStyle: pw.TextStyle(
+                    fontWeight: pw.FontWeight.bold,
+                    color: PdfColors.white,
+                    fontSize: 10,
+                  ),
+                  headerDecoration: const pw.BoxDecoration(
+                    color: PdfColors.amber800,
+                  ),
+                  cellStyle: const pw.TextStyle(fontSize: 10),
+                  cellAlignments: {
+                    0: pw.Alignment.centerLeft,
+                    1: pw.Alignment.centerLeft,
+                    2: pw.Alignment.centerLeft,
+                    3: pw.Alignment.centerLeft,
+                    4: pw.Alignment.centerRight,
+                  },
+                ),
+                pw.Spacer(),
+                pw.Text(
+                  "Generated from G-TEL ERP",
+                  style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey),
+                ),
+              ],
+        ),
+      );
+
+      final Uint8List bytes = await pdf.save();
+      _downloadWebPdf(bytes, "BonusReport_$month.pdf");
+
+      Get.snackbar(
+        "Success",
+        "Bonus Report Generated",
+        backgroundColor: Colors.green,
+        colorText: Colors.white,
+      );
+    } catch (e) {
+      Get.snackbar("Error", "Report generation failed: $e");
+    } finally {
+      isLoading.value = false;
+    }
   }
 
   pw.Widget _pdfRow(String label, String value) {

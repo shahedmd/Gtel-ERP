@@ -635,8 +635,6 @@ class SaleReturnController extends GetxController {
           throw "Failed to restore returned items to their stock buckets.";
         }
       }
-
-      // H. Commit to Database
       await batch.commit();
 
       Get.back();

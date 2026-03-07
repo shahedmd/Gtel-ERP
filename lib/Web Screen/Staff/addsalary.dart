@@ -12,6 +12,7 @@ const Color activeAccent = Color(0xFF3B82F6);
 const Color bgGrey = Color(0xFFF3F4F6);
 const Color creditGreen = Color(0xFF10B981); // For Repayments
 const Color debtRed = Color(0xFFEF4444); // For Advances
+const Color bonusGold = Color(0xFFF59E0B); // For Bonuses
 
 void addSalaryDialog(
   StaffController controller,
@@ -28,8 +29,11 @@ void addSalaryDialog(
 
   final Rx<DateTime?> selectedDate = Rx<DateTime?>(DateTime.now());
 
-  // NEW: State for Transaction Type (Salary, Advance, Repayment)
+  // State for Transaction Type (Salary, Advance, Repayment, Bonus)
   final Rx<StaffTransactionType> selectedType = StaffTransactionType.SALARY.obs;
+
+  // State for Payment Method (Only used for Repayment Cash Ledger Entry)
+  final RxString selectedPaymentMethod = "Cash".obs;
 
   Get.dialog(
     Dialog(
@@ -57,6 +61,23 @@ void addSalaryDialog(
                     _sectionLabel("Transaction Type"),
                     _buildTypeSelector(selectedType),
                     const SizedBox(height: 20),
+
+                    // 1.5. Payment Method (Dynamically visible ONLY for Repayments)
+                    Obx(
+                      () =>
+                          selectedType.value == StaffTransactionType.REPAYMENT
+                              ? Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  _sectionLabel(
+                                    "Receiving Method (Cash Ledger)",
+                                  ),
+                                  _buildMethodSelector(selectedPaymentMethod),
+                                  const SizedBox(height: 20),
+                                ],
+                              )
+                              : const SizedBox.shrink(),
+                    ),
 
                     // 2. Payment Details
                     _sectionLabel("Payment Details"),
@@ -113,6 +134,7 @@ void addSalaryDialog(
                       noteC,
                       selectedDate,
                       selectedType.value,
+                      selectedPaymentMethod.value,
                     ),
               ),
             ),
@@ -140,6 +162,10 @@ Widget _buildHeader(String name, StaffTransactionType type) {
     title = "Record Repayment";
     color = creditGreen;
     icon = FontAwesomeIcons.moneyBillTransfer;
+  } else if (type == StaffTransactionType.BONUS) {
+    title = "Give Festival / Bonus";
+    color = bonusGold;
+    icon = FontAwesomeIcons.gift;
   }
 
   return Container(
@@ -186,7 +212,7 @@ Widget _buildHeader(String name, StaffTransactionType type) {
   );
 }
 
-// NEW: Segmented Control for Transaction Type
+// Segmented Control for Transaction Type
 Widget _buildTypeSelector(Rx<StaffTransactionType> selectedType) {
   return Obx(
     () => Container(
@@ -205,6 +231,7 @@ Widget _buildTypeSelector(Rx<StaffTransactionType> selectedType) {
             StaffTransactionType.REPAYMENT,
             selectedType,
           ),
+          _typeButton("Bonus", StaffTransactionType.BONUS, selectedType),
         ],
       ),
     ),
@@ -218,8 +245,10 @@ Widget _typeButton(
 ) {
   final isSelected = current.value == type;
   Color activeColor = activeAccent;
+
   if (type == StaffTransactionType.ADVANCE) activeColor = debtRed;
   if (type == StaffTransactionType.REPAYMENT) activeColor = creditGreen;
+  if (type == StaffTransactionType.BONUS) activeColor = bonusGold;
 
   return Expanded(
     child: InkWell(
@@ -246,8 +275,44 @@ Widget _typeButton(
           style: TextStyle(
             fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
             color: isSelected ? activeColor : Colors.grey[600],
-            fontSize: 13,
+            fontSize: 12, // slightly smaller to fit 4 buttons nicely
           ),
+        ),
+      ),
+    ),
+  );
+}
+
+// Payment Method Dropdown
+Widget _buildMethodSelector(RxString selectedMethod) {
+  final methods = ['Cash', 'Bank', 'Bkash', 'Nagad'];
+
+  return Obx(
+    () => Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      decoration: BoxDecoration(
+        color: bgGrey,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.black12),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: selectedMethod.value,
+          isExpanded: true,
+          icon: const Icon(Icons.keyboard_arrow_down, color: Colors.blueGrey),
+          items:
+              methods.map((String val) {
+                return DropdownMenuItem<String>(
+                  value: val,
+                  child: Text(
+                    val,
+                    style: const TextStyle(fontSize: 14, color: darkSlate),
+                  ),
+                );
+              }).toList(),
+          onChanged: (val) {
+            if (val != null) selectedMethod.value = val;
+          },
         ),
       ),
     ),
@@ -313,6 +378,9 @@ Widget _buildFooter({
   } else if (type == StaffTransactionType.REPAYMENT) {
     btnLabel = "Confirm Repayment";
     btnColor = creditGreen;
+  } else if (type == StaffTransactionType.BONUS) {
+    btnLabel = "Process Bonus";
+    btnColor = bonusGold;
   }
 
   return Container(
@@ -350,7 +418,7 @@ Widget _buildFooter({
   );
 }
 
-// --- TRANSACTION LOGIC (UPDATED) ---
+// --- TRANSACTION LOGIC ---
 
 Future<void> _handleTransaction(
   StaffController staffCtrl,
@@ -361,6 +429,7 @@ Future<void> _handleTransaction(
   TextEditingController noteC,
   Rx<DateTime?> date,
   StaffTransactionType type,
+  String paymentMethod,
 ) async {
   // 1. Validation
   if (amountC.text.isEmpty || date.value == null) {
@@ -382,16 +451,17 @@ Future<void> _handleTransaction(
   // 2. Determine Note
   String finalNote = noteC.text;
   if (finalNote.isEmpty) {
-    finalNote =
-        type == StaffTransactionType.SALARY
-            ? "Monthly Salary"
-            : type == StaffTransactionType.ADVANCE
-            ? "Advance Payment"
-            : "Loan Repayment";
+    if (type == StaffTransactionType.SALARY) {
+      finalNote = "Monthly Salary";
+    } else if (type == StaffTransactionType.ADVANCE) {
+      finalNote = "Advance Payment";
+    } else if (type == StaffTransactionType.REPAYMENT) {
+      finalNote = "Loan Repayment";
+    } else if (type == StaffTransactionType.BONUS) {
+      finalNote = "Festival / Bonus";
+    }
   }
 
-  // 3. Perform Transaction (Controller handles DB + Daily Expenses)
-  // We do NOT call dailyExpensesController here manually anymore.
   await staffCtrl.addTransaction(
     staffId: staffId,
     staffName: staffName,
@@ -399,13 +469,13 @@ Future<void> _handleTransaction(
     note: finalNote,
     date: date.value!,
     type: type,
-    month: monthC.text, // Passed for reference
+    month: monthC.text,
+    paymentMethod: paymentMethod, // Passed for Cash Ledger
   );
 }
 
 // --- HELPER COMPONENTS ---
 
-/// Creates a small, uppercase blue label for form sections
 Widget _sectionLabel(String label) {
   return Padding(
     padding: const EdgeInsets.only(bottom: 8, top: 4),
@@ -414,14 +484,13 @@ Widget _sectionLabel(String label) {
       style: const TextStyle(
         fontSize: 11,
         fontWeight: FontWeight.bold,
-        color: Color(0xFF6B7280), // Muted Text for labels
+        color: Color(0xFF6B7280),
         letterSpacing: 1.1,
       ),
     ),
   );
 }
 
-/// A professional ERP-styled text field
 Widget _buildField(
   TextEditingController c,
   String hint,
@@ -431,34 +500,25 @@ Widget _buildField(
   return TextField(
     controller: c,
     keyboardType: type,
-    style: const TextStyle(fontSize: 14, color: Color(0xFF111827)), // darkSlate
+    style: const TextStyle(fontSize: 14, color: darkSlate),
     decoration: InputDecoration(
       hintText: hint,
       hintStyle: const TextStyle(fontSize: 14, color: Colors.grey),
       prefixIcon: Icon(icon, size: 16, color: Colors.blueGrey),
       filled: true,
-      fillColor: const Color(0xFFF3F4F6), // bgGrey
+      fillColor: bgGrey,
       contentPadding: const EdgeInsets.symmetric(vertical: 16),
-
-      // Default Border
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
         borderSide: BorderSide.none,
       ),
-
-      // Border when not focused
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
         borderSide: const BorderSide(color: Colors.black12),
       ),
-
-      // Border when user is typing
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
-        borderSide: const BorderSide(
-          color: Color(0xFF3B82F6), // activeAccent
-          width: 1.5,
-        ),
+        borderSide: const BorderSide(color: activeAccent, width: 1.5),
       ),
     ),
   );

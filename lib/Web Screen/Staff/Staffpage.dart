@@ -16,6 +16,7 @@ class StaffListPage extends StatelessWidget {
   static const Color activeAccent = Color(0xFF3B82F6);
   static const Color bgGrey = Color(0xFFF9FAFB);
   static const Color textMuted = Color(0xFF6B7280);
+  static const Color bonusGold = Color(0xFFF59E0B); // Added Bonus Color
 
   StaffListPage({super.key});
 
@@ -57,7 +58,7 @@ class StaffListPage extends StatelessWidget {
     );
   }
 
-  // --- HEADER SECTION (UPDATED) ---
+  // --- HEADER SECTION ---
   Widget _buildHeader(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(24),
@@ -75,9 +76,7 @@ class StaffListPage extends StatelessWidget {
                   color: darkSlate,
                 ),
               ),
-              // UPDATE 1: SHOW TOTAL MONTHLY PAYROLL LIABILITY
               Obx(() {
-                // Calculate total of 'salary' field from all staff
                 int totalLiability = controller.staffList.fold(
                   0,
                   (sum, item) => sum + item.salary,
@@ -95,9 +94,9 @@ class StaffListPage extends StatelessWidget {
           ),
           const Spacer(),
 
-          // Monthly Report Button
+          // 1. Monthly Payroll Button
           OutlinedButton.icon(
-            onPressed: () => _pickMonthAndDownload(context),
+            onPressed: () => _pickMonthAndDownload(context, false),
             icon: const FaIcon(
               FontAwesomeIcons.filePdf,
               size: 16,
@@ -110,6 +109,28 @@ class StaffListPage extends StatelessWidget {
             style: OutlinedButton.styleFrom(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
               side: const BorderSide(color: Colors.redAccent),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+
+          // 2. NEW: Monthly Bonus Report Button
+          OutlinedButton.icon(
+            onPressed: () => _pickMonthAndDownload(context, true),
+            icon: const FaIcon(
+              FontAwesomeIcons.gift,
+              size: 16,
+              color: bonusGold,
+            ),
+            label: const Text(
+              "Bonus Report",
+              style: TextStyle(color: bonusGold),
+            ),
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+              side: const BorderSide(color: bonusGold),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8),
               ),
@@ -157,19 +178,21 @@ class StaffListPage extends StatelessWidget {
     );
   }
 
-  void _pickMonthAndDownload(BuildContext context) async {
+  // Modified to handle BOTH Payroll and Bonus pickers
+  void _pickMonthAndDownload(BuildContext context, bool isBonus) async {
     DateTime selectedDate = DateTime.now();
     await showDialog(
       context: context,
       builder: (BuildContext context) {
-        // Simple Month Picker Dialog
         return AlertDialog(
-          title: const Text("Select Payroll Month"),
+          title: Text(isBonus ? "Select Bonus Month" : "Select Payroll Month"),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text(
-                "This report includes all payments tagged with the selected month, regardless of the actual payment date.",
+              Text(
+                isBonus
+                    ? "This report includes all festival bonuses given in the selected month."
+                    : "This report includes all salary payments tagged with the selected month.",
               ),
               const SizedBox(height: 20),
               SizedBox(
@@ -193,12 +216,22 @@ class StaffListPage extends StatelessWidget {
               onPressed: () => Get.back(),
             ),
             ElevatedButton(
-              child: const Text("Download Report"),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: isBonus ? bonusGold : activeAccent,
+              ),
+              child: Text(
+                "Download Report",
+                style: const TextStyle(color: Colors.white),
+              ),
               onPressed: () {
                 Get.back();
-                // Formats to "January 2024" etc.
                 String monthName = DateFormat('MMMM yyyy').format(selectedDate);
-                controller.downloadMonthlyPayroll(monthName);
+
+                if (isBonus) {
+                  controller.downloadMonthlyBonusReport(monthName);
+                } else {
+                  controller.downloadMonthlyPayroll(monthName);
+                }
               },
             ),
           ],
@@ -344,7 +377,7 @@ class StaffListPage extends StatelessWidget {
             Expanded(
               flex: 1,
               child: Text(
-                "\$${staff.salary}",
+                "Tk ${staff.salary}",
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   color: Colors.green,

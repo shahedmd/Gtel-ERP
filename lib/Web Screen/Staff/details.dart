@@ -1,4 +1,4 @@
-// ignore_for_file: avoid_web_libraries_in_flutter, deprecated_member_use
+// ignore_for_file: avoid_web_libraries_in_flutter, deprecated_member_use, curly_braces_in_flow_control_structures
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -16,6 +16,7 @@ const Color activeAccent = Color(0xFF3B82F6);
 const Color bgGrey = Color(0xFFF9FAFB);
 const Color debtRed = Color(0xFFEF4444);
 const Color creditGreen = Color(0xFF10B981);
+const Color bonusGold = Color(0xFFF59E0B); // NEW: Bonus Color
 
 class StaffDetailsPage extends StatelessWidget {
   final String staffId;
@@ -45,14 +46,12 @@ class StaffDetailsPage extends StatelessWidget {
           ),
         ),
         actions: [
-          // UPDATE 1: Edit Details Button
           IconButton(
             onPressed: () => _showEditDialog(context),
             icon: const Icon(Icons.edit, color: activeAccent),
             tooltip: "Edit Staff Details",
           ),
           const SizedBox(width: 10),
-          // PDF Action
           TextButton.icon(
             onPressed: () => _handlePdfDownload(staffId),
             icon: const FaIcon(
@@ -100,12 +99,10 @@ class StaffDetailsPage extends StatelessWidget {
     );
   }
 
-  // --- EDIT DIALOG (UPDATE 1) ---
+  // --- EDIT DIALOG ---
   void _showEditDialog(BuildContext context) {
-    // 1. Get current data
     final staff = controller.staffList.firstWhere((s) => s.id == staffId);
 
-    // 2. Controllers
     final nameC = TextEditingController(text: staff.name);
     final phoneC = TextEditingController(text: staff.phone);
     final nidC = TextEditingController(text: staff.nid);
@@ -113,7 +110,6 @@ class StaffDetailsPage extends StatelessWidget {
     final salaryC = TextEditingController(text: staff.salary.toString());
     DateTime selectedDate = staff.joiningDate;
 
-    // 3. Show Dialog
     Get.defaultDialog(
       title: "Edit Staff Details",
       contentPadding: const EdgeInsets.all(20),
@@ -233,10 +229,16 @@ class StaffDetailsPage extends StatelessWidget {
         stream: controller.streamSalaries(staffId),
         builder: (context, snapshot) {
           double totalPaid = 0;
+          double totalBonus = 0; // NEW
+
           if (snapshot.hasData) {
-            totalPaid = snapshot.data!
-                .where((item) => item.type == 'SALARY' || item.type == null)
-                .fold(0.0, (sum, item) => sum + item.amount);
+            for (var item in snapshot.data!) {
+              if (item.type == 'SALARY' || item.type == null) {
+                totalPaid += item.amount;
+              } else if (item.type == 'BONUS') {
+                totalBonus += item.amount;
+              }
+            }
           }
 
           return Row(
@@ -260,6 +262,13 @@ class StaffDetailsPage extends StatelessWidget {
                 "Tk ${totalPaid.toStringAsFixed(0)}",
                 FontAwesomeIcons.wallet,
                 Colors.orange,
+              ),
+              const SizedBox(width: 16),
+              _statCard(
+                "Total Bonus Paid",
+                "Tk ${totalBonus.toStringAsFixed(0)}",
+                FontAwesomeIcons.gift,
+                bonusGold,
               ),
             ],
           );
@@ -328,7 +337,6 @@ class StaffDetailsPage extends StatelessWidget {
       ),
       child: Column(
         children: [
-          // Table Header
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 15),
             decoration: const BoxDecoration(
@@ -345,11 +353,10 @@ class StaffDetailsPage extends StatelessWidget {
                 Expanded(flex: 2, child: _HeaderTxt("Month/Ref")),
                 Expanded(flex: 3, child: _HeaderTxt("Note")),
                 Expanded(flex: 2, child: _HeaderTxt("Amount")),
-                SizedBox(width: 40),
+                SizedBox(width: 80), // Space for action buttons
               ],
             ),
           ),
-          // Table Body
           StreamBuilder<List<SalaryModel>>(
             stream: controller.streamSalaries(staffId),
             builder: (context, snapshot) {
@@ -395,6 +402,9 @@ class StaffDetailsPage extends StatelessWidget {
     } else if (typeLabel == "REPAYMENT") {
       typeColor = creditGreen;
       bgColor = creditGreen.withOpacity(0.1);
+    } else if (typeLabel == "BONUS") {
+      typeColor = bonusGold;
+      bgColor = bonusGold.withOpacity(0.1);
     }
 
     return Padding(
@@ -457,16 +467,43 @@ class StaffDetailsPage extends StatelessWidget {
             ),
           ),
 
-          // Delete Action
+          // Actions
           SizedBox(
-            width: 40,
-            child: IconButton(
-              icon: const Icon(
-                Icons.delete_outline,
-                color: Colors.redAccent,
-                size: 20,
-              ),
-              onPressed: () => _confirmDelete(t),
+            width: 80,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                if (typeLabel == "BONUS")
+                  IconButton(
+                    icon: const Icon(
+                      Icons.download,
+                      color: bonusGold,
+                      size: 20,
+                    ),
+                    tooltip: "Download Bonus Slip",
+                    onPressed: () {
+                      final staff = controller.staffList.firstWhere(
+                        (s) => s.id == staffId,
+                      );
+                      controller.downloadBonusSlip(
+                        staff,
+                        t.amount,
+                        t.month,
+                        t.note,
+                        t.date,
+                      );
+                    },
+                  ),
+                IconButton(
+                  icon: const Icon(
+                    Icons.delete_outline,
+                    color: Colors.redAccent,
+                    size: 20,
+                  ),
+                  tooltip: "Delete Record",
+                  onPressed: () => _confirmDelete(t),
+                ),
+              ],
             ),
           ),
         ],
@@ -488,10 +525,13 @@ class StaffDetailsPage extends StatelessWidget {
           final staffRef = controller.db.collection("staff").doc(staffId);
           await controller.db.runTransaction((transaction) async {
             final staffSnapshot = await transaction.get(staffRef);
+
             if (staffSnapshot.exists) {
               double currentDebt =
                   (staffSnapshot.data() as Map)['currentDebt']?.toDouble() ??
                   0.0;
+
+              // Only modify Debt Balance for Advances and Repayments
               if (t.type == "ADVANCE") {
                 transaction.update(staffRef, {
                   'currentDebt': currentDebt - t.amount,
@@ -505,11 +545,12 @@ class StaffDetailsPage extends StatelessWidget {
             final docRef = staffRef.collection("salaries").doc(t.id);
             transaction.delete(docRef);
           });
+
           await controller.loadStaff();
           Get.back();
           Get.snackbar(
             "Deleted",
-            "Record removed and balance updated.",
+            "Record removed successfully.",
             snackPosition: SnackPosition.BOTTOM,
           );
         } catch (e) {

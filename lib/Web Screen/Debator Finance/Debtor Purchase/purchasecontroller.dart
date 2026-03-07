@@ -344,67 +344,226 @@ class DebtorPurchaseController extends GetxController {
     WriteBatch batch = _db.batch();
 
     try {
-      DocumentReference purchaseAdjRef =
-          _db
-              .collection('debatorbody')
-              .doc(debtorId)
-              .collection('purchases')
-              .doc();
+      DocumentSnapshot debtorSnap =
+          await _db.collection('debatorbody').doc(debtorId).get();
+      if (!debtorSnap.exists) throw "Debtor not found";
+
+      // Cast the Object? to Map<String, dynamic>
+      Map<String, dynamic> debtorData =
+          debtorSnap.data() as Map<String, dynamic>;
+      String debtorName = debtorData['name'] ?? 'Unknown';
+
+      // =========================================================
+      // 1. CALCULATE SPLIT: OLD DUE FIRST, THEN RUNNING DUE
+      // =========================================================
+      Map<String, double> breakdown = await debtorCtrl
+          .getInstantDebtorBreakdown(debtorId);
+      double currentOldDue = breakdown['loan'] ?? 0.0;
+
+      double amountToOldDue = 0.0;
+      double amountToRunningDue = 0.0;
+
+      if (currentOldDue > 0) {
+        if (amount >= currentOldDue) {
+          // Pays off entire Old Due, remainder goes to Running Due
+          amountToOldDue = currentOldDue;
+          amountToRunningDue = amount - currentOldDue;
+        } else {
+          // Adjustment is smaller than Old Due, everything goes to Old Due
+          amountToOldDue = amount;
+          amountToRunningDue = 0.0;
+        }
+      } else {
+        // No Old Due, everything goes to Running Due
+        amountToRunningDue = amount;
+      }
 
       dynamic dateField =
           customDate != null
               ? Timestamp.fromDate(customDate)
               : FieldValue.serverTimestamp();
 
+      // =========================================================
+      // 2. RECORD ADJUSTMENT IN PURCHASES
+      // =========================================================
+      DocumentReference purchaseAdjRef =
+          _db
+              .collection('debatorbody')
+              .doc(debtorId)
+              .collection('purchases')
+              .doc();
       batch.set(purchaseAdjRef, {
         'date': dateField,
         'type': 'adjustment',
         'amount': amount,
         'method': 'Contra Adjustment',
-        'note': 'Adjusted against Sales Due',
+        'note':
+            'Adjusted Sales Due (Old: $amountToOldDue, Running: $amountToRunningDue)',
         'isAdjustment': true,
       });
 
+      // =========================================================
+      // 3. CREATE DEBTOR TRANSACTIONS (BASED ON SPLIT)
+      // =========================================================
+
+      // A. Pay Off Old Due (Uses 'loan_payment' type)
+      if (amountToOldDue > 0) {
+        DocumentReference oldDueTxRef =
+            _db
+                .collection('debatorbody')
+                .doc(debtorId)
+                .collection('transactions')
+                .doc();
+        batch.set(oldDueTxRef, {
+          'transactionId': oldDueTxRef.id,
+          'amount': amountToOldDue,
+          'type': 'loan_payment',
+          'date': dateField,
+          'note': 'Contra Adjustment - Old Due',
+          'paymentMethod': {'type': 'Contra'},
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      }
+
+      // B. Pay Off Running Due (Uses 'debit' type)
+      String? runningTxId;
+      if (amountToRunningDue > 0) {
+        DocumentReference runningTxRef =
+            _db
+                .collection('debatorbody')
+                .doc(debtorId)
+                .collection('transactions')
+                .doc();
+        runningTxId = runningTxRef.id;
+        batch.set(runningTxRef, {
+          'transactionId': runningTxId,
+          'amount': amountToRunningDue,
+          'type': 'debit',
+          'date': dateField,
+          'note': 'Contra Adjustment - Running Due',
+          'paymentMethod': {'type': 'Contra'},
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      }
+
+      // =========================================================
+      // 4. UPDATE MAIN DEBTOR BALANCES
+      // =========================================================
       DocumentReference debtorRef = _db.collection('debatorbody').doc(debtorId);
-      batch.update(debtorRef, {'purchaseDue': FieldValue.increment(-amount)});
-
-      DocumentReference ledgerRef =
-          _db
-              .collection('debatorbody')
-              .doc(debtorId)
-              .collection('transactions')
-              .doc();
-      batch.set(ledgerRef, {
-        'transactionId': ledgerRef.id,
-        'amount': amount,
-        'type': 'debit',
-        'date': dateField,
-        'note': 'Contra Adjustment (Ref Purchase)',
-        'paymentMethod': {'type': 'Contra'},
-        'createdAt': FieldValue.serverTimestamp(),
+      batch.update(debtorRef, {
+        'purchaseDue': FieldValue.increment(-amount),
+        'balance': FieldValue.increment(-amount),
       });
-      batch.update(debtorRef, {'balance': FieldValue.increment(-amount)});
 
+      // =========================================================
+      // 5. BILL ALLOCATION LOGIC (ONLY APPLIES TO RUNNING DUE)
+      // =========================================================
+      if (amountToRunningDue > 0) {
+        double remainingToAllocate = amountToRunningDue;
+
+        QuerySnapshot salesSnap =
+            await _db
+                .collection('daily_sales')
+                .where('name', isEqualTo: debtorName)
+                .get();
+
+        List<DocumentSnapshot> pendingBills =
+            salesSnap.docs.where((doc) {
+              final data = doc.data() as Map<String, dynamic>;
+              double p = double.tryParse(data['pending'].toString()) ?? 0.0;
+              return p > 0.5; // Tolerance
+            }).toList();
+
+        // Sort oldest bills first
+        pendingBills.sort((a, b) {
+          Timestamp t1 = a['timestamp'] as Timestamp;
+          Timestamp t2 = b['timestamp'] as Timestamp;
+          return t1.compareTo(t2);
+        });
+
+        if (pendingBills.isNotEmpty) {
+          for (var doc in pendingBills) {
+            if (remainingToAllocate <= 0.01) break;
+
+            Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+            double currentPending =
+                double.tryParse(data['pending'].toString()) ?? 0.0;
+            double currentPaid =
+                double.tryParse(data['paid'].toString()) ?? 0.0;
+            double currentLedgerPaid =
+                double.tryParse(data['ledgerPaid']?.toString() ?? '0') ?? 0.0;
+
+            double take =
+                (remainingToAllocate >= currentPending)
+                    ? currentPending
+                    : remainingToAllocate;
+
+            // Check if this payment completely clears the bill
+            bool isNowFullyPaid = (currentPending - take) <= 0.5;
+
+            final newHistoryEntry = {
+              'type': 'Contra Adjustment',
+              'amount': take,
+              'paidAt': Timestamp.now(),
+              'sourceTxId': runningTxId ?? purchaseAdjRef.id,
+            };
+
+            // A. Update Daily Sales Document
+            // -> YES, this successfully adds to ledgerPaid right here! <-
+            batch.update(doc.reference, {
+              "paid": currentPaid + take,
+              "pending": currentPending - take,
+              "ledgerPaid": currentLedgerPaid + take, // <--- Updates ledgerPaid
+              "status": isNowFullyPaid ? "paid" : "partial",
+              "paymentHistory": FieldValue.arrayUnion([newHistoryEntry]),
+            });
+
+            // B. Synchronously Update the Connected Sales Order
+            String saleTxId = data['transactionId'] ?? '';
+            if (saleTxId.isNotEmpty) {
+              DocumentReference orderRef = _db
+                  .collection('sales_orders')
+                  .doc(saleTxId);
+
+              Map<String, dynamic> orderUpdate = {
+                "paid": FieldValue.increment(take),
+                "paymentDetails.due": FieldValue.increment(-take),
+              };
+
+              if (isNowFullyPaid) {
+                orderUpdate["isFullyPaid"] = true;
+                orderUpdate["status"] = "completed";
+              }
+
+              batch.update(orderRef, orderUpdate);
+            }
+
+            remainingToAllocate -= take;
+          }
+        }
+      }
+
+      // 6. Execute Batch Writes Everything Simultaneously
       await batch.commit();
 
+      // Refresh Purchases and Transaction views
       await loadPurchases(debtorId);
-      debtorCtrl.loadTxPage(
-        debtorId,
-        debtorCtrl.currentTxPage.value,
-      ); // Reloads the current transaction page
+      debtorCtrl.loadTxPage(debtorId, debtorCtrl.currentTxPage.value);
+      debtorCtrl.calculateTotalOutstanding(); // Sync Overall Market State
 
       Get.back();
-      Get.snackbar("Success", "Contra Adjusted.");
+      Get.snackbar(
+        "Success",
+        "Adjusted! Old Due: $amountToOldDue, Running: $amountToRunningDue",
+      );
     } catch (e) {
       Get.snackbar("Error", e.toString());
+      print("Contra Error: $e");
     } finally {
       isLoading.value = false;
     }
   }
 
-  // ----------------------------------------------------------------
-  // 4. PDF GENERATION
-  // ----------------------------------------------------------------
   Future<void> generatePurchasePdf(
     Map<String, dynamic> data,
     String debtorName,

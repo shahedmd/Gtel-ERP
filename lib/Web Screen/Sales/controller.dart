@@ -1,8 +1,10 @@
-// ignore_for_file: deprecated_member_use, empty_catches, avoid_print, prefer_interpolation_to_compose_strings
+// ignore_for_file: prefer_interpolation_to_compose_strings, empty_catches
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Stock/controller.dart';
+import 'package:gtel_erp/Web%20Screen/Sales/Condition/conditioncontroller.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -18,9 +20,15 @@ class DailySalesController extends GetxController {
   final RxBool isLoading = false.obs;
   final RxString filterQuery = "".obs;
 
-  final RxDouble totalSales = 0.0.obs;
-  final RxDouble paidAmount = 0.0.obs;
-  final RxDouble debtorPending = 0.0.obs;
+  final RxDouble revNormalAgent = 0.0.obs;
+  final RxDouble colNormalAgent = 0.0.obs;
+  final RxDouble dueNormalAgent = 0.0.obs;
+  final RxDouble extraNormalAgent = 0.0.obs;
+
+  final RxDouble revCondition = 0.0.obs;
+  final RxDouble colCondition = 0.0.obs;
+  final RxDouble dueCondition = 0.0.obs;
+  final RxDouble extraCondition = 0.0.obs;
 
   @override
   void onInit() {
@@ -36,10 +44,24 @@ class DailySalesController extends GetxController {
 
   void changeDate(DateTime date) {
     selectedDate.value = date;
+
+    // 🔥 THE FIX: Tell ConditionSalesController to load the same date instantly!
+    // This stops you from having to go to Condition Sales and scroll down.
+    try {
+      if (Get.isRegistered<ConditionSalesController>()) {
+        final condCtrl = Get.find<ConditionSalesController>();
+        condCtrl.customDateRange.value = DateTimeRange(
+          start: DateTime(date.year, date.month, date.day, 0, 0, 0),
+          end: DateTime(date.year, date.month, date.day, 23, 59, 59),
+        );
+        condCtrl.selectedFilter.value = "Custom";
+        condCtrl.fetchReportData();
+      }
+    } catch (e) {}
   }
 
   // ==========================================
-  // 1. LOAD DATA
+  // 1. LOAD DATA & COMPUTE ERP METRICS
   // ==========================================
   Future<void> loadDailySales() async {
     isLoading.value = true;
@@ -51,6 +73,7 @@ class DailySalesController extends GetxController {
       );
       final end = start.add(const Duration(days: 1));
 
+      // 1. Fetch Daily Sales (This gets normal sales & condition advances)
       final snap =
           await _db
               .collection("daily_sales")
@@ -64,13 +87,179 @@ class DailySalesController extends GetxController {
 
       salesList.value =
           snap.docs.map((doc) => SaleModel.fromFirestore(doc)).toList();
+
+      double dailyCondRev = 0.0;
+      List<String> todayCondInvIds = [];
+      Set<String> historicalConditionInvIds = {};
+
+      // 2. Force fetch all Master Orders using the EXACT query that Condition Sales uses.
+      // This guarantees we find 0-advance sales.
+      try {
+        final ordersSnap =
+            await _db
+                .collection('sales_orders')
+                .where(
+                  'timestamp',
+                  isGreaterThanOrEqualTo: Timestamp.fromDate(start),
+                )
+                .where(
+                  'timestamp',
+                  isLessThanOrEqualTo: Timestamp.fromDate(end),
+                )
+                .orderBy('timestamp', descending: true)
+                .get();
+
+        for (var doc in ordersSnap.docs) {
+          final data = doc.data();
+          if (data['isCondition'] == true) {
+            todayCondInvIds.add(doc.id);
+            double gTotal = (data['grandTotal'] as num?)?.toDouble() ?? 0.0;
+            if (gTotal <= 0.0) {
+              List items = data['items'] ?? [];
+              double sub = 0.0;
+              for (var item in items) {
+                if (item is Map) {
+                  sub +=
+                      double.tryParse(item['subtotal']?.toString() ?? '0') ??
+                      0.0;
+                }
+              }
+              double disc = (data['discount'] as num?)?.toDouble() ?? 0.0;
+              gTotal = sub - disc;
+            }
+            dailyCondRev += gTotal;
+          }
+        }
+      } catch (e) {
+        // Fallback for cache mode
+      }
+
+      // 3. Check for any historical payments collected today
+      Set<String> involvedIds = {};
+      for (var doc in snap.docs) {
+        final data = doc.data();
+        String invId =
+            (data['transactionId'] ?? data['invoiceId'] ?? '').toString();
+        if (invId.isNotEmpty && !todayCondInvIds.contains(invId)) {
+          involvedIds.add(invId);
+        }
+      }
+
+      if (involvedIds.isNotEmpty) {
+        List<String> idList = involvedIds.toList();
+        for (var i = 0; i < idList.length; i += 10) {
+          var chunk = idList.sublist(
+            i,
+            i + 10 > idList.length ? idList.length : i + 10,
+          );
+
+          var chunkSnap =
+              await _db
+                  .collection("sales_orders")
+                  .where(FieldPath.documentId, whereIn: chunk)
+                  .get();
+
+          for (var doc in chunkSnap.docs) {
+            final data = doc.data();
+            if (data['isCondition'] == true &&
+                !todayCondInvIds.contains(doc.id)) {
+              historicalConditionInvIds.add(doc.id);
+            }
+          }
+        }
+      }
+
       _applyFilter();
-      _computeTotals();
+      _computeTotals(
+        dailyCondRev,
+        todayCondInvIds,
+        historicalConditionInvIds,
+        snap.docs,
+      );
     } catch (e) {
       Get.snackbar("Error", e.toString());
     } finally {
       isLoading.value = false;
     }
+  }
+
+  void _computeTotals(
+    double conditionRevenue,
+    List<String> todayCondInvIds,
+    Set<String> historicalConditionInvIds,
+    List<QueryDocumentSnapshot> rawDocs,
+  ) {
+    double rNA = 0.0, cNA = 0.0, dNA = 0.0, eNA = 0.0;
+    double rC = conditionRevenue, cC = 0.0, advC = 0.0, eC = 0.0;
+
+    for (var doc in rawDocs) {
+      final data = doc.data() as Map<String, dynamic>;
+      String type = (data['customerType'] ?? '').toString().toLowerCase();
+      String source = (data['source'] ?? '').toString().toLowerCase();
+      String invId =
+          (data['transactionId'] ?? data['invoiceId'] ?? doc.id).toString();
+
+      bool isConditionRelated =
+          type.contains('condition') ||
+          source.contains('condition') ||
+          type.contains('courier') ||
+          todayCondInvIds.contains(invId) ||
+          historicalConditionInvIds.contains(invId);
+
+      double invAmt = (data['amount'] as num?)?.toDouble() ?? 0.0;
+      double paidAmt = (data['paid'] as num?)?.toDouble() ?? 0.0;
+      double ledgerPaidAmt = (data['ledgerPaid'] as num?)?.toDouble() ?? 0.0;
+
+      if (isConditionRelated) {
+        if (source.contains('recovery') ||
+            source.contains('payment') ||
+            (invAmt <= 0.01 && paidAmt > 0)) {
+          cC += paidAmt;
+          if (todayCondInvIds.contains(invId)) {
+            advC += paidAmt;
+          } else {
+            eC += paidAmt;
+          }
+        } else {
+          advC += paidAmt;
+          cC += paidAmt;
+        }
+      } else {
+        if (source.contains('recovery') ||
+            source.contains('payment') ||
+            (invAmt <= 0.01 && paidAmt > 0)) {
+          cNA += paidAmt;
+          eNA += paidAmt;
+        } else {
+          rNA += invAmt;
+          cNA += paidAmt;
+
+          if (invAmt > paidAmt) {
+            dNA += (invAmt - paidAmt);
+          }
+
+          if (ledgerPaidAmt > 0) {
+            cNA += ledgerPaidAmt;
+            eNA += ledgerPaidAmt;
+            dNA -= ledgerPaidAmt;
+            if (dNA < 0) dNA = 0;
+          }
+        }
+      }
+    }
+
+    double dC = rC - advC;
+    if (dC < 0) dC = 0;
+
+    revNormalAgent.value = _round(rNA);
+    colNormalAgent.value = _round(cNA);
+    dueNormalAgent.value = _round(dNA);
+    extraNormalAgent.value = _round(eNA);
+
+    revCondition.value = _round(rC);
+    colCondition.value = _round(cC);
+    dueCondition.value = _round(dC);
+    extraCondition.value = _round(eC);
   }
 
   void _applyFilter() {
@@ -88,66 +277,32 @@ class DailySalesController extends GetxController {
     }
   }
 
-  void _computeTotals() {
-    double total = 0.0;
-    double paid = 0.0;
-    double pending = 0.0;
-
-    for (var s in salesList) {
-      total += s.amount;
-      paid += s.paid;
-      if (s.customerType == "debtor") {
-        pending += s.pending;
-      }
-    }
-
-    totalSales.value = _round(total);
-    paidAmount.value = _round(paid);
-    debtorPending.value = _round(pending);
-  }
-
-  // ==========================================
-  // HELPER: FORMAT PAYMENT METHOD (RESTORED & FIXED)
-  // ==========================================
   String formatPaymentMethod(
     dynamic pm,
     double paidAmount, [
     double? totalAmount,
   ]) {
     if (paidAmount <= 0.01) return "CREDIT / DUE";
-
     if (pm == null || pm == "") return "CREDIT / DUE";
-
-    // If it's just a string, return it
     if (pm is! Map) return pm.toString().toUpperCase();
 
-    // Helper to format currency
     String toMoney(dynamic val) =>
         double.parse(val.toString()).toStringAsFixed(0);
 
-    // 1. Extract Amounts from Mixed Map (Legacy or POS Mixed)
     double cash = double.tryParse(pm['cash'].toString()) ?? 0;
     double bkash = double.tryParse(pm['bkash'].toString()) ?? 0;
     double nagad = double.tryParse(pm['nagad'].toString()) ?? 0;
     double bank = double.tryParse(pm['bank'].toString()) ?? 0;
 
-    // 2. Fallback Logic: If specific keys are 0, check 'type' or implied keys
     if (cash == 0 && bank == 0 && bkash == 0 && nagad == 0) {
       double effectiveTotal =
           (totalAmount != null && totalAmount > 0) ? totalAmount : paidAmount;
       String type = (pm['type'] ?? '').toString().toLowerCase();
 
-      // --- ROBUST DETECTION (Fix for missing 'type') ---
       if (type.isEmpty || type == 'cash') {
-        if (pm['bankName'].toString().isNotEmpty) {
-          type = 'bank';
-        }
-        if (pm['bkashNumber'].toString().isNotEmpty) {
-          type = 'bkash';
-        }
-        if (pm['nagadNumber'].toString().isNotEmpty) {
-          type = 'nagad';
-        }
+        if (pm['bankName'].toString().isNotEmpty) type = 'bank';
+        if (pm['bkashNumber'].toString().isNotEmpty) type = 'bkash';
+        if (pm['nagadNumber'].toString().isNotEmpty) type = 'nagad';
       }
 
       if (type.contains('bank')) {
@@ -163,9 +318,7 @@ class DailySalesController extends GetxController {
 
     List<String> parts = [];
 
-    if (cash > 0) {
-      parts.add("Cash: ${toMoney(cash)}");
-    }
+    if (cash > 0) parts.add("Cash: ${toMoney(cash)}");
     if (bkash > 0) {
       String num = (pm['bkashNumber'] ?? pm['number'] ?? "").toString();
       String line = "Bkash: ${toMoney(bkash)}";
@@ -184,9 +337,7 @@ class DailySalesController extends GetxController {
           (pm['accountNumber'] ?? pm['accountNo'] ?? "").toString();
 
       String line = "$myBankName: ${toMoney(bank)}";
-      if (custTrxInfo.isNotEmpty) {
-        line += "\nInfo: $custTrxInfo";
-      }
+      if (custTrxInfo.isNotEmpty) line += "\nInfo: $custTrxInfo";
       parts.add(line);
     }
 
@@ -202,9 +353,6 @@ class DailySalesController extends GetxController {
     return parts.isEmpty ? "MULTI-PAY" : parts.join("\n");
   }
 
-  // ==========================================
-  // 2. ADD SALE
-  // ==========================================
   Future<void> addSale({
     required String name,
     required double amount,
@@ -262,9 +410,6 @@ class DailySalesController extends GetxController {
     }
   }
 
-  // ==========================================
-  // 3. APPLY DEBTOR PAYMENT
-  // ==========================================
   Future<void> applyDebtorPayment(
     String debtorName,
     double paymentAmount,
@@ -452,22 +597,16 @@ class DailySalesController extends GetxController {
             List<Map<String, dynamic>> returnAdditions = [];
 
             for (var item in items) {
-              // 1. FIX TYPE ERROR: Safely parse Product ID to int
               String pIdStr =
                   (item['productId'] ?? item['id'] ?? '').toString();
               int safePidInt = int.tryParse(pIdStr) ?? 0;
-
-              // 2. FIX TYPE ERROR: Safely parse Quantity
               int qty = (item['qty'] as num?)?.toInt() ?? 0;
-
-              // Safely parse cost rate (needed for return payload)
               double cRate = (item['costRate'] as num?)?.toDouble() ?? 0.0;
 
               if (safePidInt > 0 && qty > 0) {
-                // 3. ADD TO SEA STOCK
                 returnAdditions.add({
                   'id': safePidInt,
-                  'sea_qty': qty, // Adding quantity to Sea Stock
+                  'sea_qty': qty,
                   'air_qty': 0,
                   'local_qty': 0,
                   'local_price': cRate,
@@ -476,7 +615,6 @@ class DailySalesController extends GetxController {
             }
 
             if (returnAdditions.isNotEmpty) {
-              // Using bulkAddStockMixed instead of updateStockBulk to target Sea Stock
               bool restockSuccess = await Get.find<ProductController>()
                   .bulkAddStockMixed(returnAdditions);
 
@@ -485,12 +623,11 @@ class DailySalesController extends GetxController {
                   "Error",
                   "Failed to restore stock to Sea. Sale not deleted.",
                 );
-                return; // Stop deletion if stock fails
+                return;
               }
             }
           }
 
-          // Delete from Firestore cleanly
           await _db.runTransaction((transaction) async {
             DocumentReference invRef = _db
                 .collection("sales_orders")
@@ -530,7 +667,6 @@ class DailySalesController extends GetxController {
   Future<void> reprintInvoice(String invoiceId) async {
     isLoading.value = true;
     try {
-      // 1. Fetch Master Record
       DocumentSnapshot doc =
           await _db.collection('sales_orders').doc(invoiceId).get();
       if (!doc.exists) {
@@ -541,7 +677,6 @@ class DailySalesController extends GetxController {
       Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
       bool isCond = data['isCondition'] ?? false;
 
-      // 2. Prepare Base Payment Map
       Map<String, dynamic> payMap = Map<String, dynamic>.from(
         data['paymentDetails'] ?? {},
       );
@@ -550,9 +685,6 @@ class DailySalesController extends GetxController {
         payMap['due'] =
             double.tryParse(data['courierDue']?.toString() ?? '0') ?? 0.0;
       } else {
-        // --- SCENARIO B: DEBTOR / REGULAR SALE ---
-
-        // Fetch real-time status from daily_sales
         QuerySnapshot dailySnap =
             await _db
                 .collection('daily_sales')
@@ -603,7 +735,6 @@ class DailySalesController extends GetxController {
                     double.tryParse(payMap[type]?.toString() ?? '0') ?? 0.0;
                 payMap[type] = current + amt;
 
-                // Map details
                 if (h['number'] != null) payMap['${type}Number'] = h['number'];
                 if (h['bankName'] != null) payMap['bankName'] = h['bankName'];
                 if (h['accountNumber'] != null) {
@@ -647,7 +778,6 @@ class DailySalesController extends GetxController {
         }
       }
 
-      // 4. Extract Common Data
       String name = data['customerName'] ?? "";
       String phone = data['customerPhone'] ?? "";
       String shop = data['shopName'] ?? "";
@@ -809,7 +939,7 @@ class DailySalesController extends GetxController {
               null,
               "",
               paymentMethodsStr,
-              invoiceDate, // Pass invoiceDate here
+              invoiceDate,
             ),
             _buildNewCustomerBox(
               name,
@@ -834,11 +964,7 @@ class DailySalesController extends GetxController {
             pw.SizedBox(height: 5),
             _buildNewDues(totalPreviousBalance, netTotalDue, regularFont),
             if (invDue <= 0 && !isCondition)
-              _buildPaidStamp(
-                boldFont,
-                regularFont,
-                invoiceDate,
-              ), // Pass invoiceDate here
+              _buildPaidStamp(boldFont, regularFont, invoiceDate),
             if (invDue > 0 || isCondition) pw.SizedBox(height: 15),
             _buildWordsBox(currentInvTotal, boldFont),
             pw.SizedBox(height: 40),
@@ -867,7 +993,7 @@ class DailySalesController extends GetxController {
                 courier,
                 challan,
                 paymentMethodsStr,
-                invoiceDate, // Pass invoiceDate here
+                invoiceDate,
               ),
               _buildNewCustomerBox(
                 name,
@@ -904,7 +1030,6 @@ class DailySalesController extends GetxController {
     await Printing.layoutPdf(onLayout: (f) => pdf.save());
   }
 
-  // --- COMPONENT: TOP HEADER ---
   pw.Widget _buildNewHeader(
     pw.Font bold,
     pw.Font reg,
@@ -1012,6 +1137,51 @@ class DailySalesController extends GetxController {
           ),
         ),
       ],
+    );
+  }
+
+  pw.Widget _buildPaidStamp(pw.Font bold, pw.Font reg, DateTime invoiceDate) {
+    return pw.Container(
+      margin: const pw.EdgeInsets.symmetric(vertical: 20),
+      alignment: pw.Alignment.center,
+      child: pw.Container(
+        padding: const pw.EdgeInsets.symmetric(horizontal: 40, vertical: 10),
+        decoration: pw.BoxDecoration(
+          border: pw.Border.all(color: PdfColors.blue800, width: 2),
+          borderRadius: const pw.BorderRadius.all(pw.Radius.circular(5)),
+        ),
+        child: pw.Column(
+          children: [
+            pw.Text(
+              "P A I D",
+              style: pw.TextStyle(
+                color: PdfColors.blue800,
+                font: bold,
+                fontSize: 24,
+                letterSpacing: 2,
+              ),
+            ),
+            pw.SizedBox(height: 5),
+            pw.Text(
+              DateFormat('dd MMM yyyy').format(invoiceDate),
+              style: pw.TextStyle(
+                color: PdfColors.blue800,
+                font: bold,
+                fontSize: 12,
+              ),
+            ),
+            pw.SizedBox(height: 5),
+            pw.Text(
+              "G TEL JOY EXPRESS",
+              style: pw.TextStyle(
+                color: PdfColors.blue800,
+                font: bold,
+                fontSize: 14,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1179,7 +1349,6 @@ class DailySalesController extends GetxController {
     );
   }
 
-  // --- COMPONENT: DUES SECTION ---
   pw.Widget _buildNewDues(double prevDue, double netDue, pw.Font reg) {
     return pw.Container(
       width: 200,
@@ -1196,52 +1365,6 @@ class DailySalesController extends GetxController {
           pw.Divider(thickness: 0.5, height: 5),
           _sumRow("Present Due Amount :", netDue.toStringAsFixed(2), reg, reg),
         ],
-      ),
-    );
-  }
-
-  // --- COMPONENT: PAID STAMP ---
-  pw.Widget _buildPaidStamp(pw.Font bold, pw.Font reg, DateTime invoiceDate) {
-    return pw.Container(
-      margin: const pw.EdgeInsets.symmetric(vertical: 20),
-      alignment: pw.Alignment.center,
-      child: pw.Container(
-        padding: const pw.EdgeInsets.symmetric(horizontal: 40, vertical: 10),
-        decoration: pw.BoxDecoration(
-          border: pw.Border.all(color: PdfColors.blue800, width: 2),
-          borderRadius: const pw.BorderRadius.all(pw.Radius.circular(5)),
-        ),
-        child: pw.Column(
-          children: [
-            pw.Text(
-              "P A I D",
-              style: pw.TextStyle(
-                color: PdfColors.blue800,
-                font: bold,
-                fontSize: 24,
-                letterSpacing: 2,
-              ),
-            ),
-            pw.SizedBox(height: 5),
-            pw.Text(
-              DateFormat('dd MMM yyyy').format(invoiceDate),
-              style: pw.TextStyle(
-                color: PdfColors.blue800,
-                font: bold,
-                fontSize: 12,
-              ),
-            ),
-            pw.SizedBox(height: 5),
-            pw.Text(
-              "G TEL JOY EXPRESS",
-              style: pw.TextStyle(
-                color: PdfColors.blue800,
-                font: bold,
-                fontSize: 14,
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -1404,7 +1527,6 @@ class DailySalesController extends GetxController {
     );
   }
 
-  // --- COMPONENT: CONDITION INSTRUCTION BOX ---
   pw.Widget _buildConditionBox(pw.Font bold, pw.Font reg, double due) {
     if (due <= 0) return pw.SizedBox();
     return pw.Container(
@@ -1532,13 +1654,11 @@ class DailySalesController extends GetxController {
     required String method,
     String? refNumber,
   }) async {
-    // Validation
     if (collectedAmount <= 0) {
       Get.snackbar("Error", "Please enter a valid amount");
       return;
     }
     if (collectedAmount > currentPending + 1.0) {
-      // +1.0 for float tolerance
       Get.snackbar("Error", "Collected amount cannot exceed the pending due");
       return;
     }
@@ -1548,7 +1668,6 @@ class DailySalesController extends GetxController {
       WriteBatch batch = _db.batch();
       double amount = _round(collectedAmount);
 
-      // --- 1. Fetch Daily Sales Record ---
       QuerySnapshot dailySnap =
           await _db
               .collection('daily_sales')
@@ -1573,33 +1692,20 @@ class DailySalesController extends GetxController {
       double newPending = _round(currentPending - amount);
       if (newPending < 0) newPending = 0.0;
 
-      // Prepare Payment Increments
       String lowerMethod = method.toLowerCase();
       double addCash = lowerMethod == 'cash' ? amount : 0.0;
       double addBkash = lowerMethod == 'bkash' ? amount : 0.0;
       double addNagad = lowerMethod == 'nagad' ? amount : 0.0;
       double addBank = lowerMethod == 'bank' ? amount : 0.0;
 
-      // Create History Entry
       Map<String, dynamic> historyEntry = {
         'type': lowerMethod,
         'amount': amount,
         'timestamp': Timestamp.now(),
         'note': 'Late Due Collection',
       };
-      if (refNumber != null && refNumber.isNotEmpty) {
-        if (lowerMethod == 'bank') {
-          historyEntry['bankName'] = method;
-          historyEntry['accountNumber'] = refNumber;
-        } else if (lowerMethod == 'bkash') {
-          historyEntry['bkashNumber'] = refNumber;
-        } else if (lowerMethod == 'nagad') {
-          historyEntry['nagadNumber'] = refNumber;
-        }
-      }
 
-      // Update Daily Sales Doc
-      batch.update(dailyDoc.reference, {
+      Map<String, dynamic> dailyUpdateData = {
         'paid': _round(currentPaid + amount),
         'pending': newPending,
         'status': newPending <= 0.5 ? 'paid' : 'partial',
@@ -1607,39 +1713,58 @@ class DailySalesController extends GetxController {
         'paymentMethod.bkash': FieldValue.increment(addBkash),
         'paymentMethod.nagad': FieldValue.increment(addNagad),
         'paymentMethod.bank': FieldValue.increment(addBank),
-        'paymentHistory': FieldValue.arrayUnion([historyEntry]),
-      });
+      };
 
-      // --- 2. Fetch & Update Sales Orders (Master Record) ---
+      Map<String, dynamic> orderUpdateData = {
+        'paymentDetails.cash': FieldValue.increment(addCash),
+        'paymentDetails.bkash': FieldValue.increment(addBkash),
+        'paymentDetails.nagad': FieldValue.increment(addNagad),
+        'paymentDetails.bank': FieldValue.increment(addBank),
+        'paymentDetails.paidForInvoice': FieldValue.increment(amount),
+        'paymentDetails.totalPaidInput': FieldValue.increment(amount),
+        'paymentDetails.due': newPending,
+      };
+
+      if (newPending <= 0.5) {
+        orderUpdateData['isFullyPaid'] = true;
+        orderUpdateData['status'] = 'completed';
+      }
+
+      if (refNumber != null && refNumber.isNotEmpty) {
+        if (lowerMethod == 'bank') {
+          historyEntry['bankName'] = method;
+          historyEntry['accountNumber'] = refNumber;
+          dailyUpdateData['paymentMethod.bankName'] = method;
+          dailyUpdateData['paymentMethod.accountNumber'] = refNumber;
+          orderUpdateData['paymentDetails.bankName'] = method;
+          orderUpdateData['paymentDetails.accountNumber'] = refNumber;
+        } else if (lowerMethod == 'bkash') {
+          historyEntry['bkashNumber'] = refNumber;
+          dailyUpdateData['paymentMethod.bkashNumber'] = refNumber;
+          orderUpdateData['paymentDetails.bkashNumber'] = refNumber;
+        } else if (lowerMethod == 'nagad') {
+          historyEntry['nagadNumber'] = refNumber;
+          dailyUpdateData['paymentMethod.nagadNumber'] = refNumber;
+          orderUpdateData['paymentDetails.nagadNumber'] = refNumber;
+        }
+      }
+
+      dailyUpdateData['paymentHistory'] = FieldValue.arrayUnion([historyEntry]);
+
+      batch.update(dailyDoc.reference, dailyUpdateData);
+
       DocumentReference orderRef = _db
           .collection('sales_orders')
           .doc(transactionId);
       DocumentSnapshot orderSnap = await orderRef.get();
-
       if (orderSnap.exists) {
-        Map<String, dynamic> updateData = {
-          'paymentDetails.cash': FieldValue.increment(addCash),
-          'paymentDetails.bkash': FieldValue.increment(addBkash),
-          'paymentDetails.nagad': FieldValue.increment(addNagad),
-          'paymentDetails.bank': FieldValue.increment(addBank),
-          'paymentDetails.paidForInvoice': FieldValue.increment(amount),
-          'paymentDetails.totalPaidInput': FieldValue.increment(amount),
-          'paymentDetails.due': newPending, // Syncing due directly
-        };
-
-        if (newPending <= 0.5) {
-          updateData['isFullyPaid'] = true;
-          updateData['status'] = 'completed';
-        }
-
-        batch.update(orderRef, updateData);
+        batch.update(orderRef, orderUpdateData);
       }
 
-      // Commit all changes
       await batch.commit();
       await loadDailySales();
 
-      Get.back(); // Close Dialog
+      Get.back();
       Get.snackbar(
         "Success",
         "৳$amount collected successfully!",

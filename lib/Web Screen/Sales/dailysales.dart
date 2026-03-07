@@ -47,9 +47,6 @@ class DailySalesPage extends StatelessWidget {
           );
         }
 
-        // =================================================================
-        // 📊 DATA CALCULATIONS
-        // =================================================================
         DateTime selectedDate = dailyCtrl.selectedDate.value;
         final fullDailyList = dailyCtrl.salesList;
         final tableList = dailyCtrl.filteredList;
@@ -61,51 +58,57 @@ class DailySalesPage extends StatelessWidget {
                   order.date.day == selectedDate.day;
             }).toList();
 
-        double revenueCondition = 0;
+        // 1. Raw Revenue & Collection Variables
+        double revCondition = 0;
         for (var o in todayConditionOrders) {
-          revenueCondition += o.grandTotal;
+          revCondition += o.grandTotal;
         }
 
-        double revenueNormal = 0;
-        double revenueDebtor = 0;
-        double collectedNormal = 0;
-        double collectedDebtor = 0;
-        double collectedCondition = 0;
+        double revNormalAgent = 0;
+        double colNormalAgent = 0;
+        double colCondition = 0;
 
         for (var sale in fullDailyList) {
           String type = (sale.customerType).toLowerCase();
           String source = (sale.source).toLowerCase();
 
-          bool isRecovery =
+          bool isConditionRelated =
+              type.contains('condition') ||
               source.contains('condition') ||
-              source.contains('recovery') ||
-              type.contains('courier') ||
-              source.contains('payment');
+              type.contains('courier');
 
-          if (!isRecovery) {
-            if (type.contains('debtor') || type.contains('agent')) {
-              revenueDebtor += sale.amount;
-              collectedDebtor += sale.paid;
-            } else {
-              revenueNormal += sale.amount;
-              collectedNormal += sale.paid;
-            }
-          }
-
-          if (isRecovery) {
-            if (source.contains('condition') || type.contains('courier')) {
-              collectedCondition += sale.paid;
-            } else if (type.contains('debtor') ||
-                type.contains('agent') ||
-                source.contains('payment')) {
-              collectedDebtor += sale.paid;
+          if (isConditionRelated) {
+            colCondition += sale.paid;
+          } else {
+            colNormalAgent += sale.paid;
+            if (source == 'pos_sale' || source == 'direct') {
+              revNormalAgent += sale.amount;
             }
           }
         }
 
-        double totalRevenue = revenueNormal + revenueDebtor + revenueCondition;
-        double totalCollection =
-            collectedNormal + collectedDebtor + collectedCondition;
+        // 2. Professional Due & Recovery Logic
+        // NORMAL & AGENT
+        double dueNormalAgent = revNormalAgent - colNormalAgent;
+        double extraNormalAgent = 0;
+        if (dueNormalAgent < 0) {
+          extraNormalAgent = dueNormalAgent.abs();
+          dueNormalAgent = 0; // Capped at zero!
+        }
+
+        // CONDITION
+        double dueCondition = revCondition - colCondition;
+        double extraCondition = 0;
+        if (dueCondition < 0) {
+          extraCondition = dueCondition.abs();
+          dueCondition = 0; // Capped at zero!
+        }
+
+        // 3. Totals for Dashboard
+        double totalRevenue = revNormalAgent + revCondition;
+        double totalCollection = colNormalAgent + colCondition;
+        double totalDue = dueNormalAgent + dueCondition;
+        double totalExtra = extraNormalAgent + extraCondition;
 
         // =================================================================
         // 🖥️ UI CONSTRUCTION
@@ -115,45 +118,62 @@ class DailySalesPage extends StatelessWidget {
           children: [
             _buildHeader(
               context,
-              revenueNormal,
-              revenueDebtor,
-              revenueCondition,
-              collectedNormal,
-              collectedDebtor,
-              collectedCondition,
+              revNormalAgent,
+              revCondition,
+              colNormalAgent,
+              colCondition,
+              dueNormalAgent,
+              dueCondition,
+              extraNormalAgent,
+              extraCondition,
             ),
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(20),
                 child: Column(
                   children: [
+                    // --- 4 BLOCKS ROW (Professional ERP Layout) ---
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Expanded(
                           child: _buildDetailedBlock(
-                            "REVENUE (INVOICED)",
-                            "Total value of goods sold today",
+                            "REVENUE",
+                            "Invoiced today",
                             totalRevenue,
                             primaryBlue,
                             Icons.receipt_long,
                             [
-                              _detailRow("Normal Sales", revenueNormal),
-                              _detailRow("Condition Sales", revenueCondition),
+                              _detailRow("Normal/Agent", revNormalAgent),
+                              _detailRow("Condition", revCondition),
                             ],
                           ),
                         ),
-                        const SizedBox(width: 20),
+                        const SizedBox(width: 12),
                         Expanded(
                           child: _buildDetailedBlock(
-                            "CASH COLLECTION",
-                            "Actual money received today",
+                            "COLLECTION",
+                            "Cash/Bank today",
                             totalCollection,
                             successGreen,
                             Icons.savings_outlined,
                             [
-                              _detailRow("Cash Sales", collectedNormal),
-                              _detailRow("Condition Recv.", collectedCondition),
+                              _detailRow("Normal/Agent", colNormalAgent),
+                              _detailRow("Condition", colCondition),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _buildDetailedBlock(
+                            "TODAY'S DUE",
+                            "Unpaid from today",
+                            totalDue,
+                            alertRed,
+                            Icons.money_off,
+                            [
+                              _detailRow("Normal/Agent", dueNormalAgent),
+                              _detailRow("Condition", dueCondition),
                             ],
                           ),
                         ),
@@ -269,12 +289,14 @@ class DailySalesPage extends StatelessWidget {
 
   Widget _buildHeader(
     BuildContext context,
-    double rN,
-    double rD,
+    double rNA,
     double rC,
-    double cN,
-    double cD,
+    double cNA,
     double cC,
+    double dNA,
+    double dC,
+    double eNA,
+    double eC,
   ) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
@@ -353,7 +375,9 @@ class DailySalesPage extends StatelessWidget {
           ),
           const SizedBox(width: 12),
           ElevatedButton.icon(
-            onPressed: () => _generateDailyReportPDF(rN, rD, rC, cN, cD, cC),
+            onPressed:
+                () =>
+                    _generateDailyReportPDF(rNA, rC, cNA, cC, dNA, dC, eNA, eC),
             icon: const Icon(Icons.print, size: 16),
             label: const Text("Daily Report"),
             style: ElevatedButton.styleFrom(
@@ -376,7 +400,7 @@ class DailySalesPage extends StatelessWidget {
     List<Widget> details,
   ) {
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
@@ -395,14 +419,14 @@ class DailySalesPage extends StatelessWidget {
           Row(
             children: [
               Container(
-                padding: const EdgeInsets.all(10),
+                padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
                   color: color.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(icon, color: color, size: 22),
+                child: Icon(icon, color: color, size: 20),
               ),
-              const SizedBox(width: 15),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -412,26 +436,28 @@ class DailySalesPage extends StatelessWidget {
                       style: TextStyle(
                         color: color,
                         fontWeight: FontWeight.w800,
-                        fontSize: 13,
+                        fontSize: 12,
                         letterSpacing: 0.5,
                       ),
+                      maxLines: 1,
                     ),
                     Text(
                       subtitle,
                       style: TextStyle(
                         color: Colors.grey.shade500,
-                        fontSize: 11,
+                        fontSize: 10,
                       ),
+                      maxLines: 1,
                     ),
                   ],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 25),
+          const SizedBox(height: 20),
           ...details,
           const Padding(
-            padding: EdgeInsets.symmetric(vertical: 15),
+            padding: EdgeInsets.symmetric(vertical: 12),
             child: Divider(height: 1),
           ),
           Row(
@@ -442,14 +468,14 @@ class DailySalesPage extends StatelessWidget {
                 style: TextStyle(
                   fontWeight: FontWeight.w700,
                   color: darkText,
-                  fontSize: 14,
+                  fontSize: 13,
                 ),
               ),
               Text(
                 "৳ ${NumberFormat('#,##0').format(total)}",
                 style: TextStyle(
                   fontWeight: FontWeight.w800,
-                  fontSize: 20,
+                  fontSize: 18,
                   color: color,
                 ),
               ),
@@ -462,7 +488,7 @@ class DailySalesPage extends StatelessWidget {
 
   Widget _detailRow(String label, double amount) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: 10),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
@@ -470,7 +496,7 @@ class DailySalesPage extends StatelessWidget {
             label,
             style: const TextStyle(
               color: Color(0xFF64748B),
-              fontSize: 13,
+              fontSize: 12,
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -479,7 +505,7 @@ class DailySalesPage extends StatelessWidget {
             style: const TextStyle(
               fontWeight: FontWeight.w600,
               color: darkText,
-              fontSize: 13,
+              fontSize: 12,
             ),
           ),
         ],
@@ -606,7 +632,6 @@ class DailySalesPage extends StatelessWidget {
           badgeColor = purpleDebtor;
         }
 
-        // Logic for "Collect Due" Button
         bool hasPending = sale.pending > 0.5;
         bool canCollectDue = hasPending && !isDebtor && !isConditionAdvance;
 
@@ -615,7 +640,6 @@ class DailySalesPage extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 1. Details
               Expanded(
                 flex: 3,
                 child: Column(
@@ -644,7 +668,6 @@ class DailySalesPage extends StatelessWidget {
                   ],
                 ),
               ),
-              // 2. Type Badge
               Expanded(
                 flex: 2,
                 child: Align(
@@ -669,7 +692,6 @@ class DailySalesPage extends StatelessWidget {
                   ),
                 ),
               ),
-              // 3. Payment Method
               Expanded(
                 flex: 3,
                 child: Text(
@@ -684,7 +706,6 @@ class DailySalesPage extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              // 4. Amount
               Expanded(
                 flex: 2,
                 child: Text(
@@ -697,7 +718,6 @@ class DailySalesPage extends StatelessWidget {
                   ),
                 ),
               ),
-              // 5. Paid
               Expanded(
                 flex: 2,
                 child: Column(
@@ -724,9 +744,8 @@ class DailySalesPage extends StatelessWidget {
                   ],
                 ),
               ),
-              // 6. ACTIONS (Updated Width & Logic)
               SizedBox(
-                width: 120, // Increased width to fit 3 icons
+                width: 120,
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -784,9 +803,6 @@ class DailySalesPage extends StatelessWidget {
     );
   }
 
-  // ==========================================================
-  // 🟢 NEW: COLLECT DUE DIALOG
-  // ==========================================================
   void _showCollectDueDialog(
     BuildContext context,
     DailySalesController ctrl,
@@ -811,6 +827,7 @@ class DailySalesPage extends StatelessWidget {
       text: sale.pending.toStringAsFixed(0),
     );
     final refC = TextEditingController();
+    final bankNameC = TextEditingController();
     String method = "Cash";
 
     Get.dialog(
@@ -818,10 +835,6 @@ class DailySalesPage extends StatelessWidget {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: StatefulBuilder(
           builder: (context, setState) {
-            String refLabel =
-                method == "Bank" ? "Bank Name & Account No." : "$method Number";
-            String refHint = method == "Cash" ? "Optional" : "Required";
-
             return Container(
               width: 400,
               padding: const EdgeInsets.all(24),
@@ -891,6 +904,7 @@ class DailySalesPage extends StatelessWidget {
                         setState(() {
                           method = v;
                           refC.clear();
+                          bankNameC.clear();
                         });
                       }
                     },
@@ -900,15 +914,36 @@ class DailySalesPage extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  if (method != "Cash")
+
+                  if (method == "Bank") ...[
+                    TextField(
+                      controller: bankNameC,
+                      decoration: const InputDecoration(
+                        labelText: "Bank Name (e.g., BRAC, DBBL)",
+                        hintText: "Required",
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: refC,
+                      decoration: const InputDecoration(
+                        labelText: "Account Number / Transaction ID",
+                        hintText: "Required",
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ] else if (method != "Cash") ...[
                     TextField(
                       controller: refC,
                       decoration: InputDecoration(
-                        labelText: refLabel,
-                        hintText: refHint,
+                        labelText: "$method Number / TrxID",
+                        hintText: "Required",
                         border: const OutlineInputBorder(),
                       ),
                     ),
+                  ],
+
                   const SizedBox(height: 24),
                   SizedBox(
                     width: double.infinity,
@@ -928,13 +963,28 @@ class DailySalesPage extends StatelessWidget {
                                     );
                                     return;
                                   }
-                                  if (method != "Cash" &&
-                                      refC.text.trim().isEmpty) {
-                                    Get.snackbar(
-                                      "Error",
-                                      "Reference details required for $method",
-                                    );
-                                    return;
+
+                                  String finalRef = refC.text.trim();
+
+                                  if (method == "Bank") {
+                                    if (bankNameC.text.trim().isEmpty ||
+                                        refC.text.trim().isEmpty) {
+                                      Get.snackbar(
+                                        "Error",
+                                        "Both Bank Name and Account Number are required",
+                                      );
+                                      return;
+                                    }
+                                    finalRef =
+                                        "${bankNameC.text.trim()} - ${refC.text.trim()}";
+                                  } else if (method != "Cash") {
+                                    if (refC.text.trim().isEmpty) {
+                                      Get.snackbar(
+                                        "Error",
+                                        "$method Number is required",
+                                      );
+                                      return;
+                                    }
                                   }
 
                                   ctrl.collectNormalCustomerDue(
@@ -942,7 +992,8 @@ class DailySalesPage extends StatelessWidget {
                                     currentPending: sale.pending,
                                     collectedAmount: amt,
                                     method: method,
-                                    refNumber: refC.text.trim(),
+                                    refNumber:
+                                        method == "Cash" ? null : finalRef,
                                   );
                                 },
                         style: ElevatedButton.styleFrom(
@@ -992,13 +1043,18 @@ class DailySalesPage extends StatelessWidget {
     );
   }
 
+  // ==========================================================
+  // 🖨️ UPDATED 4-COLUMN PROFESSIONAL PDF GENERATOR
+  // ==========================================================
   Future<void> _generateDailyReportPDF(
-    double rN,
-    double rD,
+    double rNA,
     double rC,
-    double cN,
-    double cD,
+    double cNA,
     double cC,
+    double dNA,
+    double dC,
+    double eNA,
+    double eC,
   ) async {
     final pdf = pw.Document();
     final fontBold = await PdfGoogleFonts.nunitoBold();
@@ -1007,13 +1063,15 @@ class DailySalesPage extends StatelessWidget {
       'dd MMMM yyyy',
     ).format(dailyCtrl.selectedDate.value);
 
-    double totalRev = rN + rD + rC;
-    double totalCol = cN + cD + cC;
+    double totalRev = rNA + rC;
+    double totalCol = cNA + cC;
+    double totalDue = dNA + dC;
+    double totalExtra = eNA + eC;
 
     pdf.addPage(
       pw.Page(
         pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.all(40),
+        margin: const pw.EdgeInsets.all(30),
         build: (context) {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -1022,7 +1080,7 @@ class DailySalesPage extends StatelessWidget {
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
                   pw.Text(
-                    "DAILY SALES & COLLECTION REPORT",
+                    "DAILY SALES & AR REPORT",
                     style: pw.TextStyle(
                       font: fontBold,
                       fontSize: 18,
@@ -1037,6 +1095,8 @@ class DailySalesPage extends StatelessWidget {
               ),
               pw.Divider(color: PdfColors.blue900),
               pw.SizedBox(height: 20),
+
+              // TOP MASTER SUMMARY BAR (4 KPIs)
               pw.Container(
                 padding: const pw.EdgeInsets.all(15),
                 decoration: pw.BoxDecoration(
@@ -1050,7 +1110,7 @@ class DailySalesPage extends StatelessWidget {
                   mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
                   children: [
                     _pdfSummaryItem(
-                      "TOTAL REVENUE",
+                      "REVENUE",
                       totalRev,
                       PdfColors.blue900,
                       fontBold,
@@ -1061,78 +1121,99 @@ class DailySalesPage extends StatelessWidget {
                       color: PdfColors.grey300,
                     ),
                     _pdfSummaryItem(
-                      "TOTAL COLLECTION",
+                      "COLLECTION",
                       totalCol,
                       PdfColors.green800,
+                      fontBold,
+                    ),
+                    pw.Container(
+                      width: 1,
+                      height: 40,
+                      color: PdfColors.grey300,
+                    ),
+                    _pdfSummaryItem(
+                      "TODAY'S DUE",
+                      totalDue,
+                      PdfColors.red800,
+                      fontBold,
+                    ),
+                    pw.Container(
+                      width: 1,
+                      height: 40,
+                      color: PdfColors.grey300,
+                    ),
+                    _pdfSummaryItem(
+                      "OLD RECOVERY",
+                      totalExtra,
+                      PdfColors.purple800,
                       fontBold,
                     ),
                   ],
                 ),
               ),
               pw.SizedBox(height: 30),
+
+              // 4 COLUMN BREAKDOWN
               pw.Row(
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
-                  pw.Expanded(
-                    child: pw.Container(
-                      padding: const pw.EdgeInsets.all(10),
-                      decoration: pw.BoxDecoration(
-                        border: pw.Border.all(color: PdfColors.blue100),
-                        borderRadius: const pw.BorderRadius.all(
-                          pw.Radius.circular(8),
-                        ),
-                      ),
-                      child: pw.Column(
-                        crossAxisAlignment: pw.CrossAxisAlignment.start,
-                        children: [
-                          pw.Text(
-                            "REVENUE BREAKDOWN",
-                            style: pw.TextStyle(
-                              font: fontBold,
-                              fontSize: 12,
-                              color: PdfColors.blue900,
-                            ),
-                          ),
-                          pw.SizedBox(height: 10),
-                          _pdfRow("Normal Sales", rN, fontRegular),
-                          _pdfRow("Debtor Sales", rD, fontRegular),
-                          _pdfRow("Condition Sales", rC, fontRegular),
-                          pw.Divider(),
-                          _pdfRow("TOTAL", totalRev, fontBold),
-                        ],
-                      ),
-                    ),
+                  // COLUMN 1: REVENUE
+                  _buildPdfCol(
+                    "REVENUE",
+                    "Normal/Agent",
+                    rNA,
+                    "Condition",
+                    rC,
+                    totalRev,
+                    PdfColors.blue100,
+                    PdfColors.blue900,
+                    fontBold,
+                    fontRegular,
                   ),
-                  pw.SizedBox(width: 20),
-                  pw.Expanded(
-                    child: pw.Container(
-                      padding: const pw.EdgeInsets.all(10),
-                      decoration: pw.BoxDecoration(
-                        border: pw.Border.all(color: PdfColors.green100),
-                        borderRadius: const pw.BorderRadius.all(
-                          pw.Radius.circular(8),
-                        ),
-                      ),
-                      child: pw.Column(
-                        crossAxisAlignment: pw.CrossAxisAlignment.start,
-                        children: [
-                          pw.Text(
-                            "COLLECTION BREAKDOWN",
-                            style: pw.TextStyle(
-                              font: fontBold,
-                              fontSize: 12,
-                              color: PdfColors.green900,
-                            ),
-                          ),
-                          pw.SizedBox(height: 10),
-                          _pdfRow("Cash Sales", cN, fontRegular),
-                          _pdfRow("Debtor Recv.", cD, fontRegular),
-                          _pdfRow("Condition Recv.", cC, fontRegular),
-                          pw.Divider(),
-                          _pdfRow("TOTAL", totalCol, fontBold),
-                        ],
-                      ),
-                    ),
+                  pw.SizedBox(width: 8),
+
+                  // COLUMN 2: COLLECTION
+                  _buildPdfCol(
+                    "COLLECTION",
+                    "Normal/Agent",
+                    cNA,
+                    "Condition",
+                    cC,
+                    totalCol,
+                    PdfColors.green100,
+                    PdfColors.green900,
+                    fontBold,
+                    fontRegular,
+                  ),
+                  pw.SizedBox(width: 8),
+
+                  // COLUMN 3: DUE
+                  _buildPdfCol(
+                    "TODAY'S DUE",
+                    "Normal/Agent",
+                    dNA,
+                    "Condition",
+                    dC,
+                    totalDue,
+                    PdfColors.red100,
+                    PdfColors.red900,
+                    fontBold,
+                    fontRegular,
+                  ),
+                  pw.SizedBox(width: 8),
+
+                  // COLUMN 4: EXTRA RECOVERY
+                  _buildPdfCol(
+                    "OLD RECOVERY",
+                    "Normal/Agent",
+                    eNA,
+                    "Condition",
+                    eC,
+                    totalExtra,
+                    PdfColors.purple100,
+                    PdfColors.purple900,
+                    fontBold,
+                    fontRegular,
                   ),
                 ],
               ),
@@ -1167,6 +1248,7 @@ class DailySalesPage extends StatelessWidget {
     await Printing.layoutPdf(onLayout: (f) => pdf.save());
   }
 
+  // Helper for Top PDF KPI
   pw.Widget _pdfSummaryItem(
     String label,
     double val,
@@ -1177,28 +1259,78 @@ class DailySalesPage extends StatelessWidget {
       children: [
         pw.Text(
           label,
-          style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
+          style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey700),
         ),
         pw.Text(
           "Tk ${val.toStringAsFixed(0)}",
-          style: pw.TextStyle(fontSize: 18, font: font, color: color),
+          style: pw.TextStyle(fontSize: 14, font: font, color: color),
         ),
       ],
     );
   }
 
-  pw.Widget _pdfRow(String label, double val, pw.Font font) {
-    return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(vertical: 3),
-      child: pw.Row(
-        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-        children: [
-          pw.Text(label, style: pw.TextStyle(font: font, fontSize: 11)),
-          pw.Text(
-            val.toStringAsFixed(0),
-            style: pw.TextStyle(font: font, fontSize: 11),
-          ),
-        ],
+  // Helper for 4 PDF Columns
+  pw.Widget _buildPdfCol(
+    String title,
+    String l1,
+    double v1,
+    String l2,
+    double v2,
+    double total,
+    PdfColor bg,
+    PdfColor textCol,
+    pw.Font fBold,
+    pw.Font fReg,
+  ) {
+    return pw.Expanded(
+      child: pw.Container(
+        padding: const pw.EdgeInsets.all(8),
+        decoration: pw.BoxDecoration(
+          border: pw.Border.all(color: bg),
+          borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
+        ),
+        child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Text(
+              title,
+              style: pw.TextStyle(font: fBold, fontSize: 10, color: textCol),
+            ),
+            pw.SizedBox(height: 10),
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text(l1, style: pw.TextStyle(font: fReg, fontSize: 9)),
+                pw.Text(
+                  v1.toStringAsFixed(0),
+                  style: pw.TextStyle(font: fReg, fontSize: 9),
+                ),
+              ],
+            ),
+            pw.SizedBox(height: 4),
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text(l2, style: pw.TextStyle(font: fReg, fontSize: 9)),
+                pw.Text(
+                  v2.toStringAsFixed(0),
+                  style: pw.TextStyle(font: fReg, fontSize: 9),
+                ),
+              ],
+            ),
+            pw.Divider(),
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text("TOTAL", style: pw.TextStyle(font: fBold, fontSize: 9)),
+                pw.Text(
+                  total.toStringAsFixed(0),
+                  style: pw.TextStyle(font: fBold, fontSize: 9),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
