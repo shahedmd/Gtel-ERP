@@ -12,14 +12,15 @@ import 'package:printing/printing.dart';
 import 'package:gtel_erp/Web%20Screen/Expenses/dailycontroller.dart';
 import 'package:gtel_erp/Web%20Screen/Sales/controller.dart';
 
-// --- MODEL FOR UI ---
+// --- MODEL FOR UI & PDF ---
 class LedgerItem {
   final DateTime time;
   final String title;
   final String subtitle;
   final double amount;
   final String type; // 'income' or 'expense'
-  final String method;
+  final String method; // 'Cash', 'Bank', 'Bkash', 'Nagad'
+  final String? methodDetails; // NEW: Bank Name, Account No, etc.
 
   LedgerItem({
     required this.time,
@@ -28,6 +29,7 @@ class LedgerItem {
     required this.amount,
     required this.type,
     required this.method,
+    this.methodDetails,
   });
 }
 
@@ -66,6 +68,8 @@ class OverviewController extends GetxController {
         "Bank": 0.0,
       }.obs;
 
+  final NumberFormat _currencyFormat = NumberFormat('#,##0.00');
+
   @override
   void onInit() {
     super.onInit();
@@ -91,7 +95,6 @@ class OverviewController extends GetxController {
   }
 
   // --- ACTIONS ---
-
   void pickDate(DateTime date) {
     selectedDate.value = date;
   }
@@ -129,10 +132,8 @@ class OverviewController extends GetxController {
       for (var doc in salesSnap.docs) {
         Map<String, dynamic> data = doc.data();
         double paid = double.tryParse(data['paid'].toString()) ?? 0;
-        double lPaid = 0.0;
-        if (data.containsKey('ledgerPaid')) {
-          lPaid = double.tryParse(data['ledgerPaid'].toString()) ?? 0;
-        }
+        double lPaid =
+            double.tryParse(data['ledgerPaid']?.toString() ?? '0') ?? 0;
         pastSales += (paid - lPaid);
       }
 
@@ -149,9 +150,8 @@ class OverviewController extends GetxController {
         if (d['source'] == 'pos_sale') continue;
 
         String type = (d['type'] ?? 'deposit').toString();
-
-        // Ignore Transfers in History Calculation
-        if (type == 'transfer') continue;
+        if (type == 'transfer')
+          continue; // Ignore Transfers in History Calculation
 
         double amt = double.tryParse(d['amount'].toString()) ?? 0;
         if (type == 'withdraw') {
@@ -214,7 +214,6 @@ class OverviewController extends GetxController {
     double tIn = 0;
     double tOut = 0;
 
-    // Reset Breakdown
     Map<String, double> tempBreakdown = {
       "Cash": 0.0,
       "Bkash": 0.0,
@@ -225,173 +224,217 @@ class OverviewController extends GetxController {
     List<LedgerItem> tempIn = [];
     List<LedgerItem> tempOut = [];
 
-    // --- A. PROCESS SALES (UPDATED FOR SPLIT PAYMENTS) ---
+    // ==========================================================
+    // A. PROCESS SALES
+    // ==========================================================
     for (var sale in salesCtrl.salesList) {
       double realCash = sale.paid - sale.ledgerPaid;
 
       if (realCash > 0.01) {
         tIn += realCash;
 
-        String methodLabel = "Cash";
-        String displaySubtitle = "Direct Sale";
+        // 1. DETERMINE EXACT SALE TYPE
+        String sType = "${sale.customerType} ${sale.source}".toLowerCase();
+        String saleTypeDesc = "Cash Sale";
 
-        // Dynamic map parsing
+        if (sType.contains('condition')) {
+          saleTypeDesc = "Condition Sale";
+        } else if (sType.contains('agent')) {
+          saleTypeDesc = "Agent Sale";
+        } else if (sType.contains('collection') ||
+            sType.contains('due') ||
+            sType.contains('ledger')) {
+          saleTypeDesc = "Bill Collection";
+        }
+
+        // 2. PARSE AMOUNTS AND EXTRACT DETAILED PAYMENT DETAILS
         dynamic pm = sale.paymentMethod;
         double c = 0, b = 0, bk = 0, n = 0;
 
+        String valBankName = '';
+        String valAccountNum = '';
+        String valBkashNum = '';
+        String valNagadNum = '';
+
         if (pm is Map) {
-          // 1. Try to read explicit amounts (New Standard)
           c = double.tryParse(pm['cash'].toString()) ?? 0;
           b = double.tryParse(pm['bank'].toString()) ?? 0;
           bk = double.tryParse(pm['bkash'].toString()) ?? 0;
           n = double.tryParse(pm['nagad'].toString()) ?? 0;
 
-          // 2. Legacy Fallback (If map exists but amounts are 0)
+          // Extract detailed strings
+          valBankName = (pm['bankName'] ?? '').toString().trim();
+          valAccountNum = (pm['accountNumber'] ?? '').toString().trim();
+          valBkashNum = (pm['bkashNumber'] ?? '').toString().trim();
+          valNagadNum = (pm['nagadNumber'] ?? '').toString().trim();
+
+          // Legacy Fallback
           if ((c + b + bk + n) == 0) {
-            String valBank = (pm['bankName'] ?? '').toString().trim();
-            String valBkash = (pm['bkashNumber'] ?? '').toString().trim();
-            String valNagad = (pm['nagadNumber'] ?? '').toString().trim();
-
-            if (valBank.isNotEmpty) {
+            if (valBankName.isNotEmpty || valAccountNum.isNotEmpty)
               b = realCash;
-              methodLabel = "Bank";
-            } else if (valBkash.isNotEmpty) {
+            else if (valBkashNum.isNotEmpty)
               bk = realCash;
-              methodLabel = "Bkash";
-            } else if (valNagad.isNotEmpty) {
+            else if (valNagadNum.isNotEmpty)
               n = realCash;
-              methodLabel = "Nagad";
-            } else {
+            else
               c = realCash;
-              methodLabel = "Cash";
-            }
-          } else {
-            // Determine Label for Split
-            List<String> labels = [];
-            if (c > 0) labels.add("Cash");
-            if (b > 0) labels.add("Bank");
-            if (bk > 0) labels.add("Bkash");
-            if (n > 0) labels.add("Nagad");
-
-            if (labels.length > 1) {
-              methodLabel = "Multi";
-              displaySubtitle = labels.join('/'); // e.g. "Cash/Bkash"
-            } else if (labels.isNotEmpty) {
-              methodLabel = labels.first;
-            }
           }
         } else {
-          // String fallback
+          // String Fallback
           String s = pm.toString().toLowerCase();
-          if (s.contains('bank')) {
+          if (s.contains('bank'))
             b = realCash;
-            methodLabel = "Bank";
-          } else if (s.contains('bkash')) {
+          else if (s.contains('bkash'))
             bk = realCash;
-            methodLabel = "Bkash";
-          } else if (s.contains('nagad')) {
+          else if (s.contains('nagad'))
             n = realCash;
-            methodLabel = "Nagad";
-          } else {
+          else
             c = realCash;
-            methodLabel = "Cash";
-          }
         }
 
-        // Add to Breakdown Totals
-        tempBreakdown['Cash'] = (tempBreakdown['Cash'] ?? 0) + c;
-        tempBreakdown['Bank'] = (tempBreakdown['Bank'] ?? 0) + b;
-        tempBreakdown['Bkash'] = (tempBreakdown['Bkash'] ?? 0) + bk;
-        tempBreakdown['Nagad'] = (tempBreakdown['Nagad'] ?? 0) + n;
-
-        tempIn.add(
-          LedgerItem(
-            time: sale.timestamp,
-            title: "Sale: ${sale.name}",
-            subtitle: displaySubtitle,
-            amount: realCash,
-            type: 'income',
-            method: methodLabel,
-          ),
-        );
+        // 3. SPLIT ROWS FOR PERFECT METHOD DISPLAY & ASSIGN DETAILS
+        if (c > 0) {
+          tempBreakdown['Cash'] = (tempBreakdown['Cash'] ?? 0) + c;
+          tempIn.add(
+            LedgerItem(
+              time: sale.timestamp,
+              title: saleTypeDesc,
+              subtitle: sale.name,
+              amount: c,
+              type: 'income',
+              method: "Cash",
+            ),
+          );
+        }
+        if (b > 0) {
+          tempBreakdown['Bank'] = (tempBreakdown['Bank'] ?? 0) + b;
+          String bDetails = [
+            valBankName,
+            valAccountNum,
+          ].where((e) => e.isNotEmpty).join('\n');
+          tempIn.add(
+            LedgerItem(
+              time: sale.timestamp,
+              title: saleTypeDesc,
+              subtitle: sale.name,
+              amount: b,
+              type: 'income',
+              method: "Bank",
+              methodDetails: bDetails,
+            ),
+          );
+        }
+        if (bk > 0) {
+          tempBreakdown['Bkash'] = (tempBreakdown['Bkash'] ?? 0) + bk;
+          tempIn.add(
+            LedgerItem(
+              time: sale.timestamp,
+              title: saleTypeDesc,
+              subtitle: sale.name,
+              amount: bk,
+              type: 'income',
+              method: "Bkash",
+              methodDetails: valBkashNum,
+            ),
+          );
+        }
+        if (n > 0) {
+          tempBreakdown['Nagad'] = (tempBreakdown['Nagad'] ?? 0) + n;
+          tempIn.add(
+            LedgerItem(
+              time: sale.timestamp,
+              title: saleTypeDesc,
+              subtitle: sale.name,
+              amount: n,
+              type: 'income',
+              method: "Nagad",
+              methodDetails: valNagadNum,
+            ),
+          );
+        }
       }
     }
 
-    // --- B. PROCESS LEDGER (UPDATED LOGIC) ---
+    // ==========================================================
+    // B. PROCESS LEDGER (EXTERNAL DEPOSITS/WITHDRAWALS)
+    // ==========================================================
     for (var item in externalLedgerData) {
       String type = item['type'] ?? 'deposit';
-
-      // Skip Transfers
-      if (type == 'transfer') continue;
+      if (type == 'transfer') continue; // Skip transfers in simple view
 
       double amt = double.tryParse(item['amount'].toString()) ?? 0.0;
       DateTime time = (item['timestamp'] as Timestamp).toDate();
       String description = item['description'] ?? "Entry";
 
-      // Parse method
+      // LOOK IN DETAILS MAP FIRST, FALLBACK TO ROOT
+      var detailsMap = item['details'] as Map<String, dynamic>?;
+      String extractedBankName =
+          (detailsMap?['bankName'] ?? item['bankName'] ?? '').toString().trim();
+      String extractedAccountNo =
+          (detailsMap?['accountNo'] ?? item['accountNo'] ?? '')
+              .toString()
+              .trim();
+
+      String detailsStr = [
+        extractedBankName,
+        extractedAccountNo,
+      ].where((e) => e.isNotEmpty).join('\n');
+
       String displayMethod = "Cash";
       String methodRaw = (item['method'] ?? 'Cash').toString().toLowerCase();
-      var bankNameVal = item['bankName'];
-      bool hasBankDetails =
-          bankNameVal != null && bankNameVal.toString().trim().isNotEmpty;
 
-      if (methodRaw.contains('bank') || hasBankDetails)
+      if (methodRaw.contains('bank') ||
+          extractedBankName.isNotEmpty ||
+          extractedAccountNo.toLowerCase().contains('brac') ||
+          extractedAccountNo.toLowerCase().contains('bank')) {
         displayMethod = "Bank";
-      else if (methodRaw.contains('bkash'))
+      } else if (methodRaw.contains('bkash')) {
         displayMethod = "Bkash";
-      else if (methodRaw.contains('nagad'))
+      } else if (methodRaw.contains('nagad')) {
         displayMethod = "Nagad";
+      }
 
       if (type == 'deposit') {
         tIn += amt;
-        // Update Breakdown
         tempBreakdown[displayMethod] =
             (tempBreakdown[displayMethod] ?? 0) + amt;
-
         tempIn.add(
           LedgerItem(
             time: time,
-            title: description,
-            subtitle:
-                displayMethod == "Bank" && hasBankDetails
-                    ? "Bank: $bankNameVal"
-                    : displayMethod,
+            title: "Deposit",
+            subtitle: description,
             amount: amt,
             type: 'income',
             method: displayMethod,
+            methodDetails: detailsStr,
           ),
         );
       } else {
-        // Withdraw/Expense
         tOut += amt;
-        // Note: We don't usually subtract from breakdown here for simple view,
-        // or we can implement waterfall logic if needed.
-        // For simple ledger, expenses are just "Out".
-
         tempOut.add(
           LedgerItem(
             time: time,
-            title: description,
-            subtitle:
-                displayMethod == "Bank" && hasBankDetails
-                    ? "Bank: $bankNameVal"
-                    : displayMethod,
+            title: "Withdrawal",
+            subtitle: description,
             amount: amt,
             type: 'expense',
             method: displayMethod,
+            methodDetails: detailsStr,
           ),
         );
       }
     }
 
-    // --- C. PROCESS EXPENSES ---
+    // ==========================================================
+    // C. PROCESS EXPENSES
+    // ==========================================================
     for (var expense in expenseCtrl.dailyList) {
       double amt = expense.amount.toDouble();
       tOut += amt;
       tempOut.add(
         LedgerItem(
           time: expense.time,
-          title: "Exp: ${expense.name}",
+          title: "Expense: ${expense.name}",
           subtitle: expense.note,
           amount: amt,
           type: 'expense',
@@ -414,11 +457,12 @@ class OverviewController extends GetxController {
     methodBreakdown.value = tempBreakdown;
   }
 
-  // --- PDF GENERATION (UNCHANGED) ---
+  // ==========================================================
+  // PDF GENERATION (5 COLUMNS WITH BANK DETAILS)
+  // ==========================================================
   Future<void> generateLedgerPdf() async {
     final doc = pw.Document();
     final dateStr = DateFormat('dd MMM yyyy').format(selectedDate.value);
-    final currency = NumberFormat("#,##0", "en_US");
     final fontRegular = await PdfGoogleFonts.nunitoRegular();
     final fontBold = await PdfGoogleFonts.nunitoBold();
 
@@ -428,6 +472,7 @@ class OverviewController extends GetxController {
         margin: const pw.EdgeInsets.all(30),
         build: (pw.Context context) {
           return [
+            // --- HEADER ---
             pw.Row(
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
               children: [
@@ -443,6 +488,8 @@ class OverviewController extends GetxController {
             ),
             pw.Divider(),
             pw.SizedBox(height: 10),
+
+            // --- BALANCE SUMMARY ---
             pw.Row(
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
               children: [
@@ -450,7 +497,6 @@ class OverviewController extends GetxController {
                   "Previous",
                   previousCash.value,
                   fontBold,
-                  currency,
                   PdfColors.grey700,
                 ),
                 pw.Text("+", style: pw.TextStyle(font: fontBold)),
@@ -458,7 +504,6 @@ class OverviewController extends GetxController {
                   "Income",
                   totalCashIn.value,
                   fontBold,
-                  currency,
                   PdfColors.green700,
                 ),
                 pw.Text("-", style: pw.TextStyle(font: fontBold)),
@@ -466,7 +511,6 @@ class OverviewController extends GetxController {
                   "Expense",
                   totalCashOut.value,
                   fontBold,
-                  currency,
                   PdfColors.red700,
                 ),
                 pw.Text("=", style: pw.TextStyle(font: fontBold)),
@@ -474,30 +518,72 @@ class OverviewController extends GetxController {
                   "CLOSING",
                   closingCash.value,
                   fontBold,
-                  currency,
                   PdfColors.blue900,
                   isLarge: true,
                 ),
               ],
             ),
             pw.SizedBox(height: 15),
+
+            // --- 5 COLUMN MAIN TABLE ---
             pw.Table(
               border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
+              columnWidths: {
+                0: const pw.FlexColumnWidth(1.2), // Time
+                1: const pw.FlexColumnWidth(2.7), // Description
+                2: const pw.FlexColumnWidth(
+                  2.0,
+                ), // Method (Expanded for details)
+                3: const pw.FlexColumnWidth(1.5), // Income
+                4: const pw.FlexColumnWidth(1.5), // Expense
+              },
               children: [
+                // Table Header
                 pw.TableRow(
                   decoration: const pw.BoxDecoration(color: PdfColors.grey200),
                   children: [
                     _pdfCell("Time", fontBold),
                     _pdfCell("Description", fontBold),
+                    _pdfCell("Method Details", fontBold),
                     _pdfCell("Income", fontBold, align: pw.TextAlign.right),
                     _pdfCell("Expense", fontBold, align: pw.TextAlign.right),
                   ],
                 ),
+                // Table Data
                 ..._generateMergedLedgerRows(
                   cashInList,
                   cashOutList,
-                  currency,
                   fontRegular,
+                ),
+              ],
+            ),
+
+            // --- BOSS SIGNATURE SECTION ---
+            pw.SizedBox(height: 60),
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.center,
+                  children: [
+                    pw.Container(width: 120, height: 1, color: PdfColors.black),
+                    pw.SizedBox(height: 5),
+                    pw.Text(
+                      "Prepared By",
+                      style: pw.TextStyle(font: fontBold, fontSize: 10),
+                    ),
+                  ],
+                ),
+                pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.center,
+                  children: [
+                    pw.Container(width: 120, height: 1, color: PdfColors.black),
+                    pw.SizedBox(height: 5),
+                    pw.Text(
+                      "Authorized Signature",
+                      style: pw.TextStyle(font: fontBold, fontSize: 10),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -505,16 +591,17 @@ class OverviewController extends GetxController {
         },
       ),
     );
+
     await Printing.layoutPdf(
       onLayout: (f) => doc.save(),
       name: 'Ledger_$dateStr',
     );
   }
 
+  // --- HELPER: TABLE ROWS GENERATOR ---
   List<pw.TableRow> _generateMergedLedgerRows(
     List<LedgerItem> inList,
     List<LedgerItem> outList,
-    NumberFormat cFmt,
     pw.Font font,
   ) {
     List<LedgerItem> all = [...inList, ...outList];
@@ -522,17 +609,25 @@ class OverviewController extends GetxController {
 
     return all.map((item) {
       bool isIncome = item.type == 'income';
+
+      // Merge method and methodDetails for display
+      String methodDisplay = item.method;
+      if (item.methodDetails != null && item.methodDetails!.isNotEmpty) {
+        methodDisplay += "\n${item.methodDetails}";
+      }
+
       return pw.TableRow(
         children: [
           _pdfCell(DateFormat('hh:mm a').format(item.time), font, size: 8),
           _pdfCell("${item.title}\n${item.subtitle}", font, size: 8),
+          _pdfCell(methodDisplay, font, size: 8), // NOW SHOWS FULL DETAILS
           _pdfCell(
-            isIncome ? cFmt.format(item.amount) : "-",
+            isIncome ? _currencyFormat.format(item.amount) : "-",
             font,
             align: pw.TextAlign.right,
           ),
           _pdfCell(
-            !isIncome ? cFmt.format(item.amount) : "-",
+            !isIncome ? _currencyFormat.format(item.amount) : "-",
             font,
             align: pw.TextAlign.right,
           ),
@@ -541,6 +636,7 @@ class OverviewController extends GetxController {
     }).toList();
   }
 
+  // --- HELPER: PDF CELL ---
   pw.Widget _pdfCell(
     String text,
     pw.Font font, {
@@ -557,11 +653,11 @@ class OverviewController extends GetxController {
     );
   }
 
+  // --- HELPER: PDF BALANCE COLUMN ---
   pw.Widget _pdfBalanceCol(
     String label,
     double val,
     pw.Font font,
-    NumberFormat fmt,
     PdfColor color, {
     bool isLarge = false,
   }) {
@@ -569,7 +665,7 @@ class OverviewController extends GetxController {
       children: [
         pw.Text(label, style: const pw.TextStyle(fontSize: 8)),
         pw.Text(
-          fmt.format(val),
+          _currencyFormat.format(val),
           style: pw.TextStyle(
             font: font,
             fontSize: isLarge ? 12 : 10,

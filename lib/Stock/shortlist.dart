@@ -1,4 +1,4 @@
-// ignore_for_file: deprecated_member_use
+// ignore_for_file: deprecated_member_use, curly_braces_in_flow_control_structures
 
 import 'dart:ui';
 import 'package:flutter/material.dart';
@@ -25,7 +25,7 @@ class OrderCartItem {
 class OrderCartController extends GetxController {
   var cartItems = <OrderCartItem>[].obs;
 
-  // NEW: Added variables for Company Name and Delivery Method
+  // Added variables for Company Name and Delivery Method
   var companyName = ''.obs;
   var deliveryMethod = 'Sea'.obs;
 
@@ -443,8 +443,9 @@ class _ShortlistPageState extends State<ShortlistPage> {
                 ),
                 child: DataTable(
                   headingRowHeight: 56,
-                  dataRowMinHeight: 60,
-                  dataRowMaxHeight: 60,
+                  dataRowMinHeight:
+                      65, // Increased height slightly to fit multi-line price
+                  dataRowMaxHeight: 65,
                   horizontalMargin: 24,
                   columnSpacing: 24,
                   showBottomBorder: true,
@@ -452,6 +453,10 @@ class _ShortlistPageState extends State<ShortlistPage> {
                     _col("Status", align: MainAxisAlignment.center),
                     _col("Model", align: MainAxisAlignment.start),
                     _col("Product Name", align: MainAxisAlignment.start),
+                    _col(
+                      "Price",
+                      align: MainAxisAlignment.start,
+                    ), // NEW PRICE COLUMN
                     _col(
                       "Stock",
                       align: MainAxisAlignment.end,
@@ -494,7 +499,7 @@ class _ShortlistPageState extends State<ShortlistPage> {
                         ),
                         DataCell(
                           ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 250),
+                            constraints: const BoxConstraints(maxWidth: 200),
                             child: Text(
                               p.name,
                               overflow: TextOverflow.ellipsis,
@@ -502,6 +507,56 @@ class _ShortlistPageState extends State<ShortlistPage> {
                             ),
                           ),
                         ),
+
+                        // NEW PRICE DATACELL (Air and Sea Stacked)
+                        DataCell(
+                          Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    Icons.flight_takeoff,
+                                    size: 14,
+                                    color: Color(0xFF0284C7),
+                                  ), // Blue for air
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    "৳${p.air}",
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF334155),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    Icons.directions_boat,
+                                    size: 14,
+                                    color: Color(0xFF0D9488),
+                                  ), // Teal for sea
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    "৳${p.sea}",
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF334155),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+
                         DataCell(
                           Align(
                             alignment: Alignment.centerRight,
@@ -1196,7 +1251,7 @@ class OrderPdfGenerator {
             ),
             pw.SizedBox(height: 10),
 
-            // Re-ordered Columns: No. -> Product Name -> Model -> Order Quantity
+            // ADDED THE PRICE COLUMN TO THE PDF HERE
             pw.TableHelper.fromTextArray(
               context: context,
               cellAlignment: pw.Alignment.centerLeft,
@@ -1204,20 +1259,25 @@ class OrderPdfGenerator {
                 color: PdfColors.blue100,
               ),
               headerHeight: 40,
-              cellHeight: 30,
+              cellHeight: 35,
               headerStyle: pw.TextStyle(
                 color: PdfColors.black,
                 fontWeight: pw.FontWeight.bold,
                 fontSize: 12,
               ),
               cellStyle: const pw.TextStyle(fontSize: 10),
-              headers: ['No.', 'Product Name', 'Model', 'Order Quantity'],
+              headers: [
+                'No.',
+                'Product Name',
+                'Model',
+                'Order Quantity',
+              ],
               data: List<List<String>>.generate(
                 items.length,
                 (index) => [
                   (index + 1).toString(),
-                  items[index].product.name, // Moved up to second column
-                  items[index].product.model, // Moved down to third column
+                  items[index].product.name,
+                  items[index].product.model,
                   items[index].qty.toString(),
                 ],
               ),

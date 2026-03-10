@@ -103,16 +103,9 @@ class DailySalesPage extends StatelessWidget {
           extraCondition = dueCondition.abs();
           dueCondition = 0; // Capped at zero!
         }
-
-        // 3. Totals for Dashboard
         double totalRevenue = revNormalAgent + revCondition;
         double totalCollection = colNormalAgent + colCondition;
         double totalDue = dueNormalAgent + dueCondition;
-        double totalExtra = extraNormalAgent + extraCondition;
-
-        // =================================================================
-        // 🖥️ UI CONSTRUCTION
-        // =================================================================
 
         return Column(
           children: [

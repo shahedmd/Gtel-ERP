@@ -6,18 +6,17 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:intl/intl.dart';
+import 'package:printing/printing.dart';
 import 'debatorcontroller.dart';
 import '../Sales/controller.dart';
 import 'model.dart';
-import 'dart:js_interop';
-import 'package:web/web.dart' as web;
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/Debtor%20Purchase/purchasepage.dart';
 
-// --- WRAPPER WITH SPLIT ACCOUNTING COLUMNS ---
+// --- ACCOUNTING WRAPPER ---
 class DisplayTx {
   final String id;
-  final double billedAmount; // Billed (+)
-  final double paidAmount; // Paid (-)
+  final double debitAmount; // Debit (Red)
+  final double creditAmount; // Credit (Green)
   final String note;
   final String type;
   final DateTime date;
@@ -28,8 +27,8 @@ class DisplayTx {
 
   DisplayTx({
     required this.id,
-    required this.billedAmount,
-    required this.paidAmount,
+    required this.debitAmount,
+    required this.creditAmount,
     required this.note,
     required this.type,
     required this.date,
@@ -60,6 +59,10 @@ class _DebatordetailsState extends State<Debatordetails> {
   static const Color bgGrey = Color(0xFFF9FAFB);
   static const Color textMuted = Color(0xFF6B7280);
 
+  // Accounting Colors
+  static const Color debitColor = Color(0xFFDC2626); // Red
+  static const Color creditColor = Color(0xFF16A34A); // Green
+
   @override
   void initState() {
     super.initState();
@@ -73,7 +76,7 @@ class _DebatordetailsState extends State<Debatordetails> {
     super.dispose();
   }
 
-  // --- PROCESSING LOGIC FOR SPLIT LEDGER ---
+  // --- PROCESSING LOGIC FOR ACCOUNTING LEDGER ---
   List<DisplayTx> get _processedTransactions {
     List<TransactionModel> rawList = controller.currentTransactions.toList();
     List<DisplayTx> mergedList = [];
@@ -91,15 +94,14 @@ class _DebatordetailsState extends State<Debatordetails> {
         var creditTx = rawList.firstWhereOrNull((t) => t.id == creditId);
         var payTx = rawList.firstWhereOrNull((t) => t.id == payId);
 
-        // If paid instantly, merge into a single row showing Billed & Paid simultaneously
         if (creditTx != null &&
             payTx != null &&
             creditTx.amount == payTx.amount) {
           mergedList.add(
             DisplayTx(
               id: creditTx.id,
-              billedAmount: creditTx.amount,
-              paidAmount: payTx.amount,
+              debitAmount: creditTx.amount, // Billed
+              creditAmount: payTx.amount, // Paid
               note: creditTx.note,
               type: 'paid_sale',
               date: creditTx.date,
@@ -114,8 +116,8 @@ class _DebatordetailsState extends State<Debatordetails> {
         }
       }
 
-      // 2. Map standard transactions to Accounting Ledger Columns
-      bool isBilled = [
+      // 2. Map standard transactions to Debit / Credit
+      bool isDebitEntry = [
         'credit',
         'previous_due',
         'advance_given',
@@ -124,8 +126,8 @@ class _DebatordetailsState extends State<Debatordetails> {
       mergedList.add(
         DisplayTx(
           id: tx.id,
-          billedAmount: isBilled ? tx.amount : 0.0,
-          paidAmount: !isBilled ? tx.amount : 0.0,
+          debitAmount: isDebitEntry ? tx.amount : 0.0,
+          creditAmount: !isDebitEntry ? tx.amount : 0.0,
           note: tx.note,
           type: tx.type,
           date: tx.date,
@@ -137,10 +139,10 @@ class _DebatordetailsState extends State<Debatordetails> {
     }
 
     // Filters
-    if (_filterType.value == 'Sales') {
-      mergedList = mergedList.where((t) => t.billedAmount > 0).toList();
-    } else if (_filterType.value == 'Payments') {
-      mergedList = mergedList.where((t) => t.paidAmount > 0).toList();
+    if (_filterType.value == 'Debits') {
+      mergedList = mergedList.where((t) => t.debitAmount > 0).toList();
+    } else if (_filterType.value == 'Credits') {
+      mergedList = mergedList.where((t) => t.creditAmount > 0).toList();
     }
 
     // Search
@@ -155,6 +157,446 @@ class _DebatordetailsState extends State<Debatordetails> {
     }
 
     return mergedList;
+  }
+
+  void _showAddTransactionDialog(DebtorModel debtor) {
+    Future.delayed(const Duration(milliseconds: 50), () {
+      final amountC = TextEditingController();
+      final noteC = TextEditingController();
+      final RxString selectedType = 'credit'.obs;
+      final Rx<DateTime> selectedDate = DateTime.now().obs;
+      final RxString payMethodType = 'cash'.obs;
+      final bankNameC = TextEditingController();
+      final accountNoC = TextEditingController();
+      final mobileNoC = TextEditingController();
+      final RxBool isSubmitting = false.obs;
+
+      Get.dialog(
+        Builder(
+          builder: (dialogContext) {
+            return Dialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Container(
+                width: 500,
+                padding: EdgeInsets.zero,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _dialogHeader("New Transaction Entry"),
+                    Flexible(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.all(24),
+                        child: Obx(
+                          () => Column(
+                            children: [
+                              _buildField(
+                                amountC,
+                                "Amount (Tk)",
+                                Icons.attach_money,
+                                isNum: true,
+                              ),
+                              const SizedBox(height: 12),
+                              _buildField(
+                                noteC,
+                                "Note / Description",
+                                Icons.note,
+                              ),
+                              const SizedBox(height: 12),
+                              _buildDropdown<String>(
+                                value: selectedType.value,
+                                items: const [
+                                  DropdownMenuItem(
+                                    value: 'credit',
+                                    child: Text("🧾  New Sale/Bill (Debit)"),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'debit',
+                                    child: Text("💵  Receive Payment (Credit)"),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'div1',
+                                    enabled: false,
+                                    child: Divider(),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'previous_due',
+                                    child: Text("🏦  Add Old Debt (Debit)"),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'loan_payment',
+                                    child: Text(
+                                      "💰  Collect Old Debt (Credit)",
+                                    ),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'div2',
+                                    enabled: false,
+                                    child: Divider(),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'advance_received',
+                                    child: Text("⬅️  Receive Advance (Credit)"),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'advance_given',
+                                    child: Text("➡️  Give Advance (Debit)"),
+                                  ),
+                                ],
+                                onChanged: (v) {
+                                  if (v != null && !v.contains('div')) {
+                                    selectedType.value = v;
+                                  }
+                                },
+                              ),
+                              if ([
+                                'debit',
+                                'loan_payment',
+                                'advance_received',
+                                'advance_given',
+                              ].contains(selectedType.value)) ...[
+                                const SizedBox(height: 16),
+                                const Divider(),
+                                _buildDynamicPaymentSection(
+                                  payMethodType,
+                                  bankNameC,
+                                  accountNoC,
+                                  mobileNoC,
+                                ),
+                              ],
+                              const SizedBox(height: 24),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.end,
+                                children: [
+                                  TextButton(
+                                    onPressed:
+                                        isSubmitting.value
+                                            ? null
+                                            : () =>
+                                                Navigator.pop(dialogContext),
+                                    child: const Text("Cancel"),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  ElevatedButton(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: darkSlate,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 24,
+                                        vertical: 16,
+                                      ),
+                                    ),
+                                    onPressed:
+                                        isSubmitting.value
+                                            ? null
+                                            : () async {
+                                              if (amountC.text.isEmpty) return;
+                                              isSubmitting.value = true;
+                                              try {
+                                                Map<String, dynamic> pm = {
+                                                  'type': 'cash',
+                                                };
+                                                if ([
+                                                  'debit',
+                                                  'loan_payment',
+                                                  'advance_received',
+                                                  'advance_given',
+                                                ].contains(
+                                                  selectedType.value,
+                                                )) {
+                                                  if (payMethodType.value ==
+                                                      'bank') {
+                                                    pm = {
+                                                      'type': 'bank',
+                                                      'bankName':
+                                                          bankNameC.text.trim(),
+                                                      'accountNo':
+                                                          accountNoC.text
+                                                              .trim(),
+                                                    };
+                                                  } else if ([
+                                                    'bkash',
+                                                    'nagad',
+                                                    'rocket',
+                                                  ].contains(
+                                                    payMethodType.value,
+                                                  )) {
+                                                    pm = {
+                                                      'type':
+                                                          payMethodType.value,
+                                                      'number':
+                                                          mobileNoC.text.trim(),
+                                                    };
+                                                  }
+                                                }
+                                                await controller.addTransaction(
+                                                  debtorId: debtor.id,
+                                                  amount:
+                                                      double.tryParse(
+                                                        amountC.text,
+                                                      ) ??
+                                                      0,
+                                                  note: noteC.text,
+                                                  type: selectedType.value,
+                                                  date: selectedDate.value,
+                                                  paymentMethodData: pm,
+                                                );
+                                                if (dialogContext.mounted) {
+                                                  Navigator.pop(dialogContext);
+                                                }
+                                              } catch (e) {
+                                                Get.snackbar(
+                                                  "Error",
+                                                  "Failed to add transaction",
+                                                );
+                                              } finally {
+                                                isSubmitting.value = false;
+                                              }
+                                            },
+                                    child:
+                                        isSubmitting.value
+                                            ? const SizedBox(
+                                              height: 20,
+                                              width: 20,
+                                              child: CircularProgressIndicator(
+                                                color: Colors.white,
+                                                strokeWidth: 2,
+                                              ),
+                                            )
+                                            : const Text(
+                                              "Save Entry",
+                                              style: TextStyle(
+                                                color: Colors.white,
+                                              ),
+                                            ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+        barrierDismissible: false,
+      );
+    });
+  }
+
+  void _showEditTransactionDialog(TransactionModel tx, DebtorModel debtor) {
+    Future.delayed(const Duration(milliseconds: 50), () {
+      final amountC = TextEditingController(text: tx.amount.toString());
+      final noteC = TextEditingController(text: tx.note);
+      final RxString selectedType = tx.type.obs;
+      final Rx<DateTime> selectedDate = tx.date.obs;
+      final map = tx.paymentMethod ?? {'type': 'cash'};
+      final RxString payMethodType =
+          (map['type'] ?? 'cash').toString().toLowerCase().obs;
+      final bankNameC = TextEditingController(text: map['bankName'] ?? '');
+      final accountNoC = TextEditingController(text: map['accountNo'] ?? '');
+      final mobileNoC = TextEditingController(text: map['number'] ?? '');
+      final RxBool isSubmitting = false.obs;
+
+      Get.dialog(
+        Builder(
+          builder: (dialogContext) {
+            return Dialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: SizedBox(
+                width: 500,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _dialogHeader("Edit Transaction"),
+                    Flexible(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.all(24),
+                        child: Obx(
+                          () => Column(
+                            children: [
+                              _buildField(
+                                amountC,
+                                "Amount",
+                                Icons.money,
+                                isNum: true,
+                              ),
+                              const SizedBox(height: 12),
+                              _buildField(noteC, "Note", Icons.edit),
+                              const SizedBox(height: 12),
+                              _buildDropdown<String>(
+                                value: selectedType.value,
+                                items: const [
+                                  DropdownMenuItem(
+                                    value: 'credit',
+                                    child: Text("CREDIT SALE"),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'debit',
+                                    child: Text("PAYMENT"),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'previous_due',
+                                    child: Text("OLD DEBT"),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'loan_payment',
+                                    child: Text("LOAN PAY"),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'advance_received',
+                                    child: Text("ADV RECV"),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'advance_given',
+                                    child: Text("ADV GIVEN"),
+                                  ),
+                                ],
+                                onChanged: (v) => selectedType.value = v!,
+                              ),
+                              if ([
+                                'debit',
+                                'loan_payment',
+                                'advance_received',
+                                'advance_given',
+                              ].contains(selectedType.value)) ...[
+                                const SizedBox(height: 12),
+                                const Divider(),
+                                _buildDynamicPaymentSection(
+                                  payMethodType,
+                                  bankNameC,
+                                  accountNoC,
+                                  mobileNoC,
+                                ),
+                              ],
+                              const SizedBox(height: 24),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.end,
+                                children: [
+                                  TextButton(
+                                    onPressed:
+                                        isSubmitting.value
+                                            ? null
+                                            : () =>
+                                                Navigator.pop(dialogContext),
+                                    child: const Text("Cancel"),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  ElevatedButton(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: activeAccent,
+                                      minimumSize: const Size(120, 50),
+                                    ),
+                                    onPressed:
+                                        isSubmitting.value
+                                            ? null
+                                            : () async {
+                                              isSubmitting.value = true;
+                                              try {
+                                                Map<String, dynamic> pm = {
+                                                  'type': 'cash',
+                                                };
+                                                if ([
+                                                  'debit',
+                                                  'loan_payment',
+                                                  'advance_received',
+                                                  'advance_given',
+                                                ].contains(
+                                                  selectedType.value,
+                                                )) {
+                                                  if (payMethodType.value ==
+                                                      'bank') {
+                                                    pm = {
+                                                      'type': 'bank',
+                                                      'bankName':
+                                                          bankNameC.text.trim(),
+                                                      'accountNo':
+                                                          accountNoC.text
+                                                              .trim(),
+                                                    };
+                                                  } else if ([
+                                                    'bkash',
+                                                    'nagad',
+                                                    'rocket',
+                                                  ].contains(
+                                                    payMethodType.value,
+                                                  )) {
+                                                    pm = {
+                                                      'type':
+                                                          payMethodType.value,
+                                                      'number':
+                                                          mobileNoC.text.trim(),
+                                                    };
+                                                  }
+                                                }
+                                                await controller
+                                                    .editTransaction(
+                                                      debtorId: debtor.id,
+                                                      transactionId: tx.id,
+                                                      oldAmount: tx.amount,
+                                                      newAmount:
+                                                          double.tryParse(
+                                                            amountC.text,
+                                                          ) ??
+                                                          0,
+                                                      oldType: tx.type,
+                                                      newType:
+                                                          selectedType.value,
+                                                      note: noteC.text,
+                                                      date: selectedDate.value,
+                                                      paymentMethod: pm,
+                                                    );
+                                                if (dialogContext.mounted) {
+                                                  Navigator.pop(dialogContext);
+                                                }
+                                              } catch (e) {
+                                                Get.snackbar(
+                                                  "Error",
+                                                  "Failed to update transaction",
+                                                );
+                                              } finally {
+                                                isSubmitting.value = false;
+                                              }
+                                            },
+                                    child:
+                                        isSubmitting.value
+                                            ? const SizedBox(
+                                              height: 20,
+                                              width: 20,
+                                              child: CircularProgressIndicator(
+                                                color: Colors.white,
+                                                strokeWidth: 2,
+                                              ),
+                                            )
+                                            : const Text(
+                                              "Update",
+                                              style: TextStyle(
+                                                color: Colors.white,
+                                              ),
+                                            ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+        barrierDismissible: false,
+      );
+    });
   }
 
   void _printInvoice(String invoiceId) async {
@@ -283,7 +725,7 @@ class _DebatordetailsState extends State<Debatordetails> {
         _actionTextBtn(
           FontAwesomeIcons.filePdf,
           "Statement",
-          Colors.redAccent,
+          debitColor,
           () => _downloadPDF(),
         ),
         const SizedBox(width: 16),
@@ -500,12 +942,12 @@ class _DebatordetailsState extends State<Debatordetails> {
                         child: Text("All Transactions"),
                       ),
                       DropdownMenuItem(
-                        value: 'Sales',
-                        child: Text("Sales / Bills Only"),
+                        value: 'Debits',
+                        child: Text("Debits (Sales/Bills)"),
                       ),
                       DropdownMenuItem(
-                        value: 'Payments',
-                        child: Text("Payments Only"),
+                        value: 'Credits',
+                        child: Text("Credits (Payments)"),
                       ),
                     ],
                     onChanged: (v) => _filterType.value = v!,
@@ -563,12 +1005,6 @@ class _DebatordetailsState extends State<Debatordetails> {
     );
   }
 
-  static const TextStyle _headStyle = TextStyle(
-    fontWeight: FontWeight.bold,
-    fontSize: 11,
-    color: textMuted,
-  );
-
   Widget _tableHeader() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
@@ -580,34 +1016,63 @@ class _DebatordetailsState extends State<Debatordetails> {
         ),
       ),
       child: Row(
-        children: const [
-          Expanded(flex: 2, child: Text("DATE", style: _headStyle)),
-          Expanded(
+        children: [
+          const Expanded(
+            flex: 2,
+            child: Text(
+              "DATE",
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 11,
+                color: textMuted,
+              ),
+            ),
+          ),
+          const Expanded(
             flex: 3,
-            child: Text("DETAILS / INVOICE", style: _headStyle),
-          ),
-          Expanded(
-            flex: 2,
             child: Text(
-              "BILLED (+)",
-              textAlign: TextAlign.right,
-              style: _headStyle,
+              "DETAILS / INVOICE",
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 11,
+                color: textMuted,
+              ),
             ),
           ),
           Expanded(
             flex: 2,
             child: Text(
-              "PAID (-)",
+              "DEBIT",
               textAlign: TextAlign.right,
-              style: _headStyle,
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+                color: debitColor,
+              ),
             ),
           ),
-          SizedBox(
+          Expanded(
+            flex: 2,
+            child: Text(
+              "CREDIT",
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+                color: creditColor,
+              ),
+            ),
+          ),
+          const SizedBox(
             width: 80,
             child: Text(
               "ACTION",
               textAlign: TextAlign.center,
-              style: _headStyle,
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 11,
+                color: textMuted,
+              ),
             ),
           ),
         ],
@@ -621,7 +1086,7 @@ class _DebatordetailsState extends State<Debatordetails> {
     String typeLabel = tx.type;
 
     if (tx.type == 'credit') {
-      typeColor = const Color(0xFFEF4444);
+      typeColor = debitColor;
       typeIcon = FontAwesomeIcons.fileInvoiceDollar;
       typeLabel = "INVOICE / DUE";
     } else if (tx.type == 'paid_sale') {
@@ -629,28 +1094,27 @@ class _DebatordetailsState extends State<Debatordetails> {
       typeIcon = FontAwesomeIcons.checkDouble;
       typeLabel = "CASH SALE";
     } else if (tx.type == 'debit') {
-      typeColor = const Color(0xFF10B981);
+      typeColor = creditColor;
       typeIcon = FontAwesomeIcons.handHoldingDollar;
       typeLabel = "PAYMENT";
     } else if (tx.type == 'advance_given') {
-      typeColor = const Color(0xFFF59E0B);
+      typeColor = debitColor;
       typeIcon = FontAwesomeIcons.arrowRightFromBracket;
       typeLabel = "ADV GIVEN";
     } else if (tx.type == 'advance_received') {
-      typeColor = const Color(0xFF06B6D4);
+      typeColor = creditColor;
       typeIcon = FontAwesomeIcons.arrowRightToBracket;
       typeLabel = "ADV RECV";
     } else if (tx.type == 'previous_due') {
-      typeColor = Colors.orange;
+      typeColor = Colors.orange.shade700;
       typeIcon = FontAwesomeIcons.clockRotateLeft;
       typeLabel = "OLD DEBT";
     } else if (tx.type == 'loan_payment') {
-      typeColor = Colors.purple;
+      typeColor = Colors.purple.shade600;
       typeIcon = FontAwesomeIcons.moneyBillWave;
       typeLabel = "LOAN COLLECT";
     }
 
-    // Invoice Link Detection
     String? invId;
     if (tx.id.startsWith('GTEL')) {
       invId = tx.id.replaceAll('_pay', '');
@@ -695,7 +1159,6 @@ class _DebatordetailsState extends State<Debatordetails> {
                   ],
                 ),
                 const SizedBox(height: 4),
-
                 if (isInvoice)
                   InkWell(
                     onTap: () => _printInvoice(invId!),
@@ -744,34 +1207,34 @@ class _DebatordetailsState extends State<Debatordetails> {
             ),
           ),
 
-          // 3. BILLED AMOUNT (Debit)
+          // 3. DEBIT AMOUNT (RED)
           Expanded(
             flex: 2,
             child: Text(
-              tx.billedAmount > 0
-                  ? "Tk ${tx.billedAmount.toStringAsFixed(0)}"
+              tx.debitAmount > 0
+                  ? "Tk ${tx.debitAmount.toStringAsFixed(0)}"
                   : "-",
               textAlign: TextAlign.right,
               style: TextStyle(
                 fontWeight:
-                    tx.billedAmount > 0 ? FontWeight.bold : FontWeight.normal,
-                color: darkSlate,
+                    tx.debitAmount > 0 ? FontWeight.bold : FontWeight.normal,
+                color: tx.debitAmount > 0 ? debitColor : darkSlate,
               ),
             ),
           ),
 
-          // 4. PAID AMOUNT (Credit)
+          // 4. CREDIT AMOUNT (GREEN)
           Expanded(
             flex: 2,
             child: Text(
-              tx.paidAmount > 0
-                  ? "Tk ${tx.paidAmount.toStringAsFixed(0)}"
+              tx.creditAmount > 0
+                  ? "Tk ${tx.creditAmount.toStringAsFixed(0)}"
                   : "-",
               textAlign: TextAlign.right,
               style: TextStyle(
                 fontWeight:
-                    tx.paidAmount > 0 ? FontWeight.bold : FontWeight.normal,
-                color: const Color(0xFF10B981),
+                    tx.creditAmount > 0 ? FontWeight.bold : FontWeight.normal,
+                color: tx.creditAmount > 0 ? creditColor : darkSlate,
               ),
             ),
           ),
@@ -878,437 +1341,6 @@ class _DebatordetailsState extends State<Debatordetails> {
     });
   }
 
-  // ==========================================
-  // DIALOGS & OTHERS REMAIN THE SAME BELOW
-  // ==========================================
-  void _showAddTransactionDialog(DebtorModel debtor) {
-    final amountC = TextEditingController();
-    final noteC = TextEditingController();
-    final RxString selectedType = 'credit'.obs;
-    final Rx<DateTime> selectedDate = DateTime.now().obs;
-    final RxString payMethodType = 'cash'.obs;
-    final bankNameC = TextEditingController();
-    final accountNoC = TextEditingController();
-    final mobileNoC = TextEditingController();
-    final RxBool isSubmitting = false.obs;
-
-    Get.dialog(
-      Builder(
-        builder: (dialogContext) {
-          return Dialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Container(
-              width: 500,
-              padding: EdgeInsets.zero,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _dialogHeader("New Transaction Entry"),
-                  Flexible(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.all(24),
-                      child: Obx(
-                        () => Column(
-                          children: [
-                            _buildField(
-                              amountC,
-                              "Amount (Tk)",
-                              Icons.attach_money,
-                              isNum: true,
-                            ),
-                            const SizedBox(height: 12),
-                            _buildField(
-                              noteC,
-                              "Note / Description",
-                              Icons.note,
-                            ),
-                            const SizedBox(height: 12),
-                            _buildDropdown<String>(
-                              value: selectedType.value,
-                              items: const [
-                                DropdownMenuItem(
-                                  value: 'credit',
-                                  child: Text(
-                                    "🧾  New Sale/Bill (Running Due)",
-                                  ),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'debit',
-                                  child: Text("💵  Receive Payment (Running)"),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'div1',
-                                  enabled: false,
-                                  child: Divider(),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'previous_due',
-                                  child: Text("🏦  Add Previous/Old Debt"),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'loan_payment',
-                                  child: Text("💰  Collect Old Debt (Cash In)"),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'div2',
-                                  enabled: false,
-                                  child: Divider(),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'advance_received',
-                                  child: Text("⬅️  Receive Advance"),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'advance_given',
-                                  child: Text("➡️  Give Advance"),
-                                ),
-                              ],
-                              onChanged: (v) {
-                                if (v != null && !v.contains('div')) {
-                                  selectedType.value = v;
-                                }
-                              },
-                            ),
-                            if ([
-                              'debit',
-                              'loan_payment',
-                              'advance_received',
-                            ].contains(selectedType.value)) ...[
-                              const SizedBox(height: 16),
-                              const Divider(),
-                              _buildDynamicPaymentSection(
-                                payMethodType,
-                                bankNameC,
-                                accountNoC,
-                                mobileNoC,
-                              ),
-                            ],
-                            const SizedBox(height: 24),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.end,
-                              children: [
-                                TextButton(
-                                  onPressed:
-                                      isSubmitting.value
-                                          ? null
-                                          : () {
-                                            if (dialogContext.mounted) {
-                                              Navigator.pop(dialogContext);
-                                            }
-                                          },
-                                  child: const Text("Cancel"),
-                                ),
-                                const SizedBox(width: 12),
-                                ElevatedButton(
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: darkSlate,
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 24,
-                                      vertical: 16,
-                                    ),
-                                  ),
-                                  onPressed:
-                                      isSubmitting.value
-                                          ? null
-                                          : () async {
-                                            if (amountC.text.isEmpty) return;
-                                            isSubmitting.value = true;
-                                            try {
-                                              Map<String, dynamic> pm = {
-                                                'type': 'cash',
-                                              };
-                                              if ([
-                                                'debit',
-                                                'loan_payment',
-                                                'advance_received',
-                                              ].contains(selectedType.value)) {
-                                                if (payMethodType.value ==
-                                                    'bank') {
-                                                  pm = {
-                                                    'type': 'bank',
-                                                    'bankName':
-                                                        bankNameC.text.trim(),
-                                                    'accountNo':
-                                                        accountNoC.text.trim(),
-                                                  };
-                                                } else if ([
-                                                  'bkash',
-                                                  'nagad',
-                                                  'rocket',
-                                                ].contains(
-                                                  payMethodType.value,
-                                                )) {
-                                                  pm = {
-                                                    'type': payMethodType.value,
-                                                    'number':
-                                                        mobileNoC.text.trim(),
-                                                  };
-                                                }
-                                              }
-                                              await controller.addTransaction(
-                                                debtorId: debtor.id,
-                                                amount:
-                                                    double.tryParse(
-                                                      amountC.text,
-                                                    ) ??
-                                                    0,
-                                                note: noteC.text,
-                                                type: selectedType.value,
-                                                date: selectedDate.value,
-                                                paymentMethodData: pm,
-                                              );
-                                              if (dialogContext.mounted) {
-                                                Navigator.pop(dialogContext);
-                                              }
-                                            } catch (e) {
-                                              Get.snackbar(
-                                                "Error",
-                                                "Failed to add transaction",
-                                              );
-                                            } finally {
-                                              isSubmitting.value = false;
-                                            }
-                                          },
-                                  child:
-                                      isSubmitting.value
-                                          ? const SizedBox(
-                                            height: 20,
-                                            width: 20,
-                                            child: CircularProgressIndicator(
-                                              color: Colors.white,
-                                              strokeWidth: 2,
-                                            ),
-                                          )
-                                          : const Text(
-                                            "Save Entry",
-                                            style: TextStyle(
-                                              color: Colors.white,
-                                            ),
-                                          ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-      barrierDismissible: false,
-    );
-  }
-
-  void _showEditTransactionDialog(TransactionModel tx, DebtorModel debtor) {
-    final amountC = TextEditingController(text: tx.amount.toString());
-    final noteC = TextEditingController(text: tx.note);
-    final RxString selectedType = tx.type.obs;
-    final Rx<DateTime> selectedDate = tx.date.obs;
-    final map = tx.paymentMethod ?? {'type': 'cash'};
-    final RxString payMethodType =
-        (map['type'] ?? 'cash').toString().toLowerCase().obs;
-    final bankNameC = TextEditingController(text: map['bankName'] ?? '');
-    final accountNoC = TextEditingController(text: map['accountNo'] ?? '');
-    final mobileNoC = TextEditingController(text: map['number'] ?? '');
-    final RxBool isSubmitting = false.obs;
-
-    Get.dialog(
-      Builder(
-        builder: (dialogContext) {
-          return Dialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: SizedBox(
-              width: 500,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _dialogHeader("Edit Transaction"),
-                  Flexible(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.all(24),
-                      child: Obx(
-                        () => Column(
-                          children: [
-                            _buildField(
-                              amountC,
-                              "Amount",
-                              Icons.money,
-                              isNum: true,
-                            ),
-                            const SizedBox(height: 12),
-                            _buildField(noteC, "Note", Icons.edit),
-                            const SizedBox(height: 12),
-                            _buildDropdown<String>(
-                              value: selectedType.value,
-                              items: const [
-                                DropdownMenuItem(
-                                  value: 'credit',
-                                  child: Text("CREDIT SALE"),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'debit',
-                                  child: Text("PAYMENT"),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'previous_due',
-                                  child: Text("OLD DEBT"),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'loan_payment',
-                                  child: Text("LOAN PAY"),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'advance_received',
-                                  child: Text("ADV RECV"),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'advance_given',
-                                  child: Text("ADV GIVEN"),
-                                ),
-                              ],
-                              onChanged: (v) => selectedType.value = v!,
-                            ),
-                            if ([
-                              'debit',
-                              'loan_payment',
-                              'advance_received',
-                            ].contains(selectedType.value)) ...[
-                              const SizedBox(height: 12),
-                              const Divider(),
-                              _buildDynamicPaymentSection(
-                                payMethodType,
-                                bankNameC,
-                                accountNoC,
-                                mobileNoC,
-                              ),
-                            ],
-                            const SizedBox(height: 24),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.end,
-                              children: [
-                                TextButton(
-                                  onPressed:
-                                      isSubmitting.value
-                                          ? null
-                                          : () {
-                                            if (dialogContext.mounted) {
-                                              Navigator.pop(dialogContext);
-                                            }
-                                          },
-                                  child: const Text("Cancel"),
-                                ),
-                                const SizedBox(width: 12),
-                                ElevatedButton(
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: activeAccent,
-                                    minimumSize: const Size(120, 50),
-                                  ),
-                                  onPressed:
-                                      isSubmitting.value
-                                          ? null
-                                          : () async {
-                                            isSubmitting.value = true;
-                                            try {
-                                              Map<String, dynamic> pm = {
-                                                'type': 'cash',
-                                              };
-                                              if ([
-                                                'debit',
-                                                'loan_payment',
-                                                'advance_received',
-                                              ].contains(selectedType.value)) {
-                                                if (payMethodType.value ==
-                                                    'bank') {
-                                                  pm = {
-                                                    'type': 'bank',
-                                                    'bankName':
-                                                        bankNameC.text.trim(),
-                                                    'accountNo':
-                                                        accountNoC.text.trim(),
-                                                  };
-                                                } else if ([
-                                                  'bkash',
-                                                  'nagad',
-                                                  'rocket',
-                                                ].contains(
-                                                  payMethodType.value,
-                                                )) {
-                                                  pm = {
-                                                    'type': payMethodType.value,
-                                                    'number':
-                                                        mobileNoC.text.trim(),
-                                                  };
-                                                }
-                                              }
-                                              await controller.editTransaction(
-                                                debtorId: debtor.id,
-                                                transactionId: tx.id,
-                                                oldAmount: tx.amount,
-                                                newAmount:
-                                                    double.tryParse(
-                                                      amountC.text,
-                                                    ) ??
-                                                    0,
-                                                oldType: tx.type,
-                                                newType: selectedType.value,
-                                                note: noteC.text,
-                                                date: selectedDate.value,
-                                                paymentMethod: pm,
-                                              );
-                                              if (dialogContext.mounted) {
-                                                Navigator.pop(dialogContext);
-                                              }
-                                            } catch (e) {
-                                              Get.snackbar(
-                                                "Error",
-                                                "Failed to update transaction",
-                                              );
-                                            } finally {
-                                              isSubmitting.value = false;
-                                            }
-                                          },
-                                  child:
-                                      isSubmitting.value
-                                          ? const SizedBox(
-                                            height: 20,
-                                            width: 20,
-                                            child: CircularProgressIndicator(
-                                              color: Colors.white,
-                                              strokeWidth: 2,
-                                            ),
-                                          )
-                                          : const Text(
-                                            "Update",
-                                            style: TextStyle(
-                                              color: Colors.white,
-                                            ),
-                                          ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-      barrierDismissible: false,
-    );
-  }
-
   void _showEditProfileDialog(DebtorModel debtor) {
     final nameC = TextEditingController(text: debtor.name);
     final phoneC = TextEditingController(text: debtor.phone);
@@ -1347,11 +1379,7 @@ class _DebatordetailsState extends State<Debatordetails> {
                   onPressed:
                       isSubmitting.value
                           ? null
-                          : () {
-                            if (dialogContext.mounted) {
-                              Navigator.pop(dialogContext);
-                            }
-                          },
+                          : () => Navigator.pop(dialogContext),
                   child: const Text("Cancel"),
                 ),
               ),
@@ -1420,7 +1448,7 @@ class _DebatordetailsState extends State<Debatordetails> {
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
             content: Text(
-              "Are you sure you want to delete this transaction of Tk ${tx.billedAmount > 0 ? tx.billedAmount : tx.paidAmount}?",
+              "Are you sure you want to delete this transaction of Tk ${tx.debitAmount > 0 ? tx.debitAmount : tx.creditAmount}?",
             ),
             actions: [
               Obx(
@@ -1428,11 +1456,7 @@ class _DebatordetailsState extends State<Debatordetails> {
                   onPressed:
                       isDeleting.value
                           ? null
-                          : () {
-                            if (dialogContext.mounted) {
-                              Navigator.pop(dialogContext);
-                            }
-                          },
+                          : () => Navigator.pop(dialogContext),
                   child: const Text("Cancel"),
                 ),
               ),
@@ -1497,40 +1521,48 @@ class _DebatordetailsState extends State<Debatordetails> {
   }
 
   Future<void> _downloadPDF() async {
-    final snap =
-        await controller.db
-            .collection("debatorbody")
-            .doc(widget.id)
-            .collection("transactions")
-            .orderBy("date")
-            .get();
-    List<Map<String, dynamic>> data =
-        snap.docs.map((d) {
-          final map = d.data();
-          return {
-            "date":
-                (map["date"] is Timestamp)
-                    ? (map["date"] as Timestamp).toDate()
-                    : map["date"],
-            "type": map["type"],
-            "amount": (map["amount"] as num).toDouble(),
-            "note": map["note"] ?? "",
-            "paymentMethod": map["paymentMethod"],
-          };
-        }).toList();
-    final List<int> bytes = await controller.generatePDF(widget.name, data);
-    final Uint8List uint8list = Uint8List.fromList(bytes);
-    final JSUint8Array jsBytes = uint8list.toJS;
-    final blob = web.Blob(
-      [jsBytes].toJS as JSArray<web.BlobPart>,
-      web.BlobPropertyBag(type: 'application/pdf'),
+    Get.dialog(
+      const Center(child: CircularProgressIndicator(color: activeAccent)),
+      barrierDismissible: false,
     );
-    final url = web.URL.createObjectURL(blob);
-    final anchor = web.document.createElement('a') as web.HTMLAnchorElement;
-    anchor.href = url;
-    anchor.download = "${widget.name}_Statement.pdf";
-    anchor.click();
-    web.URL.revokeObjectURL(url);
+
+    try {
+      final snap =
+          await controller.db
+              .collection("debatorbody")
+              .doc(widget.id)
+              .collection("transactions")
+              .orderBy("date")
+              .get();
+      List<Map<String, dynamic>> data =
+          snap.docs.map((d) {
+            final map = d.data();
+            return {
+              "date":
+                  (map["date"] is Timestamp)
+                      ? (map["date"] as Timestamp).toDate()
+                      : map["date"],
+              "type": map["type"],
+              "amount": (map["amount"] as num).toDouble(),
+              "note": map["note"] ?? "",
+              "paymentMethod": map["paymentMethod"],
+            };
+          }).toList();
+
+      final Uint8List bytes = await controller.generatePDF(widget.name, data);
+
+      // Close the loading dialog before opening the print preview
+      if (Get.isDialogOpen ?? false) Get.back();
+
+      // Open Print Preview
+      await Printing.layoutPdf(
+        onLayout: (format) async => bytes,
+        name: "${widget.name}_Statement.pdf",
+      );
+    } catch (e) {
+      if (Get.isDialogOpen ?? false) Get.back();
+      Get.snackbar("Error", "Could not load PDF: $e");
+    }
   }
 
   Widget _buildDynamicPaymentSection(

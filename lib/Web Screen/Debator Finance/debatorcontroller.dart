@@ -474,7 +474,6 @@ class DebatorController extends GetxController {
     if (pageIndex > txPageCursors.length) return;
 
     isTxLoading.value = true;
-    _recalculateSingleDebtorBalance(debtorId);
 
     try {
       Query query = db
@@ -539,7 +538,7 @@ class DebatorController extends GetxController {
       final breakdown = await getInstantDebtorBreakdown(debtorId);
       await db.collection('debatorbody').doc(debtorId).update({
         'balance': breakdown['total'],
-        'lastTransactionDate': FieldValue.serverTimestamp(),
+        'lastTransactionDate': Timestamp.now(),
       });
       calculateTotalOutstanding();
     } catch (e) {
@@ -573,12 +572,8 @@ class DebatorController extends GetxController {
       // NULLIFY PAYMENT METHOD FOR BILLS/DEBT
       // ==========================================
       Map<String, dynamic>? finalPaymentMethod = paymentMethodData;
-      if ([
-        'credit',
-        'previous_due',
-        'advance_given',
-      ].contains(type.toLowerCase())) {
-        finalPaymentMethod = null; // Don't save payment method for debts/bills
+      if (['credit', 'previous_due'].contains(type.toLowerCase())) {
+        finalPaymentMethod = null;
       }
 
       await newTxRef.set({
@@ -588,10 +583,18 @@ class DebatorController extends GetxController {
         'type': type,
         'date': Timestamp.fromDate(date),
         'paymentMethod': finalPaymentMethod,
-        'createdAt': FieldValue.serverTimestamp(),
+        'createdAt': Timestamp.now(),
       });
 
-      // ALL kinds of collections (including old due payments like 'loan_payment')
+      String parsedMethod = (paymentMethodData['type'] ?? 'cash').toString();
+      if (parsedMethod.toLowerCase() == 'cash' &&
+          paymentMethodData.containsKey('bankName')) {
+        parsedMethod = 'Bank';
+      } else if (parsedMethod.toLowerCase() == 'cash' &&
+          paymentMethodData.containsKey('bkashNumber')) {
+        parsedMethod = 'Bkash';
+      }
+
       bool isCollection = [
         'debit',
         'loan_payment',
@@ -602,20 +605,10 @@ class DebatorController extends GetxController {
       ].contains(type.toLowerCase());
 
       if (isCollection) {
-        String method = (paymentMethodData['type'] ?? 'cash').toString();
-        if (method.toLowerCase() == 'cash' &&
-            paymentMethodData.containsKey('bankName')) {
-          method = 'Bank';
-        } else if (method.toLowerCase() == 'cash' &&
-            paymentMethodData.containsKey('bkashNumber')) {
-          method = 'Bkash';
-        }
-
-        // 1. THIS CREATES THE CASH LEDGER ENTRY FOR BOTH OLD DUE AND RUNNING BILLS
         await db.collection('cash_ledger').add({
           'type': 'deposit',
           'amount': amount,
-          'method': method,
+          'method': parsedMethod,
           'details': paymentMethodData,
           'description': "Collection from $debtorName",
           'timestamp': Timestamp.fromDate(date),
@@ -627,19 +620,19 @@ class DebatorController extends GetxController {
         await db.collection('cash_ledger').add({
           'type': 'withdraw',
           'amount': amount,
-          'method': 'cash',
-          'description': "Given to $debtorName",
+          'method': parsedMethod,
+          'details': paymentMethodData,
+          'description': "Advance Given to $debtorName",
           'timestamp': Timestamp.fromDate(date),
           'linkedDebtorId': debtorId,
+          'linkedTxId': finalTxId,
           'source': 'debtor_payment',
         });
       }
 
       // =========================================================
-      // UPDATED BILL ALLOCATION LOGIC (FIXES SALES ORDER STATUS)
+      // PERFECT BILL ALLOCATION LOGIC (ID-BASED)
       // =========================================================
-
-      // We explicitly EXCLUDE 'loan_payment' (old due) from allocating to daily sales bills
       bool isRunningBillPayment = [
         'debit',
         'collection',
@@ -650,84 +643,181 @@ class DebatorController extends GetxController {
       if (isRunningBillPayment) {
         double remainingToAllocate = amount;
 
-        QuerySnapshot salesSnap =
+        String pType =
+            (paymentMethodData['type'] ?? 'cash').toString().toLowerCase();
+        String bNum = paymentMethodData['bkashNumber'] ?? '';
+        String nNum = paymentMethodData['nagadNumber'] ?? '';
+        String bankName = paymentMethodData['bankName'] ?? '';
+        String accNum =
+            paymentMethodData['accountNo'] ??
+            paymentMethodData['accountNumber'] ??
+            '';
+
+        // Fetch sales_orders by debtorId (Immune to Name Changes!)
+        QuerySnapshot ordersSnap =
             await db
-                .collection('daily_sales')
-                .where('name', isEqualTo: debtorName)
+                .collection('sales_orders')
+                .where('debtorId', isEqualTo: debtorId)
                 .get();
 
-        List<DocumentSnapshot> pendingBills =
-            salesSnap.docs.where((doc) {
+        List<DocumentSnapshot> pendingOrders =
+            ordersSnap.docs.where((doc) {
               final data = doc.data() as Map<String, dynamic>;
-              double p = double.tryParse(data['pending'].toString()) ?? 0.0;
-              return p > 0.5; // Tolerance
+              double pending = 0.0;
+              if (data['paymentDetails'] != null &&
+                  data['paymentDetails']['due'] != null) {
+                pending =
+                    double.tryParse(data['paymentDetails']['due'].toString()) ??
+                    0.0;
+              } else {
+                pending =
+                    (double.tryParse(data['grandTotal']?.toString() ?? '0') ??
+                        0.0) -
+                    (double.tryParse(data['paid']?.toString() ?? '0') ?? 0.0);
+              }
+              return pending > 0.5;
             }).toList();
 
-        pendingBills.sort((a, b) {
-          Timestamp t1 = a['timestamp'] as Timestamp;
-          Timestamp t2 = b['timestamp'] as Timestamp;
+        // Sort by date/timestamp securely
+        pendingOrders.sort((a, b) {
+          final dataA = a.data() as Map<String, dynamic>;
+          final dataB = b.data() as Map<String, dynamic>;
+          Timestamp t1 =
+              dataA['timestamp'] is Timestamp
+                  ? dataA['timestamp']
+                  : Timestamp.now();
+          Timestamp t2 =
+              dataB['timestamp'] is Timestamp
+                  ? dataB['timestamp']
+                  : Timestamp.now();
           return t1.compareTo(t2);
         });
 
-        if (pendingBills.isNotEmpty) {
+        if (pendingOrders.isNotEmpty) {
           WriteBatch batch = db.batch();
           bool hasUpdates = false;
 
-          for (var doc in pendingBills) {
+          for (var orderDoc in pendingOrders) {
             if (remainingToAllocate <= 0.01) break;
 
-            Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+            Map<String, dynamic> oData =
+                orderDoc.data() as Map<String, dynamic>;
+            String invoiceId = oData['invoiceId'] ?? orderDoc.id;
+
             double currentPending =
-                double.tryParse(data['pending'].toString()) ?? 0.0;
-            double currentPaid =
-                double.tryParse(data['paid'].toString()) ?? 0.0;
-            double currentLedgerPaid =
-                double.tryParse(data['ledgerPaid']?.toString() ?? '0') ?? 0.0;
+                oData['paymentDetails'] != null &&
+                        oData['paymentDetails']['due'] != null
+                    ? (double.tryParse(
+                          oData['paymentDetails']['due'].toString(),
+                        ) ??
+                        0.0)
+                    : ((double.tryParse(
+                              oData['grandTotal']?.toString() ?? '0',
+                            ) ??
+                            0.0) -
+                        (double.tryParse(oData['paid']?.toString() ?? '0') ??
+                            0.0));
 
             double take =
                 (remainingToAllocate >= currentPending)
                     ? currentPending
                     : remainingToAllocate;
-
             bool isNowFullyPaid = (currentPending - take) <= 0.5;
 
-            final newHistoryEntry = {
-              'type': paymentMethodData['type'] ?? 'cash',
-              'amount': take,
-              'paidAt': Timestamp.now(),
-              'sourceTxId': finalTxId,
+            // 1. Update sales_orders perfectly
+            Map<String, dynamic> orderUpdate = {
+              "paid": FieldValue.increment(take),
+              "paymentDetails.due": FieldValue.increment(-take),
+              "paymentDetails.$pType": FieldValue.increment(take),
             };
 
-            // A. Update Daily Sales
-            batch.update(doc.reference, {
-              "paid": currentPaid + take,
-              "pending": currentPending - take,
-              "ledgerPaid": currentLedgerPaid + take,
-              "status": isNowFullyPaid ? "paid" : "partial",
-              "paymentHistory": FieldValue.arrayUnion([newHistoryEntry]),
-            });
-            hasUpdates = true;
-
-            // B. Update Sales Order (Synchronous Batch Update)
-            String saleTxId = data['transactionId'] ?? '';
-            if (saleTxId.isNotEmpty) {
-              DocumentReference orderRef = db
-                  .collection('sales_orders')
-                  .doc(saleTxId);
-
-              Map<String, dynamic> orderUpdate = {
-                "paid": FieldValue.increment(take),
-                "paymentDetails.due": FieldValue.increment(-take),
-              };
-
-              if (isNowFullyPaid) {
-                orderUpdate["isFullyPaid"] = true;
-                orderUpdate["status"] = "completed";
-              }
-
-              batch.update(orderRef, orderUpdate);
+            // Auto-correct disjointed names
+            if (oData['customerName'] != debtorName) {
+              orderUpdate['customerName'] = debtorName;
             }
 
+            if (pType == 'bkash' && bNum.isNotEmpty) {
+              orderUpdate["paymentDetails.bkashNumber"] = bNum;
+            } else if (pType == 'nagad' && nNum.isNotEmpty) {
+              orderUpdate["paymentDetails.nagadNumber"] = nNum;
+            } else if (pType == 'bank') {
+              if (bankName.isNotEmpty) {
+                orderUpdate["paymentDetails.bankName"] = bankName;
+              }
+              if (accNum.isNotEmpty) {
+                orderUpdate["paymentDetails.accountNumber"] = accNum;
+              }
+            }
+
+            if (isNowFullyPaid) {
+              orderUpdate["isFullyPaid"] = true;
+              orderUpdate["status"] = "completed";
+            }
+
+            batch.update(orderDoc.reference, orderUpdate);
+
+            // 2. Update the strictly linked daily_sales document!
+            QuerySnapshot dailySnap =
+                await db
+                    .collection('daily_sales')
+                    .where('transactionId', isEqualTo: invoiceId)
+                    .limit(1)
+                    .get();
+            if (dailySnap.docs.isNotEmpty) {
+              var dailyDoc = dailySnap.docs.first;
+              Map<String, dynamic> dData =
+                  dailyDoc.data() as Map<String, dynamic>;
+              double currentPaidD =
+                  double.tryParse(dData['paid'].toString()) ?? 0.0;
+              double currentPendingD =
+                  double.tryParse(dData['pending'].toString()) ?? 0.0;
+              double currentLedgerPaidD =
+                  double.tryParse(dData['ledgerPaid']?.toString() ?? '0') ??
+                  0.0;
+
+              final newHistoryEntry = {
+                'amount': take,
+                'note': note.isNotEmpty ? note : "Late Due Collection",
+                'timestamp': Timestamp.fromDate(date),
+                'type': pType,
+                'bkashNumber': bNum,
+                'nagadNumber': nNum,
+                'bankName': bankName,
+                'accountNumber': accNum,
+                'sourceTxId': finalTxId,
+              };
+
+              Map<String, dynamic> dailyUpdate = {
+                "paid": currentPaidD + take,
+                "pending": currentPendingD - take,
+                "ledgerPaid": currentLedgerPaidD + take,
+                "status": (currentPendingD - take) <= 0.5 ? "paid" : "partial",
+                "paymentHistory": FieldValue.arrayUnion([newHistoryEntry]),
+                "paymentMethod.$pType": FieldValue.increment(take),
+              };
+
+              // Auto-correct disjointed names
+              if (dData['name'] != debtorName) {
+                dailyUpdate['name'] = debtorName;
+              }
+
+              if (pType == 'bkash' && bNum.isNotEmpty) {
+                dailyUpdate["paymentMethod.bkashNumber"] = bNum;
+              } else if (pType == 'nagad' && nNum.isNotEmpty) {
+                dailyUpdate["paymentMethod.nagadNumber"] = nNum;
+              } else if (pType == 'bank') {
+                if (bankName.isNotEmpty) {
+                  dailyUpdate["paymentMethod.bankName"] = bankName;
+                }
+                if (accNum.isNotEmpty) {
+                  dailyUpdate["paymentMethod.accountNumber"] = accNum;
+                }
+              }
+
+              batch.update(dailyDoc.reference, dailyUpdate);
+            }
+
+            hasUpdates = true;
             remainingToAllocate -= take;
           }
 
@@ -740,7 +830,10 @@ class DebatorController extends GetxController {
       await _recalculateSingleDebtorBalance(debtorId);
       await loadBodies(loadMore: false);
 
-      loadTxPage(debtorId, 1);
+      txPageCursors = [null];
+      currentTxPage.value = 1;
+      hasMoreTx.value = true;
+      await loadTxPage(debtorId, 1);
 
       if (Get.isRegistered<DailySalesController>()) {
         await Get.find<DailySalesController>().loadDailySales();
@@ -806,25 +899,59 @@ class DebatorController extends GetxController {
             await db.collection('debatorbody').doc(debtorId).get();
         final debtorName = debtorSnap.data()?['name'] ?? "";
 
-        final salesSnap =
+        // Collect documents accurately via Name AND ID to reverse payment
+        Map<String, DocumentSnapshot> dailyDocsToProcess = {};
+
+        final salesByNameSnap =
             await db
                 .collection('daily_sales')
                 .where('name', isEqualTo: debtorName)
                 .get();
+        for (var doc in salesByNameSnap.docs) {
+          dailyDocsToProcess[doc.id] = doc;
+        }
+
+        final ordersByIdSnap =
+            await db
+                .collection('sales_orders')
+                .where('debtorId', isEqualTo: debtorId)
+                .get();
+        List<String> orderTxIds = [];
+        for (var doc in ordersByIdSnap.docs) {
+          orderTxIds.add((doc.data())['invoiceId'] ?? doc.id);
+        }
+
+        for (int i = 0; i < orderTxIds.length; i += 10) {
+          int end = i + 10 > orderTxIds.length ? orderTxIds.length : i + 10;
+          List<String> chunk = orderTxIds.sublist(i, end);
+          if (chunk.isNotEmpty) {
+            final chunkSnap =
+                await db
+                    .collection('daily_sales')
+                    .where('transactionId', whereIn: chunk)
+                    .get();
+            for (var doc in chunkSnap.docs) {
+              dailyDocsToProcess[doc.id] = doc;
+            }
+          }
+        }
+
         final batch = db.batch();
 
-        for (final doc in salesSnap.docs) {
-          final data = doc.data();
+        for (final doc in dailyDocsToProcess.values) {
+          final data = doc.data() as Map<String, dynamic>;
           if (data['transactionId'] == transactionId) {
             batch.delete(doc.reference);
           } else {
             List history = List.from(data['paymentHistory'] ?? []);
             bool changed = false;
             double amountReversed = 0.0;
+            String reversedType = 'cash';
 
             history.removeWhere((h) {
               if (h['sourceTxId'] == transactionId) {
                 amountReversed += (h['amount'] as num).toDouble();
+                reversedType = (h['type'] ?? 'cash').toString().toLowerCase();
                 changed = true;
                 return true;
               }
@@ -844,7 +971,26 @@ class DebatorController extends GetxController {
                 'pending': currentPending + amountReversed,
                 'paymentHistory': history,
                 'status': 'partial',
+                'paymentMethod.$reversedType': FieldValue.increment(
+                  -amountReversed,
+                ),
               });
+
+              String saleTxId = data['transactionId'] ?? '';
+              if (saleTxId.isNotEmpty) {
+                DocumentReference orderRef = db
+                    .collection('sales_orders')
+                    .doc(saleTxId);
+                batch.update(orderRef, {
+                  "paid": FieldValue.increment(-amountReversed),
+                  "paymentDetails.due": FieldValue.increment(amountReversed),
+                  "paymentDetails.$reversedType": FieldValue.increment(
+                    -amountReversed,
+                  ),
+                  "isFullyPaid": false,
+                  "status": "completed",
+                });
+              }
             }
           }
         }
@@ -853,8 +999,12 @@ class DebatorController extends GetxController {
       }
 
       await _recalculateSingleDebtorBalance(debtorId);
-      loadTxPage(debtorId, currentTxPage.value);
-      loadBodies();
+
+      txPageCursors = [null];
+      currentTxPage.value = 1;
+      hasMoreTx.value = true;
+      await loadTxPage(debtorId, 1);
+      await loadBodies();
 
       Get.snackbar("Deleted", "Transaction removed & Balance corrected");
     } catch (e) {
@@ -877,15 +1027,8 @@ class DebatorController extends GetxController {
   }) async {
     gbIsLoading.value = true;
     try {
-      // ==========================================
-      // NULLIFY PAYMENT METHOD FOR BILLS/DEBT
-      // ==========================================
       Map<String, dynamic>? finalPaymentMethod = paymentMethod;
-      if ([
-        'credit',
-        'previous_due',
-        'advance_given',
-      ].contains(newType.toLowerCase())) {
+      if (['credit', 'previous_due'].contains(newType.toLowerCase())) {
         finalPaymentMethod = null;
       }
 
@@ -923,8 +1066,12 @@ class DebatorController extends GetxController {
         });
       }
 
-      loadTxPage(debtorId, currentTxPage.value);
-      loadBodies();
+      txPageCursors = [null];
+      currentTxPage.value = 1;
+      hasMoreTx.value = true;
+      await loadTxPage(debtorId, 1);
+      await loadBodies();
+
       Get.back();
       Get.snackbar("Success", "Updated successfully");
     } catch (e) {
@@ -959,8 +1106,8 @@ class DebatorController extends GetxController {
           phone.trim(),
           des.trim(),
         ),
-        "createdAt": FieldValue.serverTimestamp(),
-        "lastTransactionDate": FieldValue.serverTimestamp(),
+        "createdAt": Timestamp.now(),
+        "lastTransactionDate": Timestamp.now(),
       });
       await loadBodies(loadMore: false);
       Get.back();
@@ -971,7 +1118,7 @@ class DebatorController extends GetxController {
     }
   }
 
-  // --- EDIT BODY ---
+  // --- EDIT BODY (FIXED TO AVOID NAME CHANGE BUGS) ---
   Future<void> editDebtor({
     required String id,
     required String oldName,
@@ -1004,16 +1151,49 @@ class DebatorController extends GetxController {
       await db.collection('debatorbody').doc(id).update(updateData);
 
       if (oldName != newName) {
-        final snap =
+        final batch = db.batch();
+
+        // 1. Update sales_orders perfectly using debtorId
+        final orderSnap =
+            await db
+                .collection('sales_orders')
+                .where('debtorId', isEqualTo: id)
+                .get();
+        List<String> linkedInvoiceIds = [];
+        for (var doc in orderSnap.docs) {
+          batch.update(doc.reference, {"customerName": newName.trim()});
+          linkedInvoiceIds.add((doc.data())['invoiceId'] ?? doc.id);
+        }
+
+        // 2. Update daily_sales globally (Removed strict customerType restriction)
+        final salesSnap =
             await db
                 .collection('daily_sales')
-                .where('customerType', isEqualTo: 'debtor')
                 .where('name', isEqualTo: oldName)
                 .get();
-        final batch = db.batch();
-        for (var doc in snap.docs) {
+        for (var doc in salesSnap.docs) {
           batch.update(doc.reference, {"name": newName.trim()});
         }
+
+        // 3. Catch strictly linked daily_sales just in case the name was already disjointed
+        for (int i = 0; i < linkedInvoiceIds.length; i += 10) {
+          int end =
+              i + 10 > linkedInvoiceIds.length
+                  ? linkedInvoiceIds.length
+                  : i + 10;
+          List<String> chunk = linkedInvoiceIds.sublist(i, end);
+          if (chunk.isNotEmpty) {
+            final chunkSnap =
+                await db
+                    .collection('daily_sales')
+                    .where('transactionId', whereIn: chunk)
+                    .get();
+            for (var doc in chunkSnap.docs) {
+              batch.update(doc.reference, {"name": newName.trim()});
+            }
+          }
+        }
+
         await batch.commit();
       }
 
@@ -1092,15 +1272,9 @@ class DebatorController extends GetxController {
     }
   }
 
-  // --- UPDATED PDF FORMATTER to handle no payment method logic ---
   String _formatMethodForPdf(dynamic pm, [String? txType]) {
-    // Return empty dash if it's a bill type
     if (txType != null &&
-        [
-          'credit',
-          'previous_due',
-          'advance_given',
-        ].contains(txType.toLowerCase())) {
+        ['credit', 'previous_due'].contains(txType.toLowerCase())) {
       return "-";
     }
 
@@ -1119,97 +1293,217 @@ class DebatorController extends GetxController {
     return "Cash";
   }
 
+  // =========================================================
+  // WORLD-CLASS ACCOUNTING PDF REPORT (25 Rows Per Page)
+  // =========================================================
   Future<Uint8List> generatePDF(
     String debtorName,
     List<Map<String, dynamic>> transactions,
   ) async {
     final pdf = pw.Document();
 
-    double totalDebt = transactions
-        .where(
-          (t) =>
-              t['type'] == 'credit' ||
-              t['type'] == 'advance_given' ||
-              t['type'] == 'previous_due',
-        )
-        .fold(0.0, (s, t) => s + (t['amount'] as num).toDouble());
-    double totalPaid = transactions
-        .where(
-          (t) =>
-              t['type'] == 'debit' ||
-              t['type'] == 'advance_received' ||
-              t['type'] == 'loan_payment' ||
-              t['type'] == 'collection',
-        )
-        .fold(0.0, (s, t) => s + (t['amount'] as num).toDouble());
+    // 1. Sort chronologically
+    transactions.sort((a, b) {
+      DateTime dA =
+          (a['date'] is Timestamp)
+              ? (a['date'] as Timestamp).toDate()
+              : (a['date'] as DateTime);
+      DateTime dB =
+          (b['date'] is Timestamp)
+              ? (b['date'] as Timestamp).toDate()
+              : (b['date'] as DateTime);
+      return dA.compareTo(dB);
+    });
 
-    pdf.addPage(
-      pw.MultiPage(
-        pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.all(32),
-        build:
-            (context) => [
-              pw.Header(
-                level: 0,
-                child: pw.Row(
+    double totalDebit = 0.0;
+    double totalCredit = 0.0;
+
+    // 2. Calculate Totals based on Accounting Rules
+    for (var t in transactions) {
+      String type = t['type'].toString().toLowerCase();
+      // Accounting Rule: Sales/Due = Debit (Red), Payments = Credit (Green)
+      bool isDebit = ['credit', 'previous_due', 'advance_given'].contains(type);
+      double amount = (t['amount'] as num).toDouble();
+      if (isDebit) {
+        totalDebit += amount;
+      } else {
+        totalCredit += amount;
+      }
+    }
+
+    // Determine the smart balance label
+    double netBalance = totalDebit - totalCredit;
+    String balanceLabel = "Net Balance";
+    if (netBalance > 0) {
+      balanceLabel = "Due Balance";
+    } else if (netBalance < 0) {
+      balanceLabel = "Advance Balance";
+    }
+
+    // 3. Pagination Setup (Strictly 25 rows per page)
+    const int rowsPerPage = 25;
+    final int totalPages =
+        transactions.isEmpty ? 1 : (transactions.length / rowsPerPage).ceil();
+
+    for (int i = 0; i < totalPages; i++) {
+      int start = i * rowsPerPage;
+      int end =
+          (start + rowsPerPage < transactions.length)
+              ? start + rowsPerPage
+              : transactions.length;
+      List<Map<String, dynamic>> chunk =
+          transactions.isEmpty ? [] : transactions.sublist(start, end);
+
+      pdf.addPage(
+        pw.Page(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(32),
+          build: (context) {
+            return pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                // --- HEADER SECTION ---
+                pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
-                    pw.Text(
-                      "STATEMENT OF ACCOUNT",
-                      style: pw.TextStyle(
-                        fontWeight: pw.FontWeight.bold,
-                        fontSize: 18,
-                      ),
+                    pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Text(
+                          "STATEMENT OF ACCOUNT",
+                          style: pw.TextStyle(
+                            fontSize: 18,
+                            fontWeight: pw.FontWeight.bold,
+                            color: PdfColors.blue900,
+                          ),
+                        ),
+                        pw.SizedBox(height: 4),
+                        pw.Text(
+                          "Account Name: $debtorName",
+                          style: pw.TextStyle(
+                            fontSize: 14,
+                            fontWeight: pw.FontWeight.bold,
+                          ),
+                        ),
+                      ],
                     ),
-                    pw.Text(DateFormat('dd MMM yyyy').format(DateTime.now())),
+                    pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.end,
+                      children: [
+                        pw.Text(
+                          "Date: ${DateFormat('dd MMM yyyy').format(DateTime.now())}",
+                          style: const pw.TextStyle(fontSize: 10),
+                        ),
+                        pw.Text(
+                          "Page ${i + 1} of $totalPages",
+                          style: const pw.TextStyle(fontSize: 10),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
-              ),
-              pw.SizedBox(height: 20),
-              pw.Text(
-                "Debtor: $debtorName",
-                style: pw.TextStyle(
-                  fontSize: 16,
-                  fontWeight: pw.FontWeight.bold,
+                pw.SizedBox(height: 20),
+
+                // --- ACCOUNTING TABLE (5 COLUMNS) ---
+                pw.Expanded(
+                  child: pw.Table.fromTextArray(
+                    border: pw.TableBorder.all(
+                      color: PdfColors.grey400,
+                      width: 0.5,
+                    ),
+                    headerDecoration: const pw.BoxDecoration(
+                      color: PdfColors.grey200,
+                    ),
+                    headerHeight: 28,
+                    cellHeight: 25,
+                    cellAlignments: {
+                      0: pw.Alignment.centerLeft,
+                      1: pw.Alignment.centerLeft,
+                      2: pw.Alignment.centerLeft,
+                      3: pw.Alignment.centerRight,
+                      4: pw.Alignment.centerRight,
+                    },
+                    headerStyle: pw.TextStyle(
+                      fontWeight: pw.FontWeight.bold,
+                      fontSize: 10,
+                    ),
+                    cellStyle: const pw.TextStyle(fontSize: 9),
+                    headers: [
+                      "Date",
+                      "Description",
+                      "Payment Method",
+                      "Debit",
+                      "Credit",
+                    ],
+                    data:
+                        chunk.map((t) {
+                          DateTime date =
+                              (t['date'] is Timestamp)
+                                  ? (t['date'] as Timestamp).toDate()
+                                  : t['date'];
+                          String type = t['type'].toString().toLowerCase();
+                          bool isDebit = [
+                            'credit',
+                            'previous_due',
+                            'advance_given',
+                          ].contains(type);
+                          double amount = (t['amount'] as num).toDouble();
+                          String method = _formatMethodForPdf(
+                            t['paymentMethod'],
+                            type,
+                          );
+
+                          // FIX: Show only DEBIT or CREDIT as primary description
+                          String desc = isDebit ? "DEBIT" : "CREDIT";
+                          if (t['note'] != null &&
+                              t['note'].toString().trim().isNotEmpty) {
+                            desc += "\nNote: ${t['note']}";
+                          }
+
+                          return [
+                            DateFormat('dd/MM/yyyy').format(date),
+                            desc,
+                            method,
+                            isDebit ? bdCurrency.format(amount) : "",
+                            !isDebit ? bdCurrency.format(amount) : "",
+                          ];
+                        }).toList(),
+                  ),
                 ),
-              ),
-              pw.SizedBox(height: 20),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  _pdfStat("Total Debt Taken", totalDebt, PdfColors.black),
-                  _pdfStat("Total Paid / Adv", totalPaid, PdfColors.green900),
-                  _pdfStat(
-                    "Net Balance",
-                    totalDebt - totalPaid,
-                    PdfColors.red900,
+
+                // --- SUMMARY FOOTER (Only on the last page) ---
+                if (i == totalPages - 1) ...[
+                  pw.SizedBox(height: 20),
+                  pw.Container(
+                    padding: const pw.EdgeInsets.all(12),
+                    decoration: pw.BoxDecoration(
+                      border: pw.Border.all(color: PdfColors.grey400),
+                      color: PdfColors.grey50,
+                    ),
+                    child: pw.Row(
+                      mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
+                      children: [
+                        _pdfStat("Total Debit", totalDebit, PdfColors.red900),
+                        _pdfStat(
+                          "Total Credit",
+                          totalCredit,
+                          PdfColors.green900,
+                        ),
+                        _pdfStat(
+                          balanceLabel,
+                          netBalance.abs(),
+                          PdfColors.black,
+                        ), // Auto-switching label
+                      ],
+                    ),
                   ),
                 ],
-              ),
-              pw.SizedBox(height: 20),
-              pw.Table.fromTextArray(
-                headers: ["Date", "Type", "Note", "Method", "Amount"],
-                data:
-                    transactions.map((t) {
-                      return [
-                        DateFormat('dd/MM/yy').format(
-                          (t['date'] is DateTime
-                              ? t['date']
-                              : (t['date'] as Timestamp).toDate()),
-                        ),
-                        t['type'].toString().toUpperCase().replaceAll('_', ' '),
-                        t['note'] ?? "",
-                        _formatMethodForPdf(
-                          t['paymentMethod'],
-                          t['type'].toString(),
-                        ), // PASSED TYPE HERE
-                        bdCurrency.format((t['amount'] as num)),
-                      ];
-                    }).toList(),
-              ),
-            ],
-      ),
-    );
+              ],
+            );
+          },
+        ),
+      );
+    }
     return pdf.save();
   }
 

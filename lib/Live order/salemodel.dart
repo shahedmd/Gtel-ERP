@@ -553,6 +553,46 @@ class LiveSalesController extends GetxController {
     return keywords.toSet().toList();
   }
 
+  // --- CASH LEDGER: Helper method to perfectly split & map Cash records ---
+  void _insertCashLedgerRecords({
+    required WriteBatch batch,
+    required Map<String, dynamic> payMap,
+    required String description,
+    required String debtorId,
+    required String txId,
+    required String sellerUid,
+  }) {
+    double c = double.tryParse(payMap['cash']?.toString() ?? '0') ?? 0;
+    double b = double.tryParse(payMap['bkash']?.toString() ?? '0') ?? 0;
+    double n = double.tryParse(payMap['nagad']?.toString() ?? '0') ?? 0;
+    double bankAmt = double.tryParse(payMap['bank']?.toString() ?? '0') ?? 0;
+
+    void addRecord(String methodType, double amt, Map<String, dynamic> extra) {
+      if (amt <= 0) return;
+      DocumentReference ref = _db.collection('cash_ledger').doc();
+      batch.set(ref, {
+        'amount': amt,
+        'description': description,
+        'details': {'type': methodType, ...extra},
+        'linkedDebtorId': debtorId,
+        'linkedTxId': txId,
+        'method': methodType,
+        'source': 'debtor_collection',
+        'timestamp': FieldValue.serverTimestamp(),
+        'type': 'deposit',
+        'userUid': sellerUid,
+      });
+    }
+
+    addRecord('cash', c, {});
+    addRecord('bkash', b, {'bkashNumber': payMap['bkashNumber'] ?? ''});
+    addRecord('nagad', n, {'nagadNumber': payMap['nagadNumber'] ?? ''});
+    addRecord('bank', bankAmt, {
+      'bankName': payMap['bankName'] ?? '',
+      'accountNo': payMap['accountNumber'] ?? '', // EXACT MATCH for accountNo
+    });
+  }
+
   Future<void> _processTransaction({
     String? finalCourierName,
     required String finalChallan,
@@ -575,14 +615,25 @@ class LiveSalesController extends GetxController {
         runningDueSnap = debtorRunningDue.value;
 
     // ==============================================================================
-    // LOGIC TO ALLOCATE PAYMENT (PRIORITY: OLD DUE -> PREV RUNNING DUE -> CURRENT INVOICE)
+    // NEW PRIORITY LOGIC: CURRENT INVOICE -> OLD DUE -> PREV RUNNING DUE
     // ==============================================================================
+    double remaining = totalPaidInputVal;
+
+    // 1. Pay Current Invoice FIRST
+    if (remaining > 0) {
+      if (remaining >= grandTotal) {
+        allocatedToInvoice = grandTotal;
+        remaining = _round(remaining - grandTotal);
+      } else {
+        allocatedToInvoice = remaining;
+        remaining = 0.0;
+      }
+    }
+
     if (customerType.value == "AGENT" &&
         !isConditionSale.value &&
         debtorId != null) {
-      double remaining = totalPaidInputVal;
-
-      // 1. Pay Old Due (Historic Loan)
+      // 2. Pay Old Due (Historic Loan) NEXT
       if (oldDueSnap > 0 && remaining > 0) {
         if (remaining >= oldDueSnap) {
           allocatedToOldDue = oldDueSnap;
@@ -593,25 +644,13 @@ class LiveSalesController extends GetxController {
         }
       }
 
-      // 2. Pay Running Due (Previous Unpaid Bills)
+      // 3. Pay Running Due (Previous Unpaid Bills) LAST
       if (runningDueSnap > 0 && remaining > 0) {
         if (remaining >= runningDueSnap) {
           allocatedToPrevRunningDue = runningDueSnap;
           remaining = _round(remaining - runningDueSnap);
         } else {
           allocatedToPrevRunningDue = remaining;
-          remaining = 0.0;
-        }
-      }
-
-      // 3. Pay Current Invoice (The new bill)
-      if (remaining > 0) {
-        if (remaining >= grandTotal) {
-          allocatedToInvoice =
-              grandTotal; // Clamp it so we don't overpay the bill
-          remaining = _round(remaining - grandTotal);
-        } else {
-          allocatedToInvoice = remaining;
           remaining = 0.0;
         }
       }
@@ -661,6 +700,7 @@ class LiveSalesController extends GetxController {
         totalPaidInputVal,
       );
 
+      // --- EXACT SALES_ORDER SCHEMA ---
       batch.set(orderRef, {
         "invoiceId": invNo,
         "timestamp": FieldValue.serverTimestamp(),
@@ -683,9 +723,10 @@ class LiveSalesController extends GetxController {
         "subtotal": subtotalAmount,
         "discount": discountVal.value,
         "grandTotal": grandTotal,
+        "paid": allocatedToInvoice, // ROOT PAID FIELD ADDED
         "totalCost": totalInvoiceCost,
         "profit": invoiceProfit,
-        "paymentDetails": masterPaymentMap,
+        "paymentDetails": masterPaymentMap, // EXACT NESTED MAP STRUCTURE
         "isFullyPaid": invoiceDueAmount <= 0,
         "snapshotOldDue": oldDueSnap,
         "snapshotRunningDue": runningDueSnap,
@@ -750,19 +791,42 @@ class LiveSalesController extends GetxController {
         });
 
         DocumentReference dailyRef = _db.collection('daily_sales').doc();
+
+        // --- EXACT DAILY_SALES SCHEMA (Non-Agent) ---
+        double invoiceDue = _round(grandTotal - allocatedToInvoice);
+        Map<String, dynamic> methodMap = _extractPaymentFor(allocatedToInvoice);
+        methodMap['pending'] = invoiceDue;
+
         batch.set(dailyRef, {
           "name": fName,
           "amount": grandTotal,
           "paid": allocatedToInvoice,
-          "pending": 0.0,
+          "pending": invoiceDue,
           "customerType": customerType.value.toLowerCase(),
           "timestamp": Timestamp.fromDate(saleDate),
-          "paymentMethod": _extractPaymentFor(allocatedToInvoice),
+          "paymentMethod": methodMap,
+          "paymentHistory":
+              allocatedToInvoice > 0
+                  ? [
+                    {
+                      "amount": allocatedToInvoice,
+                      "note": "Initial Payment",
+                      // CRITICAL FIX: Timestamp.fromDate instead of serverTimestamp inside Array
+                      "timestamp": Timestamp.fromDate(saleDate),
+                      "type": methodMap['method'],
+                      "bkashNumber": methodMap['bkashNumber'] ?? "",
+                      "nagadNumber": methodMap['nagadNumber'] ?? "",
+                      "bankName": methodMap['bankName'] ?? "",
+                      "accountNumber": methodMap['accountNumber'] ?? "",
+                    },
+                  ]
+                  : [],
           "createdAt": FieldValue.serverTimestamp(),
           "source": "pos_sale",
           "transactionId": invNo,
           "invoiceId": invNo,
-          "packagerName": selectedPackager.value,
+          "status": invoiceDue <= 0.5 ? "paid" : "due", // ADDED STATUS FIELD
+          "packagerName": selectedPackager.value ?? "Admin",
           "soldByUid": sellerUid,
           "soldByName": sellerName,
           "soldByNumber": sellerPhone,
@@ -876,6 +940,12 @@ class LiveSalesController extends GetxController {
 
     if ((masterPaymentMap['paidForInvoice'] as double) > 0) {
       DocumentReference dailyRef = _db.collection('daily_sales').doc();
+
+      Map<String, dynamic> condMethodMap = _extractPaymentFor(
+        masterPaymentMap['paidForInvoice'],
+      );
+      condMethodMap['pending'] = invoiceDueAmount;
+
       batch.set(dailyRef, {
         "name": "$fName (Condition)",
         "amount": grandTotal,
@@ -883,13 +953,26 @@ class LiveSalesController extends GetxController {
         "pending": invoiceDueAmount,
         "customerType": "condition_advance",
         "timestamp": Timestamp.fromDate(saleDate),
-        "paymentMethod": _extractPaymentFor(masterPaymentMap['paidForInvoice']),
+        "paymentMethod": condMethodMap,
+        "paymentHistory": [
+          {
+            "amount": masterPaymentMap['paidForInvoice'],
+            "note": "Advance Payment",
+            // CRITICAL FIX: Timestamp.fromDate instead of serverTimestamp inside Array
+            "timestamp": Timestamp.fromDate(saleDate),
+            "type": condMethodMap['method'],
+            "bkashNumber": condMethodMap['bkashNumber'] ?? "",
+            "nagadNumber": condMethodMap['nagadNumber'] ?? "",
+            "bankName": condMethodMap['bankName'] ?? "",
+            "accountNumber": condMethodMap['accountNumber'] ?? "",
+          },
+        ],
         "createdAt": FieldValue.serverTimestamp(),
         "source": "pos_condition_sale",
         "transactionId": invNo,
         "invoiceId": invNo,
         "status": invoiceDueAmount <= 0 ? "paid" : "partial",
-        "packagerName": selectedPackager.value,
+        "packagerName": selectedPackager.value ?? "Admin",
         "soldByUid": sellerUid,
         "soldByName": sellerName,
         "soldByNumber": sellerPhone,
@@ -897,9 +980,6 @@ class LiveSalesController extends GetxController {
     }
   }
 
-  // ------------------------------------------------------------------------
-  // UPDATED: _handleAgentTransaction (Fixes isFullyPaid in sales_orders)
-  // ------------------------------------------------------------------------
   Future<void> _handleAgentTransaction(
     WriteBatch batch,
     String debtorId,
@@ -956,19 +1036,15 @@ class LiveSalesController extends GetxController {
         "collectedByPhone": sellerPhone,
       });
 
-      DocumentReference cashRef = _db.collection('cash_ledger').doc();
-      batch.set(cashRef, {
-        'type': 'deposit',
-        'amount': allocatedToOldDue,
-        'method': 'multi',
-        'details': _extractPaymentFor(allocatedToOldDue),
-        'description': "Loan Repayment: $fName (Inv $invNo)",
-        'timestamp': FieldValue.serverTimestamp(),
-        'linkedDebtorId': debtorId,
-        'linkedTxId': oldPayTxId,
-        'source': 'pos_old_due',
-        'userUid': sellerUid,
-      });
+      // --- EXACT CASH LEDGER SCHEMA ---
+      _insertCashLedgerRecords(
+        batch: batch,
+        payMap: _extractPaymentFor(allocatedToOldDue),
+        description: "Collection from $fName",
+        debtorId: debtorId,
+        txId: oldPayTxId,
+        sellerUid: sellerUid,
+      );
     }
 
     // 3. Record the Current Sale (Credit)
@@ -1008,7 +1084,7 @@ class LiveSalesController extends GetxController {
       });
     }
 
-    // 5. Handle Surplus / Running Due Payment (The Fix)
+    // 5. Handle Surplus / Running Due Payment (IMMUNE TO NAME CHANGES NOW!)
     if (allocatedToPrevRunningDue > 0) {
       String surplusTxId = "${invNo}_surplus";
 
@@ -1029,99 +1105,202 @@ class LiveSalesController extends GetxController {
         "collectedBy": sellerName,
       });
 
-      DocumentReference cashRef2 = _db.collection('cash_ledger').doc();
-      batch.set(cashRef2, {
-        'type': 'deposit',
-        'amount': allocatedToPrevRunningDue,
-        'method': 'multi',
-        'details': _extractPaymentFor(allocatedToPrevRunningDue),
-        'description': "Unmatched Surplus: $fName (Inv $invNo)",
-        'timestamp': FieldValue.serverTimestamp(),
-        'linkedDebtorId': debtorId,
-        'linkedTxId': surplusTxId,
-        'source': 'pos_running_collection',
-        'userUid': sellerUid,
-      });
+      _insertCashLedgerRecords(
+        batch: batch,
+        payMap: _extractPaymentFor(allocatedToPrevRunningDue),
+        description: "Collection from $fName",
+        debtorId: debtorId,
+        txId: surplusTxId,
+        sellerUid: sellerUid,
+      );
 
-      // --- START NEW LOGIC: FIND AND PAY PREVIOUS BILLS ---
+      // --- LOGIC: FIND AND PAY PREVIOUS BILLS (BY ID INSTEAD OF NAME) ---
       try {
-        QuerySnapshot salesSnap =
+        QuerySnapshot ordersSnap =
             await _db
-                .collection('daily_sales')
-                .where('name', isEqualTo: fName)
+                .collection('sales_orders')
+                .where('debtorId', isEqualTo: debtorId)
                 .get();
 
-        List<DocumentSnapshot> pendingBills =
-            salesSnap.docs.where((doc) {
+        List<DocumentSnapshot> pendingOrders =
+            ordersSnap.docs.where((doc) {
               final data = doc.data() as Map<String, dynamic>;
-              double p = double.tryParse(data['pending'].toString()) ?? 0.0;
-              return p > 0.5; // Small tolerance to find unpaid bills
+              double pending = 0.0;
+              if (data['paymentDetails'] != null &&
+                  data['paymentDetails']['due'] != null) {
+                pending =
+                    double.tryParse(data['paymentDetails']['due'].toString()) ??
+                    0.0;
+              } else {
+                pending =
+                    (double.tryParse(data['grandTotal']?.toString() ?? '0') ??
+                        0.0) -
+                    (double.tryParse(data['paid']?.toString() ?? '0') ?? 0.0);
+              }
+              return pending > 0.5; // Small tolerance
             }).toList();
 
-        // Sort: Pay oldest bills first
-        pendingBills.sort((a, b) {
-          Timestamp t1 = a['timestamp'] as Timestamp;
-          Timestamp t2 = b['timestamp'] as Timestamp;
+        pendingOrders.sort((a, b) {
+          final dataA = a.data() as Map<String, dynamic>;
+          final dataB = b.data() as Map<String, dynamic>;
+          Timestamp t1 =
+              dataA['timestamp'] is Timestamp
+                  ? dataA['timestamp']
+                  : Timestamp.now();
+          Timestamp t2 =
+              dataB['timestamp'] is Timestamp
+                  ? dataB['timestamp']
+                  : Timestamp.now();
           return t1.compareTo(t2);
         });
 
         double remainingToAllocate = allocatedToPrevRunningDue;
 
-        for (var doc in pendingBills) {
+        for (var orderDoc in pendingOrders) {
           if (remainingToAllocate <= 0.01) break;
 
-          Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+          Map<String, dynamic> oData = orderDoc.data() as Map<String, dynamic>;
+          String saleTxId = oData['invoiceId'] ?? orderDoc.id;
+
           double currentPending =
-              double.tryParse(data['pending'].toString()) ?? 0.0;
-          double currentPaid = double.tryParse(data['paid'].toString()) ?? 0.0;
-          double currentLedgerPaid =
-              double.tryParse(data['ledgerPaid']?.toString() ?? '0') ?? 0.0;
+              oData['paymentDetails'] != null &&
+                      oData['paymentDetails']['due'] != null
+                  ? (double.tryParse(
+                        oData['paymentDetails']['due'].toString(),
+                      ) ??
+                      0.0)
+                  : ((double.tryParse(oData['grandTotal']?.toString() ?? '0') ??
+                          0.0) -
+                      (double.tryParse(oData['paid']?.toString() ?? '0') ??
+                          0.0));
 
           double take =
               (remainingToAllocate >= currentPending)
                   ? currentPending
                   : remainingToAllocate;
-
-          // Check if this payment fully clears the bill
           bool isNowFullyPaid = (currentPending - take) <= 0.5;
 
-          final newHistoryEntry = {
-            'type': 'Surplus from $invNo',
-            'amount': take,
-            'paidAt': Timestamp.now(),
-            'sourceTxId': surplusTxId,
+          Map<String, dynamic> surplusMethodMap = _extractPaymentFor(take);
+          double sCash = surplusMethodMap['cash'] ?? 0.0;
+          double sBkash = surplusMethodMap['bkash'] ?? 0.0;
+          double sNagad = surplusMethodMap['nagad'] ?? 0.0;
+          double sBank = surplusMethodMap['bank'] ?? 0.0;
+
+          String bNum = surplusMethodMap['bkashNumber'] ?? '';
+          String nNum = surplusMethodMap['nagadNumber'] ?? '';
+          String bankName = surplusMethodMap['bankName'] ?? '';
+          String accNum = surplusMethodMap['accountNumber'] ?? '';
+
+          // A. UPDATE SALES_ORDERS FOR OLD DUE CLEARANCE
+          Map<String, dynamic> orderUpdate = {
+            "paid": FieldValue.increment(take),
+            "paymentDetails.due": FieldValue.increment(-take),
           };
 
-          // Update daily_sales
-          batch.update(doc.reference, {
-            "paid": currentPaid + take,
-            "pending": currentPending - take,
-            "ledgerPaid": currentLedgerPaid + take,
-            "status": isNowFullyPaid ? "paid" : "partial",
-            "paymentHistory": FieldValue.arrayUnion([newHistoryEntry]),
-          });
+          // Auto-correct disjointed names if found
+          if (oData['customerName'] != fName) {
+            orderUpdate['customerName'] = fName;
+          }
 
-          // Update sales_orders (The fix for isFullyPaid)
-          String saleTxId = data['transactionId'] ?? '';
-          if (saleTxId.isNotEmpty) {
-            DocumentReference orderRef = _db
-                .collection('sales_orders')
-                .doc(saleTxId);
+          if (sCash > 0) {
+            orderUpdate["paymentDetails.cash"] = FieldValue.increment(sCash);
+          }
+          if (sBkash > 0) {
+            orderUpdate["paymentDetails.bkash"] = FieldValue.increment(sBkash);
+            if (bNum.isNotEmpty) {
+              orderUpdate["paymentDetails.bkashNumber"] = bNum;
+            }
+          }
+          if (sNagad > 0) {
+            orderUpdate["paymentDetails.nagad"] = FieldValue.increment(sNagad);
+            if (nNum.isNotEmpty) {
+              orderUpdate["paymentDetails.nagadNumber"] = nNum;
+            }
+          }
+          if (sBank > 0) {
+            orderUpdate["paymentDetails.bank"] = FieldValue.increment(sBank);
+            if (bankName.isNotEmpty) {
+              orderUpdate["paymentDetails.bankName"] = bankName;
+            }
+            if (accNum.isNotEmpty) {
+              orderUpdate["paymentDetails.accountNumber"] = accNum;
+            }
+          }
 
-            Map<String, dynamic> orderUpdate = {
-              "paid": FieldValue.increment(take), // Root paid field
-              "paymentDetails.due": FieldValue.increment(
-                -take,
-              ), // Update nested due
+          if (isNowFullyPaid) {
+            orderUpdate["isFullyPaid"] = true;
+            orderUpdate["status"] = "completed";
+          }
+          batch.update(orderDoc.reference, orderUpdate);
+
+          // B. FIND AND UPDATE STRICTLY LINKED DAILY_SALES
+          QuerySnapshot dailySnap =
+              await _db
+                  .collection('daily_sales')
+                  .where('transactionId', isEqualTo: saleTxId)
+                  .limit(1)
+                  .get();
+          if (dailySnap.docs.isNotEmpty) {
+            var dailyDoc = dailySnap.docs.first;
+            Map<String, dynamic> dData =
+                dailyDoc.data() as Map<String, dynamic>;
+            double currentPaidD =
+                double.tryParse(dData['paid'].toString()) ?? 0.0;
+            double currentPendingD =
+                double.tryParse(dData['pending'].toString()) ?? 0.0;
+            double currentLedgerPaidD =
+                double.tryParse(dData['ledgerPaid']?.toString() ?? '0') ?? 0.0;
+
+            final newHistoryEntry = {
+              'amount': take,
+              'note': 'Surplus from $invNo',
+              'timestamp': Timestamp.fromDate(saleDate),
+              'type': surplusMethodMap['method'],
+              'bkashNumber': bNum,
+              'nagadNumber': nNum,
+              'bankName': bankName,
+              'accountNumber': accNum,
             };
 
-            // If fully paid, flip the boolean and status
-            if (isNowFullyPaid) {
-              orderUpdate["isFullyPaid"] = true;
-              orderUpdate["status"] = "completed";
+            Map<String, dynamic> dailyUpdate = {
+              "paid": currentPaidD + take,
+              "pending": currentPendingD - take,
+              "ledgerPaid": currentLedgerPaidD + take,
+              "status": (currentPendingD - take) <= 0.5 ? "paid" : "partial",
+              "paymentHistory": FieldValue.arrayUnion([newHistoryEntry]),
+            };
+
+            // Auto-correct disjointed names
+            if (dData['name'] != fName) {
+              dailyUpdate['name'] = fName;
             }
 
-            batch.update(orderRef, orderUpdate);
+            if (sCash > 0) {
+              dailyUpdate["paymentMethod.cash"] = FieldValue.increment(sCash);
+            }
+            if (sBkash > 0) {
+              dailyUpdate["paymentMethod.bkash"] = FieldValue.increment(sBkash);
+              if (bNum.isNotEmpty) {
+                dailyUpdate["paymentMethod.bkashNumber"] = bNum;
+              }
+            }
+            if (sNagad > 0) {
+              dailyUpdate["paymentMethod.nagad"] = FieldValue.increment(sNagad);
+              if (nNum.isNotEmpty) {
+                dailyUpdate["paymentMethod.nagadNumber"] = nNum;
+              }
+            }
+            if (sBank > 0) {
+              dailyUpdate["paymentMethod.bank"] = FieldValue.increment(sBank);
+              if (bankName.isNotEmpty) {
+                dailyUpdate["paymentMethod.bankName"] = bankName;
+              }
+              if (accNum.isNotEmpty) {
+                dailyUpdate["paymentMethod.accountNumber"] = accNum;
+              }
+            }
+
+            batch.update(dailyDoc.reference, dailyUpdate);
           }
 
           remainingToAllocate -= take;
@@ -1129,12 +1308,17 @@ class LiveSalesController extends GetxController {
       } catch (e) {
         print("Error allocating surplus to old bills: $e");
       }
-      // --- END NEW LOGIC ---
     }
 
     // 6. Create Daily Sales Entry for CURRENT Invoice
     DocumentReference dailyRef = _db.collection('daily_sales').doc();
     double due = grandTotal - allocatedToInvoice;
+
+    // --- EXACT DAILY_SALES SCHEMA (AGENT) ---
+    Map<String, dynamic> agentMethodMap = _extractPaymentFor(
+      allocatedToInvoice,
+    );
+    agentMethodMap['pending'] = due;
 
     batch.set(dailyRef, {
       "name": fName,
@@ -1143,20 +1327,35 @@ class LiveSalesController extends GetxController {
       "pending": due,
       "customerType": "agent",
       "timestamp": Timestamp.fromDate(saleDate),
-      "paymentMethod": _extractPaymentFor(allocatedToInvoice),
+      "paymentMethod": agentMethodMap,
+      "paymentHistory":
+          allocatedToInvoice > 0
+              ? [
+                {
+                  "amount": allocatedToInvoice,
+                  "note": "Initial Payment",
+                  // CRITICAL FIX: Timestamp.fromDate instead of serverTimestamp inside Array
+                  "timestamp": Timestamp.fromDate(saleDate),
+                  "type": agentMethodMap['method'],
+                  "bkashNumber": agentMethodMap['bkashNumber'] ?? "",
+                  "nagadNumber": agentMethodMap['nagadNumber'] ?? "",
+                  "bankName": agentMethodMap['bankName'] ?? "",
+                  "accountNumber": agentMethodMap['accountNumber'] ?? "",
+                },
+              ]
+              : [],
       "createdAt": FieldValue.serverTimestamp(),
       "source": "pos_sale",
       "transactionId": invNo,
       "invoiceId": invNo,
       "status": due <= 0.5 ? "paid" : "due",
-      "packagerName": selectedPackager.value,
+      "packagerName": selectedPackager.value ?? "Admin",
       "soldByUid": sellerUid,
       "soldByName": sellerName,
       "soldByNumber": sellerPhone,
     });
   }
 
-  // --- UPDATED EXTRACTION LOGIC: Scales payments to match targetAmount ---
   Map<String, dynamic> _extractPaymentFor(double targetAmount) {
     double rawCash = double.tryParse(cashC.text) ?? 0;
     double rawBkash = double.tryParse(bkashC.text) ?? 0;
@@ -1209,17 +1408,17 @@ class LiveSalesController extends GetxController {
     if (types > 1) {
       type = "Multi";
     } else if (finalBkash > 0) {
-      type = "Bkash";
+      type = "bkash";
     } else if (finalNagad > 0) {
-      type = "Nagad";
+      type = "nagad";
     } else if (finalBank > 0) {
-      type = "Bank";
+      type = "bank";
     }
 
     if (targetAmount <= 0.01) type = "Due";
 
     return {
-      "method": type,
+      "method": type.toLowerCase(), // Safe for DB rules
       "cash": _round(finalCash),
       "bkash": _round(finalBkash),
       "nagad": _round(finalNagad),
@@ -1229,9 +1428,11 @@ class LiveSalesController extends GetxController {
       "nagadNumber": nagadNumberC.text.trim(),
       "bankName": bankNameC.text.trim(),
       "accountNumber": bankAccC.text.trim(),
+      "pending": 0.0, // Matches daily_sales schema correctly
     };
   }
 
+  // --- EXACT PAYMENT DETAILS SCHEMA FOR SALES_ORDERS ---
   Map<String, dynamic> _createPaymentMap(
     double oldDue,
     double inv,
@@ -1462,9 +1663,6 @@ class LiveSalesController extends GetxController {
       ),
     );
 
-    // ---------------------------------------------------------
-    // PAGE 1: MAIN INVOICE
-    // ---------------------------------------------------------
     pdf.addPage(
       pw.MultiPage(
         pageTheme: pageTheme,
@@ -1482,7 +1680,7 @@ class LiveSalesController extends GetxController {
               false,
               null,
               "",
-              paymentMethodsStr, // Passing methods string
+              paymentMethodsStr,
             ),
             _buildNewCustomerBox(
               name,
@@ -1517,9 +1715,6 @@ class LiveSalesController extends GetxController {
       ),
     );
 
-    // ---------------------------------------------------------
-    // PAGE 2: CONDITION CHALLAN (If Applicable)
-    // ---------------------------------------------------------
     if (isCondition) {
       pdf.addPage(
         pw.MultiPage(
@@ -1538,7 +1733,7 @@ class LiveSalesController extends GetxController {
                 isCondition,
                 courier,
                 challan,
-                paymentMethodsStr, // Passing methods string
+                paymentMethodsStr,
               ),
               _buildNewCustomerBox(
                 name,
@@ -1549,7 +1744,6 @@ class LiveSalesController extends GetxController {
                 boldFont,
               ),
               pw.SizedBox(height: 20),
-              // NEW COURIER INFORMATION BOX
               _buildCourierBox(
                 courier,
                 challan,
@@ -1558,9 +1752,8 @@ class LiveSalesController extends GetxController {
                 boldFont,
               ),
               pw.SizedBox(height: 60),
-              // REPLACED CONDITION BOX WITH NEW CHALLAN CENTER BOX
               _buildChallanCenterBox(boldFont, regularFont, invDue),
-              pw.SizedBox(height: 100), // Spacing to push signatures down
+              pw.SizedBox(height: 100),
               _buildNewSignatures(regularFont),
             ];
           },
@@ -1583,12 +1776,11 @@ class LiveSalesController extends GetxController {
     bool isCondition,
     String? courier,
     String challan,
-    String paymentMethodsStr, // <--- New Param
+    String paymentMethodsStr,
   ) {
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        // Left Side: Company Info
         pw.Expanded(
           flex: 6,
           child: pw.Column(
@@ -1635,7 +1827,6 @@ class LiveSalesController extends GetxController {
           ),
         ),
         pw.SizedBox(width: 10),
-        // Right Side: Invoice Info Box
         pw.Expanded(
           flex: 4,
           child: pw.Container(
@@ -1669,12 +1860,7 @@ class LiveSalesController extends GetxController {
                   reg,
                   bold,
                 ),
-                _infoRow(
-                  "Payment Via",
-                  ": $paymentMethodsStr",
-                  reg,
-                  bold,
-                ), // Show Method here
+                _infoRow("Payment Via", ": $paymentMethodsStr", reg, bold),
                 _infoRow("Sales Person", ": $authorizedName", reg, bold),
                 if (isCondition) ...[
                   _infoRow("Courier", ": ${courier ?? 'N/A'}", reg, bold),
@@ -1818,8 +2004,8 @@ class LiveSalesController extends GetxController {
     double subTotal,
     double discount,
     double currentInvTotal,
-    double paidForInvoice, // <--- New Param
-    String paymentMethodsStr, // <--- New Param
+    double paidForInvoice,
+    String paymentMethodsStr,
     List items,
     pw.Font bold,
     pw.Font reg,
@@ -1887,7 +2073,6 @@ class LiveSalesController extends GetxController {
                     bold,
                   ),
                   pw.SizedBox(height: 2),
-                  // Display explicitly how much was paid and by what method right under total amount
                   _sumRow(
                     "Paid Amount",
                     paidForInvoice.toStringAsFixed(2),
@@ -2060,7 +2245,7 @@ class LiveSalesController extends GetxController {
     );
   }
 
-  // --- COMPONENT: NEW CHALLAN CENTER BOX (Replaces Condition Box) ---
+  // --- COMPONENT: NEW CHALLAN CENTER BOX ---
   pw.Widget _buildChallanCenterBox(pw.Font bold, pw.Font reg, double due) {
     bool isPaid = due <= 0;
 
@@ -2133,7 +2318,6 @@ class LiveSalesController extends GetxController {
     );
   }
 
-  // HELPER FOR ROWS IN PDF
   pw.Widget _infoRow(
     String label,
     String value,
