@@ -147,6 +147,7 @@ class _DebatorpageState extends State<Debatorpage> {
                     onTap: controller.downloadAllDebtorsReport,
                     color: primaryColor,
                   ),
+                  
                 ],
               ),
             ],

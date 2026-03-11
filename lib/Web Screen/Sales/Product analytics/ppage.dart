@@ -121,14 +121,6 @@ class HotSellingProductPage extends StatelessWidget {
                               style: TextStyle(fontWeight: FontWeight.bold),
                             ),
                           ),
-                          Expanded(
-                            flex: 2,
-                            child: Text(
-                              "STOCK",
-                              textAlign: TextAlign.center,
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                          ),
                         ],
                       ),
                     ),
@@ -250,22 +242,6 @@ class HotSellingProductPage extends StatelessWidget {
                                       textAlign: TextAlign.right,
                                       style: const TextStyle(
                                         color: Colors.black87,
-                                      ),
-                                    ),
-                                  ),
-                                  // Stock Left
-                                  Expanded(
-                                    flex: 2,
-                                    child: Text(
-                                      "${item.product.stockQty}",
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(
-                                        color:
-                                            item.product.stockQty <
-                                                    item.product.alertQty
-                                                ? Colors.red
-                                                : Colors.green,
-                                        fontWeight: FontWeight.bold,
                                       ),
                                     ),
                                   ),

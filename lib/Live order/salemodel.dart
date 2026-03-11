@@ -1162,7 +1162,32 @@ class LiveSalesController extends GetxController {
           Map<String, dynamic> oData = orderDoc.data() as Map<String, dynamic>;
           String saleTxId = oData['invoiceId'] ?? orderDoc.id;
 
-          double currentPending =
+          // --- 🚨 CRITICAL FIX: Fetch Daily Sales FIRST to avoid Ghost Dues ---
+          QuerySnapshot dailySnap =
+              await _db
+                  .collection('daily_sales')
+                  .where('transactionId', isEqualTo: saleTxId)
+                  .limit(1)
+                  .get();
+
+          double currentPendingD = 0.0;
+          double currentPaidD = 0.0;
+          double currentLedgerPaidD = 0.0;
+          DocumentSnapshot? dailyDoc;
+
+          if (dailySnap.docs.isNotEmpty) {
+            dailyDoc = dailySnap.docs.first;
+            Map<String, dynamic> dData =
+                dailyDoc.data() as Map<String, dynamic>;
+            currentPendingD =
+                double.tryParse(dData['pending'].toString()) ?? 0.0;
+            currentPaidD = double.tryParse(dData['paid'].toString()) ?? 0.0;
+            currentLedgerPaidD =
+                double.tryParse(dData['ledgerPaid']?.toString() ?? '0') ?? 0.0;
+          }
+
+          // Ghost Due Check
+          double salesOrderPending =
               oData['paymentDetails'] != null &&
                       oData['paymentDetails']['due'] != null
                   ? (double.tryParse(
@@ -1174,11 +1199,30 @@ class LiveSalesController extends GetxController {
                       (double.tryParse(oData['paid']?.toString() ?? '0') ??
                           0.0));
 
+          // 👉 TRUE PENDING
+          double actualPending =
+              dailyDoc != null ? currentPendingD : salesOrderPending;
+
+          if (actualPending <= 0.5) {
+            // 🚑 AUTO-HEAL
+            if (salesOrderPending > 0.5) {
+              batch.update(orderDoc.reference, {
+                "paid":
+                    double.tryParse(oData['grandTotal']?.toString() ?? '0') ??
+                    0.0,
+                "paymentDetails.due": 0.0,
+                "isFullyPaid": true,
+                "status": "completed",
+              });
+            }
+            continue; // Move to next order!
+          }
+
           double take =
-              (remainingToAllocate >= currentPending)
-                  ? currentPending
+              (remainingToAllocate >= actualPending)
+                  ? actualPending
                   : remainingToAllocate;
-          bool isNowFullyPaid = (currentPending - take) <= 0.5;
+          bool isNowFullyPaid = (actualPending - take) <= 0.5;
 
           Map<String, dynamic> surplusMethodMap = _extractPaymentFor(take);
           double sCash = surplusMethodMap['cash'] ?? 0.0;
@@ -1191,13 +1235,12 @@ class LiveSalesController extends GetxController {
           String bankName = surplusMethodMap['bankName'] ?? '';
           String accNum = surplusMethodMap['accountNumber'] ?? '';
 
-          // A. UPDATE SALES_ORDERS FOR OLD DUE CLEARANCE
+          // A. UPDATE SALES_ORDERS
           Map<String, dynamic> orderUpdate = {
             "paid": FieldValue.increment(take),
             "paymentDetails.due": FieldValue.increment(-take),
           };
 
-          // Auto-correct disjointed names if found
           if (oData['customerName'] != fName) {
             orderUpdate['customerName'] = fName;
           }
@@ -1234,23 +1277,7 @@ class LiveSalesController extends GetxController {
           batch.update(orderDoc.reference, orderUpdate);
 
           // B. FIND AND UPDATE STRICTLY LINKED DAILY_SALES
-          QuerySnapshot dailySnap =
-              await _db
-                  .collection('daily_sales')
-                  .where('transactionId', isEqualTo: saleTxId)
-                  .limit(1)
-                  .get();
-          if (dailySnap.docs.isNotEmpty) {
-            var dailyDoc = dailySnap.docs.first;
-            Map<String, dynamic> dData =
-                dailyDoc.data() as Map<String, dynamic>;
-            double currentPaidD =
-                double.tryParse(dData['paid'].toString()) ?? 0.0;
-            double currentPendingD =
-                double.tryParse(dData['pending'].toString()) ?? 0.0;
-            double currentLedgerPaidD =
-                double.tryParse(dData['ledgerPaid']?.toString() ?? '0') ?? 0.0;
-
+          if (dailyDoc != null) {
             final newHistoryEntry = {
               'amount': take,
               'note': 'Surplus from $invNo',
@@ -1270,10 +1297,7 @@ class LiveSalesController extends GetxController {
               "paymentHistory": FieldValue.arrayUnion([newHistoryEntry]),
             };
 
-            // Auto-correct disjointed names
-            if (dData['name'] != fName) {
-              dailyUpdate['name'] = fName;
-            }
+            if (dailyDoc.get('name') != fName) dailyUpdate['name'] = fName;
 
             if (sCash > 0) {
               dailyUpdate["paymentMethod.cash"] = FieldValue.increment(sCash);

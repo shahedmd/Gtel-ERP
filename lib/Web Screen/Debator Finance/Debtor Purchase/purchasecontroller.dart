@@ -461,81 +461,156 @@ class DebtorPurchaseController extends GetxController {
       if (amountToRunningDue > 0) {
         double remainingToAllocate = amountToRunningDue;
 
-        QuerySnapshot salesSnap =
+        // ID দিয়ে sales_orders থেকে আনলে নাম পরিবর্তনের সমস্যা হবে না
+        QuerySnapshot ordersSnap =
             await _db
-                .collection('daily_sales')
-                .where('name', isEqualTo: debtorName)
+                .collection('sales_orders')
+                .where('debtorId', isEqualTo: debtorId)
                 .get();
 
-        List<DocumentSnapshot> pendingBills =
-            salesSnap.docs.where((doc) {
+        List<DocumentSnapshot> pendingOrders =
+            ordersSnap.docs.where((doc) {
               final data = doc.data() as Map<String, dynamic>;
-              double p = double.tryParse(data['pending'].toString()) ?? 0.0;
-              return p > 0.5; // Tolerance
+              double pending = 0.0;
+              if (data['paymentDetails'] != null &&
+                  data['paymentDetails']['due'] != null) {
+                pending =
+                    double.tryParse(data['paymentDetails']['due'].toString()) ??
+                    0.0;
+              } else {
+                pending =
+                    (double.tryParse(data['grandTotal']?.toString() ?? '0') ??
+                        0.0) -
+                    (double.tryParse(data['paid']?.toString() ?? '0') ?? 0.0);
+              }
+              return pending > 0.5;
             }).toList();
 
-        // Sort oldest bills first
-        pendingBills.sort((a, b) {
-          Timestamp t1 = a['timestamp'] as Timestamp;
-          Timestamp t2 = b['timestamp'] as Timestamp;
+        // Sort by date (পুরনো বিল আগে ক্লিয়ার হবে)
+        pendingOrders.sort((a, b) {
+          final dataA = a.data() as Map<String, dynamic>;
+          final dataB = b.data() as Map<String, dynamic>;
+          Timestamp t1 =
+              dataA['timestamp'] is Timestamp
+                  ? dataA['timestamp']
+                  : Timestamp.now();
+          Timestamp t2 =
+              dataB['timestamp'] is Timestamp
+                  ? dataB['timestamp']
+                  : Timestamp.now();
           return t1.compareTo(t2);
         });
 
-        if (pendingBills.isNotEmpty) {
-          for (var doc in pendingBills) {
+        if (pendingOrders.isNotEmpty) {
+          for (var orderDoc in pendingOrders) {
             if (remainingToAllocate <= 0.01) break;
 
-            Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
-            double currentPending =
-                double.tryParse(data['pending'].toString()) ?? 0.0;
-            double currentPaid =
-                double.tryParse(data['paid'].toString()) ?? 0.0;
-            double currentLedgerPaid =
-                double.tryParse(data['ledgerPaid']?.toString() ?? '0') ?? 0.0;
+            Map<String, dynamic> oData =
+                orderDoc.data() as Map<String, dynamic>;
+            String saleTxId = oData['invoiceId'] ?? orderDoc.id;
+
+            // Daily Sales থেকে আসল বকেয়া চেক (Ghost Due Check)
+            QuerySnapshot dailySnap =
+                await _db
+                    .collection('daily_sales')
+                    .where('transactionId', isEqualTo: saleTxId)
+                    .limit(1)
+                    .get();
+
+            double currentPendingD = 0.0;
+            double currentPaidD = 0.0;
+            double currentLedgerPaidD = 0.0;
+            DocumentSnapshot? dailyDoc;
+
+            if (dailySnap.docs.isNotEmpty) {
+              dailyDoc = dailySnap.docs.first;
+              Map<String, dynamic> dData =
+                  dailyDoc.data() as Map<String, dynamic>;
+              currentPendingD =
+                  double.tryParse(dData['pending'].toString()) ?? 0.0;
+              currentPaidD = double.tryParse(dData['paid'].toString()) ?? 0.0;
+              currentLedgerPaidD =
+                  double.tryParse(dData['ledgerPaid']?.toString() ?? '0') ??
+                  0.0;
+            }
+
+            double salesOrderPending =
+                oData['paymentDetails'] != null &&
+                        oData['paymentDetails']['due'] != null
+                    ? (double.tryParse(
+                          oData['paymentDetails']['due'].toString(),
+                        ) ??
+                        0.0)
+                    : ((double.tryParse(
+                              oData['grandTotal']?.toString() ?? '0',
+                            ) ??
+                            0.0) -
+                        (double.tryParse(oData['paid']?.toString() ?? '0') ??
+                            0.0));
+
+            // 👉 TRUE PENDING
+            double actualPending =
+                dailyDoc != null ? currentPendingD : salesOrderPending;
+
+            if (actualPending <= 0.5) {
+              // 🚑 AUTO-HEAL: Daily Sales-এ পেইড থাকলে Sales Orders-এর Ghost Due ফিক্স করে স্কিপ করবে
+              if (salesOrderPending > 0.5) {
+                batch.update(orderDoc.reference, {
+                  "paid":
+                      double.tryParse(oData['grandTotal']?.toString() ?? '0') ??
+                      0.0,
+                  "paymentDetails.due": 0.0,
+                  "isFullyPaid": true,
+                  "status": "completed",
+                });
+              }
+              continue; // টাকা কাটবে না, পরের বিলে চলে যাবে!
+            }
 
             double take =
-                (remainingToAllocate >= currentPending)
-                    ? currentPending
+                (remainingToAllocate >= actualPending)
+                    ? actualPending
                     : remainingToAllocate;
+            bool isNowFullyPaid = (actualPending - take) <= 0.5;
 
-            // Check if this payment completely clears the bill
-            bool isNowFullyPaid = (currentPending - take) <= 0.5;
-
-            final newHistoryEntry = {
-              'type': 'Contra Adjustment',
-              'amount': take,
-              'paidAt': Timestamp.now(),
-              'sourceTxId': runningTxId ?? purchaseAdjRef.id,
+            // A. Update Sales Order
+            Map<String, dynamic> orderUpdate = {
+              "paid": FieldValue.increment(take),
+              "paymentDetails.due": FieldValue.increment(-take),
             };
 
-            // A. Update Daily Sales Document
-            // -> YES, this successfully adds to ledgerPaid right here! <-
-            batch.update(doc.reference, {
-              "paid": currentPaid + take,
-              "pending": currentPending - take,
-              "ledgerPaid": currentLedgerPaid + take, // <--- Updates ledgerPaid
-              "status": isNowFullyPaid ? "paid" : "partial",
-              "paymentHistory": FieldValue.arrayUnion([newHistoryEntry]),
-            });
+            if (oData['customerName'] != debtorName) {
+              orderUpdate['customerName'] = debtorName;
+            }
 
-            // B. Synchronously Update the Connected Sales Order
-            String saleTxId = data['transactionId'] ?? '';
-            if (saleTxId.isNotEmpty) {
-              DocumentReference orderRef = _db
-                  .collection('sales_orders')
-                  .doc(saleTxId);
+            if (isNowFullyPaid) {
+              orderUpdate["isFullyPaid"] = true;
+              orderUpdate["status"] = "completed";
+            }
+            batch.update(orderDoc.reference, orderUpdate);
 
-              Map<String, dynamic> orderUpdate = {
-                "paid": FieldValue.increment(take),
-                "paymentDetails.due": FieldValue.increment(-take),
+            // B. Update Daily Sales
+            if (dailyDoc != null) {
+              final newHistoryEntry = {
+                'type': 'Contra Adjustment',
+                'amount': take,
+                'paidAt': Timestamp.now(),
+                'sourceTxId': runningTxId ?? purchaseAdjRef.id,
               };
 
-              if (isNowFullyPaid) {
-                orderUpdate["isFullyPaid"] = true;
-                orderUpdate["status"] = "completed";
+              Map<String, dynamic> dailyUpdate = {
+                "paid": currentPaidD + take,
+                "pending": currentPendingD - take,
+                "ledgerPaid": currentLedgerPaidD + take,
+                "status": isNowFullyPaid ? "paid" : "partial",
+                "paymentHistory": FieldValue.arrayUnion([newHistoryEntry]),
+              };
+
+              if (dailyDoc.get('name') != debtorName) {
+                dailyUpdate['name'] = debtorName;
               }
 
-              batch.update(orderRef, orderUpdate);
+              batch.update(dailyDoc.reference, dailyUpdate);
             }
 
             remainingToAllocate -= take;
@@ -543,7 +618,6 @@ class DebtorPurchaseController extends GetxController {
         }
       }
 
-      // 6. Execute Batch Writes Everything Simultaneously
       await batch.commit();
 
       // Refresh Purchases and Transaction views

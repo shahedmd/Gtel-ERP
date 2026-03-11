@@ -47,14 +47,14 @@ class HotSalesController extends GetxController {
   Future<void> fetchSalesData() async {
     isLoading.value = true;
 
-    // Maps for aggregation
+    // Maps for aggregation (Grouped by Name + Model to avoid duplicate rows)
     Map<String, int> qtyMap = {};
     Map<String, double> revMap = {};
 
-    // Maps to store "Backup" details from the order itself
-    // (In case the product is deleted from inventory, we still have its name)
+    // Backup details for virtual/deleted products
     Map<String, String> backupNameMap = {};
     Map<String, String> backupModelMap = {};
+    Map<String, int> backupIdMap = {};
 
     try {
       // 1. Always ensure we have products loaded
@@ -62,12 +62,19 @@ class HotSalesController extends GetxController {
         await productCtrl.fetchProducts();
       }
 
-      // Create a lookup map for speed
-      Map<String, Product> productLookup = {
-        for (var p in productCtrl.allProducts) p.id.toString(): p,
-      };
+      // 2. Create a robust lookup map using a Composite Key (Name + Model)
+      // This forces exact matches of products to merge, even if their productId changed.
+      Map<String, Product> productLookup = {};
+      for (var p in productCtrl.allProducts) {
+        String pName = p.name.trim().toUpperCase();
+        String pModel = p.model.trim().toUpperCase();
+        String compositeKey = "${pName}_||_$pModel";
 
-      // 2. Fetch Orders
+        productLookup[compositeKey] = p;
+        productLookup[p.id.toString()] = p; // Fallback by ID
+      }
+
+      // 3. Fetch Orders
       QuerySnapshot snapshot =
           await _db
               .collection('sales_orders')
@@ -75,9 +82,16 @@ class HotSalesController extends GetxController {
               .limit(2000)
               .get();
 
-      // 3. Loop Orders
+      // 4. Loop Orders
       for (var doc in snapshot.docs) {
         Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+
+        // FIX 1: Allow all statuses (Due, Pending, Completed)
+        // We ONLY block "cancelled" or "returned" so they don't falsely inflate your qty.
+        String? status = data['status']?.toString().toLowerCase();
+        if (status == 'cancelled' || status == 'returned') {
+          continue;
+        }
 
         // Apply Date Filter
         if (!_shouldIncludeOrder(data)) continue;
@@ -85,35 +99,71 @@ class HotSalesController extends GetxController {
         List<dynamic> items = data['items'] ?? [];
 
         for (var item in items) {
-          String pId = item['productId'].toString();
-          if (pId == 'null' || pId.isEmpty || pId == '0') continue;
+          // Extract text safely and remove trailing spaces
+          String rawName = item['name']?.toString().trim() ?? '';
+          String rawModel = item['model']?.toString().trim() ?? '';
 
-          int qty = int.tryParse(item['qty'].toString()) ?? 0;
-          double subtotal = double.tryParse(item['subtotal'].toString()) ?? 0.0;
-          if (qtyMap.containsKey(pId)) {
-            qtyMap[pId] = qtyMap[pId]! + qty;
-            revMap[pId] = revMap[pId]! + subtotal;
+          int parsedId =
+              num.tryParse(item['productId']?.toString() ?? '0')?.toInt() ?? 0;
+
+          // Skip completely empty items
+          if (rawName.isEmpty && parsedId == 0) continue;
+
+          // FIX 2: Build a Composite Key. This forces items with the exact
+          // same name and model to merge into ONE row, even if IDs changed.
+          String groupKey;
+          if (rawName.isNotEmpty) {
+            groupKey = "${rawName.toUpperCase()}_||_${rawModel.toUpperCase()}";
           } else {
-            qtyMap[pId] = qty;
-            revMap[pId] = subtotal;
-            backupNameMap[pId] = item['name']?.toString() ?? 'Unknown Item';
-            backupModelMap[pId] = item['model']?.toString() ?? '-';
+            groupKey =
+                parsedId
+                    .toString(); // Fallback to ID if name is completely missing
+          }
+
+          // FIX 3: Safely parse num first to prevent database decimals like "10.0" from breaking
+          int qty = num.tryParse(item['qty']?.toString() ?? '0')?.toInt() ?? 0;
+          double subtotal =
+              num.tryParse(item['subtotal']?.toString() ?? '0')?.toDouble() ??
+              0.0;
+
+          if (qty <= 0) continue; // Skip negative or zero quantities
+
+          // Aggregate the Data
+          if (qtyMap.containsKey(groupKey)) {
+            qtyMap[groupKey] = qtyMap[groupKey]! + qty;
+            revMap[groupKey] = revMap[groupKey]! + subtotal;
+          } else {
+            qtyMap[groupKey] = qty;
+            revMap[groupKey] = subtotal;
+
+            backupNameMap[groupKey] =
+                rawName.isEmpty ? 'Unknown Item' : rawName;
+            backupModelMap[groupKey] = rawModel;
+            backupIdMap[groupKey] = parsedId;
           }
         }
       }
+
+      // 5. Build Final Display List
       List<HotSalesData> tempList = [];
-      qtyMap.forEach((id, qty) {
-        Product? realProduct = productLookup[id];
+
+      qtyMap.forEach((groupKey, qty) {
+        // Try finding the product by Name+Model first, then fallback to finding it by ID
+        Product? realProduct = productLookup[groupKey];
+        if (realProduct == null && backupIdMap[groupKey] != 0) {
+          realProduct = productLookup[backupIdMap[groupKey].toString()];
+        }
 
         if (realProduct != null) {
-          tempList.add(HotSalesData(realProduct, qty, revMap[id] ?? 0.0));
+          tempList.add(HotSalesData(realProduct, qty, revMap[groupKey] ?? 0.0));
         } else {
+          // Product was deleted from inventory completely (Virtual Product)
           Product virtualProduct = Product(
-            id: int.tryParse(id) ?? 0,
-            name: backupNameMap[id] ?? 'Deleted Product ($id)',
+            id: backupIdMap[groupKey] ?? 0,
+            name: backupNameMap[groupKey] ?? 'Deleted Product',
             category: 'Archived',
             brand: '-',
-            model: backupModelMap[id] ?? '-',
+            model: backupModelMap[groupKey] ?? '-',
             weight: 0,
             yuan: 0,
             air: 0,
@@ -129,17 +179,23 @@ class HotSalesController extends GetxController {
             airStockQty: 0,
             localQty: 0,
           );
-          tempList.add(HotSalesData(virtualProduct, qty, revMap[id] ?? 0.0));
+          tempList.add(
+            HotSalesData(virtualProduct, qty, revMap[groupKey] ?? 0.0),
+          );
         }
       });
+
+      // Sort heavily sold items to the top
       tempList.sort((a, b) => b.totalSold.compareTo(a.totalSold));
       allHotProducts.assignAll(tempList);
       currentPage.value = 1;
+
       _applySearchAndPagination();
-    } finally {
+    }  finally {
       isLoading.value = false;
     }
   }
+
   bool _shouldIncludeOrder(Map<String, dynamic> data) {
     if (filterType.value == 'All') return true;
 
@@ -163,19 +219,23 @@ class HotSalesController extends GetxController {
     }
     return true;
   }
+
   void setFilter(String type) {
     filterType.value = type;
     fetchSalesData();
   }
+
   void updateDate(DateTime newDate) {
     selectedDate.value = newDate;
     fetchSalesData();
   }
+
   void search(String query) {
     searchQuery.value = query;
     currentPage.value = 1;
     _applySearchAndPagination();
   }
+
   void _applySearchAndPagination() {
     List<HotSalesData> temp;
     if (searchQuery.value.isEmpty) {

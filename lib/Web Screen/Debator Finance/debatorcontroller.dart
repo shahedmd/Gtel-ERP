@@ -704,7 +704,33 @@ class DebatorController extends GetxController {
                 orderDoc.data() as Map<String, dynamic>;
             String invoiceId = oData['invoiceId'] ?? orderDoc.id;
 
-            double currentPending =
+            // --- 🚨 CRITICAL FIX: Fetch Daily Sales FIRST to avoid Ghost Dues ---
+            QuerySnapshot dailySnap =
+                await db
+                    .collection('daily_sales')
+                    .where('transactionId', isEqualTo: invoiceId)
+                    .limit(1)
+                    .get();
+
+            double currentPendingD = 0.0;
+            double currentPaidD = 0.0;
+            double currentLedgerPaidD = 0.0;
+            DocumentSnapshot? dailyDoc;
+
+            if (dailySnap.docs.isNotEmpty) {
+              dailyDoc = dailySnap.docs.first;
+              Map<String, dynamic> dData =
+                  dailyDoc.data() as Map<String, dynamic>;
+              currentPendingD =
+                  double.tryParse(dData['pending'].toString()) ?? 0.0;
+              currentPaidD = double.tryParse(dData['paid'].toString()) ?? 0.0;
+              currentLedgerPaidD =
+                  double.tryParse(dData['ledgerPaid']?.toString() ?? '0') ??
+                  0.0;
+            }
+
+            // Calculate what Sales Orders thinks is pending (Ghost Due Check)
+            double salesOrderPending =
                 oData['paymentDetails'] != null &&
                         oData['paymentDetails']['due'] != null
                     ? (double.tryParse(
@@ -718,11 +744,31 @@ class DebatorController extends GetxController {
                         (double.tryParse(oData['paid']?.toString() ?? '0') ??
                             0.0));
 
+            // 👉 TRUE PENDING is Daily Sales (if exists), otherwise fallback to Sales Orders
+            double actualPending =
+                dailyDoc != null ? currentPendingD : salesOrderPending;
+
+            if (actualPending <= 0.5) {
+              // 🚑 AUTO-HEAL: Already paid in Daily Sales! Fix Sales Orders ghost due and SKIP.
+              if (salesOrderPending > 0.5) {
+                batch.update(orderDoc.reference, {
+                  "paid":
+                      double.tryParse(oData['grandTotal']?.toString() ?? '0') ??
+                      0.0,
+                  "paymentDetails.due": 0.0,
+                  "isFullyPaid": true,
+                  "status": "completed",
+                });
+                hasUpdates = true;
+              }
+              continue; // Do NOT take money from current collection!
+            }
+
             double take =
-                (remainingToAllocate >= currentPending)
-                    ? currentPending
+                (remainingToAllocate >= actualPending)
+                    ? actualPending
                     : remainingToAllocate;
-            bool isNowFullyPaid = (currentPending - take) <= 0.5;
+            bool isNowFullyPaid = (actualPending - take) <= 0.5;
 
             // 1. Update sales_orders perfectly
             Map<String, dynamic> orderUpdate = {
@@ -757,23 +803,9 @@ class DebatorController extends GetxController {
             batch.update(orderDoc.reference, orderUpdate);
 
             // 2. Update the strictly linked daily_sales document!
-            QuerySnapshot dailySnap =
-                await db
-                    .collection('daily_sales')
-                    .where('transactionId', isEqualTo: invoiceId)
-                    .limit(1)
-                    .get();
-            if (dailySnap.docs.isNotEmpty) {
-              var dailyDoc = dailySnap.docs.first;
+            if (dailyDoc != null) {
               Map<String, dynamic> dData =
                   dailyDoc.data() as Map<String, dynamic>;
-              double currentPaidD =
-                  double.tryParse(dData['paid'].toString()) ?? 0.0;
-              double currentPendingD =
-                  double.tryParse(dData['pending'].toString()) ?? 0.0;
-              double currentLedgerPaidD =
-                  double.tryParse(dData['ledgerPaid']?.toString() ?? '0') ??
-                  0.0;
 
               final newHistoryEntry = {
                 'amount': take,
@@ -803,9 +835,9 @@ class DebatorController extends GetxController {
 
               if (pType == 'bkash' && bNum.isNotEmpty) {
                 dailyUpdate["paymentMethod.bkashNumber"] = bNum;
-              } else if (pType == 'nagad' && nNum.isNotEmpty) {
-                dailyUpdate["paymentMethod.nagadNumber"] = nNum;
-              } else if (pType == 'bank') {
+              } else if (pType == 'nagad' && nNum.isNotEmpty)
+                {dailyUpdate["paymentMethod.nagadNumber"] = nNum;}
+              else if (pType == 'bank') {
                 if (bankName.isNotEmpty) {
                   dailyUpdate["paymentMethod.bankName"] = bankName;
                 }
