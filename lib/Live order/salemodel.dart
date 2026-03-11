@@ -811,7 +811,6 @@ class LiveSalesController extends GetxController {
                     {
                       "amount": allocatedToInvoice,
                       "note": "Initial Payment",
-                      // CRITICAL FIX: Timestamp.fromDate instead of serverTimestamp inside Array
                       "timestamp": Timestamp.fromDate(saleDate),
                       "type": methodMap['method'],
                       "bkashNumber": methodMap['bkashNumber'] ?? "",
@@ -825,7 +824,7 @@ class LiveSalesController extends GetxController {
           "source": "pos_sale",
           "transactionId": invNo,
           "invoiceId": invNo,
-          "status": invoiceDue <= 0.5 ? "paid" : "due", // ADDED STATUS FIELD
+          "status": invoiceDue <= 0.5 ? "paid" : "due",
           "packagerName": selectedPackager.value ?? "Admin",
           "soldByUid": sellerUid,
           "soldByName": sellerName,
@@ -958,7 +957,6 @@ class LiveSalesController extends GetxController {
           {
             "amount": masterPaymentMap['paidForInvoice'],
             "note": "Advance Payment",
-            // CRITICAL FIX: Timestamp.fromDate instead of serverTimestamp inside Array
             "timestamp": Timestamp.fromDate(saleDate),
             "type": condMethodMap['method'],
             "bkashNumber": condMethodMap['bkashNumber'] ?? "",
@@ -1122,8 +1120,24 @@ class LiveSalesController extends GetxController {
                 .where('debtorId', isEqualTo: debtorId)
                 .get();
 
+        // 🌟 GET ALL ORDERS & SORT THEM FOR THE MIDDLE INVOICE RIPPLE EFFECT 🌟
+        List<DocumentSnapshot> allOrders = ordersSnap.docs.toList();
+        allOrders.sort((a, b) {
+          final dataA = a.data() as Map<String, dynamic>;
+          final dataB = b.data() as Map<String, dynamic>;
+          Timestamp t1 =
+              dataA['timestamp'] is Timestamp
+                  ? dataA['timestamp']
+                  : Timestamp.now();
+          Timestamp t2 =
+              dataB['timestamp'] is Timestamp
+                  ? dataB['timestamp']
+                  : Timestamp.now();
+          return t1.compareTo(t2);
+        });
+
         List<DocumentSnapshot> pendingOrders =
-            ordersSnap.docs.where((doc) {
+            allOrders.where((doc) {
               final data = doc.data() as Map<String, dynamic>;
               double pending = 0.0;
               if (data['paymentDetails'] != null &&
@@ -1140,21 +1154,8 @@ class LiveSalesController extends GetxController {
               return pending > 0.5; // Small tolerance
             }).toList();
 
-        pendingOrders.sort((a, b) {
-          final dataA = a.data() as Map<String, dynamic>;
-          final dataB = b.data() as Map<String, dynamic>;
-          Timestamp t1 =
-              dataA['timestamp'] is Timestamp
-                  ? dataA['timestamp']
-                  : Timestamp.now();
-          Timestamp t2 =
-              dataB['timestamp'] is Timestamp
-                  ? dataB['timestamp']
-                  : Timestamp.now();
-          return t1.compareTo(t2);
-        });
-
         double remainingToAllocate = allocatedToPrevRunningDue;
+        Map<String, double> middleInvoiceReductions = {};
 
         for (var orderDoc in pendingOrders) {
           if (remainingToAllocate <= 0.01) break;
@@ -1162,7 +1163,6 @@ class LiveSalesController extends GetxController {
           Map<String, dynamic> oData = orderDoc.data() as Map<String, dynamic>;
           String saleTxId = oData['invoiceId'] ?? orderDoc.id;
 
-          // --- 🚨 CRITICAL FIX: Fetch Daily Sales FIRST to avoid Ghost Dues ---
           QuerySnapshot dailySnap =
               await _db
                   .collection('daily_sales')
@@ -1276,6 +1276,20 @@ class LiveSalesController extends GetxController {
           }
           batch.update(orderDoc.reference, orderUpdate);
 
+          // ---> 🌟 NEW LOGIC: RIPPLE EFFECT FOR MIDDLE INVOICES 🌟 <---
+          // Accumulate reductions for every invoice created AFTER the one we just paid.
+          int currentIndex = allOrders.indexWhere(
+            (doc) => doc.id == orderDoc.id,
+          );
+          if (currentIndex != -1 && currentIndex < allOrders.length - 1) {
+            for (int i = currentIndex + 1; i < allOrders.length; i++) {
+              String newerDocId = allOrders[i].id;
+              middleInvoiceReductions[newerDocId] =
+                  (middleInvoiceReductions[newerDocId] ?? 0.0) + take;
+            }
+          }
+          // ---> 🌟 END NEW LOGIC 🌟 <---
+
           // B. FIND AND UPDATE STRICTLY LINKED DAILY_SALES
           if (dailyDoc != null) {
             final newHistoryEntry = {
@@ -1329,6 +1343,13 @@ class LiveSalesController extends GetxController {
 
           remainingToAllocate -= take;
         }
+
+        // ---> 🌟 APPLY ALL RIPPLE UPDATES AT ONCE TO THE BATCH 🌟 <---
+        middleInvoiceReductions.forEach((docId, totalTake) {
+          batch.update(_db.collection('sales_orders').doc(docId), {
+            "snapshotRunningDue": FieldValue.increment(-totalTake),
+          });
+        });
       } catch (e) {
         print("Error allocating surplus to old bills: $e");
       }
@@ -1358,7 +1379,6 @@ class LiveSalesController extends GetxController {
                 {
                   "amount": allocatedToInvoice,
                   "note": "Initial Payment",
-                  // CRITICAL FIX: Timestamp.fromDate instead of serverTimestamp inside Array
                   "timestamp": Timestamp.fromDate(saleDate),
                   "type": agentMethodMap['method'],
                   "bkashNumber": agentMethodMap['bkashNumber'] ?? "",
@@ -1640,8 +1660,14 @@ class LiveSalesController extends GetxController {
     double paidPrevRun =
         double.tryParse(payMap['paidForPrevRunning'].toString()) ?? 0.0;
     double invDue = double.tryParse(payMap['due'].toString()) ?? 0.0;
+
+    // 🌟 FIX FOR PDF DISPLAY 🌟
+    // Calculate total money received from customer so that 'Paid Amount' does not confuse them visually
     double totalPaidForInvoice =
         double.tryParse(payMap['paidForInvoice']?.toString() ?? '0') ?? 0.0;
+    double totalPaidInput =
+        double.tryParse(payMap['totalPaidInput']?.toString() ?? '0') ??
+        totalPaidForInvoice;
 
     // Detect Payment Methods for String Generation
     List<String> methodsUsed = [];
@@ -1720,7 +1746,7 @@ class LiveSalesController extends GetxController {
               subTotal,
               discount,
               currentInvTotal,
-              totalPaidForInvoice,
+              totalPaidInput, // <-- 🌟 FIX FOR PDF DISPLAY 🌟 Passed actual received total
               paymentMethodsStr,
               items,
               boldFont,
@@ -2028,7 +2054,7 @@ class LiveSalesController extends GetxController {
     double subTotal,
     double discount,
     double currentInvTotal,
-    double paidForInvoice,
+    double totalPaidAmount, // 🌟 Updated signature variable 🌟
     String paymentMethodsStr,
     List items,
     pw.Font bold,
@@ -2099,7 +2125,9 @@ class LiveSalesController extends GetxController {
                   pw.SizedBox(height: 2),
                   _sumRow(
                     "Paid Amount",
-                    paidForInvoice.toStringAsFixed(2),
+                    totalPaidAmount.toStringAsFixed(
+                      2,
+                    ), // 🌟 Corrected visual variable 🌟
                     reg,
                     bold,
                   ),

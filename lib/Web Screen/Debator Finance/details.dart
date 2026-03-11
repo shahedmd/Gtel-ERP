@@ -961,9 +961,7 @@ class _DebatordetailsState extends State<Debatordetails> {
     );
   }
 
-  // ==========================================
-  // SPLIT LEDGER TABLE
-  // ==========================================
+
   Widget _buildTableSection(DebtorModel debtor) {
     return Container(
       decoration: BoxDecoration(
@@ -1138,7 +1136,6 @@ class _DebatordetailsState extends State<Debatordetails> {
             ),
           ),
 
-          // 2. DETAILS & INVOICE
           Expanded(
             flex: 3,
             child: Column(

@@ -587,11 +587,15 @@ class DebatorController extends GetxController {
       });
 
       String parsedMethod = (paymentMethodData['type'] ?? 'cash').toString();
+
+      // FIX: Ensure it is not an empty string before overriding
       if (parsedMethod.toLowerCase() == 'cash' &&
-          paymentMethodData.containsKey('bankName')) {
+          paymentMethodData.containsKey('bankName') &&
+          paymentMethodData['bankName'].toString().trim().isNotEmpty) {
         parsedMethod = 'Bank';
       } else if (parsedMethod.toLowerCase() == 'cash' &&
-          paymentMethodData.containsKey('bkashNumber')) {
+          paymentMethodData.containsKey('bkashNumber') &&
+          paymentMethodData['bkashNumber'].toString().trim().isNotEmpty) {
         parsedMethod = 'Bkash';
       }
 
@@ -631,7 +635,7 @@ class DebatorController extends GetxController {
       }
 
       // =========================================================
-      // PERFECT BILL ALLOCATION LOGIC (ID-BASED)
+      // PERFECT BILL ALLOCATION LOGIC (WITH RIPPLE EFFECT FIX)
       // =========================================================
       bool isRunningBillPayment = [
         'debit',
@@ -660,26 +664,9 @@ class DebatorController extends GetxController {
                 .where('debtorId', isEqualTo: debtorId)
                 .get();
 
-        List<DocumentSnapshot> pendingOrders =
-            ordersSnap.docs.where((doc) {
-              final data = doc.data() as Map<String, dynamic>;
-              double pending = 0.0;
-              if (data['paymentDetails'] != null &&
-                  data['paymentDetails']['due'] != null) {
-                pending =
-                    double.tryParse(data['paymentDetails']['due'].toString()) ??
-                    0.0;
-              } else {
-                pending =
-                    (double.tryParse(data['grandTotal']?.toString() ?? '0') ??
-                        0.0) -
-                    (double.tryParse(data['paid']?.toString() ?? '0') ?? 0.0);
-              }
-              return pending > 0.5;
-            }).toList();
-
-        // Sort by date/timestamp securely
-        pendingOrders.sort((a, b) {
+        // 🌟 GET ALL ORDERS & SORT THEM FOR THE MIDDLE INVOICE RIPPLE EFFECT 🌟
+        List<DocumentSnapshot> allOrders = ordersSnap.docs.toList();
+        allOrders.sort((a, b) {
           final dataA = a.data() as Map<String, dynamic>;
           final dataB = b.data() as Map<String, dynamic>;
           Timestamp t1 =
@@ -693,9 +680,28 @@ class DebatorController extends GetxController {
           return t1.compareTo(t2);
         });
 
+        List<DocumentSnapshot> pendingOrders =
+            allOrders.where((doc) {
+              final data = doc.data() as Map<String, dynamic>;
+              double pending = 0.0;
+              if (data['paymentDetails'] != null &&
+                  data['paymentDetails']['due'] != null) {
+                pending =
+                    double.tryParse(data['paymentDetails']['due'].toString()) ??
+                    0.0;
+              } else {
+                pending =
+                    (double.tryParse(data['grandTotal']?.toString() ?? '0') ??
+                        0.0) -
+                    (double.tryParse(data['paid']?.toString() ?? '0') ?? 0.0);
+              }
+              return pending > 0.5; // Small tolerance
+            }).toList();
+
         if (pendingOrders.isNotEmpty) {
           WriteBatch batch = db.batch();
           bool hasUpdates = false;
+          Map<String, double> middleInvoiceReductions = {};
 
           for (var orderDoc in pendingOrders) {
             if (remainingToAllocate <= 0.01) break;
@@ -802,6 +808,20 @@ class DebatorController extends GetxController {
 
             batch.update(orderDoc.reference, orderUpdate);
 
+            // ---> 🌟 NEW LOGIC: RIPPLE EFFECT FOR MIDDLE INVOICES 🌟 <---
+            // Accumulate reductions for every invoice created AFTER the one we just paid.
+            int currentIndex = allOrders.indexWhere(
+              (doc) => doc.id == orderDoc.id,
+            );
+            if (currentIndex != -1 && currentIndex < allOrders.length - 1) {
+              for (int i = currentIndex + 1; i < allOrders.length; i++) {
+                String newerDocId = allOrders[i].id;
+                middleInvoiceReductions[newerDocId] =
+                    (middleInvoiceReductions[newerDocId] ?? 0.0) + take;
+              }
+            }
+            // ---> 🌟 END NEW LOGIC 🌟 <---
+
             // 2. Update the strictly linked daily_sales document!
             if (dailyDoc != null) {
               Map<String, dynamic> dData =
@@ -835,9 +855,9 @@ class DebatorController extends GetxController {
 
               if (pType == 'bkash' && bNum.isNotEmpty) {
                 dailyUpdate["paymentMethod.bkashNumber"] = bNum;
-              } else if (pType == 'nagad' && nNum.isNotEmpty)
-                {dailyUpdate["paymentMethod.nagadNumber"] = nNum;}
-              else if (pType == 'bank') {
+              } else if (pType == 'nagad' && nNum.isNotEmpty) {
+                dailyUpdate["paymentMethod.nagadNumber"] = nNum;
+              } else if (pType == 'bank') {
                 if (bankName.isNotEmpty) {
                   dailyUpdate["paymentMethod.bankName"] = bankName;
                 }
@@ -851,6 +871,16 @@ class DebatorController extends GetxController {
 
             hasUpdates = true;
             remainingToAllocate -= take;
+          }
+
+          // ---> 🌟 APPLY ALL RIPPLE UPDATES AT ONCE TO THE BATCH 🌟 <---
+          if (middleInvoiceReductions.isNotEmpty) {
+            middleInvoiceReductions.forEach((docId, totalTake) {
+              batch.update(db.collection('sales_orders').doc(docId), {
+                "snapshotRunningDue": FieldValue.increment(-totalTake),
+              });
+            });
+            hasUpdates = true;
           }
 
           if (hasUpdates) {
@@ -1314,12 +1344,23 @@ class DebatorController extends GetxController {
     if (pm is String) return pm;
     if (pm is Map) {
       String type = (pm['type'] ?? 'Cash').toString();
-      if (type.toLowerCase() == 'cash' && pm.containsKey('bankName')) {
+      String lowerType = type.toLowerCase();
+
+      // FIX: Ensure the bankName actually contains text, not just an empty string
+      bool hasValidBankName =
+          pm.containsKey('bankName') &&
+          pm['bankName'].toString().trim().isNotEmpty;
+
+      if (lowerType == 'cash' && hasValidBankName) {
         return "Bank: ${pm['bankName']}";
       }
-      if (type.toLowerCase() == 'bank') return "Bank: ${pm['bankName'] ?? ''}";
-      if (type.toLowerCase().contains('bkash')) return "Bkash";
-      if (type.toLowerCase().contains('nagad')) return "Nagad";
+      if (lowerType == 'bank') {
+        return hasValidBankName ? "Bank: ${pm['bankName']}" : "Bank";
+      }
+      if (lowerType.contains('bkash')) return "Bkash";
+      if (lowerType.contains('nagad')) return "Nagad";
+      if (lowerType.contains('rocket')) return "Rocket";
+
       return type.toUpperCase();
     }
     return "Cash";
@@ -1525,7 +1566,7 @@ class DebatorController extends GetxController {
                           balanceLabel,
                           netBalance.abs(),
                           PdfColors.black,
-                        ), // Auto-switching label
+                        ),
                       ],
                     ),
                   ),
