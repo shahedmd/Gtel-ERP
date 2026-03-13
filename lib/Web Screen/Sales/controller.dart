@@ -908,7 +908,10 @@ class DailySalesController extends GetxController {
     if (remainingPrevRunning < 0) remainingPrevRunning = 0;
 
     double netTotalDue = remainingOldDue + remainingPrevRunning + invDue;
-    double totalPreviousBalance = oldDueSnap + runningDueSnap;
+
+    // 🌟 FIX: Deduct the surplus payments from Previous Balance for perfect reprinting math!
+    double totalPreviousBalance = remainingOldDue + remainingPrevRunning;
+
     double currentInvTotal = subTotal - discount;
 
     final pageTheme = pw.PageTheme(

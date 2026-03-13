@@ -8,23 +8,26 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-
 import 'expensemodel.dart';
 import 'monthlycontroller.dart';
 
 class DailyExpensesController extends GetxController {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  // State variables
   final RxList<ExpenseModel> dailyList = <ExpenseModel>[].obs;
   final RxInt dailyTotal = 0.obs;
   final RxBool isLoading = false.obs;
-  final Rx<DateTime> selectedDate = DateTime.now().obs;
+
+  final Rx<DateTime> selectedDate =
+      DateTime(
+        DateTime.now().year,
+        DateTime.now().month,
+        DateTime.now().day,
+      ).obs;
 
   StreamSubscription? _expenseSubscription;
   late final MonthlyExpensesController monthlyController;
 
-  // Formatting Key
   String get selectedKey => DateFormat('yyyy-MM-dd').format(selectedDate.value);
 
   @override
@@ -36,12 +39,11 @@ class DailyExpensesController extends GetxController {
 
   @override
   void onClose() {
-    _expenseSubscription?.cancel(); // Essential for long-term performance
+    _expenseSubscription?.cancel();
     super.onClose();
   }
 
   void listenToDailyExpenses() {
-    // Cancel existing listener if date changes
     _expenseSubscription?.cancel();
 
     _expenseSubscription = _db
@@ -72,7 +74,8 @@ class DailyExpensesController extends GetxController {
   }
 
   void changeDate(DateTime date) {
-    selectedDate.value = date;
+    // FIX: Ensure any new date picked is also cleanly stripped of time
+    selectedDate.value = DateTime(date.year, date.month, date.day);
     listenToDailyExpenses();
   }
 
@@ -85,7 +88,29 @@ class DailyExpensesController extends GetxController {
   }) async {
     try {
       isLoading.value = true;
-      final expenseDate = date ?? DateTime.now();
+
+      final now = DateTime.now();
+      DateTime expenseDate = now;
+
+      // If a date is provided, handle its time
+      if (date != null) {
+        // showDatePicker sets time to 00:00:00 (12:00 AM).
+        // Since we also enforced this on selectedDate, it will trigger here.
+        if (date.hour == 0 && date.minute == 0 && date.second == 0) {
+          expenseDate = DateTime(
+            date.year,
+            date.month,
+            date.day,
+            now.hour,
+            now.minute,
+            now.second,
+          );
+        } else {
+          // If the date already contains a specific time (e.g. from a TimePicker), use it
+          expenseDate = date;
+        }
+      }
+
       final docKey = DateFormat('yyyy-MM-dd').format(expenseDate);
 
       final parentDoc = _db.collection('daily_expenses').doc(docKey);
@@ -102,7 +127,6 @@ class DailyExpensesController extends GetxController {
         'time': Timestamp.fromDate(expenseDate),
       });
 
-      // Update Monthly Controller
       await monthlyController.addToMonthly(amount: amount, date: expenseDate);
 
       if (Get.isDialogOpen ?? false) {
@@ -122,28 +146,23 @@ class DailyExpensesController extends GetxController {
     }
   }
 
-  // --- DELETE EXPENSE ---
   Future<void> deleteDaily(String docId) async {
     try {
       isLoading.value = true;
 
-      // 1. Get a reference to the specific daily item
       final docRef = _db
           .collection('daily_expenses')
           .doc(selectedKey)
           .collection('items')
           .doc(docId);
 
-      // 2. Fetch the data before deleting so we know the amount and date
       final snapshot = await docRef.get();
       if (!snapshot.exists) return;
 
       final expense = ExpenseModel.fromFirestore(snapshot.id, snapshot.data()!);
 
-      // 3. Delete from Daily Expenses
       await docRef.delete();
 
-      // 4. Update the Monthly Total (Subtracting the amount)
       await monthlyController.removeFromMonthly(
         amount: expense.amount,
         date: expense.time,
@@ -157,12 +176,10 @@ class DailyExpensesController extends GetxController {
     }
   }
 
-  // --- PROFESSIONAL POS PDF GENERATION ---
   Future<void> generateDailyPDF() async {
     final pdf = pw.Document();
     final formattedDate = DateFormat('dd MMMM yyyy').format(selectedDate.value);
 
-    // Style Constants
     final primaryColor = PdfColors.blue900;
     final secondaryColor = PdfColors.grey800;
 
@@ -276,8 +293,6 @@ class DailyExpensesController extends GetxController {
                   ),
                 ],
               ),
-
-              // Footer
               pw.SizedBox(height: 50),
               pw.Center(
                 child: pw.Text(
@@ -291,7 +306,6 @@ class DailyExpensesController extends GetxController {
             ],
       ),
     );
-
     await Printing.layoutPdf(onLayout: (format) async => pdf.save());
   }
 }

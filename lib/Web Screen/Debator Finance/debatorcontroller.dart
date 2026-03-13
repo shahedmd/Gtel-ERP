@@ -1,4 +1,4 @@
-// ignore_for_file: deprecated_member_use, empty_catches, avoid_print
+// ignore_for_file: empty_catches, deprecated_member_use
 
 import 'dart:async';
 import 'dart:typed_data';
@@ -24,34 +24,25 @@ class DebatorController extends GetxController {
   RxBool isBodiesLoading = false.obs;
   RxBool isSearching = false.obs;
 
-  // --- PAGINATION STATE ---
   final int _limit = 30;
   List<DocumentSnapshot?> pageCursors = [null];
   RxInt currentPage = 1.obs;
   RxBool hasMore = true.obs;
-
-  // --- MARKET TOTALS ---
   var totalMarketOutstanding = 0.0.obs;
   var totalMarketPayable = 0.0.obs;
 
-  // --- OBSERVABLES ---
   var filteredBodies = <DebtorModel>[].obs;
   RxBool gbIsLoading = false.obs;
   RxBool isAddingBody = false.obs;
-
-  // --- SEARCH DEBOUNCE ---
   Timer? _searchDebounce;
 
   DocumentSnapshot? _lastDocument;
   final RxBool isMoreLoading = false.obs;
 
-  // ==========================================
-  // TRANSACTION PAGINATION STATES
-  // ==========================================
   final RxList<TransactionModel> currentTransactions = <TransactionModel>[].obs;
   final RxBool isTxLoading = false.obs;
   final RxBool hasMoreTx = true.obs;
-  final int _txLimit = 20; // 20 Rows Per Page
+  final int _txLimit = 20;
   List<DocumentSnapshot?> txPageCursors = [null];
   RxInt currentTxPage = 1.obs;
 
@@ -83,10 +74,6 @@ class DebatorController extends GetxController {
     if (currentPage.value <= 1) return;
     loadPage(currentPage.value - 1);
   }
-
-  // =========================================================
-  // 1. ADVANCED GLOBAL SEARCH LOGIC
-  // =========================================================
 
   void searchDebtors(String queryText) {
     if (_searchDebounce?.isActive ?? false) _searchDebounce!.cancel();
@@ -146,8 +133,6 @@ class DebatorController extends GetxController {
           }).toList();
 
       filteredBodies.value = finalMatches;
-    } catch (e) {
-      print("Global Search Error: $e");
     } finally {
       isBodiesLoading.value = false;
     }
@@ -237,9 +222,7 @@ class DebatorController extends GetxController {
       }
       totalMarketOutstanding.value = totalRec;
       totalMarketPayable.value = totalPay;
-    } catch (e) {
-      print("Calc Error: $e");
-    }
+    } catch (e) {}
   }
 
   Stream<double> getLiveBalance(String debtorId) {
@@ -393,7 +376,6 @@ class DebatorController extends GetxController {
         'total': currentLoan + runningDue,
       };
     } catch (e) {
-      print("Breakdown Error: $e");
       return {'loan': 0.0, 'running': 0.0, 'total': 0.0};
     }
   }
@@ -527,7 +509,6 @@ class DebatorController extends GetxController {
         hasMoreTx.value = false;
       }
     } catch (e) {
-      print("Error loading transactions: $e");
     } finally {
       isTxLoading.value = false;
     }
@@ -541,9 +522,7 @@ class DebatorController extends GetxController {
         'lastTransactionDate': Timestamp.now(),
       });
       calculateTotalOutstanding();
-    } catch (e) {
-      print("Auto-Fix Error: $e");
-    }
+    } catch (e) {}
   }
 
   Future<void> addTransaction({
@@ -911,7 +890,6 @@ class DebatorController extends GetxController {
       Get.snackbar("Success", "Collection Recorded & Bills Updated");
     } catch (e) {
       Get.snackbar("Error", e.toString());
-      print("Error: $e");
     } finally {
       gbIsLoading.value = false;
     }
@@ -1329,9 +1307,7 @@ class DebatorController extends GetxController {
         }
       }
       if (needsUpdate) await batch.commit();
-    } catch (e) {
-      print(e);
-    }
+    } catch (e) {}
   }
 
   String _formatMethodForPdf(dynamic pm, [String? txType]) {
@@ -1367,7 +1343,7 @@ class DebatorController extends GetxController {
   }
 
   // =========================================================
-  // WORLD-CLASS ACCOUNTING PDF REPORT (25 Rows Per Page)
+  // WORLD-CLASS ACCOUNTING PDF REPORT (FIXED: Auto-Pagination)
   // =========================================================
   Future<Uint8List> generatePDF(
     String debtorName,
@@ -1393,10 +1369,11 @@ class DebatorController extends GetxController {
 
     // 2. Calculate Totals based on Accounting Rules
     for (var t in transactions) {
-      String type = t['type'].toString().toLowerCase();
+      String type = (t['type'] ?? '').toString().toLowerCase();
       // Accounting Rule: Sales/Due = Debit (Red), Payments = Credit (Green)
       bool isDebit = ['credit', 'previous_due', 'advance_given'].contains(type);
-      double amount = (t['amount'] as num).toDouble();
+      double amount = (t['amount'] as num?)?.toDouble() ?? 0.0;
+
       if (isDebit) {
         totalDebit += amount;
       } else {
@@ -1413,171 +1390,204 @@ class DebatorController extends GetxController {
       balanceLabel = "Advance Balance";
     }
 
-    // 3. Pagination Setup (Strictly 25 rows per page)
-    const int rowsPerPage = 25;
-    final int totalPages =
-        transactions.isEmpty ? 1 : (transactions.length / rowsPerPage).ceil();
-
-    for (int i = 0; i < totalPages; i++) {
-      int start = i * rowsPerPage;
-      int end =
-          (start + rowsPerPage < transactions.length)
-              ? start + rowsPerPage
-              : transactions.length;
-      List<Map<String, dynamic>> chunk =
-          transactions.isEmpty ? [] : transactions.sublist(start, end);
-
-      pdf.addPage(
-        pw.Page(
-          pageFormat: PdfPageFormat.a4,
-          margin: const pw.EdgeInsets.all(32),
-          build: (context) {
-            return pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                // --- HEADER SECTION ---
-                pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Column(
-                      crossAxisAlignment: pw.CrossAxisAlignment.start,
-                      children: [
-                        pw.Text(
-                          "STATEMENT OF ACCOUNT",
-                          style: pw.TextStyle(
-                            fontSize: 18,
-                            fontWeight: pw.FontWeight.bold,
-                            color: PdfColors.blue900,
-                          ),
+    // 3. pw.MultiPage perfectly auto-handles page breaks for long tables
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(32),
+        header: (context) {
+          // This header will automatically repeat on every new page
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text(
+                        "STATEMENT OF ACCOUNT",
+                        style: pw.TextStyle(
+                          fontSize: 18,
+                          fontWeight: pw.FontWeight.bold,
+                          color: PdfColors.blue900,
                         ),
-                        pw.SizedBox(height: 4),
-                        pw.Text(
-                          "Account Name: $debtorName",
-                          style: pw.TextStyle(
-                            fontSize: 14,
-                            fontWeight: pw.FontWeight.bold,
-                          ),
+                      ),
+                      pw.SizedBox(height: 4),
+                      pw.Text(
+                        "Account Name: $debtorName",
+                        style: pw.TextStyle(
+                          fontSize: 14,
+                          fontWeight: pw.FontWeight.bold,
                         ),
-                      ],
-                    ),
-                    pw.Column(
-                      crossAxisAlignment: pw.CrossAxisAlignment.end,
-                      children: [
-                        pw.Text(
-                          "Date: ${DateFormat('dd MMM yyyy').format(DateTime.now())}",
-                          style: const pw.TextStyle(fontSize: 10),
-                        ),
-                        pw.Text(
-                          "Page ${i + 1} of $totalPages",
-                          style: const pw.TextStyle(fontSize: 10),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-                pw.SizedBox(height: 20),
-
-                // --- ACCOUNTING TABLE (5 COLUMNS) ---
-                pw.Expanded(
-                  child: pw.Table.fromTextArray(
-                    border: pw.TableBorder.all(
-                      color: PdfColors.grey400,
-                      width: 0.5,
-                    ),
-                    headerDecoration: const pw.BoxDecoration(
-                      color: PdfColors.grey200,
-                    ),
-                    headerHeight: 28,
-                    cellHeight: 25,
-                    cellAlignments: {
-                      0: pw.Alignment.centerLeft,
-                      1: pw.Alignment.centerLeft,
-                      2: pw.Alignment.centerLeft,
-                      3: pw.Alignment.centerRight,
-                      4: pw.Alignment.centerRight,
-                    },
-                    headerStyle: pw.TextStyle(
-                      fontWeight: pw.FontWeight.bold,
-                      fontSize: 10,
-                    ),
-                    cellStyle: const pw.TextStyle(fontSize: 9),
-                    headers: [
-                      "Date",
-                      "Description",
-                      "Payment Method",
-                      "Debit",
-                      "Credit",
+                      ),
                     ],
-                    data:
-                        chunk.map((t) {
-                          DateTime date =
-                              (t['date'] is Timestamp)
-                                  ? (t['date'] as Timestamp).toDate()
-                                  : t['date'];
-                          String type = t['type'].toString().toLowerCase();
-                          bool isDebit = [
-                            'credit',
-                            'previous_due',
-                            'advance_given',
-                          ].contains(type);
-                          double amount = (t['amount'] as num).toDouble();
-                          String method = _formatMethodForPdf(
-                            t['paymentMethod'],
-                            type,
-                          );
-
-                          // FIX: Show only DEBIT or CREDIT as primary description
-                          String desc = isDebit ? "DEBIT" : "CREDIT";
-                          if (t['note'] != null &&
-                              t['note'].toString().trim().isNotEmpty) {
-                            desc += "\nNote: ${t['note']}";
-                          }
-
-                          return [
-                            DateFormat('dd/MM/yyyy').format(date),
-                            desc,
-                            method,
-                            isDebit ? bdCurrency.format(amount) : "",
-                            !isDebit ? bdCurrency.format(amount) : "",
-                          ];
-                        }).toList(),
                   ),
-                ),
-
-                // --- SUMMARY FOOTER (Only on the last page) ---
-                if (i == totalPages - 1) ...[
-                  pw.SizedBox(height: 20),
-                  pw.Container(
-                    padding: const pw.EdgeInsets.all(12),
-                    decoration: pw.BoxDecoration(
-                      border: pw.Border.all(color: PdfColors.grey400),
-                      color: PdfColors.grey50,
-                    ),
-                    child: pw.Row(
-                      mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
-                      children: [
-                        _pdfStat("Total Debit", totalDebit, PdfColors.red900),
-                        _pdfStat(
-                          "Total Credit",
-                          totalCredit,
-                          PdfColors.green900,
-                        ),
-                        _pdfStat(
-                          balanceLabel,
-                          netBalance.abs(),
-                          PdfColors.black,
-                        ),
-                      ],
-                    ),
+                  pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.end,
+                    children: [
+                      pw.Text(
+                        "Date: ${DateFormat('dd MMM yyyy').format(DateTime.now())}",
+                        style: const pw.TextStyle(fontSize: 10),
+                      ),
+                      pw.Text(
+                        "Page ${context.pageNumber} of ${context.pagesCount}",
+                        style: const pw.TextStyle(fontSize: 10),
+                      ),
+                    ],
                   ),
                 ],
+              ),
+              pw.SizedBox(height: 20),
+            ],
+          );
+        },
+        build: (context) {
+          return [
+            pw.Table.fromTextArray(
+              border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.5),
+              headerDecoration: const pw.BoxDecoration(
+                color: PdfColors.grey200,
+              ),
+              headerHeight: 28,
+              cellHeight: 25, // Minimum height. Auto-expands if text wraps!
+              cellAlignments: {
+                0: pw.Alignment.centerLeft,
+                1: pw.Alignment.centerLeft,
+                2: pw.Alignment.centerLeft,
+                3: pw.Alignment.centerRight,
+                4: pw.Alignment.centerRight,
+              },
+              headerStyle: pw.TextStyle(
+                fontWeight: pw.FontWeight.bold,
+                fontSize: 10,
+              ),
+              cellStyle: const pw.TextStyle(fontSize: 9),
+              headers: [
+                "Date",
+                "Description",
+                "Payment Method",
+                "Debit",
+                "Credit",
               ],
-            );
-          },
-        ),
-      );
-    }
+              data:
+                  transactions.map((t) {
+                    DateTime date =
+                        (t['date'] is Timestamp)
+                            ? (t['date'] as Timestamp).toDate()
+                            : t['date'];
+                    String type = (t['type'] ?? '').toString().toLowerCase();
+                    bool isDebit = [
+                      'credit',
+                      'previous_due',
+                      'advance_given',
+                    ].contains(type);
+                    double amount = (t['amount'] as num?)?.toDouble() ?? 0.0;
+                    String method = _formatMethodForPdf(
+                      t['paymentMethod'],
+                      type,
+                    );
+
+                    String desc = isDebit ? "DEBIT" : "CREDIT";
+                    if (t['note'] != null &&
+                        t['note'].toString().trim().isNotEmpty) {
+                      desc += "\nNote: ${t['note']}";
+                    }
+
+                    return [
+                      DateFormat('dd/MM/yyyy').format(date),
+                      desc,
+                      method,
+                      isDebit ? bdCurrency.format(amount) : "",
+                      !isDebit ? bdCurrency.format(amount) : "",
+                    ];
+                  }).toList(),
+            ),
+
+            // --- SUMMARY FOOTER (Appears securely at the bottom of the data) ---
+            pw.SizedBox(height: 20),
+            pw.Container(
+              padding: const pw.EdgeInsets.all(12),
+              decoration: pw.BoxDecoration(
+                border: pw.Border.all(color: PdfColors.grey400),
+                color: PdfColors.grey50,
+              ),
+              child: pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
+                children: [
+                  _pdfStat("Total Debit", totalDebit, PdfColors.red900),
+                  _pdfStat("Total Credit", totalCredit, PdfColors.green900),
+                  _pdfStat(balanceLabel, netBalance.abs(), PdfColors.black),
+                ],
+              ),
+            ),
+          ];
+        },
+      ),
+    );
+
     return pdf.save();
+  }
+
+  // =========================================================
+  // NEW: FETCHES ALL TRANSACTIONS FOR PDF (Bypasses UI Limit)
+  // =========================================================
+  Future<void> downloadFullDebtorStatement(
+    String debtorId,
+    String debtorName,
+  ) async {
+    gbIsLoading.value = true;
+    try {
+      // Fetch ALL transactions for this debtor ignoring the UI pagination
+      Query query = db
+          .collection('debatorbody')
+          .doc(debtorId)
+          .collection('transactions')
+          .orderBy('date', descending: true);
+
+      // Respect the date filter if applied
+      if (selectedDateRange.value != null) {
+        query = query
+            .where(
+              'date',
+              isGreaterThanOrEqualTo: Timestamp.fromDate(
+                selectedDateRange.value!.start,
+              ),
+            )
+            .where(
+              'date',
+              isLessThanOrEqualTo: Timestamp.fromDate(
+                selectedDateRange.value!.end,
+              ),
+            );
+      }
+
+      final snap = await query.get();
+
+      if (snap.docs.isEmpty) {
+        Get.snackbar("Info", "No transactions found to print.");
+        return;
+      }
+
+      List<Map<String, dynamic>> allTransactions =
+          snap.docs.map((d) {
+            return d.data() as Map<String, dynamic>;
+          }).toList();
+
+      // Generate PDF using the complete list
+      final pdfBytes = await generatePDF(debtorName, allTransactions);
+
+      // Print or Save
+      await Printing.layoutPdf(
+        onLayout: (format) async => pdfBytes,
+        name: '${debtorName.replaceAll(' ', '_')}_Statement.pdf',
+      );
+    } catch (e) {
+      Get.snackbar("Error", "Could not generate full PDF: $e");
+    } finally {
+      gbIsLoading.value = false;
+    }
   }
 
   Future<void> downloadAllDebtorsReport() async {

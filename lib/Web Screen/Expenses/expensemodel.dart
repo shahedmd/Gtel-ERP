@@ -21,9 +21,11 @@ class ExpenseModel {
       name: data['name'] ?? '',
       amount: (data['amount'] as num?)?.toInt() ?? 0,
       note: data['note'] ?? '',
-      time: data['time'] is Timestamp 
-          ? (data['time'] as Timestamp).toDate() 
-          : DateTime.now(),
+      time:
+          data['time'] is Timestamp
+              ? (data['time'] as Timestamp).toDate()
+              : DateTime.now(),
     );
   }
 }
+  
