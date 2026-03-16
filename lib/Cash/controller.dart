@@ -616,86 +616,321 @@ class CashDrawerController extends GetxController {
     }
   }
 
-  // --- PDF REPORT ---
+  // ========================================================================
+  // WORLD-CLASS ERP PDF REPORT (EXECUTIVE LIQUIDITY DASHBOARD)
+  // ========================================================================
   Future<void> downloadPdf() async {
     final doc = pw.Document();
-    final font = await PdfGoogleFonts.openSansRegular();
+
+    // Load Professional Fonts
+    final fontReg = await PdfGoogleFonts.openSansRegular();
     final fontBold = await PdfGoogleFonts.openSansBold();
-    String period =
-        "${DateFormat('dd MMM').format(selectedRange.value.start)} - ${DateFormat('dd MMM').format(selectedRange.value.end)}";
-    final txList = _allTransactions;
+
+    // Format Data
+    String generatedDate = DateFormat(
+      'dd MMM yyyy, hh:mm a',
+    ).format(DateTime.now());
 
     doc.addPage(
-      pw.MultiPage(
+      pw.Page(
         pageFormat: PdfPageFormat.a4,
-        build:
-            (context) => [
-              pw.Text(
-                "Cash Position Report ($period)",
-                style: pw.TextStyle(font: fontBold, fontSize: 18),
-              ),
-              pw.Divider(),
-              pw.SizedBox(height: 10),
+        margin: const pw.EdgeInsets.all(40),
+        build: (context) {
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              // --- 1. CORPORATE HEADER ---
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: pw.CrossAxisAlignment.end,
                 children: [
-                  _pdfCol("Total Sales", rawSalesTotal.value, fontBold),
-                  _pdfCol("Collections", rawCollectionTotal.value, fontBold),
-                  _pdfCol("Expenses", rawExpenseTotal.value, fontBold),
-                  _pdfCol(
-                    "CLOSING NET ASSET",
-                    grandTotal.value,
-                    fontBold,
-                    isTotal: true,
+                  pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text(
+                        "STATEMENT OF CASH POSITION",
+                        style: pw.TextStyle(
+                          font: fontBold,
+                          fontSize: 22,
+                          color: PdfColors.blue900,
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                      pw.SizedBox(height: 4),
+                      pw.Text(
+                        "Executive Liquidity Dashboard",
+                        style: pw.TextStyle(
+                          font: fontReg,
+                          fontSize: 12,
+                          color: PdfColors.grey600,
+                          letterSpacing: 1,
+                        ),
+                      ),
+                    ],
+                  ),
+                  pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.end,
+                    children: [
+                      pw.Text(
+                        "Report Generated:",
+                        style: pw.TextStyle(
+                          font: fontReg,
+                          fontSize: 9,
+                          color: PdfColors.grey500,
+                        ),
+                      ),
+                      pw.Text(
+                        generatedDate,
+                        style: pw.TextStyle(
+                          font: fontBold,
+                          fontSize: 10,
+                          color: PdfColors.black,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+
+              pw.SizedBox(height: 20),
+              pw.Divider(color: PdfColors.grey300, thickness: 1.5),
+              pw.SizedBox(height: 30),
+
+              // --- 2. HERO METRIC: GRAND TOTAL ---
+              pw.Container(
+                width: double.infinity,
+                padding: const pw.EdgeInsets.symmetric(
+                  vertical: 24,
+                  horizontal: 20,
+                ),
+                decoration: pw.BoxDecoration(
+                  color: PdfColors.blue900, // Deep corporate blue
+                  borderRadius: pw.BorderRadius.circular(8),
+                ),
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.center,
+                  children: [
+                    pw.Text(
+                      "TOTAL NET LIQUID ASSETS",
+                      style: pw.TextStyle(
+                        font: fontReg,
+                        fontSize: 12,
+                        color: PdfColors.blue100,
+                        letterSpacing: 2,
+                      ),
+                    ),
+                    pw.SizedBox(height: 8),
+                    pw.Text(
+                      "BDT ${_currencyFormat.format(grandTotal.value)}",
+                      style: pw.TextStyle(
+                        font: fontBold,
+                        fontSize: 34,
+                        color: PdfColors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              pw.SizedBox(height: 40),
+
+              // --- 3. BREAKDOWN HEADER ---
+              pw.Text(
+                "ASSET BREAKDOWN",
+                style: pw.TextStyle(
+                  font: fontBold,
+                  fontSize: 14,
+                  color: PdfColors.grey800,
+                  letterSpacing: 1.2,
+                ),
+              ),
+              pw.SizedBox(height: 15),
+
+              // --- 4. THE 2x2 GRID (CASH, BANK, BKASH, NAGAD) ---
+              pw.Row(
+                children: [
+                  pw.Expanded(
+                    child: _buildBalanceCard(
+                      title: "CASH IN HAND",
+                      amount: netCash.value,
+                      primaryColor: PdfColors.green700,
+                      bgColor: PdfColors.green50,
+                      fontReg: fontReg,
+                      fontBold: fontBold,
+                    ),
+                  ),
+                  pw.SizedBox(width: 20),
+                  pw.Expanded(
+                    child: _buildBalanceCard(
+                      title: "BANK BALANCE",
+                      amount: netBank.value,
+                      primaryColor: PdfColors.blue700,
+                      bgColor: PdfColors.blue50,
+                      fontReg: fontReg,
+                      fontBold: fontBold,
+                    ),
                   ),
                 ],
               ),
               pw.SizedBox(height: 20),
-              pw.TableHelper.fromTextArray(
-                headers: ['Date', 'Desc', 'Method', 'Amount'],
-                data:
-                    txList
-                        .map(
-                          (t) => [
-                            DateFormat('dd-MMM HH:mm').format(t.date),
-                            t.description,
-                            t.method,
-                            "${t.type == 'withdraw' || t.type == 'expense' ? '-' : ''}${_currencyFormat.format(t.amount)}",
-                          ],
-                        )
-                        .toList(),
-                headerStyle: pw.TextStyle(
-                  font: fontBold,
-                  color: PdfColors.white,
-                ),
-                headerDecoration: const pw.BoxDecoration(
-                  color: PdfColors.black,
-                ),
-                cellStyle: pw.TextStyle(font: font, fontSize: 9),
+              pw.Row(
+                children: [
+                  pw.Expanded(
+                    child: _buildBalanceCard(
+                      title: "bKash BALANCE",
+                      amount: netBkash.value,
+                      primaryColor: const PdfColor.fromInt(
+                        0xFFDF146E,
+                      ), // Official bKash Pink
+                      bgColor: const PdfColor.fromInt(0xFFFDE8F0),
+                      fontReg: fontReg,
+                      fontBold: fontBold,
+                    ),
+                  ),
+                  pw.SizedBox(width: 20),
+                  pw.Expanded(
+                    child: _buildBalanceCard(
+                      title: "NAGAD BALANCE",
+                      amount: netNagad.value,
+                      primaryColor: const PdfColor.fromInt(
+                        0xFFF7931E,
+                      ), // Official Nagad Orange
+                      bgColor: const PdfColor.fromInt(0xFFFEF4E8),
+                      fontReg: fontReg,
+                      fontBold: fontBold,
+                    ),
+                  ),
+                ],
+              ),
+
+              // Pushes the signature block and footer to the very bottom of the page
+              pw.Spacer(),
+
+              // --- 5. SIGNATURE BLOCK ---
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.center,
+                    children: [
+                      pw.Container(
+                        width: 150,
+                        height: 1,
+                        color: PdfColors.grey600,
+                      ),
+                      pw.SizedBox(height: 8),
+                      pw.Text(
+                        "Prepared By",
+                        style: pw.TextStyle(
+                          font: fontReg,
+                          fontSize: 10,
+                          color: PdfColors.grey800,
+                        ),
+                      ),
+                    ],
+                  ),
+                  pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.center,
+                    children: [
+                      pw.Container(
+                        width: 180,
+                        height: 1,
+                        color: PdfColors.black,
+                      ),
+                      pw.SizedBox(height: 8),
+                      pw.Text(
+                        "Authorized Signature",
+                        style: pw.TextStyle(
+                          font: fontBold,
+                          fontSize: 11,
+                          color: PdfColors.black,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+
+              pw.SizedBox(
+                height: 30,
+              ), 
+              pw.Divider(color: PdfColors.grey300, thickness: 1),
+              pw.SizedBox(height: 10),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(
+                    "System Generated Report - Internal Use Only", // Disclaimer updated!
+                    style: pw.TextStyle(
+                      font: fontReg,
+                      fontSize: 9,
+                      color: PdfColors.grey500,
+                    ),
+                  ),
+                  pw.Text(
+                    "Strictly Confidential",
+                    style: pw.TextStyle(
+                      font: fontBold,
+                      fontSize: 9,
+                      color: PdfColors.grey700,
+                    ),
+                  ),
+                ],
               ),
             ],
+          );
+        },
       ),
     );
-    await Printing.layoutPdf(onLayout: (f) => doc.save());
-  }
 
-  pw.Widget _pdfCol(
-    String label,
-    double val,
-    pw.Font font, {
-    bool isTotal = false,
-  }) {
-    return pw.Column(
-      children: [
-        pw.Text(
-          label,
-          style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey700),
-        ),
-        pw.Text(
-          _currencyFormat.format(val),
-          style: pw.TextStyle(font: font, fontSize: isTotal ? 14 : 11),
-        ),
-      ],
+    // Save & Print
+    await Printing.layoutPdf(
+      onLayout: (f) => doc.save(),
+      name:
+          "Cash_Position_Report_${DateFormat('dd_MMM_yyyy').format(DateTime.now())}.pdf",
     );
   }
+
+  // Helper Widget for the Dashboard Cards
+  pw.Widget _buildBalanceCard({
+    required String title,
+    required double amount,
+    required PdfColor primaryColor,
+    required PdfColor bgColor,
+    required pw.Font fontReg,
+    required pw.Font fontBold,
+  }) {
+    return pw.Container(
+      padding: const pw.EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+      decoration: pw.BoxDecoration(
+        color: bgColor,
+        border: pw.Border.all(color: primaryColor, width: 0.5),
+        borderRadius: pw.BorderRadius.circular(8),
+      ),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(
+            title,
+            style: pw.TextStyle(
+              font: fontBold,
+              fontSize: 11,
+              color: primaryColor,
+              letterSpacing: 1,
+            ),
+          ),
+          pw.SizedBox(height: 12),
+          pw.Text(
+            "BDT ${_currencyFormat.format(amount)}",
+            style: pw.TextStyle(
+              font: fontBold,
+              fontSize: 20,
+              color: PdfColors.black,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
 }

@@ -898,9 +898,36 @@ class ConditionSalesController extends GetxController {
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          _infoRow("To", ": $name", reg, bold, col1Width: 60),
-          _infoRow("Address", address, reg, bold, col1Width: 60),
-          _infoRow("Contact No.", ": $phone", reg, bold, col1Width: 60),
+          _infoRow2("To", ": $name", reg, bold, col1Width: 60),
+          _infoRow2("Address", ": $address", reg, bold, col1Width: 60),
+          _infoRow2("Contact No.", ": $phone", reg, bold, col1Width: 60),
+        ],
+      ),
+    );
+  }
+
+  pw.Widget _infoRow2(
+    String label,
+    String value,
+    pw.Font reg,
+    pw.Font bold, {
+    double col1Width = 75,
+  }) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(vertical: 2),
+      child: pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.SizedBox(
+            width: col1Width,
+            child: pw.Text(
+              label,
+              style: pw.TextStyle(font: bold, fontSize: 10, ),
+            ),
+          ),
+          pw.Expanded(
+            child: pw.Text( value, style: pw.TextStyle(font: bold, fontSize: 10)),
+          ),
         ],
       ),
     );

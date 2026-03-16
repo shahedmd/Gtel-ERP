@@ -5,8 +5,7 @@ class VendorModel {
   String? docId;
   final String name;
   final String contact;
-  final double
-  totalDue; // Positive = We owe them, Negative = They owe us (Advance)
+  final double totalDue;
   final DateTime? createdAt;
 
   VendorModel({
@@ -31,34 +30,27 @@ class VendorModel {
     );
   }
 
-  // --- ERP Helpers ---
-
-  // 1. Full Number Format (e.g., 12,500)
   String get formattedDue {
     final formatter = NumberFormat('#,##0', 'en_US');
     return formatter.format(totalDue.abs());
   }
 
-  // 2. Status Indicator Logic
-  // Returns: 'Payable', 'Advance', or 'Settled'
   String get status {
-    if (totalDue > 0) return 'Payable'; // We owe money
-    if (totalDue < 0) return 'Advance'; // We paid extra / They owe us
+    if (totalDue > 0) return 'Payable';
+    if (totalDue < 0) return 'Advance';
     return 'Settled';
   }
 
-  // 3. Status Color Suggestion (Used in UI)
-  // 0 = Green (Settled), 1 = Red (Payable), 2 = Blue (Advance)
   int get statusColorCode {
-    if (totalDue > 0) return 1; // Red
-    if (totalDue < 0) return 2; // Blue/Orange
-    return 0; // Green
+    if (totalDue > 0) return 1;
+    if (totalDue < 0) return 2;
+    return 0;
   }
 }
 
 class VendorTransaction {
   String? id;
-  final String type; // 'CREDIT' or 'DEBIT'
+  final String type;
   final double amount;
   final DateTime date;
   final String? paymentMethod;
@@ -66,6 +58,8 @@ class VendorTransaction {
   final String? cartons;
   final String? notes;
   final bool isIncomingCash;
+  final String?
+  cashLedgerId; // NEW: To easily update/delete cash_ledger entries
 
   VendorTransaction({
     this.id,
@@ -77,6 +71,7 @@ class VendorTransaction {
     this.cartons,
     this.notes,
     this.isIncomingCash = false,
+    this.cashLedgerId,
   });
 
   factory VendorTransaction.fromSnapshot(DocumentSnapshot doc) {
@@ -94,16 +89,18 @@ class VendorTransaction {
       cartons: data['cartons'],
       notes: data['notes'],
       isIncomingCash: data['isIncomingCash'] ?? false,
+      cashLedgerId: data['cashLedgerId'],
     );
   }
 
-  // Helper for UI Table
   String get formattedAmount {
     final formatter = NumberFormat('#,##0', 'en_US');
     return formatter.format(amount);
   }
 
   String get formattedDate {
-    return DateFormat('dd MMM yyyy').format(date);
+    return DateFormat(
+      'dd MMM yyyy, hh:mm a',
+    ).format(date); // Format to show exact time
   }
 }

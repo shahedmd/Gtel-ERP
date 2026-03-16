@@ -17,6 +17,9 @@ class LiveOrderSalesPage extends StatelessWidget {
     // UI Local State for Cart Search
     final RxString cartSearchQuery = ''.obs;
 
+    // --- RESPONSIVE BREAKPOINT ---
+    final bool isDesktop = MediaQuery.of(context).size.width >= 900;
+
     return Scaffold(
       backgroundColor: const Color(0xFFF1F5F9), // Slate-100 background
       // 1. FULL PAGE SCROLLABLE
@@ -25,7 +28,7 @@ class LiveOrderSalesPage extends StatelessWidget {
         child: Column(
           children: [
             // Top Bar
-            _buildTopBar(controller),
+            _buildTopBar(controller, isDesktop),
 
             // Control Panel (Customer & Payment)
             Container(
@@ -33,39 +36,60 @@ class LiveOrderSalesPage extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
               child: Column(
                 children: [
-                  _buildCustomerSection(controller),
+                  _buildCustomerSection(controller, isDesktop, context),
                   const SizedBox(height: 16),
                   const Divider(thickness: 1, height: 1),
                   const SizedBox(height: 16),
-                  _buildExpandedPaymentSection(controller),
+                  _buildExpandedPaymentSection(controller, isDesktop),
                 ],
               ),
             ),
-
             const SizedBox(height: 12),
-
-            // 2. EXPANDED WORKSPACE (Fixed Height for Tables to allow internal scrolling)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: SizedBox(
-                height: 850, // Large fixed height for desktop-like feel
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Inventory (Left)
-                    Expanded(
-                      flex: 6,
-                      child: _productInventoryTable(controller),
-                    ),
-                    const SizedBox(width: 12),
-                    // Cart (Right)
-                    Expanded(
-                      flex: 4,
-                      child: _buildCartSection(controller, cartSearchQuery),
-                    ),
-                  ],
-                ),
-              ),
+              child:
+                  isDesktop
+                      ? SizedBox(
+                        height: 850, 
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Inventory (Left)
+                            Expanded(
+                              flex: 6,
+                              child: _productInventoryTable(controller, true),
+                            ),
+                            const SizedBox(width: 12),
+                            // Cart (Right)
+                            Expanded(
+                              flex: 4,
+                              child: _buildCartSection(
+                                controller,
+                                cartSearchQuery,
+                                true,
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                      : Column(
+                        children: [
+                          SizedBox(
+                            height:
+                                600, 
+                            child: _productInventoryTable(controller, false),
+                          ),
+                          const SizedBox(height: 16),
+                          SizedBox(
+                            height: 600,
+                            child: _buildCartSection(
+                              controller,
+                              cartSearchQuery,
+                              false,
+                            ),
+                          ),
+                        ],
+                      ),
             ),
 
             // Bottom Padding for scrolling ease
@@ -77,439 +101,463 @@ class LiveOrderSalesPage extends StatelessWidget {
   }
 
   // --- 1. TOP BAR ---
-  Widget _buildTopBar(LiveSalesController controller) {
-    return Obx(
-      () => Container(
-        height: 60,
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        decoration: BoxDecoration(
-          color:
+  Widget _buildTopBar(LiveSalesController controller, bool isDesktop) {
+    Widget titleBlock = Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Obx(
+            () => Icon(
               controller.isConditionSale.value
-                  ? const Color(0xFFC2410C) // Orange-700 for Condition
-                  : const Color(0xFF0F172A), // Slate-900 for Regular
-          boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 6),
-          ],
+                  ? Icons.local_shipping
+                  : Icons.point_of_sale,
+              color: Colors.white,
+              size: 24,
+            ),
+          ),
         ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        const SizedBox(width: 12),
+        Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(
-                    controller.isConditionSale.value
-                        ? Icons.local_shipping
-                        : Icons.point_of_sale,
-                    color: Colors.white,
-                    size: 24,
-                  ),
+            Obx(
+              () => Text(
+                controller.isConditionSale.value
+                    ? "CONDITION / COURIER MANAGER"
+                    : "POINT OF SALE (POS)",
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  letterSpacing: 0.5,
                 ),
-                const SizedBox(width: 12),
-                Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      controller.isConditionSale.value
-                          ? "CONDITION / COURIER MANAGER"
-                          : "POINT OF SALE (POS)",
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    Text(
-                      "Sales & Inventory System",
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.7),
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
+              ),
             ),
-
-            // Toggle Switch & Refresh Button
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(30),
-                  ),
-                  child: Row(
-                    children: [
-                      Text(
-                        controller.isConditionSale.value
-                            ? "Switch to Direct Sale"
-                            : "Switch to Condition",
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Switch(
-                        value: controller.isConditionSale.value,
-                        activeColor: Colors.white,
-                        activeTrackColor: Colors.orange.shade300,
-                        inactiveThumbColor: Colors.white,
-                        inactiveTrackColor: Colors.grey,
-                        onChanged:
-                            (val) => controller.isConditionSale.value = val,
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 16),
-
-                // --- NEW REFRESH BUTTON ---
-                Container(
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: IconButton(
-                    onPressed: controller.refreshPage,
-                    icon: const Icon(Icons.refresh, color: Colors.white),
-                    tooltip: "Refresh Page & Clear Data",
-                  ),
-                ),
-              ],
+            Text(
+              "Sales & Inventory System",
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.7),
+                fontSize: 11,
+              ),
             ),
           ],
         ),
+      ],
+    );
+
+    Widget toggleBlock = Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.2),
+            borderRadius: BorderRadius.circular(30),
+          ),
+          child: Row(
+            children: [
+              Obx(
+                () => Text(
+                  controller.isConditionSale.value
+                      ? "Switch to Direct Sale"
+                      : "Switch to Condition",
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Obx(
+                () => Switch(
+                  value: controller.isConditionSale.value,
+                  activeColor: Colors.white,
+                  activeTrackColor: Colors.orange.shade300,
+                  inactiveThumbColor: Colors.white,
+                  inactiveTrackColor: Colors.grey,
+                  onChanged: (val) => controller.isConditionSale.value = val,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 16),
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: IconButton(
+            onPressed: controller.refreshPage,
+            icon: const Icon(Icons.refresh, color: Colors.white),
+            tooltip: "Refresh Page & Clear Data",
+          ),
+        ),
+      ],
+    );
+
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: 20,
+        vertical: isDesktop ? 0 : 16,
       ),
+      height: isDesktop ? 60 : null,
+      decoration: BoxDecoration(
+        color:
+            controller.isConditionSale.value
+                ? const Color(0xFFC2410C)
+                : const Color(0xFF0F172A),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 6),
+        ],
+      ),
+      child:
+          isDesktop
+              ? Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [titleBlock, toggleBlock],
+              )
+              : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [titleBlock, const SizedBox(height: 16), toggleBlock],
+              ),
     );
   }
 
   // --- 2. CUSTOMER SECTION ---
-  Widget _buildCustomerSection(LiveSalesController controller) {
+  Widget _buildCustomerSection(LiveSalesController controller, bool isDesktop, BuildContext context) {
     return Obx(() {
       bool isAgent = controller.customerType.value == "AGENT";
+
+      // 2.1 Reusable Tabs
+      Widget tabsBlock = SizedBox(
+        width: isDesktop ? 320 : double.infinity,
+        child: Row(
+          children:
+              ["WHOLESALE", "VIP", "AGENT"].map((type) {
+                bool isSelected = controller.customerType.value == type;
+                return Expanded(
+                  child: InkWell(
+                    onTap: () => controller.customerType.value = type,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      height: 40,
+                      margin: const EdgeInsets.only(right: 6),
+                      decoration: BoxDecoration(
+                        color:
+                            isSelected
+                                ? const Color(0xFF2563EB)
+                                : Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color:
+                              isSelected
+                                  ? Colors.transparent
+                                  : Colors.grey.shade300,
+                        ),
+                        boxShadow:
+                            isSelected
+                                ? [
+                                  BoxShadow(
+                                    color: Colors.blue.withOpacity(0.3),
+                                    blurRadius: 4,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ]
+                                : null,
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        type,
+                        style: TextStyle(
+                          color: isSelected ? Colors.white : Colors.black87,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+        ),
+      );
+
+      // 2.2 Reusable Agent Search
+      Widget searchFieldBlock = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _erpInput(
+            controller.debtorPhoneSearch,
+            "Search Existing Agent...",
+            icon: Icons.search,
+            highlight: true,
+            fillColor: Colors.yellow.shade50,
+          ),
+          Obx(() {
+            if (controller.filteredDebtors.isEmpty) {
+              return const SizedBox.shrink();
+            }
+            return Container(
+              constraints: const BoxConstraints(maxHeight: 200),
+              margin: const EdgeInsets.only(top: 4),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                border: Border.all(color: Colors.blue.shade200),
+                borderRadius: BorderRadius.circular(6),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 8,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: ListView.separated(
+                shrinkWrap: true,
+                padding: EdgeInsets.zero,
+                itemCount: controller.filteredDebtors.length,
+                separatorBuilder: (_, __) => const Divider(height: 1),
+                itemBuilder: (context, i) {
+                  final debtor = controller.filteredDebtors[i];
+                  return InkWell(
+                    onTap: () {
+                      FocusScope.of(context).unfocus();
+                      controller.selectDebtorFromDropdown(debtor);
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                debtor.name,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.blueAccent,
+                                ),
+                              ),
+                              Text(
+                                debtor.phone,
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const Icon(
+                            Icons.arrow_forward_ios,
+                            size: 12,
+                            color: Colors.grey,
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            );
+          }),
+        ],
+      );
+
+      Widget badgeBlock =
+          controller.selectedDebtor.value != null
+              ? Container(
+                height: 40,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  color: Colors.green.shade50,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: Colors.green.shade200),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.verified,
+                          size: 18,
+                          color: Colors.green,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          "FOUND",
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.green.shade700,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        const Text(
+                          "Previous Due",
+                          style: TextStyle(fontSize: 9, color: Colors.grey),
+                        ),
+                        Text(
+                          "৳${controller.totalPreviousDue.toStringAsFixed(0)}",
+                          style: const TextStyle(
+                            color: Colors.red,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              )
+              : Container(
+                height: 40,
+                alignment: Alignment.centerLeft,
+                child: const Text(
+                  "* To create NEW Agent, ignore search and fill info below.",
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Colors.grey,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              );
 
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 2.1 Customer Type Tabs
-              SizedBox(
-                width: 320,
-                child: Row(
-                  children:
-                      ["WHOLESALE", "VIP", "AGENT"].map((type) {
-                        bool isSelected = controller.customerType.value == type;
-
-                        return Expanded(
-                          child: InkWell(
-                            onTap: () => controller.customerType.value = type,
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 200),
-                              height: 40,
-                              margin: const EdgeInsets.only(right: 6),
-                              decoration: BoxDecoration(
-                                color:
-                                    isSelected
-                                        ? const Color(0xFF2563EB)
-                                        : Colors.grey.shade100,
-                                borderRadius: BorderRadius.circular(6),
-                                border: Border.all(
-                                  color:
-                                      isSelected
-                                          ? Colors.transparent
-                                          : Colors.grey.shade300,
-                                ),
-                                boxShadow:
-                                    isSelected
-                                        ? [
-                                          BoxShadow(
-                                            color: Colors.blue.withOpacity(0.3),
-                                            blurRadius: 4,
-                                            offset: const Offset(0, 2),
-                                          ),
-                                        ]
-                                        : null,
-                              ),
-                              alignment: Alignment.center,
-                              child: Text(
-                                type,
-                                style: TextStyle(
-                                  color:
-                                      isSelected
-                                          ? Colors.white
-                                          : Colors.black87,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                ),
-              ),
-
-              const SizedBox(width: 16),
-
-              // 2.2 Agent Search Bar & Dropdown
-              if (isAgent)
-                Expanded(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // SEARCH FIELD & INLINE DROPDOWN
-                      Expanded(
-                        flex: 5,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _erpInput(
-                              controller.debtorPhoneSearch,
-                              "Search Existing Agent (Name/Phone)...",
-                              icon: Icons.search,
-                              highlight: true,
-                              fillColor: Colors.yellow.shade50,
-                            ),
-
-                            // --- NEW DROPDOWN LIST UI ---
-                            Obx(() {
-                              if (controller.filteredDebtors.isEmpty) {
-                                return const SizedBox.shrink();
-                              }
-                              return Container(
-                                constraints: const BoxConstraints(
-                                  maxHeight: 200,
-                                ),
-                                margin: const EdgeInsets.only(top: 4),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  border: Border.all(
-                                    color: Colors.blue.shade200,
-                                  ),
-                                  borderRadius: BorderRadius.circular(6),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withOpacity(0.1),
-                                      blurRadius: 8,
-                                      offset: const Offset(0, 4),
-                                    ),
-                                  ],
-                                ),
-                                child: ListView.separated(
-                                  shrinkWrap: true,
-                                  padding: EdgeInsets.zero,
-                                  itemCount: controller.filteredDebtors.length,
-                                  separatorBuilder:
-                                      (_, __) => const Divider(height: 1),
-                                  itemBuilder: (context, i) {
-                                    final debtor =
-                                        controller.filteredDebtors[i];
-                                    return InkWell(
-                                      onTap: () {
-                                        // Hide keyboard and select debtor
-                                        FocusScope.of(context).unfocus();
-                                        controller.selectDebtorFromDropdown(
-                                          debtor,
-                                        );
-                                      },
-                                      child: Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 12,
-                                          vertical: 10,
-                                        ),
-                                        child: Row(
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.spaceBetween,
-                                          children: [
-                                            Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Text(
-                                                  debtor.name,
-                                                  style: const TextStyle(
-                                                    fontSize: 13,
-                                                    fontWeight: FontWeight.bold,
-                                                    color: Colors.blueAccent,
-                                                  ),
-                                                ),
-                                                Text(
-                                                  debtor.phone,
-                                                  style: const TextStyle(
-                                                    fontSize: 11,
-                                                    color: Colors.grey,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                            const Icon(
-                                              Icons.arrow_forward_ios,
-                                              size: 12,
-                                              color: Colors.grey,
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                ),
-                              );
-                            }),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-
-                      // Verified Balance Badge
-                      if (controller.selectedDebtor.value != null)
-                        Expanded(
-                          flex: 4,
-                          child: Container(
-                            height: 40,
-                            padding: const EdgeInsets.symmetric(horizontal: 12),
-                            decoration: BoxDecoration(
-                              color: Colors.green.shade50,
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: Colors.green.shade200),
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Row(
-                                  children: [
-                                    const Icon(
-                                      Icons.verified,
-                                      size: 18,
-                                      color: Colors.green,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      "FOUND",
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.green.shade700,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  crossAxisAlignment: CrossAxisAlignment.end,
-                                  children: [
-                                    const Text(
-                                      "Previous Due",
-                                      style: TextStyle(
-                                        fontSize: 9,
-                                        color: Colors.grey,
-                                      ),
-                                    ),
-                                    Text(
-                                      "৳${controller.totalPreviousDue.toStringAsFixed(0)}",
-                                      style: const TextStyle(
-                                        color: Colors.red,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 13,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                        )
-                      else
-                        // "New Agent" Hint
-                        Expanded(
-                          flex: 4,
-                          child: Container(
-                            height: 40,
-                            alignment: Alignment.centerLeft,
-                            child: const Text(
-                              "* To create NEW Agent, ignore search and fill info below.",
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: Colors.grey,
-                                fontStyle: FontStyle.italic,
-                              ),
-                            ),
-                          ),
-                        ),
-                    ],
+          // Row 1: Tabs & Search
+          if (isDesktop)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                tabsBlock,
+                const SizedBox(width: 16),
+                if (isAgent)
+                  Expanded(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(flex: 5, child: searchFieldBlock),
+                        const SizedBox(width: 12),
+                        Expanded(flex: 4, child: badgeBlock),
+                      ],
+                    ),
                   ),
-                ),
-            ],
-          ),
+              ],
+            )
+          else
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                tabsBlock,
+                if (isAgent) ...[
+                  const SizedBox(height: 12),
+                  searchFieldBlock,
+                  const SizedBox(height: 8),
+                  badgeBlock,
+                ],
+              ],
+            ),
 
           const SizedBox(height: 12),
 
-          // 2.3 Manual Info Fields
-          Row(
-            children: [
-              Expanded(
-                flex: 2,
-                child: _erpInput(
+          // Row 2: Manual Info Fields
+          if (isDesktop)
+            Row(
+              children: [
+                Expanded(
+                  flex: 2,
+                  child: _erpInput(
+                    controller.phoneC,
+                    "Phone Number",
+                    isNumber: true,
+                    highlight: true,
+                    icon: Icons.phone,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  flex: 3,
+                  child: _erpInput(
+                    controller.nameC,
+                    "Customer Name",
+                    icon: Icons.person,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  flex: 3,
+                  child: _erpInput(
+                    controller.addressC,
+                    "Address / Location",
+                    icon: Icons.location_on,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  flex: 2,
+                  child: _erpInput(
+                    controller.shopC,
+                    "Shop Name",
+                    icon: Icons.store,
+                  ),
+                ),
+              ],
+            )
+          else
+            Column(
+              children: [
+                _erpInput(
                   controller.phoneC,
                   "Phone Number",
                   isNumber: true,
                   highlight: true,
                   icon: Icons.phone,
                 ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                flex: 3,
-                child: _erpInput(
+                const SizedBox(height: 8),
+                _erpInput(
                   controller.nameC,
                   "Customer Name",
                   icon: Icons.person,
                 ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                flex: 3,
-                child: _erpInput(
+                const SizedBox(height: 8),
+                _erpInput(
                   controller.addressC,
                   "Address / Location",
                   icon: Icons.location_on,
                 ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                flex: 2,
-                child: _erpInput(
-                  controller.shopC,
-                  "Shop Name",
-                  icon: Icons.store,
-                ),
-              ),
-            ],
-          ),
+                const SizedBox(height: 8),
+                _erpInput(controller.shopC, "Shop Name", icon: Icons.store),
+              ],
+            ),
 
-          // 2.4 Logistics Row
+          // Row 3: Logistics (Uses Wrap to naturally flow on Mobile)
           Padding(
             padding: const EdgeInsets.only(top: 12),
-            child: Row(
+            child: Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 Container(
                   height: 40,
-                  width: 240,
+                  width: isDesktop ? 240 : double.infinity,
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   decoration: BoxDecoration(
                     border: Border.all(color: Colors.grey.shade300),
@@ -540,13 +588,17 @@ class LiveOrderSalesPage extends StatelessWidget {
                 ),
 
                 if (controller.isConditionSale.value) ...[
-                  const SizedBox(width: 16),
-                  Container(width: 1, height: 25, color: Colors.grey.shade300),
-                  const SizedBox(width: 16),
-                  // Courier Dropdown
+                  if (isDesktop)
+                    Container(
+                      width: 1,
+                      height: 25,
+                      color: Colors.grey.shade300,
+                      margin: const EdgeInsets.symmetric(horizontal: 6),
+                    ),
+
                   Container(
                     height: 40,
-                    width: 200,
+                    width: isDesktop ? 200 : double.infinity,
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     decoration: BoxDecoration(
                       color: Colors.orange.shade50,
@@ -578,18 +630,24 @@ class LiveOrderSalesPage extends StatelessWidget {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 10),
+
                   SizedBox(
-                    width: 140,
+                    width:
+                        isDesktop
+                            ? 140
+                            : (MediaQuery.of(context).size.width / 2) - 22,
                     child: _erpInput(
                       controller.challanC,
                       "Challan No",
                       icon: Icons.receipt,
                     ),
                   ),
-                  const SizedBox(width: 10),
+
                   SizedBox(
-                    width: 100,
+                    width:
+                        isDesktop
+                            ? 100
+                            : (MediaQuery.of(context).size.width / 2) - 22,
                     child: _erpInput(
                       controller.cartonsC,
                       "Carton Qty",
@@ -597,15 +655,15 @@ class LiveOrderSalesPage extends StatelessWidget {
                       icon: Icons.inventory_2,
                     ),
                   ),
-                  if (controller.selectedCourier.value == 'Other') ...[
-                    const SizedBox(width: 10),
-                    Expanded(
+
+                  if (controller.selectedCourier.value == 'Other')
+                    SizedBox(
+                      width: isDesktop ? 250 : double.infinity,
                       child: _erpInput(
                         controller.otherCourierC,
                         "Custom Courier Name",
                       ),
                     ),
-                  ],
                 ],
               ],
             ),
@@ -616,205 +674,240 @@ class LiveOrderSalesPage extends StatelessWidget {
   }
 
   // --- 3. EXPANDED PAYMENT SECTION ---
-  Widget _buildExpandedPaymentSection(LiveSalesController controller) {
-    return Column(
+  Widget _buildExpandedPaymentSection(
+    LiveSalesController controller,
+    bool isDesktop,
+  ) {
+    Widget cashBlock = Container(
+      height: 85,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.green.shade50.withOpacity(0.5),
+        border: Border.all(color: Colors.green.shade200),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: const [
+              Icon(Icons.money, size: 18, color: Colors.green),
+              SizedBox(width: 8),
+              Text(
+                "CASH PAYMENT",
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                  color: Colors.green,
+                ),
+              ),
+            ],
+          ),
+          _erpPaymentInput(controller.cashC, "Received Amount", Colors.green),
+        ],
+      ),
+    );
+
+    Widget bkashBlock = Row(
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // CASH BLOCK
-            Expanded(
-              flex: 2,
-              child: Container(
-                height: 85,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.green.shade50.withOpacity(0.5),
-                  border: Border.all(color: Colors.green.shade200),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
-                      children: const [
-                        Icon(Icons.money, size: 18, color: Colors.green),
-                        SizedBox(width: 8),
-                        Text(
-                          "CASH PAYMENT",
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                            color: Colors.green,
-                          ),
-                        ),
-                      ],
-                    ),
-                    _erpPaymentInput(
-                      controller.cashC,
-                      "Received Amount",
-                      Colors.green,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(width: 16),
-
-            // MOBILE BANKING BLOCK
-            Expanded(
-              flex: 5,
-              child: Container(
-                height: 85,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.pink.shade50.withOpacity(0.3),
-                  border: Border.all(color: Colors.pink.shade100),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
-                      children: const [
-                        Icon(
-                          Icons.mobile_friendly,
-                          size: 18,
-                          color: Colors.pink,
-                        ),
-                        SizedBox(width: 8),
-                        Text(
-                          "MOBILE BANKING",
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                            color: Colors.pink,
-                          ),
-                        ),
-                      ],
-                    ),
-                    Row(
-                      children: [
-                        // BKASH
-                        Expanded(
-                          child: Row(
-                            children: [
-                              Expanded(
-                                flex: 4,
-                                child: _erpPaymentInput(
-                                  controller.bkashC,
-                                  "Bkash Amt",
-                                  Colors.pink,
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              Expanded(
-                                flex: 6,
-                                child: _erpInput(
-                                  controller.bkashNumberC,
-                                  "Bkash No (017..)",
-                                  icon: Icons.phone_android,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        // NAGAD
-                        Expanded(
-                          child: Row(
-                            children: [
-                              Expanded(
-                                flex: 4,
-                                child: _erpPaymentInput(
-                                  controller.nagadC,
-                                  "Nagad Amt",
-                                  Colors.orange,
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              Expanded(
-                                flex: 6,
-                                child: _erpInput(
-                                  controller.nagadNumberC,
-                                  "Nagad No (016..)",
-                                  icon: Icons.phone_android,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
+        Expanded(
+          flex: 4,
+          child: _erpPaymentInput(controller.bkashC, "Bkash Amt", Colors.pink),
         ),
-
-        const SizedBox(height: 12),
-
-        Row(
-          children: [
-            // BANK BLOCK
-            Expanded(
-              flex: 7,
-              child: Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.blue.shade50.withOpacity(0.3),
-                  border: Border.all(color: Colors.blue.shade100),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.account_balance,
-                      size: 18,
-                      color: Colors.blue,
-                    ),
-                    const SizedBox(width: 8),
-                    SizedBox(
-                      width: 120,
-                      child: _erpPaymentInput(
-                        controller.bankC,
-                        "Bank Amt",
-                        Colors.blue,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _erpInput(
-                        controller.bankNameC,
-                        "Bank Name (e.g. City Bank)",
-                        icon: Icons.business,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _erpInput(
-                        controller.bankAccC,
-                        "Acc No / Trx ID",
-                        icon: Icons.numbers,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
+        const SizedBox(width: 6),
+        Expanded(
+          flex: 6,
+          child: _erpInput(
+            controller.bkashNumberC,
+            "Bkash No (017..)",
+            icon: Icons.phone_android,
+          ),
         ),
       ],
     );
+
+    Widget nagadBlock = Row(
+      children: [
+        Expanded(
+          flex: 4,
+          child: _erpPaymentInput(
+            controller.nagadC,
+            "Nagad Amt",
+            Colors.orange,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          flex: 6,
+          child: _erpInput(
+            controller.nagadNumberC,
+            "Nagad No (016..)",
+            icon: Icons.phone_android,
+          ),
+        ),
+      ],
+    );
+
+    Widget mobileBankingBlock = Container(
+      height:
+          isDesktop
+              ? 85
+              : null, // Uses original 85 height on Desktop to fix bugs
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.pink.shade50.withOpacity(0.3),
+        border: Border.all(color: Colors.pink.shade100),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: const [
+              Icon(Icons.mobile_friendly, size: 18, color: Colors.pink),
+              SizedBox(width: 8),
+              Text(
+                "MOBILE BANKING",
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                  color: Colors.pink,
+                ),
+              ),
+            ],
+          ),
+          if (!isDesktop) const SizedBox(height: 12),
+          if (isDesktop)
+            Row(
+              children: [
+                Expanded(child: bkashBlock),
+                const SizedBox(width: 16),
+                Expanded(child: nagadBlock),
+              ],
+            )
+          else
+            Column(
+              children: [bkashBlock, const SizedBox(height: 8), nagadBlock],
+            ),
+        ],
+      ),
+    );
+
+    Widget bankBlock = Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.blue.shade50.withOpacity(0.3),
+        border: Border.all(color: Colors.blue.shade100),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child:
+          isDesktop
+              ? Row(
+                children: [
+                  const Icon(
+                    Icons.account_balance,
+                    size: 18,
+                    color: Colors.blue,
+                  ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 120,
+                    child: _erpPaymentInput(
+                      controller.bankC,
+                      "Bank Amt",
+                      Colors.blue,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _erpInput(
+                      controller.bankNameC,
+                      "Bank Name (e.g. City Bank)",
+                      icon: Icons.business,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _erpInput(
+                      controller.bankAccC,
+                      "Acc No / Trx ID",
+                      icon: Icons.numbers,
+                    ),
+                  ),
+                ],
+              )
+              : Column(
+                children: [
+                  Row(
+                    children: const [
+                      Icon(Icons.account_balance, size: 18, color: Colors.blue),
+                      SizedBox(width: 8),
+                      Text(
+                        "BANK PAYMENT",
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                          color: Colors.blue,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  _erpPaymentInput(controller.bankC, "Bank Amt", Colors.blue),
+                  const SizedBox(height: 8),
+                  _erpInput(
+                    controller.bankNameC,
+                    "Bank Name",
+                    icon: Icons.business,
+                  ),
+                  const SizedBox(height: 8),
+                  _erpInput(
+                    controller.bankAccC,
+                    "Acc No / Trx ID",
+                    icon: Icons.numbers,
+                  ),
+                ],
+              ),
+    );
+
+    // Identical return type to original code for Desktop to enforce safe layout.
+    if (isDesktop) {
+      return Column(
+        children: [
+          Row(
+            crossAxisAlignment:
+                CrossAxisAlignment
+                    .start, // FIXED: Removed stretch which caused the infinite constraint error.
+            children: [
+              Expanded(flex: 2, child: cashBlock),
+              const SizedBox(width: 16),
+              Expanded(flex: 5, child: mobileBankingBlock),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(children: [Expanded(flex: 7, child: bankBlock)]),
+        ],
+      );
+    } else {
+      return Column(
+        children: [
+          cashBlock,
+          const SizedBox(height: 12),
+          mobileBankingBlock,
+          const SizedBox(height: 12),
+          bankBlock,
+        ],
+      );
+    }
   }
 
   // --- 4. CART & SEARCH ---
   Widget _buildCartSection(
     LiveSalesController controller,
     RxString searchQuery,
+    bool isDesktop,
   ) {
     return Container(
       decoration: BoxDecoration(
@@ -873,7 +966,6 @@ class LiveOrderSalesPage extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 12),
-                // Search Cart
                 SizedBox(
                   height: 40,
                   child: TextField(
@@ -923,7 +1015,6 @@ class LiveOrderSalesPage extends StatelessWidget {
                 );
               }
 
-              // SEARCH FILTER
               final filteredCart =
                   controller.cart.where((item) {
                     final query = searchQuery.value.toLowerCase();
@@ -1108,7 +1199,6 @@ class LiveOrderSalesPage extends StatelessWidget {
                   );
                 }),
                 const SizedBox(height: 16),
-                // DISCOUNT BLOCK
                 TextField(
                   controller: controller.discountC,
                   textAlign: TextAlign.center,
@@ -1146,8 +1236,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                     controller.updatePaymentCalculations();
                   },
                 ),
-                const SizedBox(width: 16),
-
+                const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,
                   height: 50,
@@ -1207,54 +1296,14 @@ class LiveOrderSalesPage extends StatelessWidget {
   }
 
   // --- 5. PRODUCT TABLE (LEFT SIDE) ---
-  Widget _productInventoryTable(LiveSalesController controller) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade300),
-      ),
-      child: Column(
+  Widget _productInventoryTable(
+    LiveSalesController controller,
+    bool isDesktop,
+  ) {
+    // Extracted the core table builder so we can wrap it horizontally for mobile
+    Widget buildTableContent() {
+      return Column(
         children: [
-          // Table Toolbar
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.inventory_2_outlined,
-                  size: 20,
-                  color: Colors.black87,
-                ),
-                const SizedBox(width: 10),
-                const Text(
-                  "PRODUCT CATALOG",
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 15,
-                    color: Colors.black87,
-                  ),
-                ),
-                const Spacer(),
-                SizedBox(
-                  width: 250,
-                  height: 40,
-                  child: TextField(
-                    onChanged: (v) => controller.productCtrl.search(v),
-                    decoration: InputDecoration(
-                      hintText: "Search Name / Model / Code...",
-                      prefixIcon: const Icon(Icons.search, size: 18),
-                      contentPadding: EdgeInsets.zero,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
           // Table Headers
           Container(
             color: const Color(0xFFF1F5F9),
@@ -1386,14 +1435,10 @@ class LiveOrderSalesPage extends StatelessWidget {
                             Expanded(
                               flex: 2,
                               child: Obx(() {
-                                // Decide which price to show in the list based on selection
-                                double price;
-                                if (controller.customerType.value == "AGENT") {
-                                  price = p.agent;
-                                } else {
-                                  // VIP & Wholesale both use base wholesale price
-                                  price = p.wholesale;
-                                }
+                                double price =
+                                    controller.customerType.value == "AGENT"
+                                        ? p.agent
+                                        : p.wholesale;
                                 return Text(
                                   "৳${price.toStringAsFixed(0)}",
                                   textAlign: TextAlign.right,
@@ -1433,6 +1478,111 @@ class LiveOrderSalesPage extends StatelessWidget {
                 },
               );
             }),
+          ),
+        ],
+      );
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade300),
+      ),
+      child: Column(
+        children: [
+          // Table Toolbar
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child:
+                isDesktop
+                    ? Row(
+                      children: [
+                        const Icon(
+                          Icons.inventory_2_outlined,
+                          size: 20,
+                          color: Colors.black87,
+                        ),
+                        const SizedBox(width: 10),
+                        const Text(
+                          "PRODUCT CATALOG",
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                            color: Colors.black87,
+                          ),
+                        ),
+                        const Spacer(),
+                        SizedBox(
+                          width: 250,
+                          height: 40,
+                          child: TextField(
+                            onChanged: (v) => controller.productCtrl.search(v),
+                            decoration: InputDecoration(
+                              hintText: "Search Name / Model / Code...",
+                              prefixIcon: const Icon(Icons.search, size: 18),
+                              contentPadding: EdgeInsets.zero,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    )
+                    : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: const [
+                            Icon(
+                              Icons.inventory_2_outlined,
+                              size: 20,
+                              color: Colors.black87,
+                            ),
+                            SizedBox(width: 10),
+                            Text(
+                              "PRODUCT CATALOG",
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                                color: Colors.black87,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          height: 40,
+                          child: TextField(
+                            onChanged: (v) => controller.productCtrl.search(v),
+                            decoration: InputDecoration(
+                              hintText: "Search Name / Model...",
+                              prefixIcon: const Icon(Icons.search, size: 18),
+                              contentPadding: EdgeInsets.zero,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+          ),
+
+          // Main Table Area - Handled for mobile horizontal scrolling safely
+          Expanded(
+            child:
+                isDesktop
+                    ? buildTableContent()
+                    : SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: SizedBox(
+                        width:
+                            700, // Forces the original row spacing to prevent UI squash bugs
+                        child: buildTableContent(),
+                      ),
+                    ),
           ),
 
           // Pagination Footer
@@ -1562,7 +1712,7 @@ class LiveOrderSalesPage extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// LOGIC WIDGETS
+// LOGIC WIDGETS (Untouched)
 // ---------------------------------------------------------------------------
 
 class CartQuantityEditor extends StatefulWidget {

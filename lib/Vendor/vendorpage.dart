@@ -1,11 +1,8 @@
-// ignore_for_file: deprecated_member_use
+// ignore_for_file: deprecated_member_use, avoid_print, use_build_context_synchronously
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
 import 'package:gtel_erp/Vendor/vendorcontroller.dart';
 import 'package:gtel_erp/Vendor/vendormodel.dart';
 
@@ -88,7 +85,7 @@ class VendorPage extends StatelessWidget {
             ),
           ),
 
-          // List
+          // Datatable (FULL WIDTH FIX)
           Expanded(
             child: Obx(() {
               if (controller.isLoading.value) {
@@ -114,16 +111,198 @@ class VendorPage extends StatelessWidget {
                 );
               }
 
-              return ListView.separated(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: controller.vendors.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 12),
-                itemBuilder: (context, index) {
-                  return _VendorCard(
-                    vendor: controller.vendors[index],
-                    controller: controller,
-                  );
-                },
+              return Card(
+                elevation: 0,
+                margin: EdgeInsets.zero, // REMOVED MARGIN FOR FULL WIDTH
+                shape: const RoundedRectangleBorder(
+                  borderRadius: BorderRadius.zero, // Made edges straight
+                  side: BorderSide(color: AppTheme.border),
+                ),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    return SingleChildScrollView(
+                      scrollDirection: Axis.vertical,
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: ConstrainedBox(
+                          // FORCES TABLE TO STRETCH TO SCREEN WIDTH
+                          constraints: BoxConstraints(
+                            minWidth: constraints.maxWidth,
+                          ),
+                          child: DataTable(
+                            headingRowColor: MaterialStateProperty.all(
+                              AppTheme.bgGrey,
+                            ),
+                            columnSpacing: 25,
+                            dataRowHeight: 65,
+                            columns: const [
+                              DataColumn(
+                                label: Text(
+                                  'Company Name',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              DataColumn(
+                                label: Text(
+                                  'Contact',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              DataColumn(
+                                label: Text(
+                                  'Balance (BDT)',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              DataColumn(
+                                label: Text(
+                                  'Status',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              DataColumn(
+                                label: Text(
+                                  'Actions',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            ],
+                            rows:
+                                controller.vendors.map((vendor) {
+                                  Color color =
+                                      vendor.totalDue > 0
+                                          ? AppTheme.danger
+                                          : (vendor.totalDue < 0
+                                              ? AppTheme.success
+                                              : AppTheme.textMuted);
+
+                                  return DataRow(
+                                    cells: [
+                                      DataCell(
+                                        Row(
+                                          children: [
+                                            CircleAvatar(
+                                              radius: 16,
+                                              backgroundColor: AppTheme
+                                                  .darkSlate
+                                                  .withOpacity(0.1),
+                                              child: Text(
+                                                vendor.name.isNotEmpty
+                                                    ? vendor.name[0]
+                                                        .toUpperCase()
+                                                    : "?",
+                                                style: const TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 14,
+                                                ),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 10),
+                                            Text(
+                                              vendor.name,
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      DataCell(
+                                        Text(
+                                          vendor.contact,
+                                          style: const TextStyle(
+                                            color: AppTheme.textMuted,
+                                          ),
+                                        ),
+                                      ),
+                                      DataCell(
+                                        Text(
+                                          vendor.formattedDue,
+                                          style: TextStyle(
+                                            color: color,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 15,
+                                          ),
+                                        ),
+                                      ),
+                                      DataCell(_statusBadge(vendor.totalDue)),
+                                      DataCell(
+                                        Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            IconButton(
+                                              icon: const Icon(
+                                                Icons.edit_outlined,
+                                                color: Colors.blueGrey,
+                                                size: 20,
+                                              ),
+                                              tooltip: "Edit Vendor",
+                                              onPressed:
+                                                  () => _showEditVendorDialog(
+                                                    controller,
+                                                    vendor,
+                                                  ),
+                                            ),
+                                            IconButton(
+                                              icon: const Icon(
+                                                Icons.delete_outline,
+                                                color: AppTheme.danger,
+                                                size: 20,
+                                              ),
+                                              tooltip: "Delete Vendor",
+                                              onPressed:
+                                                  () =>
+                                                      _showDeleteVendorConfirm(
+                                                        controller,
+                                                        vendor,
+                                                      ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            ElevatedButton(
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor:
+                                                    AppTheme.primary,
+                                                shape: RoundedRectangleBorder(
+                                                  borderRadius:
+                                                      BorderRadius.circular(8),
+                                                ),
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 16,
+                                                      vertical: 8,
+                                                    ),
+                                              ),
+                                              onPressed: () {
+                                                controller.loadHistoryInitial(
+                                                  vendor.docId!,
+                                                );
+                                                Get.to(
+                                                  () => VendorDetailPage(
+                                                    vendor: vendor,
+                                                    controller: controller,
+                                                  ),
+                                                );
+                                              },
+                                              child: const Text(
+                                                "Ledger",
+                                                style: TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 12,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  );
+                                }).toList(),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
               );
             }),
           ),
@@ -143,7 +322,6 @@ class VendorPage extends StatelessWidget {
         border: Border(top: BorderSide(color: AppTheme.border)),
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Obx(
             () => Text(
@@ -179,6 +357,38 @@ class VendorPage extends StatelessWidget {
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _statusBadge(double due) {
+    String text;
+    Color bg;
+    Color fg;
+
+    if (due > 0) {
+      text = "PAYABLE";
+      bg = AppTheme.danger.withOpacity(0.1);
+      fg = AppTheme.danger;
+    } else if (due < 0) {
+      text = "ADVANCE";
+      bg = AppTheme.success.withOpacity(0.1);
+      fg = AppTheme.success;
+    } else {
+      text = "SETTLED";
+      bg = AppTheme.textMuted.withOpacity(0.1);
+      fg = AppTheme.textMuted;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(color: fg, fontSize: 11, fontWeight: FontWeight.bold),
       ),
     );
   }
@@ -219,7 +429,10 @@ class VendorPage extends StatelessWidget {
             backgroundColor: AppTheme.darkSlate,
             padding: const EdgeInsets.symmetric(vertical: 12),
           ),
-          onPressed: () => ctrl.addVendor(nameC.text, contactC.text),
+          onPressed: () {
+            if (nameC.text.trim().isEmpty) return;
+            ctrl.addVendor(nameC.text, contactC.text);
+          },
           child: const Text(
             "Create Vendor",
             style: TextStyle(color: Colors.white),
@@ -228,142 +441,84 @@ class VendorPage extends StatelessWidget {
       ),
     );
   }
-}
 
-class _VendorCard extends StatelessWidget {
-  final VendorModel vendor;
-  final VendorController controller;
-  const _VendorCard({required this.vendor, required this.controller});
-
-  @override
-  Widget build(BuildContext context) {
-    Color color =
-        vendor.totalDue > 0
-            ? AppTheme.danger
-            : (vendor.totalDue < 0 ? AppTheme.success : AppTheme.textMuted);
-
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: const BorderSide(color: AppTheme.border),
+  void _showEditVendorDialog(VendorController ctrl, VendorModel vendor) {
+    final nameC = TextEditingController(text: vendor.name);
+    final contactC = TextEditingController(text: vendor.contact);
+    Get.defaultDialog(
+      title: "Edit Vendor",
+      titleStyle: const TextStyle(fontWeight: FontWeight.bold),
+      contentPadding: const EdgeInsets.all(24),
+      radius: 12,
+      content: Column(
+        children: [
+          TextField(
+            controller: nameC,
+            decoration: const InputDecoration(
+              labelText: "Company Name",
+              border: OutlineInputBorder(),
+              prefixIcon: Icon(Icons.business),
+            ),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: contactC,
+            decoration: const InputDecoration(
+              labelText: "Contact / Phone",
+              border: OutlineInputBorder(),
+              prefixIcon: Icon(Icons.phone),
+            ),
+          ),
+        ],
       ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () {
-          controller.loadHistoryInitial(vendor.docId!);
-          Get.to(
-            () => VendorDetailPage(vendor: vendor, controller: controller),
-          );
-        },
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              CircleAvatar(
-                backgroundColor: AppTheme.bgGrey,
-                radius: 24,
-                child: Text(
-                  vendor.name.isNotEmpty ? vendor.name[0].toUpperCase() : "?",
-                  style: const TextStyle(
-                    color: AppTheme.darkSlate,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 18,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      vendor.name,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                        color: AppTheme.textDark,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.phone,
-                          size: 14,
-                          color: AppTheme.textMuted,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          vendor.contact,
-                          style: const TextStyle(
-                            color: AppTheme.textMuted,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    "BDT ${vendor.formattedDue}",
-                    style: TextStyle(
-                      color: color,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 16,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  _statusBadge(vendor.totalDue),
-                ],
-              ),
-            ],
+      confirm: SizedBox(
+        width: double.infinity,
+        child: ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppTheme.primary,
+            padding: const EdgeInsets.symmetric(vertical: 12),
+          ),
+          onPressed: () {
+            if (nameC.text.trim().isEmpty) return;
+            ctrl.updateVendor(
+              vendorId: vendor.docId!,
+              name: nameC.text,
+              contact: contactC.text,
+            );
+          },
+          child: const Text(
+            "Save Changes",
+            style: TextStyle(color: Colors.white),
           ),
         ),
       ),
     );
   }
 
-  Widget _statusBadge(double due) {
-    String text;
-    Color bg;
-    Color fg;
-
-    if (due > 0) {
-      text = "PAYABLE";
-      bg = AppTheme.danger.withOpacity(0.1);
-      fg = AppTheme.danger;
-    } else if (due < 0) {
-      text = "ADVANCE";
-      bg = AppTheme.success.withOpacity(0.1);
-      fg = AppTheme.success;
-    } else {
-      text = "SETTLED";
-      bg = AppTheme.textMuted.withOpacity(0.1);
-      fg = AppTheme.textMuted;
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(color: fg, fontSize: 10, fontWeight: FontWeight.bold),
-      ),
+  void _showDeleteVendorConfirm(VendorController ctrl, VendorModel vendor) {
+    Get.defaultDialog(
+      title: "Delete Vendor?",
+      middleText:
+          "Are you sure you want to delete ${vendor.name}? This action requires all transactions to be deleted first.",
+      textConfirm: "DELETE",
+      textCancel: "Cancel",
+      confirmTextColor: Colors.white,
+      buttonColor: AppTheme.danger,
+      onConfirm: () {
+        Get.back(); // close dialog
+        ctrl.deleteVendor(vendor.docId!);
+      },
     );
   }
 }
 
+// ==========================================
+// 3. VENDOR DETAIL PAGE (LEDGER)
+// ==========================================
 class VendorDetailPage extends StatelessWidget {
   final VendorModel vendor;
   final VendorController controller;
+
   const VendorDetailPage({
     super.key,
     required this.vendor,
@@ -386,7 +541,7 @@ class VendorDetailPage extends StatelessWidget {
                 fontWeight: FontWeight.bold,
               ),
             ),
-            Text(
+            const Text(
               "Vendor Ledger",
               style: TextStyle(
                 color: AppTheme.textMuted,
@@ -407,16 +562,15 @@ class VendorDetailPage extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.print_outlined),
             tooltip: "Print Statement",
-            onPressed: () => _generatePDF(context),
+            // Pass the whole vendor object so we have the ID to fetch all data
+            onPressed: () => controller.generateVendorReport(vendor),
           ),
         ],
       ),
       body: Column(
         children: [
-          // 1. Balance Summary
           _buildBalanceSummary(),
 
-          // 2. Action Buttons
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             child: Row(
@@ -426,7 +580,6 @@ class VendorDetailPage extends StatelessWidget {
                     label: "ADD BILL",
                     icon: Icons.post_add,
                     color: AppTheme.danger,
-                    // 'Purchase' usually increases debt (Credit)
                     onTap:
                         () => _openTransactionForm(
                           context,
@@ -434,13 +587,12 @@ class VendorDetailPage extends StatelessWidget {
                         ),
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 8),
                 Expanded(
                   child: _ActionButton(
-                    label: "MAKE PAYMENT",
+                    label: "PAYMENT",
                     icon: Icons.send,
                     color: AppTheme.success,
-                    // 'Payment' decreases debt (Debit) and reduces Cash/Bank
                     onTap:
                         () => _openTransactionForm(
                           context,
@@ -448,11 +600,23 @@ class VendorDetailPage extends StatelessWidget {
                         ),
                   ),
                 ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _ActionButton(
+                    label: "ADVANCE",
+                    icon: Icons.account_balance_wallet,
+                    color: AppTheme.primary,
+                    onTap:
+                        () => _openTransactionForm(
+                          context,
+                          TransactionMode.advance,
+                        ),
+                  ),
+                ),
               ],
             ),
           ),
 
-          // 3. Filters
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(
@@ -475,7 +639,6 @@ class VendorDetailPage extends StatelessWidget {
           ),
           const SizedBox(height: 10),
 
-          // 4. Headers
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             color: Colors.grey[100],
@@ -531,17 +694,13 @@ class VendorDetailPage extends StatelessWidget {
             ),
           ),
 
-          // 5. List
           Expanded(child: _buildTransactionList()),
 
-          // 6. Pagination
           _buildHistoryPagination(controller),
         ],
       ),
     );
   }
-
-  // --- WIDGETS ---
 
   Widget _buildBalanceSummary() {
     return Container(
@@ -634,12 +793,24 @@ class VendorDetailPage extends StatelessWidget {
               children: [
                 Expanded(
                   flex: 2,
-                  child: Text(
-                    DateFormat('dd MMM yyyy').format(tx.date),
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: AppTheme.textDark,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        DateFormat('dd MMM yy').format(tx.date),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppTheme.textDark,
+                        ),
+                      ),
+                      Text(
+                        DateFormat('hh:mm a').format(tx.date),
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: AppTheme.textMuted,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 Expanded(
@@ -664,7 +835,6 @@ class VendorDetailPage extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      // Show method if it's a payment
                       if (!isCredit && !isIncoming && tx.paymentMethod != null)
                         Text(
                           "Paid via: ${tx.paymentMethod}",
@@ -685,7 +855,7 @@ class VendorDetailPage extends StatelessWidget {
                     ),
                     decoration: BoxDecoration(
                       color:
-                          (isCredit || isIncoming)
+                          (isCredit && !isIncoming)
                               ? AppTheme.danger.withOpacity(0.1)
                               : AppTheme.success.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(4),
@@ -696,7 +866,7 @@ class VendorDetailPage extends StatelessWidget {
                         fontSize: 10,
                         fontWeight: FontWeight.bold,
                         color:
-                            (isCredit || isIncoming)
+                            (isCredit && !isIncoming)
                                 ? AppTheme.danger
                                 : AppTheme.success,
                       ),
@@ -713,7 +883,7 @@ class VendorDetailPage extends StatelessWidget {
                       fontSize: 13,
                       fontWeight: FontWeight.bold,
                       color:
-                          (isCredit || isIncoming)
+                          (isCredit && !isIncoming)
                               ? AppTheme.danger
                               : AppTheme.success,
                     ),
@@ -800,18 +970,26 @@ class VendorDetailPage extends StatelessWidget {
     );
   }
 
-  // =========================================================================
-  // UPDATED: ADD TRANSACTION FORM
-  // Now includes "Payment Method" Dropdown
-  // =========================================================================
   void _openTransactionForm(BuildContext context, TransactionMode mode) {
     final amountC = TextEditingController();
     final noteC = TextEditingController();
     Rx<DateTime> selectedDate = DateTime.now().obs;
 
-    // NEW: Payment Method Selection
     final List<String> methods = ['Cash', 'Bank', 'Bkash', 'Nagad'];
     RxString selectedMethod = 'Cash'.obs;
+
+    String title = "";
+    Color themeColor;
+    if (mode == TransactionMode.purchase) {
+      title = "Add Vendor Bill";
+      themeColor = AppTheme.danger;
+    } else if (mode == TransactionMode.payment) {
+      title = "Make Payment";
+      themeColor = AppTheme.success;
+    } else {
+      title = "Receive Advance/Refund";
+      themeColor = AppTheme.primary;
+    }
 
     Get.bottomSheet(
       Container(
@@ -828,9 +1006,7 @@ class VendorDetailPage extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  mode == TransactionMode.purchase
-                      ? "Add Vendor Bill"
-                      : "Add Payment",
+                  title,
                   style: const TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
@@ -846,7 +1022,6 @@ class VendorDetailPage extends StatelessWidget {
             const Divider(),
             const SizedBox(height: 16),
 
-            // Amount
             TextField(
               controller: amountC,
               keyboardType: TextInputType.number,
@@ -863,7 +1038,6 @@ class VendorDetailPage extends StatelessWidget {
             ),
             const SizedBox(height: 16),
 
-            // Date Picker
             InkWell(
               onTap: () async {
                 final d = await showDatePicker(
@@ -872,11 +1046,34 @@ class VendorDetailPage extends StatelessWidget {
                   firstDate: DateTime(2020),
                   lastDate: DateTime.now(),
                 );
-                if (d != null) selectedDate.value = d;
+                if (d != null) {
+                  final t = await showTimePicker(
+                    context: context,
+                    initialTime: TimeOfDay.now(),
+                  );
+                  if (t != null) {
+                    selectedDate.value = DateTime(
+                      d.year,
+                      d.month,
+                      d.day,
+                      t.hour,
+                      t.minute,
+                    );
+                  } else {
+                    final now = DateTime.now();
+                    selectedDate.value = DateTime(
+                      d.year,
+                      d.month,
+                      d.day,
+                      now.hour,
+                      now.minute,
+                    );
+                  }
+                }
               },
               child: InputDecorator(
                 decoration: InputDecoration(
-                  labelText: "Date",
+                  labelText: "Date & Time",
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
                   ),
@@ -884,17 +1081,17 @@ class VendorDetailPage extends StatelessWidget {
                 ),
                 child: Obx(
                   () => Text(
-                    DateFormat('dd MMM, yyyy').format(selectedDate.value),
+                    DateFormat(
+                      'dd MMM, yyyy - hh:mm a',
+                    ).format(selectedDate.value),
                   ),
                 ),
               ),
             ),
             const SizedBox(height: 16),
 
-            // NEW: Payment Method Dropdown
-            // Only show if we are making a payment (DEBIT)
-            // Bills (CREDIT) usually don't involve cash movement unless specified, defaults to Cash if needed
-            if (mode == TransactionMode.payment)
+            if (mode == TransactionMode.payment ||
+                mode == TransactionMode.advance)
               Column(
                 children: [
                   DropdownButtonFormField<String>(
@@ -920,7 +1117,6 @@ class VendorDetailPage extends StatelessWidget {
                 ],
               ),
 
-            // Note
             TextField(
               controller: noteC,
               decoration: InputDecoration(
@@ -933,15 +1129,11 @@ class VendorDetailPage extends StatelessWidget {
             ),
             const SizedBox(height: 24),
 
-            // Submit
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor:
-                      mode == TransactionMode.purchase
-                          ? AppTheme.danger
-                          : AppTheme.success,
+                  backgroundColor: themeColor,
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
@@ -949,16 +1141,24 @@ class VendorDetailPage extends StatelessWidget {
                 ),
                 onPressed: () {
                   if (amountC.text.isEmpty) return;
-
                   controller.addTransaction(
                     vendorId: vendor.docId!,
                     vendorName: vendor.name,
-                    type: mode == TransactionMode.purchase ? 'CREDIT' : 'DEBIT',
+                    type:
+                        mode == TransactionMode.purchase
+                            ? 'CREDIT'
+                            : (mode == TransactionMode.payment
+                                ? 'DEBIT'
+                                : 'CREDIT'),
                     amount: double.parse(amountC.text),
                     date: selectedDate.value,
                     notes: noteC.text,
-                    // Pass the selected method here
-                    paymentMethod: selectedMethod.value,
+                    paymentMethod:
+                        (mode == TransactionMode.payment ||
+                                mode == TransactionMode.advance)
+                            ? selectedMethod.value
+                            : null,
+                    isIncomingCash: mode == TransactionMode.advance,
                   );
                 },
                 child: const Text(
@@ -978,7 +1178,6 @@ class VendorDetailPage extends StatelessWidget {
     );
   }
 
-  // --- EDIT TRANSACTION ---
   void _showEditTransactionDialog(BuildContext context, VendorTransaction tx) {
     final amountC = TextEditingController(text: tx.amount.toString());
     final noteC = TextEditingController(text: tx.notes);
@@ -1007,7 +1206,29 @@ class VendorDetailPage extends StatelessWidget {
                 firstDate: DateTime(2020),
                 lastDate: DateTime.now(),
               );
-              if (d != null) editDate.value = d;
+              if (d != null) {
+                final t = await showTimePicker(
+                  context: context,
+                  initialTime: TimeOfDay.now(),
+                );
+                if (t != null) {
+                  editDate.value = DateTime(
+                    d.year,
+                    d.month,
+                    d.day,
+                    t.hour,
+                    t.minute,
+                  );
+                } else {
+                  editDate.value = DateTime(
+                    d.year,
+                    d.month,
+                    d.day,
+                    DateTime.now().hour,
+                    DateTime.now().minute,
+                  );
+                }
+              }
             },
             child: InputDecorator(
               decoration: const InputDecoration(
@@ -1016,7 +1237,9 @@ class VendorDetailPage extends StatelessWidget {
                 prefixIcon: Icon(Icons.calendar_today),
               ),
               child: Obx(
-                () => Text(DateFormat('dd MMM, yyyy').format(editDate.value)),
+                () => Text(
+                  DateFormat('dd MMM, yyyy - hh:mm a').format(editDate.value),
+                ),
               ),
             ),
           ),
@@ -1054,7 +1277,7 @@ class VendorDetailPage extends StatelessWidget {
     Get.defaultDialog(
       title: "Delete Transaction?",
       middleText:
-          "This will remove the transaction and reverse the balance impact. Cannot be undone.",
+          "This will remove the transaction, reverse the balance impact, and adjust the Cash Ledger.",
       textConfirm: "DELETE",
       textCancel: "Cancel",
       confirmTextColor: Colors.white,
@@ -1062,71 +1285,10 @@ class VendorDetailPage extends StatelessWidget {
       onConfirm: () => controller.deleteTransaction(vendor.docId!, tx),
     );
   }
-
-  Future<void> _generatePDF(BuildContext context) async {
-    final pdf = pw.Document();
-    final list = controller.currentTransactions;
-    pdf.addPage(
-      pw.MultiPage(
-        build:
-            (ctx) => [
-              pw.Header(
-                level: 0,
-                child: pw.Text(
-                  "Statement: ${vendor.name}",
-                  style: pw.TextStyle(
-                    fontSize: 20,
-                    fontWeight: pw.FontWeight.bold,
-                  ),
-                ),
-              ),
-              pw.Padding(
-                padding: const pw.EdgeInsets.only(bottom: 20),
-                child: pw.Text(
-                  "Generated on: ${DateFormat('dd MMM yyyy').format(DateTime.now())}",
-                ),
-              ),
-              pw.Table.fromTextArray(
-                headerStyle: pw.TextStyle(
-                  fontWeight: pw.FontWeight.bold,
-                  color: PdfColors.white,
-                ),
-                headerDecoration: const pw.BoxDecoration(
-                  color: PdfColors.blueGrey800,
-                ),
-                cellAlignments: {
-                  0: pw.Alignment.centerLeft,
-                  1: pw.Alignment.centerLeft,
-                  2: pw.Alignment.center,
-                  3: pw.Alignment.centerRight,
-                },
-                headers: ["Date", "Description", "Type", "Amount"],
-                data:
-                    list
-                        .map(
-                          (e) => [
-                            DateFormat('dd/MM/yyyy').format(e.date),
-                            e.shipmentName ?? e.notes ?? "-",
-                            e.isIncomingCash
-                                ? "ADVANCE"
-                                : (e.type == 'CREDIT' ? "BILL" : "PAYMENT"),
-                            e.formattedAmount,
-                          ],
-                        )
-                        .toList(),
-              ),
-            ],
-      ),
-    );
-    await Printing.layoutPdf(
-      onLayout: (f) => pdf.save(),
-      name: 'Statement_${vendor.name}.pdf',
-    );
-  }
 }
 
 // Helpers
-enum TransactionMode { purchase, payment }
+enum TransactionMode { purchase, payment, advance }
 
 class _ActionButton extends StatelessWidget {
   final String label;
@@ -1150,10 +1312,10 @@ class _ActionButton extends StatelessWidget {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
     ),
     onPressed: onTap,
-    icon: Icon(icon, size: 18),
+    icon: Icon(icon, size: 16),
     label: Text(
       label,
-      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
     ),
   );
 }
