@@ -1,10 +1,10 @@
 // ignore_for_file: deprecated_member_use, avoid_print
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
 import 'package:gtel_erp/Shipment/controller.dart';
 import 'package:gtel_erp/Shipment/shipmodel.dart';
 import 'package:gtel_erp/Shipment/shipmentdialog.dart';
-import 'package:gtel_erp/Stock/controller.dart';
 import 'package:intl/intl.dart';
 
 // --- ERP THEME COLORS ---

@@ -3,13 +3,38 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import '../Web Screen/homepage.dart'; // Adjust path to your AdminHomepage
+import 'package:gtel_erp/Core/Utils/app_logger.dart';
 
 class AuthController extends GetxController {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   RxBool isLoading = false.obs;
 
-  // Professional Error Handler
+  final Rxn<User> _firebaseUser = Rxn<User>();
+  User? get user => _firebaseUser.value;
+
+  @override
+  void onInit() {
+    super.onInit();
+    _firebaseUser.bindStream(_auth.authStateChanges());
+  }
+
+  @override
+  void onReady() {
+    super.onReady();
+    ever(_firebaseUser, _initialScreen);
+  }
+
+  void _initialScreen(User? user) {
+    if (user == null) {
+      AppLogger.w("User is not logged in. Navigating to Login Page.");
+      Get.offAllNamed('/');
+    } else {
+      AppLogger.i(
+        "User is logged in as ${user.email}. Navigating to Home Page.",
+      );
+      Get.offAllNamed('/home');
+    }
+  }
   String _handleAuthError(String code) {
     switch (code) {
       case 'invalid-email':
@@ -34,15 +59,17 @@ class AuthController extends GetxController {
   Future<void> login(String email, String password) async {
     try {
       isLoading.value = true;
+      Get.dialog(
+        const Center(child: CircularProgressIndicator()),
+        barrierDismissible: false,
+      );
 
       await _auth.signInWithEmailAndPassword(
         email: email.trim(),
         password: password.trim(),
       );
 
-      // Success: Clear fields and navigate
-      Get.offAll(() => const AdminHomepage());
-
+      Get.back();
       Get.snackbar(
         "Welcome Back",
         "Successfully logged into G-Tel ERP",
@@ -52,7 +79,8 @@ class AuthController extends GetxController {
         maxWidth: 400,
       );
     } on FirebaseAuthException catch (e) {
-      // Handle Firebase Errors professionally
+      if (Get.isDialogOpen ?? false) Get.back();
+
       Get.snackbar(
         "Login Failed",
         _handleAuthError(e.code),
@@ -64,6 +92,7 @@ class AuthController extends GetxController {
         icon: const Icon(Icons.error_outline, color: Colors.white),
       );
     } catch (e) {
+      if (Get.isDialogOpen ?? false) Get.back();
       Get.snackbar(
         "Error",
         "Something went wrong. Please try again.",
@@ -75,7 +104,17 @@ class AuthController extends GetxController {
   }
 
   void logout() async {
-    await _auth.signOut();
-    Get.offAllNamed('/login'); // Make sure to define this route in main.dart
+    try {
+      Get.dialog(
+        const Center(child: CircularProgressIndicator()),
+        barrierDismissible: false,
+      );
+
+      await _auth.signOut();
+      Get.back();
+    } catch (e) {
+      if (Get.isDialogOpen ?? false) Get.back();
+      Get.snackbar("Logout Error", e.toString());
+    }
   }
 }

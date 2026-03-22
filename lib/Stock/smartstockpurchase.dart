@@ -4,12 +4,10 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:get/get.dart';
+import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
 import 'package:http/http.dart' as http;
-
-// Make sure your imports match your project structure
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/Debtor%20Purchase/purchasecontroller.dart';
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/debatorcontroller.dart';
-import 'package:gtel_erp/Stock/controller.dart';
 import 'package:gtel_erp/Stock/model.dart';
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/model.dart';
 

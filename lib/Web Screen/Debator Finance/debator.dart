@@ -108,8 +108,8 @@ class _DebatorpageState extends State<Debatorpage> {
             children: [
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
+                children: const [
+                  Text(
                     "Debtor Ledger",
                     style: TextStyle(
                       fontSize: 22,
@@ -118,37 +118,46 @@ class _DebatorpageState extends State<Debatorpage> {
                       letterSpacing: -0.5,
                     ),
                   ),
-                  const Text(
+                  Text(
                     "Manage receivables and customer accounts",
                     style: TextStyle(fontSize: 13, color: textLight),
                   ),
                 ],
               ),
               // Reports Dropdown / Buttons
-              Row(
-                children: [
-                  _buildReportButton(
-                    icon: Icons.auto_fix_high,
-                    label: "Fix Search DB",
-                    onTap: () => _confirmRepairDialog(),
-                    color: Colors.blueAccent,
-                  ),
-                  const SizedBox(width: 10),
-                  _buildReportButton(
-                    icon: Icons.upload_file,
-                    label: "Payables Rpt",
-                    onTap: controller.downloadAllPayablesReport,
-                    color: Colors.orange,
-                  ),
-                  const SizedBox(width: 10),
-                  _buildReportButton(
-                    icon: Icons.download_for_offline,
-                    label: "Due Report",
-                    onTap: controller.downloadAllDebtorsReport,
-                    color: primaryColor,
-                  ),
-                  
-                ],
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    _buildReportButton(
+                      icon: Icons.auto_fix_high,
+                      label: "Fix Search DB",
+                      onTap: () => _confirmRepairDialog(),
+                      color: Colors.blueAccent,
+                    ),
+                    const SizedBox(width: 10),
+                    _buildReportButton(
+                      icon: Icons.upload_file,
+                      label: "Payables Rpt",
+                      onTap: controller.downloadAllPayablesReport,
+                      color: Colors.orange,
+                    ),
+                    const SizedBox(width: 10),
+                    _buildReportButton(
+                      icon: Icons.download_for_offline,
+                      label: "Due Report",
+                      onTap: controller.downloadAllDebtorsReport,
+                      color: primaryColor,
+                    ),
+                    const SizedBox(width: 10),
+                    _buildReportButton(
+                      icon: FontAwesomeIcons.gift,
+                      label: "Eid Bonus Rpt",
+                      onTap: controller.downloadYearlyEidBonusReport,
+                      color: Colors.teal, // Fresh color for Eid Bonus
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -610,14 +619,14 @@ class _DebatorpageState extends State<Debatorpage> {
               ),
             ),
 
-            // 3. Balance Status (Live Stream)
+            // 3. Balance Status (CRITICAL FIX: Fully accurate live stream)
             Expanded(
               flex: 2,
-              child: StreamBuilder<double>(
-                stream: controller.getLiveBalance(debtor.id),
-                initialData: debtor.balance,
+              child: StreamBuilder<Map<String, double>>(
+                stream: controller.getDebtorBreakdown(debtor.id),
                 builder: (context, snapshot) {
-                  double bal = snapshot.data ?? 0.0;
+                  // Fallback to locally cached balance only while loading
+                  double bal = snapshot.data?['total'] ?? debtor.balance;
                   bool isDue = bal > 0;
 
                   return Row(

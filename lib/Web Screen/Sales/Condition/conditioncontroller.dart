@@ -4,7 +4,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:gtel_erp/Stock/controller.dart';
+import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
 import 'package:gtel_erp/Web%20Screen/Sales/Condition/cmodel.dart';
 import 'package:gtel_erp/Web%20Screen/Sales/controller.dart';
 import 'package:intl/intl.dart';
@@ -500,6 +500,9 @@ class ConditionSalesController extends GetxController {
 
       double discountVal = (data['discount'] as num?)?.toDouble() ?? 0.0;
 
+      // 🌟 FIX PART A: EXTRACT THE DISCOUNT NOTE FROM FIRESTORE FOR REPRINT 🌟
+      String savedDiscountNote = data['discountNote'] ?? "";
+
       double oldDueSnap =
           double.tryParse(data['snapshotOldDue']?.toString() ?? "0") ?? 0.0;
       double runningDueSnap =
@@ -540,6 +543,8 @@ class ConditionSalesController extends GetxController {
         authorizedName: sellerName,
         authorizedPhone: sellerPhone,
         discount: discountVal,
+        discountNote:
+            savedDiscountNote, // 🌟 FIX PART B: PASS THE SAVED NOTE TO PDF 🌟
         packagerName: packagerName,
       );
     } catch (e) {
@@ -567,6 +572,7 @@ class ConditionSalesController extends GetxController {
     required String authorizedName,
     required String authorizedPhone,
     double discount = 0.0,
+    String discountNote = "", // <-- ADDED PARAMETER
     String? packagerName,
   }) async {
     final pdf = pw.Document();
@@ -664,6 +670,7 @@ class ConditionSalesController extends GetxController {
               items,
               boldFont,
               regularFont,
+              discountNote, // <-- PASSING IT DOWN TO SUMMARY
             ),
             pw.SizedBox(height: 5),
             _buildNewDues(totalPreviousBalance, netTotalDue, regularFont),
@@ -922,11 +929,14 @@ class ConditionSalesController extends GetxController {
             width: col1Width,
             child: pw.Text(
               label,
-              style: pw.TextStyle(font: bold, fontSize: 10, ),
+              style: pw.TextStyle(font: bold, fontSize: 10),
             ),
           ),
           pw.Expanded(
-            child: pw.Text( value, style: pw.TextStyle(font: bold, fontSize: 10)),
+            child: pw.Text(
+              value,
+              style: pw.TextStyle(font: bold, fontSize: 10),
+            ),
           ),
         ],
       ),
@@ -1042,11 +1052,20 @@ class ConditionSalesController extends GetxController {
     List items,
     pw.Font bold,
     pw.Font reg,
+    String discountNote, // <-- ADDED TO SUMMARY
   ) {
     int totalQty = items.fold(
       0,
       (sumv, item) => sumv + ((item['qty'] as num?)?.toInt() ?? 0),
     );
+
+    // FORMAT DISCOUNT STRING CLEANLY
+    String discountLabel = "Less Discount";
+    if (discountNote.isNotEmpty) {
+      discountLabel +=
+          " ($discountNote)"; // Dynamically appends exactly what was saved
+    }
+
     return pw.Container(
       decoration: const pw.BoxDecoration(
         border: pw.Border(
@@ -1091,7 +1110,7 @@ class ConditionSalesController extends GetxController {
                     reg,
                   ),
                   _sumRow(
-                    "Less Discount",
+                    discountLabel, // <-- DYNAMIC DISCOUNT LABEL
                     discount.toStringAsFixed(2),
                     reg,
                     reg,
@@ -1397,6 +1416,7 @@ class ConditionSalesController extends GetxController {
     );
   }
 
+  // --- UPDATED SAFE _sumRow: PREVENTS LONG NOTES FROM CRASHING THE PDF ---
   pw.Widget _sumRow(
     String label,
     String value,
@@ -1407,8 +1427,16 @@ class ConditionSalesController extends GetxController {
       padding: const pw.EdgeInsets.symmetric(vertical: 2),
       child: pw.Row(
         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        crossAxisAlignment:
+            pw.CrossAxisAlignment.start, // Safely handles multi-line wraps
         children: [
-          pw.Text(label, style: pw.TextStyle(font: labelFont, fontSize: 9)),
+          pw.Expanded(
+            child: pw.Text(
+              label,
+              style: pw.TextStyle(font: labelFont, fontSize: 9),
+            ),
+          ),
+          pw.SizedBox(width: 10),
           pw.Text(value, style: pw.TextStyle(font: valFont, fontSize: 9)),
         ],
       ),

@@ -3,7 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart'; // Ensure intl package is in pubspec.yaml for date formatting
-import 'controller.dart';
+import '../Core/Stock Management/stockcontroller.dart';
 import 'model.dart';
 
 /// ===============================

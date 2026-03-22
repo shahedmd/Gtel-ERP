@@ -8,7 +8,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
-import '../controller.dart';
+import '../../Core/Stock Management/stockcontroller.dart';
 
 class ServicePage extends StatefulWidget {
   const ServicePage({super.key});

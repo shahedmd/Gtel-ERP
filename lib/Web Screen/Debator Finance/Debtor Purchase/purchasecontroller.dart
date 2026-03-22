@@ -1,7 +1,7 @@
 // ignore_for_file: avoid_print, empty_catches, deprecated_member_use
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:get/get.dart';
-import 'package:gtel_erp/Stock/controller.dart';
+import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/debatorcontroller.dart';
 import 'package:gtel_erp/Web%20Screen/Expenses/dailycontroller.dart';
 import 'package:intl/intl.dart';

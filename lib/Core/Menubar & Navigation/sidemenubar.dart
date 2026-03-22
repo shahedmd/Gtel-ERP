@@ -1,12 +1,8 @@
-// ignore_for_file: deprecated_member_use
-
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:get/get.dart';
-
-import 'route.dart';
-
-// menu_item_model.dart
+import 'package:gtel_erp/Core/Menubar%20&%20Navigation/app_pages.dart';
+import 'package:gtel_erp/Core/Utils/navigation_key.dart';
 
 class MenuItem {
   final String title;
@@ -23,7 +19,7 @@ class MenuItem {
 }
 
 class NavigationController extends GetxController {
-  var activeId = Routes.DASHBOARD.obs;
+  var activeId = Routes.overviewaccount.obs;
 
   void changePage(String routeName) {
     if (activeId.value == routeName) {
@@ -31,9 +27,7 @@ class NavigationController extends GetxController {
     }
 
     activeId.value = routeName;
-
-    // id: 1 refers to the Get.nestedKey(1) we set in MainLayout
-    Get.toNamed(routeName, id: 1);
+    Get.toNamed(routeName, id: NavKey.nestedHome);
   }
 }
 
@@ -51,7 +45,6 @@ class _NavGroup extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Theme(
-      // This removes the ugly default borders/dividers from ExpansionTile
       data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
       child: ExpansionTile(
         tilePadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 2),
@@ -90,6 +83,7 @@ class _NavTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+
     final navCtrl = Get.find<NavigationController>();
 
     return Obx(() {
@@ -109,7 +103,7 @@ class _NavTile extends StatelessWidget {
             decoration: BoxDecoration(
               color:
                   isActive
-                      ? SidebarMenu.activeAccent.withOpacity(0.12)
+                      ? SidebarMenu.activeAccent.withValues(alpha: 0.12)
                       : Colors.transparent,
               borderRadius: BorderRadius.circular(8),
             ),
@@ -126,7 +120,6 @@ class _NavTile extends StatelessWidget {
                   ),
                   const SizedBox(width: 15),
                 ] else if (isSubItem) ...[
-                  // Dot indicator for nested items
                   AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
                     width: isActive ? 6 : 4,
@@ -171,21 +164,21 @@ class _NavTile extends StatelessWidget {
 }
 
 class SidebarMenu extends StatelessWidget {
-  // Access the controller we initialized in MainLayout
   final NavigationController navCtrl = Get.find<NavigationController>();
 
-  // Professional Theme Colors
-  static const Color sidebarBg = Color(0xFF111827); // Modern Dark Slate
-  static const Color activeAccent = Color(0xFF3B82F6); // Electric Blue
+  static const Color sidebarBg = Color(0xFF111827); 
+  static const Color activeAccent = Color(0xFF3B82F6); 
   static const Color textPrimary = Colors.white;
-  static const Color textSecondary = Color(0xFF9CA3AF); // Muted Gray
+  static const Color textSecondary = Color(0xFF9CA3AF); 
 
   SidebarMenu({super.key});
 
   @override
   Widget build(BuildContext context) {
+   
+
     return Container(
-      width: 260, // Fixed width for Desktop stability
+      width: 260, 
       color: sidebarBg,
       child: Column(
         children: [
@@ -196,150 +189,149 @@ class SidebarMenu extends StatelessWidget {
               padding: const EdgeInsets.symmetric(vertical: 10),
               physics: const BouncingScrollPhysics(),
               children: [
+                
                 _NavTile(
-                  id: Routes.OVERVIEWACCOUNT,
+                  id: Routes.overviewaccount, 
                   icon: FontAwesomeIcons.chartPie,
                   title: "Overview Dashboard",
                 ),
                 // --- DASHBOARD ---
                 _NavTile(
-                  id: Routes.DASHBOARD,
+                  id: Routes.dashboard, // regular nested route
                   icon: FontAwesomeIcons.chartPie,
                   title: "Daily Ledger",
                 ),
                 _NavTile(
-                  id: Routes.LIVEORDER,
+                  id: Routes.liveorder,
                   title: "Live Order",
                   icon: FontAwesomeIcons.moneyBill,
-
                   isSubItem: false,
                 ),
                 _NavTile(
-                  id: Routes.LOCALPURCHASE,
+                  id: Routes.localpurchase,
                   title: "LOCAL PURCHASE",
                   icon: FontAwesomeIcons.productHunt,
-
                   isSubItem: false,
                 ),
-                // --- FINANCE ---
+                
                 _NavGroup(
                   title: "Finance",
                   icon: FontAwesomeIcons.moneyBillTransfer,
                   children: [
                     _NavTile(
-                      id: Routes.DEBTOR,
+                      id: Routes.debtor,
                       title: "Debtor Account",
                       isSubItem: true,
                     ),
                     _NavTile(
-                      id: Routes.VENDOR,
+                      id: Routes.vendor,
                       title: "Vendor Account",
                       isSubItem: true,
                     ),
                     _NavTile(
-                      id: '/cash', // Example of a standalone route
+                      id: Routes.cash,
                       icon: FontAwesomeIcons.cashRegister,
                       title: "Cash Drawer",
                     ),
                   ],
                 ),
 
-                // --- EXPENSES ---
+                // EXPENSES GROUP (Routes.DAILY_EXPENSES, Routes.MONTHLY_EXPENSES)
                 _NavGroup(
                   title: "Expenses",
                   icon: FontAwesomeIcons.wallet,
                   children: [
                     _NavTile(
-                      id: Routes.DAILY_EXPENSES,
+                      id: Routes.dailyexpenses,
                       title: "Daily Expenses",
                       isSubItem: true,
                     ),
                     _NavTile(
-                      id: Routes.MONTHLY_EXPENSES,
+                      id: Routes.monthlyexpense,
                       title: "Monthly Expenses",
                       isSubItem: true,
                     ),
                   ],
                 ),
 
-                // --- SALES ---
+                // SALES GROUP (Routes.DAILY_SALES, Routes.MONTHLY_SALES... etc.)
                 _NavGroup(
                   title: "Sales",
                   icon: FontAwesomeIcons.receipt,
                   children: [
                     _NavTile(
-                      id: Routes.DAILY_SALES,
+                      id: Routes.dailysales,
                       title: "Daily Sales",
                       isSubItem: true,
                     ),
                     _NavTile(
-                      id: Routes.MONTHLY_SALES,
+                      id: Routes.monthlysalespage,
                       title: "Monthly Sales",
                       isSubItem: true,
                     ),
-
                     _NavTile(
-                      id: Routes.CONDITION,
+                      id: Routes.conditionpage,
                       title: "Condition Sale",
                       isSubItem: true,
                     ),
                     _NavTile(
-                      id: Routes.SALERETURN,
+                      id: Routes.salereturn,
                       title: "Sale Return",
                       isSubItem: true,
                     ),
                     _NavTile(
-                      id: '/profit',
+                      id: Routes.profitloss,
                       title: "Sale Overview",
                       isSubItem: true,
                     ),
                     _NavTile(
-                      id: Routes.CUSTOMEROVERVIEW,
+                      id: Routes.customeroverview,
                       title: "Customer Overview",
                       isSubItem: true,
                     ),
                     _NavTile(
-                      id: Routes.STAFFSALEREPORT,
+                      id: Routes.staffsalesreport,
                       title: "Staff Overview",
                       isSubItem: true,
                     ),
                     _NavTile(
-                      id: Routes.PRODUCTOVERVIEW,
+                      id: Routes.productoverview,
                       title: "Product Overview",
                       isSubItem: true,
                     ),
                   ],
                 ),
 
+                // PRODUCTS & STOCK GROUP (Routes.STOCK, SERVICE, Routes.SHIPMENT... etc.)
                 _NavGroup(
                   title: "Products & Stock",
                   icon: FontAwesomeIcons.boxesStacked,
                   children: [
                     _NavTile(
-                      id: Routes.STOCK,
+                      id: Routes.stock,
                       title: "Stock Management",
                       isSubItem: true,
                     ),
                     _NavTile(
-                      id: '/service', // Example of a standalone route
+                      id: Routes.service,
                       title: "Service Product",
                       isSubItem: true,
                     ),
                     _NavTile(
-                      id: Routes.SHIPMENT,
+                      id: Routes.shipment,
                       title: "Shipment Details",
                       isSubItem: true,
                     ),
                     _NavTile(
-                      id: Routes.PURCHASE,
+                      id: Routes.purchase,
                       title: "Purchase Hirstory",
                       isSubItem: true,
                     ),
                     _NavTile(
-                      id: Routes.ORDERLIST,
+                      id: Routes.orderlist,
                       title: "China Order List",
                       isSubItem: true,
-                    )
+                    ),
                   ],
                 ),
 
@@ -350,7 +342,7 @@ class SidebarMenu extends StatelessWidget {
 
                 // --- STAFF ---
                 _NavTile(
-                  id: Routes.STAFF,
+                  id: Routes.staff,
                   icon: FontAwesomeIcons.userTie,
                   title: "Staff Members",
                 ),
@@ -372,7 +364,8 @@ class SidebarMenu extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: activeAccent.withOpacity(0.2),
+              // ৫. withOpacity দূর করে .withValues(alpha: ) ব্যবহার করুন
+              color: activeAccent.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(12),
             ),
             child: const Icon(
@@ -423,7 +416,7 @@ class SidebarMenu extends StatelessWidget {
                 ),
               ),
               Text(
-                "v1.0.24",
+                "v22.3.26",
                 style: TextStyle(color: textSecondary, fontSize: 11),
               ),
             ],

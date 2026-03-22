@@ -3,9 +3,9 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
 import 'package:gtel_erp/Vendor/vendorcontroller.dart';
 import 'package:intl/intl.dart';
-import 'package:gtel_erp/Stock/controller.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -367,8 +367,8 @@ class ShipmentController extends GetxController {
           'local_qty': 0,
         };
         int? newId = await productController.createProductReturnId(createBody);
-        if (newId != null && newId != 0) {
-          finalProductId = newId;
+        if (newId != 0) {
+          finalProductId = newId!;
         } else {
           throw "Product ID Missing";
         }

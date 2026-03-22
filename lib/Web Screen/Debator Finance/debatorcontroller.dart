@@ -206,7 +206,7 @@ class DebatorController extends GetxController {
   }
 
   // =========================================================
-  // CALCULATIONS & LOADING
+  // CALCULATIONS & LOADING (EID BONUS UPDATED)
   // =========================================================
 
   Future<void> calculateTotalOutstanding() async {
@@ -353,7 +353,8 @@ class DebatorController extends GetxController {
 
         if (type == 'previous_due') {
           oldDueTotal += amount;
-        } else if (type == 'loan_payment') {
+        } else if (type == 'loan_payment' || type == 'eid_bonus') {
+          // Eid Bonus acts identically to loan payment initially
           oldDuePaid += amount;
         } else if (type == 'credit' || type == 'advance_given') {
           runningSales += amount;
@@ -363,6 +364,8 @@ class DebatorController extends GetxController {
       }
 
       double currentLoan = oldDueTotal - oldDuePaid;
+      // If loan goes negative (meaning eid bonus or payments overflowed the loan),
+      // we apply the overflow to runningPaid!
       if (currentLoan < 0) {
         runningPaid += currentLoan.abs();
         currentLoan = 0;
@@ -399,7 +402,7 @@ class DebatorController extends GetxController {
 
             if (type == 'previous_due') {
               oldDueTotal += amount;
-            } else if (type == 'loan_payment') {
+            } else if (type == 'loan_payment' || type == 'eid_bonus') {
               oldDuePaid += amount;
             } else if (type == 'credit' || type == 'advance_given') {
               runningSales += amount;
@@ -541,15 +544,27 @@ class DebatorController extends GetxController {
       if (!debtorSnap.exists) throw "Debtor not found";
       final String debtorName = debtorSnap.data()?['name'] ?? 'Unknown';
 
+      // ==========================================================
+      // SMART EID BONUS CALCULATION (Loan vs Running)
+      // ==========================================================
+      double amountForRunningBills = 0.0;
+      if (type.toLowerCase() == 'eid_bonus') {
+        Map<String, double> breakdown = await getInstantDebtorBreakdown(
+          debtorId,
+        );
+        double currentLoan = breakdown['loan'] ?? 0.0;
+        if (amount > currentLoan) {
+          amountForRunningBills =
+              amount - currentLoan; // Remaining spills to running bills
+        }
+      }
+
       DocumentReference newTxRef =
           (txid != null && txid.isNotEmpty)
               ? debtorRef.collection('transactions').doc(txid)
               : debtorRef.collection('transactions').doc();
       String finalTxId = newTxRef.id;
 
-      // ==========================================
-      // NULLIFY PAYMENT METHOD FOR BILLS/DEBT
-      // ==========================================
       Map<String, dynamic>? finalPaymentMethod = paymentMethodData;
       if (['credit', 'previous_due'].contains(type.toLowerCase())) {
         finalPaymentMethod = null;
@@ -566,8 +581,11 @@ class DebatorController extends GetxController {
       });
 
       String parsedMethod = (paymentMethodData['type'] ?? 'cash').toString();
+      if (type.toLowerCase() == 'eid_bonus') {
+        parsedMethod =
+            'eid_bonus'; // Override method for Eid Bonus specifically
+      }
 
-      // FIX: Ensure it is not an empty string before overriding
       if (parsedMethod.toLowerCase() == 'cash' &&
           paymentMethodData.containsKey('bankName') &&
           paymentMethodData['bankName'].toString().trim().isNotEmpty) {
@@ -578,6 +596,7 @@ class DebatorController extends GetxController {
         parsedMethod = 'Bkash';
       }
 
+      // CASH LEDGER LOGIC (Eid Bonus safely bypasses this because it's NOT a collection)
       bool isCollection = [
         'debit',
         'loan_payment',
@@ -614,7 +633,7 @@ class DebatorController extends GetxController {
       }
 
       // =========================================================
-      // PERFECT BILL ALLOCATION LOGIC (WITH RIPPLE EFFECT FIX)
+      // PERFECT BILL ALLOCATION LOGIC (WITH EID BONUS SPILLOVER)
       // =========================================================
       bool isRunningBillPayment = [
         'debit',
@@ -623,11 +642,16 @@ class DebatorController extends GetxController {
         'received',
       ].contains(type.toLowerCase());
 
-      if (isRunningBillPayment) {
-        double remainingToAllocate = amount;
+      double remainingToAllocate = amount;
 
-        String pType =
-            (paymentMethodData['type'] ?? 'cash').toString().toLowerCase();
+      // If it's an Eid Bonus AND there is an overflow into running bills, trigger allocation!
+      if (type.toLowerCase() == 'eid_bonus' && amountForRunningBills > 0.01) {
+        isRunningBillPayment = true;
+        remainingToAllocate = amountForRunningBills;
+      }
+
+      if (isRunningBillPayment) {
+        String pType = parsedMethod.toLowerCase();
         String bNum = paymentMethodData['bkashNumber'] ?? '';
         String nNum = paymentMethodData['nagadNumber'] ?? '';
         String bankName = paymentMethodData['bankName'] ?? '';
@@ -636,14 +660,12 @@ class DebatorController extends GetxController {
             paymentMethodData['accountNumber'] ??
             '';
 
-        // Fetch sales_orders by debtorId (Immune to Name Changes!)
         QuerySnapshot ordersSnap =
             await db
                 .collection('sales_orders')
                 .where('debtorId', isEqualTo: debtorId)
                 .get();
 
-        // 🌟 GET ALL ORDERS & SORT THEM FOR THE MIDDLE INVOICE RIPPLE EFFECT 🌟
         List<DocumentSnapshot> allOrders = ordersSnap.docs.toList();
         allOrders.sort((a, b) {
           final dataA = a.data() as Map<String, dynamic>;
@@ -689,7 +711,6 @@ class DebatorController extends GetxController {
                 orderDoc.data() as Map<String, dynamic>;
             String invoiceId = oData['invoiceId'] ?? orderDoc.id;
 
-            // --- 🚨 CRITICAL FIX: Fetch Daily Sales FIRST to avoid Ghost Dues ---
             QuerySnapshot dailySnap =
                 await db
                     .collection('daily_sales')
@@ -714,7 +735,6 @@ class DebatorController extends GetxController {
                   0.0;
             }
 
-            // Calculate what Sales Orders thinks is pending (Ghost Due Check)
             double salesOrderPending =
                 oData['paymentDetails'] != null &&
                         oData['paymentDetails']['due'] != null
@@ -729,12 +749,10 @@ class DebatorController extends GetxController {
                         (double.tryParse(oData['paid']?.toString() ?? '0') ??
                             0.0));
 
-            // 👉 TRUE PENDING is Daily Sales (if exists), otherwise fallback to Sales Orders
             double actualPending =
                 dailyDoc != null ? currentPendingD : salesOrderPending;
 
             if (actualPending <= 0.5) {
-              // 🚑 AUTO-HEAL: Already paid in Daily Sales! Fix Sales Orders ghost due and SKIP.
               if (salesOrderPending > 0.5) {
                 batch.update(orderDoc.reference, {
                   "paid":
@@ -746,7 +764,7 @@ class DebatorController extends GetxController {
                 });
                 hasUpdates = true;
               }
-              continue; // Do NOT take money from current collection!
+              continue;
             }
 
             double take =
@@ -762,7 +780,6 @@ class DebatorController extends GetxController {
               "paymentDetails.$pType": FieldValue.increment(take),
             };
 
-            // Auto-correct disjointed names
             if (oData['customerName'] != debtorName) {
               orderUpdate['customerName'] = debtorName;
             }
@@ -787,8 +804,7 @@ class DebatorController extends GetxController {
 
             batch.update(orderDoc.reference, orderUpdate);
 
-            // ---> 🌟 NEW LOGIC: RIPPLE EFFECT FOR MIDDLE INVOICES 🌟 <---
-            // Accumulate reductions for every invoice created AFTER the one we just paid.
+            // RIPPLE EFFECT LOGIC
             int currentIndex = allOrders.indexWhere(
               (doc) => doc.id == orderDoc.id,
             );
@@ -799,16 +815,20 @@ class DebatorController extends GetxController {
                     (middleInvoiceReductions[newerDocId] ?? 0.0) + take;
               }
             }
-            // ---> 🌟 END NEW LOGIC 🌟 <---
 
-            // 2. Update the strictly linked daily_sales document!
+            // 2. Update strictly linked daily_sales document
             if (dailyDoc != null) {
               Map<String, dynamic> dData =
                   dailyDoc.data() as Map<String, dynamic>;
 
               final newHistoryEntry = {
                 'amount': take,
-                'note': note.isNotEmpty ? note : "Late Due Collection",
+                'note':
+                    note.isNotEmpty
+                        ? note
+                        : (type.toLowerCase() == 'eid_bonus'
+                            ? "Eid Bonus Applied"
+                            : "Late Due Collection"),
                 'timestamp': Timestamp.fromDate(date),
                 'type': pType,
                 'bkashNumber': bNum,
@@ -827,7 +847,6 @@ class DebatorController extends GetxController {
                 "paymentMethod.$pType": FieldValue.increment(take),
               };
 
-              // Auto-correct disjointed names
               if (dData['name'] != debtorName) {
                 dailyUpdate['name'] = debtorName;
               }
@@ -852,7 +871,6 @@ class DebatorController extends GetxController {
             remainingToAllocate -= take;
           }
 
-          // ---> 🌟 APPLY ALL RIPPLE UPDATES AT ONCE TO THE BATCH 🌟 <---
           if (middleInvoiceReductions.isNotEmpty) {
             middleInvoiceReductions.forEach((docId, totalTake) {
               batch.update(db.collection('sales_orders').doc(docId), {
@@ -887,7 +905,12 @@ class DebatorController extends GetxController {
       }
 
       if (Get.isDialogOpen ?? false) Get.back();
-      Get.snackbar("Success", "Collection Recorded & Bills Updated");
+      Get.snackbar(
+        "Success",
+        type.toLowerCase() == 'eid_bonus'
+            ? "Eid Bonus Recorded Perfectly!"
+            : "Collection Recorded & Bills Updated",
+      );
     } catch (e) {
       Get.snackbar("Error", e.toString());
     } finally {
@@ -927,10 +950,12 @@ class DebatorController extends GetxController {
         await doc.reference.delete();
       }
 
+      // Eid bonus is perfectly reversed from invoices here because of `sourceTxId` logic
       if (type == 'credit' ||
           type == 'debit' ||
           type == 'collection' ||
-          type == 'payment') {
+          type == 'payment' ||
+          type == 'eid_bonus') {
         if (!Get.isRegistered<DailySalesController>()) {
           Get.put(DailySalesController());
         }
@@ -939,7 +964,6 @@ class DebatorController extends GetxController {
             await db.collection('debatorbody').doc(debtorId).get();
         final debtorName = debtorSnap.data()?['name'] ?? "";
 
-        // Collect documents accurately via Name AND ID to reverse payment
         Map<String, DocumentSnapshot> dailyDocsToProcess = {};
 
         final salesByNameSnap =
@@ -1121,7 +1145,6 @@ class DebatorController extends GetxController {
     }
   }
 
-  // --- ADD BODY ---
   Future<void> addBody({
     required String name,
     required String des,
@@ -1158,7 +1181,6 @@ class DebatorController extends GetxController {
     }
   }
 
-  // --- EDIT BODY (FIXED TO AVOID NAME CHANGE BUGS) ---
   Future<void> editDebtor({
     required String id,
     required String oldName,
@@ -1193,7 +1215,6 @@ class DebatorController extends GetxController {
       if (oldName != newName) {
         final batch = db.batch();
 
-        // 1. Update sales_orders perfectly using debtorId
         final orderSnap =
             await db
                 .collection('sales_orders')
@@ -1205,7 +1226,6 @@ class DebatorController extends GetxController {
           linkedInvoiceIds.add((doc.data())['invoiceId'] ?? doc.id);
         }
 
-        // 2. Update daily_sales globally (Removed strict customerType restriction)
         final salesSnap =
             await db
                 .collection('daily_sales')
@@ -1215,7 +1235,6 @@ class DebatorController extends GetxController {
           batch.update(doc.reference, {"name": newName.trim()});
         }
 
-        // 3. Catch strictly linked daily_sales just in case the name was already disjointed
         for (int i = 0; i < linkedInvoiceIds.length; i += 10) {
           int end =
               i + 10 > linkedInvoiceIds.length
@@ -1247,7 +1266,6 @@ class DebatorController extends GetxController {
     }
   }
 
-  // --- DELETE BODY ---
   Future<void> deleteDebtor(String id) async {
     gbIsLoading.value = true;
     try {
@@ -1322,7 +1340,8 @@ class DebatorController extends GetxController {
       String type = (pm['type'] ?? 'Cash').toString();
       String lowerType = type.toLowerCase();
 
-      // FIX: Ensure the bankName actually contains text, not just an empty string
+      if (lowerType == 'eid_bonus') return "Eid Bonus"; // Look clean on PDF
+
       bool hasValidBankName =
           pm.containsKey('bankName') &&
           pm['bankName'].toString().trim().isNotEmpty;
@@ -1343,15 +1362,172 @@ class DebatorController extends GetxController {
   }
 
   // =========================================================
-  // WORLD-CLASS ACCOUNTING PDF REPORT (FIXED: Auto-Pagination)
+  // YEARLY EID BONUS REPORT
   // =========================================================
+  Future<void> downloadYearlyEidBonusReport() async {
+    gbIsLoading.value = true;
+    try {
+      DateTime now = DateTime.now();
+      int currentYear = now.year;
+      DateTime startOfYear = DateTime(currentYear, 1, 1);
+      DateTime endOfYear = DateTime(currentYear, 12, 31, 23, 59, 59);
+
+      // Fetch all debtors to map their names and phones locally
+      QuerySnapshot debtorSnap = await db.collection('debatorbody').get();
+      Map<String, Map<String, dynamic>> debtorDataMap = {};
+      for (var d in debtorSnap.docs) {
+        debtorDataMap[d.id] = d.data() as Map<String, dynamic>;
+      }
+
+      List<Map<String, dynamic>> yearlyBonuses = [];
+      double totalBonus = 0.0;
+
+      // Ensure Firebase index exists for this collectionGroup search on 'type'
+      QuerySnapshot txSnap =
+          await db
+              .collectionGroup('transactions')
+              .where('type', isEqualTo: 'eid_bonus')
+              .get();
+
+      for (var doc in txSnap.docs) {
+        var data = doc.data() as Map<String, dynamic>;
+        DateTime date =
+            (data['date'] is Timestamp)
+                ? (data['date'] as Timestamp).toDate()
+                : (data['date'] as DateTime);
+
+        if (date.isAfter(startOfYear) && date.isBefore(endOfYear)) {
+          String debtorId = doc.reference.parent.parent!.id;
+          double amount = (data['amount'] as num?)?.toDouble() ?? 0.0;
+
+          yearlyBonuses.add({
+            'date': date,
+            'amount': amount,
+            'note': data['note'] ?? '',
+            'debtorName': debtorDataMap[debtorId]?['name'] ?? 'Unknown',
+            'debtorPhone': debtorDataMap[debtorId]?['phone'] ?? 'Unknown',
+          });
+          totalBonus += amount;
+        }
+      }
+
+      if (yearlyBonuses.isEmpty) {
+        Get.snackbar("Info", "No Eid Bonus has been given in $currentYear.");
+        return;
+      }
+
+      yearlyBonuses.sort(
+        (a, b) => (b['date'] as DateTime).compareTo(a['date'] as DateTime),
+      );
+
+      final pdf = pw.Document();
+
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(32),
+          header:
+              (context) => pw.Column(
+                children: [
+                  pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Text(
+                        "EID BONUS REPORT - $currentYear",
+                        style: pw.TextStyle(
+                          fontWeight: pw.FontWeight.bold,
+                          fontSize: 18,
+                          color: PdfColors.green900,
+                        ),
+                      ),
+                      pw.Text(
+                        "Generated: ${DateFormat('dd MMM yyyy').format(now)}",
+                      ),
+                    ],
+                  ),
+                  pw.Divider(),
+                  pw.SizedBox(height: 10),
+                ],
+              ),
+          build: (context) {
+            return [
+              pw.Container(
+                padding: const pw.EdgeInsets.all(12),
+                decoration: pw.BoxDecoration(
+                  color: PdfColors.green50,
+                  border: pw.Border.all(color: PdfColors.green900),
+                ),
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text(
+                      "TOTAL EID BONUS GIVEN THIS YEAR:",
+                      style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                    ),
+                    pw.Text(
+                      "${bdCurrency.format(totalBonus)} BDT",
+                      style: pw.TextStyle(
+                        fontWeight: pw.FontWeight.bold,
+                        fontSize: 16,
+                        color: PdfColors.green900,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              pw.SizedBox(height: 15),
+
+              pw.Table.fromTextArray(
+                border: pw.TableBorder.all(
+                  color: PdfColors.grey400,
+                  width: 0.5,
+                ),
+                headerDecoration: const pw.BoxDecoration(
+                  color: PdfColors.grey200,
+                ),
+                headerHeight: 28,
+                cellHeight: 25,
+                cellAlignments: {
+                  0: pw.Alignment.centerLeft,
+                  1: pw.Alignment.centerLeft,
+                  2: pw.Alignment.centerLeft,
+                  3: pw.Alignment.centerLeft,
+                  4: pw.Alignment.centerRight,
+                },
+                headers: ["SL", "Date", "Debtor Name", "Phone", "Bonus Amount"],
+                data: List<List<String>>.generate(yearlyBonuses.length, (idx) {
+                  final b = yearlyBonuses[idx];
+                  return [
+                    "${idx + 1}",
+                    DateFormat('dd/MM/yyyy').format(b['date'] as DateTime),
+                    b['debtorName'],
+                    b['debtorPhone'],
+                    bdCurrency.format(b['amount']),
+                  ];
+                }),
+              ),
+            ];
+          },
+        ),
+      );
+
+      await Printing.layoutPdf(
+        onLayout: (format) => pdf.save(),
+        name: 'Eid_Bonus_Report_$currentYear.pdf',
+      );
+    } catch (e) {
+      Get.snackbar("Error", "Could not generate report: $e");
+    } finally {
+      gbIsLoading.value = false;
+    }
+  }
+
   Future<Uint8List> generatePDF(
     String debtorName,
     List<Map<String, dynamic>> transactions,
   ) async {
     final pdf = pw.Document();
 
-    // 1. Sort chronologically
     transactions.sort((a, b) {
       DateTime dA =
           (a['date'] is Timestamp)
@@ -1367,10 +1543,8 @@ class DebatorController extends GetxController {
     double totalDebit = 0.0;
     double totalCredit = 0.0;
 
-    // 2. Calculate Totals based on Accounting Rules
     for (var t in transactions) {
       String type = (t['type'] ?? '').toString().toLowerCase();
-      // Accounting Rule: Sales/Due = Debit (Red), Payments = Credit (Green)
       bool isDebit = ['credit', 'previous_due', 'advance_given'].contains(type);
       double amount = (t['amount'] as num?)?.toDouble() ?? 0.0;
 
@@ -1381,7 +1555,6 @@ class DebatorController extends GetxController {
       }
     }
 
-    // Determine the smart balance label
     double netBalance = totalDebit - totalCredit;
     String balanceLabel = "Net Balance";
     if (netBalance > 0) {
@@ -1390,13 +1563,11 @@ class DebatorController extends GetxController {
       balanceLabel = "Advance Balance";
     }
 
-    // 3. pw.MultiPage perfectly auto-handles page breaks for long tables
     pdf.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(32),
         header: (context) {
-          // This header will automatically repeat on every new page
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
@@ -1451,7 +1622,7 @@ class DebatorController extends GetxController {
                 color: PdfColors.grey200,
               ),
               headerHeight: 28,
-              cellHeight: 25, // Minimum height. Auto-expands if text wraps!
+              cellHeight: 25,
               cellAlignments: {
                 0: pw.Alignment.centerLeft,
                 1: pw.Alignment.centerLeft,
@@ -1489,7 +1660,10 @@ class DebatorController extends GetxController {
                       type,
                     );
 
-                    String desc = isDebit ? "DEBIT" : "CREDIT";
+                    String desc =
+                        isDebit
+                            ? "DEBIT"
+                            : (type == 'eid_bonus' ? "EID BONUS" : "CREDIT");
                     if (t['note'] != null &&
                         t['note'].toString().trim().isNotEmpty) {
                       desc += "\nNote: ${t['note']}";
@@ -1505,7 +1679,6 @@ class DebatorController extends GetxController {
                   }).toList(),
             ),
 
-            // --- SUMMARY FOOTER (Appears securely at the bottom of the data) ---
             pw.SizedBox(height: 20),
             pw.Container(
               padding: const pw.EdgeInsets.all(12),
@@ -1530,23 +1703,18 @@ class DebatorController extends GetxController {
     return pdf.save();
   }
 
-  // =========================================================
-  // NEW: FETCHES ALL TRANSACTIONS FOR PDF (Bypasses UI Limit)
-  // =========================================================
   Future<void> downloadFullDebtorStatement(
     String debtorId,
     String debtorName,
   ) async {
     gbIsLoading.value = true;
     try {
-      // Fetch ALL transactions for this debtor ignoring the UI pagination
       Query query = db
           .collection('debatorbody')
           .doc(debtorId)
           .collection('transactions')
           .orderBy('date', descending: true);
 
-      // Respect the date filter if applied
       if (selectedDateRange.value != null) {
         query = query
             .where(
@@ -1575,10 +1743,8 @@ class DebatorController extends GetxController {
             return d.data() as Map<String, dynamic>;
           }).toList();
 
-      // Generate PDF using the complete list
       final pdfBytes = await generatePDF(debtorName, allTransactions);
 
-      // Print or Save
       await Printing.layoutPdf(
         onLayout: (format) async => pdfBytes,
         name: '${debtorName.replaceAll(' ', '_')}_Statement.pdf',

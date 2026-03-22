@@ -50,7 +50,7 @@ class LiveOrderSalesPage extends StatelessWidget {
               child:
                   isDesktop
                       ? SizedBox(
-                        height: 850, 
+                        height: 850,
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -75,8 +75,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                       : Column(
                         children: [
                           SizedBox(
-                            height:
-                                600, 
+                            height: 600,
                             child: _productInventoryTable(controller, false),
                           ),
                           const SizedBox(height: 16),
@@ -229,8 +228,11 @@ class LiveOrderSalesPage extends StatelessWidget {
     );
   }
 
-  // --- 2. CUSTOMER SECTION ---
-  Widget _buildCustomerSection(LiveSalesController controller, bool isDesktop, BuildContext context) {
+  Widget _buildCustomerSection(
+    LiveSalesController controller,
+    bool isDesktop,
+    BuildContext context,
+  ) {
     return Obx(() {
       bool isAgent = controller.customerType.value == "AGENT";
 
@@ -877,9 +879,7 @@ class LiveOrderSalesPage extends StatelessWidget {
       return Column(
         children: [
           Row(
-            crossAxisAlignment:
-                CrossAxisAlignment
-                    .start, // FIXED: Removed stretch which caused the infinite constraint error.
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(flex: 2, child: cashBlock),
               const SizedBox(width: 16),
@@ -1199,43 +1199,99 @@ class LiveOrderSalesPage extends StatelessWidget {
                   );
                 }),
                 const SizedBox(height: 16),
-                TextField(
-                  controller: controller.discountC,
-                  textAlign: TextAlign.center,
-                  keyboardType: TextInputType.number,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.red,
-                    fontSize: 15,
-                  ),
-                  decoration: InputDecoration(
-                    labelText: "DISCOUNT",
-                    labelStyle: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 11,
+
+                // --- NEW DISCOUNT ROW INCLUDING DISCOUNT NOTE ---
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      flex: 4,
+                      child: TextField(
+                        controller: controller.discountC,
+                        textAlign: TextAlign.center,
+                        keyboardType: TextInputType.number,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.red,
+                          fontSize: 15,
+                        ),
+                        decoration: InputDecoration(
+                          labelText: "DISCOUNT",
+                          labelStyle: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 11,
+                          ),
+                          prefixText: "- ",
+                          isDense: true,
+                          filled: true,
+                          fillColor: Colors.white,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: BorderSide(color: Colors.red.shade200),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: BorderSide(color: Colors.red.shade200),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 12,
+                          ),
+                        ),
+                        onChanged: (v) {
+                          controller.discountVal.value =
+                              double.tryParse(v) ?? 0.0;
+                          controller.updatePaymentCalculations();
+                        },
+                      ),
                     ),
-                    prefixText: "- ",
-                    isDense: true,
-                    filled: true,
-                    fillColor: Colors.white,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide(color: Colors.red.shade200),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      flex: 6,
+                      child: TextField(
+                        controller: controller.discountNoteC,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: Colors.black87,
+                        ),
+                        decoration: InputDecoration(
+                          labelText: "Discount Note (Optional)",
+                          labelStyle: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 11,
+                            color: Colors.grey,
+                          ),
+                          hintText: "e.g., Damaged Box, Eid...",
+                          hintStyle: const TextStyle(
+                            fontSize: 11,
+                            color: Colors.black38,
+                          ),
+                          isDense: true,
+                          filled: true,
+                          fillColor: Colors.white,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: BorderSide(color: Colors.grey.shade300),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: BorderSide(color: Colors.grey.shade300),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(color: Colors.blue),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 12,
+                          ),
+                        ),
+                      ),
                     ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide(color: Colors.red.shade200),
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 12,
-                    ),
-                  ),
-                  onChanged: (v) {
-                    controller.discountVal.value = double.tryParse(v) ?? 0.0;
-                    controller.updatePaymentCalculations();
-                  },
+                  ],
                 ),
+
+                // ------------------------------------------------
                 const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,
@@ -1887,6 +1943,6 @@ class _CartPriceEditorState extends State<CartPriceEditor> {
       onSubmitted: (v) {
         if (!widget.readOnly) widget.onChanged(v);
       },
-    );
+    ); 
   }
 }

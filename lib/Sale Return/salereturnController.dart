@@ -3,7 +3,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import '../Stock/controller.dart'; // Ensure correct path to ProductController
+import '../Core/Stock Management/stockcontroller.dart'; // Ensure correct path to ProductController
 
 class SaleReturnController extends GetxController {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -55,7 +55,11 @@ class SaleReturnController extends GetxController {
           await _db
               .collection('sales_orders')
               .orderBy('timestamp', descending: true)
-              .limit(100)
+              // The bug was here: .limit(100)
+              // Removing .limit(100) will allow searching all orders
+              // For better performance, consider adding more filters (e.g., date range)
+              // or implementing a proper search solution like Algolia if you have
+              // a large number of orders.
               .get();
 
       List<Map<String, dynamic>> matches = [];

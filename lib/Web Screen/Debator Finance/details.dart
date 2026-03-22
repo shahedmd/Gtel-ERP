@@ -117,11 +117,9 @@ class _DebatordetailsState extends State<Debatordetails> {
       }
 
       // 2. Map standard transactions to Debit / Credit
-      bool isDebitEntry = [
-        'credit',
-        'previous_due',
-        'advance_given',
-      ].contains(tx.type);
+      bool isDebitEntry = ['credit', 'previous_due', 'advance_given'].contains(
+        tx.type,
+      ); // Eid bonus is NOT in this list, so it securely maps to creditAmount!
 
       mergedList.add(
         DisplayTx(
@@ -216,6 +214,10 @@ class _DebatordetailsState extends State<Debatordetails> {
                                     child: Text("💵  Receive Payment (Credit)"),
                                   ),
                                   DropdownMenuItem(
+                                    value: 'eid_bonus',
+                                    child: Text("🎁  Give Eid Bonus (Credit)"),
+                                  ),
+                                  DropdownMenuItem(
                                     value: 'div1',
                                     enabled: false,
                                     child: Divider(),
@@ -296,7 +298,11 @@ class _DebatordetailsState extends State<Debatordetails> {
                                                 Map<String, dynamic> pm = {
                                                   'type': 'cash',
                                                 };
-                                                if ([
+
+                                                if (selectedType.value ==
+                                                    'eid_bonus') {
+                                                  pm = {'type': 'eid_bonus'};
+                                                } else if ([
                                                   'debit',
                                                   'loan_payment',
                                                   'advance_received',
@@ -442,6 +448,10 @@ class _DebatordetailsState extends State<Debatordetails> {
                                     child: Text("PAYMENT"),
                                   ),
                                   DropdownMenuItem(
+                                    value: 'eid_bonus',
+                                    child: Text("EID BONUS"),
+                                  ),
+                                  DropdownMenuItem(
                                     value: 'previous_due',
                                     child: Text("OLD DEBT"),
                                   ),
@@ -502,7 +512,11 @@ class _DebatordetailsState extends State<Debatordetails> {
                                                 Map<String, dynamic> pm = {
                                                   'type': 'cash',
                                                 };
-                                                if ([
+
+                                                if (selectedType.value ==
+                                                    'eid_bonus') {
+                                                  pm = {'type': 'eid_bonus'};
+                                                } else if ([
                                                   'debit',
                                                   'loan_payment',
                                                   'advance_received',
@@ -728,7 +742,28 @@ class _DebatordetailsState extends State<Debatordetails> {
           debitColor,
           () => _downloadPDF(),
         ),
-        const SizedBox(width: 16),
+        PopupMenuButton<String>(
+          icon: const Icon(Icons.more_vert, color: darkSlate),
+          onSelected: (value) {
+            if (value == 'eid_report') {
+              controller.downloadYearlyEidBonusReport();
+            }
+          },
+          itemBuilder:
+              (context) => [
+                const PopupMenuItem(
+                  value: 'eid_report',
+                  child: Row(
+                    children: [
+                      Icon(FontAwesomeIcons.gift, size: 16, color: Colors.teal),
+                      SizedBox(width: 12),
+                      Text("Yearly Eid Bonus Report"),
+                    ],
+                  ),
+                ),
+              ],
+        ),
+        const SizedBox(width: 8),
       ],
     );
   }
@@ -961,7 +996,6 @@ class _DebatordetailsState extends State<Debatordetails> {
     );
   }
 
-
   Widget _buildTableSection(DebtorModel debtor) {
     return Container(
       decoration: BoxDecoration(
@@ -1095,6 +1129,10 @@ class _DebatordetailsState extends State<Debatordetails> {
       typeColor = creditColor;
       typeIcon = FontAwesomeIcons.handHoldingDollar;
       typeLabel = "PAYMENT";
+    } else if (tx.type == 'eid_bonus') {
+      typeColor = Colors.teal;
+      typeIcon = FontAwesomeIcons.gift;
+      typeLabel = "EID BONUS";
     } else if (tx.type == 'advance_given') {
       typeColor = debitColor;
       typeIcon = FontAwesomeIcons.arrowRightFromBracket;
@@ -1548,10 +1586,8 @@ class _DebatordetailsState extends State<Debatordetails> {
 
       final Uint8List bytes = await controller.generatePDF(widget.name, data);
 
-      // Close the loading dialog before opening the print preview
       if (Get.isDialogOpen ?? false) Get.back();
 
-      // Open Print Preview
       await Printing.layoutPdf(
         onLayout: (format) async => bytes,
         name: "${widget.name}_Statement.pdf",
@@ -1735,7 +1771,9 @@ class _DebatordetailsState extends State<Debatordetails> {
 
 String formatDynamicPayment(Map<String, dynamic> pm) {
   String type = (pm['type'] ?? 'Cash').toString().toUpperCase();
-  if (type == 'BANK') {
+  if (type == 'EID_BONUS') {
+    return "Eid Bonus";
+  } else if (type == 'BANK') {
     return "BANK: ${pm['bankName'] ?? ''}\nACC: ${pm['accountNo'] ?? ''}";
   } else if (['BKASH', 'NAGAD', 'ROCKET'].contains(type)) {
     return "$type: ${pm['number'] ?? ''}";

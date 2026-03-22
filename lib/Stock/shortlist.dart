@@ -4,13 +4,13 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 // Adjust imports to match your project structure
 import 'package:gtel_erp/Shipment/controller.dart';
-import 'package:gtel_erp/Stock/controller.dart';
 import 'package:gtel_erp/Stock/model.dart';
 import 'package:gtel_erp/Stock/Service/servicepage.dart';
 

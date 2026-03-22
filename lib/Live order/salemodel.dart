@@ -12,7 +12,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 // IMPORTANT: Update these imports to match your actual file structure
-import '../Stock/controller.dart';
+import '../Core/Stock Management/stockcontroller.dart';
 import '../Stock/model.dart';
 import '../Web Screen/Debator Finance/debatorcontroller.dart';
 import '../Web Screen/Debator Finance/model.dart';
@@ -95,7 +95,10 @@ class LiveSalesController extends GetxController {
   final challanC = TextEditingController();
   final cartonsC = TextEditingController();
   final otherCourierC = TextEditingController();
+
   final discountC = TextEditingController();
+  final discountNoteC =
+      TextEditingController(); // <-- TEXT INPUT FOR DISCOUNT NOTE
 
   // Payment Controllers
   final cashC = TextEditingController();
@@ -722,11 +725,12 @@ class LiveSalesController extends GetxController {
         "items": orderItems,
         "subtotal": subtotalAmount,
         "discount": discountVal.value,
+        "discountNote": discountNoteC.text.trim(), // <-- SAVING DISCOUNT NOTE
         "grandTotal": grandTotal,
-        "paid": allocatedToInvoice, // ROOT PAID FIELD ADDED
+        "paid": allocatedToInvoice,
         "totalCost": totalInvoiceCost,
         "profit": invoiceProfit,
-        "paymentDetails": masterPaymentMap, // EXACT NESTED MAP STRUCTURE
+        "paymentDetails": masterPaymentMap,
         "isFullyPaid": invoiceDueAmount <= 0,
         "snapshotOldDue": oldDueSnap,
         "snapshotRunningDue": runningDueSnap,
@@ -853,6 +857,8 @@ class LiveSalesController extends GetxController {
         authorizedName: sellerName,
         authorizedPhone: sellerPhone,
         discount: discountVal.value,
+        discountNote:
+            discountNoteC.text.trim(), // <-- PASSING DISCOUNT NOTE TO PDF
         packagerName: selectedPackager.value,
       );
 
@@ -1534,7 +1540,10 @@ class LiveSalesController extends GetxController {
     challanC.clear();
     cartonsC.clear();
     otherCourierC.clear();
+
     discountC.clear();
+    discountNoteC.clear(); // <-- RESET DISCOUNT NOTE
+
     cashC.clear();
     bkashC.clear();
     bkashNumberC.clear();
@@ -1647,6 +1656,7 @@ class LiveSalesController extends GetxController {
     required String authorizedName,
     required String authorizedPhone,
     double discount = 0.0,
+    String discountNote = "", // <-- ADDED TO PDF
     String? packagerName,
   }) async {
     final pdf = pw.Document();
@@ -1746,11 +1756,12 @@ class LiveSalesController extends GetxController {
               subTotal,
               discount,
               currentInvTotal,
-              totalPaidInput, // <-- 🌟 FIX FOR PDF DISPLAY 🌟 Passed actual received total
+              totalPaidInput,
               paymentMethodsStr,
               items,
               boldFont,
               regularFont,
+              discountNote, // <-- PASSED DOWN
             ),
             pw.SizedBox(height: 5),
             _buildNewDues(totalPreviousBalance, netTotalDue, regularFont),
@@ -1940,7 +1951,6 @@ class LiveSalesController extends GetxController {
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-
           _infoRow2("To", ": $name", reg, bold, col1Width: 60),
           _infoRow2("Address", ": $address", reg, bold, col1Width: 60),
           _infoRow2("Contact No.", ": $phone", reg, bold, col1Width: 60),
@@ -2054,16 +2064,25 @@ class LiveSalesController extends GetxController {
     double subTotal,
     double discount,
     double currentInvTotal,
-    double totalPaidAmount, // 🌟 Updated signature variable 🌟
+    double totalPaidAmount,
     String paymentMethodsStr,
     List items,
     pw.Font bold,
     pw.Font reg,
+    String discountNote, // <-- ADDED TO SUMMARY
   ) {
     int totalQty = items.fold(
       0,
       (sumv, item) => sumv + ((item['qty'] as num?)?.toInt() ?? 0),
     );
+
+    // FORMAT DISCOUNT STRING CLEANLY
+    String discountLabel = "Less Discount";
+    if (discountNote.isNotEmpty) {
+      discountLabel +=
+          " ($discountNote)"; // Dynamically appends exactly what you typed
+    }
+
     return pw.Container(
       decoration: const pw.BoxDecoration(
         border: pw.Border(
@@ -2108,7 +2127,7 @@ class LiveSalesController extends GetxController {
                     reg,
                   ),
                   _sumRow(
-                    "Less Discount",
+                    discountLabel, // <-- DYNAMIC DISCOUNT LABEL
                     discount.toStringAsFixed(2),
                     reg,
                     reg,
@@ -2125,9 +2144,7 @@ class LiveSalesController extends GetxController {
                   pw.SizedBox(height: 2),
                   _sumRow(
                     "Paid Amount",
-                    totalPaidAmount.toStringAsFixed(
-                      2,
-                    ), // 🌟 Corrected visual variable 🌟
+                    totalPaidAmount.toStringAsFixed(2),
                     reg,
                     bold,
                   ),
@@ -2394,7 +2411,7 @@ class LiveSalesController extends GetxController {
     );
   }
 
-    pw.Widget _infoRow2(
+  pw.Widget _infoRow2(
     String label,
     String value,
     pw.Font reg,
@@ -2408,16 +2425,23 @@ class LiveSalesController extends GetxController {
         children: [
           pw.SizedBox(
             width: col1Width,
-            child: pw.Text(label, style: pw.TextStyle(font: bold, fontSize: 10)),
+            child: pw.Text(
+              label,
+              style: pw.TextStyle(font: bold, fontSize: 10),
+            ),
           ),
           pw.Expanded(
-            child: pw.Text(value, style: pw.TextStyle(font: bold, fontSize: 10)),
+            child: pw.Text(
+              value,
+              style: pw.TextStyle(font: bold, fontSize: 10),
+            ),
           ),
         ],
       ),
     );
   }
 
+  // --- UPDATED SAFE _sumRow: THIS PREVENTS LONG DISCOUNT NOTES FROM CRASHING THE PDF ---
   pw.Widget _sumRow(
     String label,
     String value,
@@ -2428,8 +2452,15 @@ class LiveSalesController extends GetxController {
       padding: const pw.EdgeInsets.symmetric(vertical: 2),
       child: pw.Row(
         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          pw.Text(label, style: pw.TextStyle(font: labelFont, fontSize: 9)),
+          pw.Expanded(
+            child: pw.Text(
+              label,
+              style: pw.TextStyle(font: labelFont, fontSize: 9),
+            ),
+          ),
+          pw.SizedBox(width: 10),
           pw.Text(value, style: pw.TextStyle(font: valFont, fontSize: 9)),
         ],
       ),
