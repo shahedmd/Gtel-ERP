@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
-import '../../Stock/model.dart';
+import 'stockproductmodel.dart';
 
 class ProductController extends GetxController {
   static const baseUrl = 'https://dart-server-1zun.onrender.com';

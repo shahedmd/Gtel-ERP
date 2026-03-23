@@ -1,5 +1,3 @@
-// ignore_for_file: deprecated_member_use, curly_braces_in_flow_control_structures
-
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -8,13 +6,10 @@ import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-
-// Adjust imports to match your project structure
 import 'package:gtel_erp/Shipment/controller.dart';
-import 'package:gtel_erp/Stock/model.dart';
+import 'package:gtel_erp/Core/Stock%20Management/stockproductmodel.dart';
 import 'package:gtel_erp/Stock/Service/servicepage.dart';
 
-// --- Order Cart Model and Controller --- //
 class OrderCartItem {
   final Product product;
   int qty;

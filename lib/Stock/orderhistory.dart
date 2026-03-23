@@ -1,4 +1,3 @@
-// ignore_for_file: deprecated_member_use
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -23,7 +22,6 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
   List<DocumentSnapshot> _orders = [];
   final List<DocumentSnapshot> _pageStartDocs = [];
 
-  // --- ADDED SCROLL CONTROLLERS TO FIX THE SCROLLBAR CRASH ---
   final ScrollController _horizontalScroll = ScrollController();
   final ScrollController _verticalScroll = ScrollController();
 
@@ -170,7 +168,7 @@ class _OrderHistoryPageState extends State<OrderHistoryPage> {
                 border: Border.all(color: const Color(0xFFE2E8F0)),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.04),
+                    color: Colors.black.withValues(alpha: 0.04),
                     blurRadius: 12,
                     offset: const Offset(0, 4),
                   ),

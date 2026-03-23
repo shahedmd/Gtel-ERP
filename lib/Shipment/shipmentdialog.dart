@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
 import 'package:gtel_erp/Shipment/controller.dart';
-import 'package:gtel_erp/Stock/model.dart';
+import 'package:gtel_erp/Core/Stock%20Management/stockproductmodel.dart';
 import 'shipmodel.dart';
 
 void showShipmentEntryDialog(

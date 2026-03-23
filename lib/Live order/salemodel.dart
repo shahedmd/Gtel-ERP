@@ -13,7 +13,7 @@ import 'package:printing/printing.dart';
 
 // IMPORTANT: Update these imports to match your actual file structure
 import '../Core/Stock Management/stockcontroller.dart';
-import '../Stock/model.dart';
+import '../Core/Stock Management/stockproductmodel.dart';
 import '../Web Screen/Debator Finance/debatorcontroller.dart';
 import '../Web Screen/Debator Finance/model.dart';
 import '../Web Screen/Sales/controller.dart';

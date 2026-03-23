@@ -1023,93 +1023,116 @@ class ShipmentController extends GetxController {
     );
   }
 
-  // --- RESTORED: AGGREGATED REPORT ---
   Future<void> generateAggregatedOnWayPdf() async {
     if (aggregatedList.isEmpty) {
-      Get.snackbar("Info", "No data.");
+      Get.snackbar("Notice", "No shipments to download.");
       return;
     }
-    final doc = pw.Document();
-    final font = await PdfGoogleFonts.robotoRegular();
-    final fontBold = await PdfGoogleFonts.robotoBold();
-    doc.addPage(
+
+    final pdf = pw.Document();
+
+    // Prepare table headers
+    final headers = [
+      'Model',
+      'Product Name',
+      'Total Qty',
+      'Shipment Breakdown',
+    ];
+
+    // Convert aggregated list to purely text arrays
+    final data =
+        aggregatedList.map((product) {
+          // Create a clean, multiline string for the breakdown
+          final breakdownStr = product.incomingDetails
+              .map((d) {
+                final dateStr = DateFormat('MMM dd').format(d.date);
+                return '${d.shipmentName} | $dateStr | ${d.qty} pcs';
+              })
+              .join('\n');
+
+          return [
+            product.model,
+            product.name,
+            product.totalQty.toString(),
+            breakdownStr,
+          ];
+        }).toList();
+
+    pdf.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
-        theme: pw.ThemeData.withFont(base: font, bold: fontBold),
+        margin: const pw.EdgeInsets.all(32), // Professional margins
         build:
             (context) => [
+              // Professional Header
               pw.Header(
                 level: 0,
-                child: pw.Text(
-                  "INCOMING INVENTORY",
-                  style: pw.TextStyle(
-                    fontSize: 18,
-                    fontWeight: pw.FontWeight.bold,
-                  ),
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text(
+                      'Incoming Shipments Report',
+                      style: pw.TextStyle(
+                        fontSize: 18,
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColors.blue900,
+                      ),
+                    ),
+                    pw.Text(
+                      'Generated: ${DateFormat('yyyy-MM-dd').format(DateTime.now())}',
+                      style: const pw.TextStyle(
+                        fontSize: 10,
+                        color: PdfColors.grey700,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              pw.SizedBox(height: 20),
-              pw.Table(
-                border: pw.TableBorder.all(color: PdfColors.grey300),
-                children: [
-                  pw.TableRow(
-                    decoration: const pw.BoxDecoration(
-                      color: PdfColors.grey200,
-                    ),
-                    children: [
-                      pw.Padding(
-                        padding: const pw.EdgeInsets.all(6),
-                        child: pw.Text(
-                          "Model",
-                          style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-                        ),
-                      ),
-                      pw.Padding(
-                        padding: const pw.EdgeInsets.all(6),
-                        child: pw.Text(
-                          "Qty",
-                          style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-                        ),
-                      ),
-                      pw.Padding(
-                        padding: const pw.EdgeInsets.all(6),
-                        child: pw.Text(
-                          "Breakdown",
-                          style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-                        ),
-                      ),
-                    ],
-                  ),
-                  ...aggregatedList.map(
-                    (product) => pw.TableRow(
-                      children: [
-                        pw.Padding(
-                          padding: const pw.EdgeInsets.all(6),
-                          child: pw.Text("${product.model}\n${product.name}"),
-                        ),
-                        pw.Padding(
-                          padding: const pw.EdgeInsets.all(6),
-                          child: pw.Text("${product.totalQty}"),
-                        ),
-                        pw.Padding(
-                          padding: const pw.EdgeInsets.all(6),
-                          child: pw.Text(
-                            product.incomingDetails
-                                .map((d) => "${d.shipmentName} | ${d.qty}")
-                                .join("\n"),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+              pw.SizedBox(height: 10),
+
+              // High-Density PDF Table
+              pw.TableHelper.fromTextArray(
+                headers: headers,
+                data: data,
+                border: pw.TableBorder.all(
+                  color: PdfColors.grey400,
+                  width: 0.5,
+                ),
+
+                // Header Styling
+                headerStyle: pw.TextStyle(
+                  fontSize: 9,
+                  fontWeight: pw.FontWeight.bold,
+                  color: PdfColors.white,
+                ),
+                headerDecoration: const pw.BoxDecoration(
+                  color: PdfColors.blue800,
+                ),
+
+                // Body Cell Styling (Small font = 30+ items per page!)
+                cellStyle: const pw.TextStyle(fontSize: 8),
+                cellPadding: const pw.EdgeInsets.symmetric(
+                  vertical: 4,
+                  horizontal: 6,
+                ),
+                cellAlignment: pw.Alignment.centerLeft,
+
+                // Custom Column Widths prevents awkward line breaks
+                columnWidths: {
+                  0: const pw.FlexColumnWidth(1.5), // Model
+                  1: const pw.FlexColumnWidth(2.5), // Name
+                  2: const pw.FlexColumnWidth(1.0), // Total Qty
+                  3: const pw.FlexColumnWidth(3.5), // Breakdown
+                },
               ),
             ],
       ),
     );
+
     await Printing.layoutPdf(
-      onLayout: (format) => doc.save(),
-      name: 'Incoming_Report.pdf',
+      onLayout: (PdfPageFormat format) async => pdf.save(),
+      name:
+          'Incoming_Shipments_Report_${DateFormat('MMM_dd').format(DateTime.now())}.pdf',
     );
   }
 }

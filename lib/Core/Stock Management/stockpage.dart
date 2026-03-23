@@ -1,17 +1,14 @@
-// ignore_for_file: deprecated_member_use, empty_catches, avoid_print
-
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
-
 import '../../Shipment/controller.dart';
-import '../../Stock/allshipmentlist.dart';
+import 'ongoining_shipment_page.dart';
 import '../../Stock/shortlist.dart';
 import '../../Stock/Service/servicepage.dart';
 import 'stockcontroller.dart';
-import '../../Stock/edit.dart';
-import '../../Stock/model.dart';
+import 'helperdialogs.dart';
+import 'stockproductmodel.dart';
 
 class MyCustomScrollBehavior extends MaterialScrollBehavior {
   @override
@@ -57,7 +54,7 @@ class ProductScreen extends StatelessWidget {
                   borderRadius: BorderRadius.circular(12),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.04),
+                      color: Colors.black.withValues(alpha: 0.04),
                       blurRadius: 10,
                       offset: const Offset(0, 4),
                     ),
@@ -95,9 +92,6 @@ class ProductScreen extends StatelessWidget {
     );
   }
 
-  // ==========================================
-  // APP BAR
-  // ==========================================
   PreferredSizeWidget _buildAppBar(bool isMobile) {
     return AppBar(
       title: Row(
@@ -140,7 +134,7 @@ class ProductScreen extends StatelessWidget {
                     value: 'shipments',
                     child: ListTile(
                       leading: Icon(Icons.local_shipping, color: Colors.orange),
-                      title: Text("Shipments"),
+                      title: Text("Shipments", style: TextStyle(fontSize: 13),),
                       contentPadding: EdgeInsets.zero,
                     ),
                   ),
@@ -148,7 +142,7 @@ class ProductScreen extends StatelessWidget {
                     value: 'service',
                     child: ListTile(
                       leading: Icon(Icons.handyman, color: Colors.orange),
-                      title: Text("Service Center"),
+                      title: Text("Service Center", style: TextStyle(fontSize: 13)),
                       contentPadding: EdgeInsets.zero,
                     ),
                   ),
@@ -156,7 +150,7 @@ class ProductScreen extends StatelessWidget {
                     value: 'alerts',
                     child: ListTile(
                       leading: Icon(Icons.warning_amber, color: Colors.red),
-                      title: Text("Low Stock"),
+                      title: Text("Low Stock", style: TextStyle(fontSize: 13)),
                       contentPadding: EdgeInsets.zero,
                     ),
                   ),
@@ -164,7 +158,7 @@ class ProductScreen extends StatelessWidget {
                     value: 'refresh',
                     child: ListTile(
                       leading: Icon(Icons.refresh, color: Colors.blue),
-                      title: Text("Refresh Data"),
+                      title: Text("Refresh Data", style: TextStyle(fontSize: 13)),
                       contentPadding: EdgeInsets.zero,
                     ),
                   ),
@@ -175,13 +169,13 @@ class ProductScreen extends StatelessWidget {
             onPressed: () => Get.to(() => OnGoingShipmentsPage()),
             style: TextButton.styleFrom(foregroundColor: Colors.orange[700]),
             icon: const Icon(Icons.local_shipping, size: 20),
-            label: const Text("Shipments"),
+            label: const Text("Shipments",style: TextStyle(fontSize: 13)),
           ),
           TextButton.icon(
             onPressed: () => Get.to(() => ServicePage()),
             style: TextButton.styleFrom(foregroundColor: Colors.orange[700]),
             icon: const Icon(Icons.handyman_outlined, size: 20),
-            label: const Text("Service Center"),
+            label: const Text("Service Center",style: TextStyle(fontSize: 13)),
           ),
           const SizedBox(width: 8),
           TextButton.icon(
@@ -191,7 +185,7 @@ class ProductScreen extends StatelessWidget {
               foregroundColor: const Color(0xFFDC2626),
             ),
             icon: const Icon(Icons.warning_amber_rounded, size: 20),
-            label: const Text("Alerts"),
+            label: const Text("Alerts",style: TextStyle(fontSize: 13)),
           ),
           const SizedBox(width: 8),
           IconButton(
@@ -369,9 +363,6 @@ class ProductScreen extends StatelessWidget {
     );
   }
 
-  // ==========================================
-  // TOOLBAR (SEARCH & FILTERS)
-  // ==========================================
   Widget _buildControlToolbar(bool isMobile) {
     return Padding(
       padding: EdgeInsets.all(isMobile ? 12 : 16),
@@ -379,13 +370,17 @@ class ProductScreen extends StatelessWidget {
         children: [
           Expanded(
             child: TextField(
+              style: TextStyle(fontSize: 13),
               onChanged: (v) => controller.search(v),
               decoration: InputDecoration(
                 hintText:
                     isMobile
                         ? 'Search...'
                         : 'Search by model, name or brand...',
+                hintStyle: const TextStyle(fontSize: 13, color: Colors.grey),
+
                 prefixIcon: const Icon(Icons.search, color: Colors.grey),
+
                 filled: true,
                 fillColor: const Color(0xFFF8FAFC),
                 contentPadding: const EdgeInsets.symmetric(vertical: 0),
@@ -398,6 +393,7 @@ class ProductScreen extends StatelessWidget {
                   borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
                 ),
               ),
+              
             ),
           ),
           const SizedBox(width: 12),
@@ -455,9 +451,6 @@ class ProductScreen extends StatelessWidget {
     );
   }
 
-  // ==========================================
-  // LAG-FREE CUSTOM TABLE
-  // ==========================================
   Widget _buildOptimizedTable(bool isMobile) {
     return Obx(() {
       if (controller.isLoading.value) {
@@ -479,13 +472,11 @@ class ProductScreen extends StatelessWidget {
             child: SingleChildScrollView(
               controller: _horizontalScrollController,
               scrollDirection: Axis.horizontal,
-              // OVERFLOW FIXED: 1180 (columns) + 32 (padding) + 8 (buffer) = 1220. No more 32px crash!
               child: SizedBox(
                 width: 1220,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // TABLE HEADER
                     Container(
                       color: const Color(0xFFF1F5F9),
                       padding: const EdgeInsets.symmetric(
@@ -543,7 +534,7 @@ class ProductScreen extends StatelessWidget {
                                   p.name,
                                   overflow: TextOverflow.ellipsis,
                                   maxLines: 2,
-                                  style: const TextStyle(fontSize: 12),
+                                  style: const TextStyle(fontSize: 13),
                                 ),
                                 180,
                               ),
@@ -557,7 +548,7 @@ class ProductScreen extends StatelessWidget {
                                   p.stockQty.toString(),
                                   style: TextStyle(
                                     fontWeight: FontWeight.w800,
-                                    fontSize: 14,
+                                    fontSize: 13,
                                     color:
                                         p.stockQty <= p.alertQty
                                             ? Colors.red
@@ -591,16 +582,23 @@ class ProductScreen extends StatelessWidget {
                                   style: const TextStyle(
                                     color: Color(0xFF047857),
                                     fontWeight: FontWeight.bold,
+                                    fontSize: 13,
                                   ),
                                 ),
                                 100,
                               ),
                               _dataCell(
-                                Text("৳${p.agent.toStringAsFixed(1)}"),
+                                Text(
+                                  "৳${p.agent.toStringAsFixed(1)}",
+                                  style: TextStyle(fontSize: 13),
+                                ),
                                 100,
                               ),
                               _dataCell(
-                                Text("৳${p.wholesale.toStringAsFixed(1)}"),
+                                Text(
+                                  "৳${p.wholesale.toStringAsFixed(1)}",
+                                  style: TextStyle(fontSize: 13),
+                                ),
                                 100,
                               ),
                               _dataCell(_buildActions(context, p), 140),
@@ -641,9 +639,6 @@ class ProductScreen extends StatelessWidget {
     );
   }
 
-  // ==========================================
-  // CELL WIDGETS
-  // ==========================================
   Widget _buildProfitCell(Product p) {
     double profitAgent = p.agent - p.avgPurchasePrice;
     double profitWholesale = p.wholesale - p.avgPurchasePrice;
@@ -764,7 +759,10 @@ class ProductScreen extends StatelessWidget {
                   value: 'service',
                   child: ListTile(
                     leading: Icon(Icons.handyman, color: Colors.orange),
-                    title: Text('Send to Service'),
+                    title: Text(
+                      'Send to Service',
+                      style: TextStyle(fontSize: 13),
+                    ),
                     contentPadding: EdgeInsets.zero,
                   ),
                 ),
@@ -772,7 +770,10 @@ class ProductScreen extends StatelessWidget {
                   value: 'damage',
                   child: ListTile(
                     leading: Icon(Icons.broken_image, color: Colors.red),
-                    title: Text('Mark as Damage'),
+                    title: Text(
+                      'Mark as Damage',
+                      style: TextStyle(fontSize: 13),
+                    ),
                     contentPadding: EdgeInsets.zero,
                   ),
                 ),
@@ -780,7 +781,10 @@ class ProductScreen extends StatelessWidget {
                   value: 'delete',
                   child: ListTile(
                     leading: Icon(Icons.delete, color: Colors.grey),
-                    title: Text('Delete Product'),
+                    title: Text(
+                      'Delete Product',
+                      style: TextStyle(fontSize: 13),
+                    ),
                     contentPadding: EdgeInsets.zero,
                   ),
                 ),

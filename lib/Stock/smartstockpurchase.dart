@@ -8,7 +8,7 @@ import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
 import 'package:http/http.dart' as http;
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/Debtor%20Purchase/purchasecontroller.dart';
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/debatorcontroller.dart';
-import 'package:gtel_erp/Stock/model.dart';
+import 'package:gtel_erp/Core/Stock%20Management/stockproductmodel.dart';
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/model.dart';
 
 // --- Professional ERP Theme Colors ---
