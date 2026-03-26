@@ -22,17 +22,33 @@ class AuthController extends GetxController {
     ever(_firebaseUser, _initialScreen);
   }
 
+  // ==========================================
+  // THE TRAFFIC COP (Handles all routing & dialog closing)
+  // ==========================================
   void _initialScreen(User? user) {
+    // 1. SAFELY CLOSE ANY OPEN LOADING DIALOGS FIRST
+    if (Get.isDialogOpen ?? false) {
+      Get.back();
+    }
+
+    // 2. ROUTE THE USER
     if (user == null) {
       AppLogger.w("User is not logged in. Navigating to Login Page.");
-      Get.offAllNamed('/');
+      // Prevents routing to '/' if we are already on '/'
+      if (Get.currentRoute != '/') {
+        Get.offAllNamed('/');
+      }
     } else {
       AppLogger.i(
         "User is logged in as ${user.email}. Navigating to Home Page.",
       );
-      Get.offAllNamed('/home');
+      // Prevents routing to '/home' if we are already on '/home'
+      if (Get.currentRoute != '/home') {
+        Get.offAllNamed('/home');
+      }
     }
   }
+
   String _handleAuthError(String code) {
     switch (code) {
       case 'invalid-email':
@@ -54,6 +70,9 @@ class AuthController extends GetxController {
     }
   }
 
+  // ==========================================
+  // LOGIN LOGIC
+  // ==========================================
   Future<void> login(String email, String password) async {
     try {
       isLoading.value = true;
@@ -62,12 +81,13 @@ class AuthController extends GetxController {
         barrierDismissible: false,
       );
 
+      // This triggers authStateChanges, which triggers _initialScreen
       await _auth.signInWithEmailAndPassword(
         email: email.trim(),
         password: password.trim(),
       );
 
-      Get.back();
+
       Get.snackbar(
         "Welcome Back",
         "Successfully logged into G-Tel ERP",
@@ -101,6 +121,9 @@ class AuthController extends GetxController {
     }
   }
 
+  // ==========================================
+  // LOGOUT LOGIC
+  // ==========================================
   void logout() async {
     try {
       Get.dialog(
@@ -109,7 +132,6 @@ class AuthController extends GetxController {
       );
 
       await _auth.signOut();
-      Get.back();
     } catch (e) {
       if (Get.isDialogOpen ?? false) Get.back();
       Get.snackbar("Logout Error", e.toString());

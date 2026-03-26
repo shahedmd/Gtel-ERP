@@ -9,7 +9,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 // IMPORTANT: Update imports to match your file structure
-import 'package:gtel_erp/Web%20Screen/Expenses/dailycontroller.dart';
+import 'package:gtel_erp/Core/Gtel%20Expense/Daily%20Expense/dailyexpensecontroller.dart';
 import 'package:gtel_erp/Web%20Screen/Sales/controller.dart';
 
 // --- MODEL FOR UI & PDF ---
@@ -111,69 +111,163 @@ class OverviewController extends GetxController {
     expenseCtrl.changeDate(selectedDate.value);
   }
 
-  // --- 1. CALCULATE PREVIOUS BALANCE ---
+ // ==========================================================
+  // 1. CALCULATE PREVIOUS BALANCE (EXACT CHRONOLOGICAL MATCH)
+  // ==========================================================
   Future<void> _fetchPreviousBalance() async {
     isLoadingHistory.value = true;
     try {
+      DateTime absoluteStart = DateTime(2020, 1, 1);
       DateTime startOfDay = DateTime(
         selectedDate.value.year,
         selectedDate.value.month,
         selectedDate.value.day,
+        0, 0, 0
       );
 
-      // A. Past Sales
-      var salesSnap =
-          await _db
-              .collection('daily_sales')
-              .where('timestamp', isLessThan: startOfDay)
-              .get();
+      // Fetch all three collections
+      var salesFuture = _db.collection('daily_sales')
+          .where('timestamp', isGreaterThanOrEqualTo: absoluteStart)
+          .where('timestamp', isLessThan: startOfDay)
+          .get();
 
-      double pastSales = 0.0;
-      for (var doc in salesSnap.docs) {
-        Map<String, dynamic> data = doc.data();
-        double paid = double.tryParse(data['paid'].toString()) ?? 0;
-        double lPaid =
-            double.tryParse(data['ledgerPaid']?.toString() ?? '0') ?? 0;
-        pastSales += (paid - lPaid);
+      var ledgerFuture = _db.collection('cash_ledger')
+          .where('timestamp', isGreaterThanOrEqualTo: absoluteStart)
+          .where('timestamp', isLessThan: startOfDay)
+          .get();
+
+      var expensesFuture = _db.collectionGroup('items')
+          .where('time', isGreaterThanOrEqualTo: absoluteStart)
+          .where('time', isLessThan: startOfDay)
+          .get();
+
+      var results = await Future.wait([salesFuture, ledgerFuture, expensesFuture]);
+
+      // 1. COMBINE ALL RECORDS INTO A SINGLE TIMELINE
+      List<Map<String, dynamic>> allRawItems = [];
+
+      for (var doc in (results[0] as QuerySnapshot).docs) {
+        allRawItems.add({
+          'type': 'sale',
+          'data': doc.data(),
+          'time': (doc['timestamp'] as Timestamp).toDate(),
+        });
       }
 
-      // B. Past Ledger
-      var ledgerSnap =
-          await _db
-              .collection('cash_ledger')
-              .where('timestamp', isLessThan: startOfDay)
-              .get();
+      for (var doc in (results[1] as QuerySnapshot).docs) {
+        allRawItems.add({
+          'type': 'ledger',
+          'data': doc.data(),
+          'time': (doc['timestamp'] as Timestamp).toDate(),
+        });
+      }
 
-      double pastLedgerSum = 0.0;
-      for (var doc in ledgerSnap.docs) {
-        var d = doc.data();
-        if (d['source'] == 'pos_sale') continue;
+      for (var doc in (results[2] as QuerySnapshot).docs) {
+        var d = doc.data() as Map<String, dynamic>;
+        DateTime time = d['time'] is Timestamp ? (d['time'] as Timestamp).toDate() : DateTime.now();
+        allRawItems.add({
+          'type': 'expense',
+          'data': d,
+          'time': time,
+        });
+      }
 
-        String type = (d['type'] ?? 'deposit').toString();
-        if (type == 'transfer')
-          continue; // Ignore Transfers in History Calculation
+      // 2. SORT CHRONOLOGICALLY (THIS FIXES THE 13,000 TK GAP)
+      allRawItems.sort((a, b) => (a['time'] as DateTime).compareTo(b['time'] as DateTime));
 
-        double amt = double.tryParse(d['amount'].toString()) ?? 0;
-        if (type == 'withdraw') {
-          pastLedgerSum -= amt;
-        } else {
-          pastLedgerSum += amt;
+      double tCash = 0, tBank = 0, tBkash = 0, tNagad = 0;
+
+      // 3. PROCESS SEQUENTIALLY EXACTLY LIKE CASH DRAWER
+      for (var item in allRawItems) {
+        if (item['type'] == 'sale') {
+          var data = item['data'];
+          double totalPaid = double.tryParse(data['paid'].toString()) ?? 0;
+          double ledgerPaid = double.tryParse(data['ledgerPaid']?.toString() ?? '0') ?? 0;
+          double actualReceived = totalPaid - ledgerPaid;
+
+          if (actualReceived > 0.01) {
+            double c = 0, b = 0, bk = 0, n = 0;
+            var pm = data['paymentMethod'];
+
+            if (pm is Map) {
+              c = double.tryParse(pm['cash'].toString()) ?? 0;
+              b = double.tryParse(pm['bank'].toString()) ?? 0;
+              bk = double.tryParse(pm['bkash'].toString()) ?? 0;
+              n = double.tryParse(pm['nagad'].toString()) ?? 0;
+
+              if ((c + b + bk + n) == 0) {
+                String valBank = (pm['bankName'] ?? '').toString();
+                String valBkash = (pm['bkashNumber'] ?? '').toString();
+                String valNagad = (pm['nagadNumber'] ?? '').toString();
+
+                if (valBank.isNotEmpty) b = actualReceived;
+                else if (valBkash.isNotEmpty) bk = actualReceived;
+                else if (valNagad.isNotEmpty) n = actualReceived;
+                else c = actualReceived;
+              }
+            } else {
+              String s = pm.toString().toLowerCase();
+              if (s.contains('bank')) b = actualReceived;
+              else if (s.contains('bkash')) bk = actualReceived;
+              else if (s.contains('nagad')) n = actualReceived;
+              else c = actualReceived;
+            }
+
+            tCash += c; tBank += b; tBkash += bk; tNagad += n;
+          }
+        } 
+        else if (item['type'] == 'ledger') {
+          var data = item['data'];
+          if (data['source'] == 'pos_sale') continue;
+
+          double amt = double.tryParse(data['amount'].toString()) ?? 0;
+          String type = (data['type'] ?? 'deposit').toString();
+
+          if (type == 'transfer') {
+            String from = (data['fromMethod'] ?? 'Cash').toString();
+            String to = (data['toMethod'] ?? 'Cash').toString();
+
+            if (from == 'Bank') tBank -= amt;
+            else if (from == 'Bkash') tBkash -= amt;
+            else if (from == 'Nagad') tNagad -= amt;
+            else tCash -= amt;
+
+            if (to == 'Bank') tBank += amt;
+            else if (to == 'Bkash') tBkash += amt;
+            else if (to == 'Nagad') tNagad += amt;
+            else tCash += amt;
+          } else {
+            String methodStr = (data['method'] ?? 'Cash').toString().toLowerCase();
+            bool isBank = methodStr.contains('bank');
+            bool isBkash = methodStr.contains('bkash');
+            bool isNagad = methodStr.contains('nagad');
+
+            if (type == 'deposit') {
+              if (isBank) tBank += amt;
+              else if (isBkash) tBkash += amt;
+              else if (isNagad) tNagad += amt;
+              else tCash += amt;
+            } else { 
+              if (isBank) tBank -= amt;
+              else if (isBkash) tBkash -= amt;
+              else if (isNagad) tNagad -= amt;
+              else tCash -= amt;
+            }
+          }
+        } 
+        else if (item['type'] == 'expense') {
+          double amt = double.tryParse(item['data']['amount'].toString()) ?? 0;
+          double rem = amt;
+
+          if (tCash >= rem) { tCash -= rem; rem = 0; } else { rem -= tCash; tCash = 0; }
+          if (rem > 0) { if (tBank >= rem) { tBank -= rem; rem = 0; } else { rem -= tBank; tBank = 0; } }
+          if (rem > 0) { if (tBkash >= rem) { tBkash -= rem; rem = 0; } else { rem -= tBkash; tBkash = 0; } }
+          if (rem > 0) { if (tNagad >= rem) { tNagad -= rem; rem = 0; } else { rem -= tNagad; tNagad = 0; } }
         }
       }
 
-      // C. Past Expenses
-      var expenseSnap =
-          await _db
-              .collectionGroup('items')
-              .where('time', isLessThan: startOfDay)
-              .get();
-
-      double pastExpenses = 0.0;
-      for (var doc in expenseSnap.docs) {
-        pastExpenses += (double.tryParse(doc['amount'].toString()) ?? 0);
-      }
-
-      previousCash.value = (pastSales + pastLedgerSum) - pastExpenses;
+      // SET THE EXACT MATCHING TOTAL
+      previousCash.value = tCash + tBank + tBkash + tNagad;
 
       _processLedgerData();
     } catch (e) {

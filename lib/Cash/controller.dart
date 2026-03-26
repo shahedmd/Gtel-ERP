@@ -252,9 +252,6 @@ class CashDrawerController extends GetxController {
 
             var pm = data['paymentMethod'];
 
-            // ----------------------------------------------------
-            // NEW PARSING LOGIC FOR SPLIT PAYMENTS
-            // ----------------------------------------------------
             if (pm is Map) {
               // 1. Try exact values first (The new standard)
               c = double.tryParse(pm['cash'].toString()) ?? 0;

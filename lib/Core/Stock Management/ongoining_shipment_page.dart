@@ -24,9 +24,10 @@ class OnGoingShipmentsPage extends StatefulWidget {
 class _OnGoingShipmentsPageState extends State<OnGoingShipmentsPage> {
   final ShipmentController controller = Get.find<ShipmentController>();
 
-  int currentPage = 1;
+  // Changed to GetX Rx variables!
+  final RxInt currentPage = 1.obs;
   final int itemsPerPage = 15;
-  String searchQuery = ''; // NEW: Search state
+  final RxString searchQuery = ''.obs;
 
   final ScrollController _verticalScrollController = ScrollController();
   final ScrollController _horizontalScrollController = ScrollController();
@@ -39,11 +40,11 @@ class _OnGoingShipmentsPageState extends State<OnGoingShipmentsPage> {
   }
 
   void _nextPage(int totalPages) {
-    if (currentPage < totalPages) setState(() => currentPage++);
+    if (currentPage.value < totalPages) currentPage.value++;
   }
 
   void _prevPage() {
-    if (currentPage > 1) setState(() => currentPage--);
+    if (currentPage.value > 1) currentPage.value--;
   }
 
   @override
@@ -63,19 +64,18 @@ class _OnGoingShipmentsPageState extends State<OnGoingShipmentsPage> {
         if (controller.aggregatedList.isEmpty) {
           return _buildEmptyState();
         }
-
         // --- SEARCH FILTER LOGIC ---
         final filteredList =
-            searchQuery.isEmpty
+            searchQuery.value.isEmpty
                 ? controller.aggregatedList
                 : controller.aggregatedList
                     .where(
                       (p) =>
                           p.model.toLowerCase().contains(
-                            searchQuery.toLowerCase(),
+                            searchQuery.value.toLowerCase(),
                           ) ||
                           p.name.toLowerCase().contains(
-                            searchQuery.toLowerCase(),
+                            searchQuery.value.toLowerCase(),
                           ),
                     )
                     .toList();
@@ -83,11 +83,11 @@ class _OnGoingShipmentsPageState extends State<OnGoingShipmentsPage> {
         // --- PAGINATION LOGIC ---
         final totalItems = filteredList.length;
         final totalPages = (totalItems / itemsPerPage).ceil();
-        if (currentPage > totalPages && totalPages > 0) {
-          currentPage = totalPages;
+        if (currentPage.value > totalPages && totalPages > 0) {
+          currentPage.value = totalPages;
         }
 
-        final startIndex = (currentPage - 1) * itemsPerPage;
+        final startIndex = (currentPage.value - 1) * itemsPerPage;
         final endIndex =
             (startIndex + itemsPerPage > totalItems)
                 ? totalItems
@@ -177,10 +177,8 @@ class _OnGoingShipmentsPageState extends State<OnGoingShipmentsPage> {
       ),
       child: TextField(
         onChanged: (v) {
-          setState(() {
-            searchQuery = v;
-            currentPage = 1; // Always reset to page 1 when searching
-          });
+          searchQuery.value = v;
+          currentPage.value = 1; // Always reset to page 1 when searching
         },
         style: const TextStyle(fontSize: 16, color: Colors.black),
         decoration: InputDecoration(
@@ -581,7 +579,7 @@ class _OnGoingShipmentsPageState extends State<OnGoingShipmentsPage> {
                   border: Border.all(color: const Color(0xFFE2E8F0)),
                 ),
                 child: Text(
-                  "Page $currentPage of $totalPages",
+                  "Page ${currentPage.value} of $totalPages", // Added .value
                   style: const TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 13,
@@ -593,7 +591,7 @@ class _OnGoingShipmentsPageState extends State<OnGoingShipmentsPage> {
                 icon: const Icon(Icons.chevron_right),
                 tooltip: "Next",
                 onPressed:
-                    currentPage < totalPages
+                    currentPage.value < totalPages
                         ? () => _nextPage(totalPages)
                         : null,
               ),
@@ -651,7 +649,7 @@ class _OnGoingShipmentsPageState extends State<OnGoingShipmentsPage> {
             Icon(Icons.search_off, size: 48, color: Colors.grey[400]),
             const SizedBox(height: 16),
             Text(
-              'No shipments match "$searchQuery"',
+              'No shipments match "${searchQuery.value}"', // Added .value
               style: TextStyle(fontSize: 16, color: Colors.grey[600]),
             ),
           ],

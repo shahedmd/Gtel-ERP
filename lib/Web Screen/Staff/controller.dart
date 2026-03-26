@@ -7,7 +7,7 @@ import 'package:web/web.dart' as web; // For Web Download
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:gtel_erp/Web%20Screen/Expenses/dailycontroller.dart';
+import 'package:gtel_erp/Core/Gtel%20Expense/Daily%20Expense/dailyexpensecontroller.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -223,7 +223,7 @@ class StaffController extends GetxController {
 
           await dailyCtrl.addDailyExpense(
             expenseName,
-            amount.toInt(),
+            amount.toDouble(),
             note: note,
             date: date,
           );

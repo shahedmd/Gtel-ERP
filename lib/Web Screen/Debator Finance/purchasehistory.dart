@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/debatorcontroller.dart';
-import 'package:gtel_erp/Web%20Screen/Expenses/dailycontroller.dart';
+import 'package:gtel_erp/Core/Gtel%20Expense/Daily%20Expense/dailyexpensecontroller.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -357,7 +357,7 @@ class GlobalPurchaseHistoryController extends GetxController {
       try {
         await dailyExpenseCtrl.addDailyExpense(
           "Payment to $debtorName",
-          amount.toInt(),
+          amount.toDouble(),
           note: "Debtor Payment. Method: $method. ${note ?? ''}",
           date: customDate ?? DateTime.now(),
         );
