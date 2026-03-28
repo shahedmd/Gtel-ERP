@@ -1,17 +1,15 @@
 // ignore_for_file: avoid_print, deprecated_member_use, must_be_immutable
-
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Core/Utils/app_logger.dart';
 import 'package:http/http.dart' as http;
-
 import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/Debtor%20Purchase/purchasecontroller.dart';
-import 'package:gtel_erp/Web%20Screen/Debator%20Finance/debatorcontroller.dart';
+import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/gteldebtorcontroller.dart';
 import 'package:gtel_erp/Core/Stock%20Management/stockproductmodel.dart';
-import 'package:gtel_erp/Web%20Screen/Debator%20Finance/model.dart';
+import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/debtordartmodel.dart';
 
 // --- Professional ERP Theme Colors ---
 const Color darkSlate = Color(0xFF0F172A);
@@ -45,7 +43,6 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
   late TextEditingController qtyController;
   late TextEditingController costController;
   late TextEditingController noteController;
-
   TextEditingController? _internalSupplierCtrl;
   TextEditingController? _internalProductCtrl;
 
@@ -84,7 +81,6 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
     noteController.clear();
     _internalSupplierCtrl?.clear();
     _internalProductCtrl?.clear();
-
     debtorCtrl.loadBodies();
     productCtrl.fetchProducts();
     Get.snackbar(
@@ -104,10 +100,11 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
     double calculatedCost = 0.0;
     if (location == 'Sea') {
       calculatedCost = (p.yuan * p.currency) + (p.weight * p.shipmentTax);
-    } else if (location == 'Air')
-      {calculatedCost = (p.yuan * p.currency) + (p.weight * p.shipmentTaxAir);}
-    else
-      {calculatedCost = p.avgPurchasePrice;}
+    } else if (location == 'Air') {
+      calculatedCost = (p.yuan * p.currency) + (p.weight * p.shipmentTaxAir);
+    } else {
+      calculatedCost = p.avgPurchasePrice;
+    }
 
     costController.text = calculatedCost.toStringAsFixed(2);
   }
@@ -196,7 +193,11 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
             SizedBox(width: 12),
             Text(
               "Smart Product Purchase",
-              style: TextStyle(fontWeight: FontWeight.w600, letterSpacing: 0.5),
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.5,
+                fontSize: 11,
+              ),
             ),
           ],
         ),
@@ -209,7 +210,7 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
             icon: const Icon(Icons.refresh, color: Colors.white),
             label: const Text(
               "Reset Page",
-              style: TextStyle(color: Colors.white),
+              style: TextStyle(color: Colors.white, fontSize: 13),
             ),
             style: TextButton.styleFrom(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -351,7 +352,7 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
                 ),
                 label: const Text(
                   "New Supplier",
-                  style: TextStyle(color: Colors.white),
+                  style: TextStyle(color: Colors.white, fontSize: 13),
                 ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: darkSlate,
@@ -418,10 +419,12 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
             ) {
               _internalSupplierCtrl = controller;
               return TextField(
+                style: TextStyle(fontSize:13),
                 controller: controller,
                 focusNode: focusNode,
                 decoration: InputDecoration(
                   labelText: "Search Supplier by Name, Phone, NID...",
+                  labelStyle: TextStyle(fontSize: 11),
                   prefixIcon: const Icon(Icons.business, color: textLight),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
@@ -537,7 +540,7 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
                 icon: const Icon(Icons.add, size: 16, color: Colors.white),
                 label: const Text(
                   "New Product",
-                  style: TextStyle(color: Colors.white),
+                  style: TextStyle(color: Colors.white, fontSize: 13),
                 ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: activeAccent,
@@ -577,7 +580,7 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
                   return productsJson.map((e) => Product.fromJson(e)).toList();
                 }
               } catch (e) {
-            AppLogger.i(e.toString());
+                AppLogger.i(e.toString());
               }
 
               String qLower = queryText.toLowerCase();
@@ -603,10 +606,12 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
             ) {
               _internalProductCtrl = controller;
               return TextField(
+                style: TextStyle(fontSize: 13),
                 controller: controller,
                 focusNode: focusNode,
                 decoration: InputDecoration(
                   labelText: "Search Product by Model, Name, Brand...",
+                  labelStyle: TextStyle(fontSize: 11),
                   prefixIcon: const Icon(
                     Icons.inventory_2_outlined,
                     color: textLight,
@@ -678,16 +683,20 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
         value: selectedLocation.value,
         decoration: InputDecoration(
           labelText: 'Purchase Location',
+          labelStyle: TextStyle(fontSize: 11),
           filled: true,
           fillColor: Colors.white,
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
         ),
         items:
-            [
-              'Local',
-              'Air',
-              'Sea',
-            ].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+            ['Local', 'Air', 'Sea']
+                .map(
+                  (e) => DropdownMenuItem(
+                    value: e,
+                    child: Text(e, style: TextStyle(fontSize: 13)),
+                  ),
+                )
+                .toList(),
         onChanged: (val) {
           selectedLocation.value = val!;
           _calculateAutoCost(selectedProduct.value, selectedLocation.value);
@@ -700,8 +709,10 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
     return TextField(
       controller: qtyController,
       keyboardType: TextInputType.number,
+      style: TextStyle(fontSize: 13),
       decoration: InputDecoration(
         labelText: 'Quantity',
+        labelStyle: TextStyle(fontSize: 11),
         filled: true,
         fillColor: Colors.white,
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
@@ -712,9 +723,13 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
   Widget _buildCostInput() {
     return TextField(
       controller: costController,
+      style: TextStyle(fontSize: 13),
+
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
       decoration: InputDecoration(
         labelText: 'Unit Cost (৳)',
+        labelStyle: TextStyle(fontSize: 11),
+
         filled: true,
         fillColor: Colors.white,
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
@@ -923,9 +938,11 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
               ),
               const SizedBox(height: 20),
               TextField(
+                style: TextStyle(fontSize: 13),
                 controller: noteController,
                 decoration: InputDecoration(
                   labelText: 'Purchase Note / Invoice No. (Optional)',
+                  labelStyle: TextStyle(fontSize: 11),
                   prefixIcon: const Icon(
                     Icons.note_alt_outlined,
                     color: textLight,
@@ -1368,15 +1385,16 @@ class _AddSupplierDialogState extends State<AddSupplierDialog> {
       final type = p["type"].value;
       if (type == "cash") {
         finalPayments.add({"type": "cash", "currency": "BDT"});
-      } else if (type == "bkash" || type == "nagad")
-        {finalPayments.add({"type": type, "number": p[type].text});}
-      else if (type == "bank")
-        {finalPayments.add({
+      } else if (type == "bkash" || type == "nagad") {
+        finalPayments.add({"type": type, "number": p[type].text});
+      } else if (type == "bank") {
+        finalPayments.add({
           "type": "bank",
           "bankName": p["bankName"].text,
           "accountNumber": p["bankAcc"].text,
           "branch": p["bankBranch"].text,
-        });}
+        });
+      }
     }
 
     await widget.debtorCtrl.addBody(

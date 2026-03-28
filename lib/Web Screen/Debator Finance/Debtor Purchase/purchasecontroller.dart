@@ -2,7 +2,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
-import 'package:gtel_erp/Web%20Screen/Debator%20Finance/debatorcontroller.dart';
+import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/gteldebtorcontroller.dart';
 import 'package:gtel_erp/Core/Gtel%20Expense/Daily%20Expense/dailyexpensecontroller.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';

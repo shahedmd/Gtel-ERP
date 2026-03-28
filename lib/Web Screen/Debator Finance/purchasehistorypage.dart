@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/purchasehistory.dart';
 import 'package:intl/intl.dart';
-import 'package:gtel_erp/Web%20Screen/Debator%20Finance/debatorcontroller.dart';
+import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/gteldebtorcontroller.dart';
 
 class GlobalPurchasePage extends StatelessWidget {
   GlobalPurchasePage({super.key});

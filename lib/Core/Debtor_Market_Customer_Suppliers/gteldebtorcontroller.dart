@@ -1,52 +1,55 @@
-// ignore_for_file: empty_catches, deprecated_member_use
-
 import 'dart:async';
-import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:gtel_erp/Web%20Screen/overviewcontroller.dart';
+import 'package:gtel_erp/Core/Utils/app_logger.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+
+import 'package:gtel_erp/Web%20Screen/overviewcontroller.dart';
 import 'package:gtel_erp/Cash/controller.dart';
-import '../Sales/controller.dart';
-import 'model.dart';
+import '../../Web Screen/Sales/controller.dart';
+import 'debtordartmodel.dart';
 
 class DebatorController extends GetxController {
   final FirebaseFirestore db = FirebaseFirestore.instance;
 
-  // --- DATA LISTS ---
-  var bodies = <DebtorModel>[].obs;
+  // ==========================================
+  // 1. STATE & VARIABLES
+  // ==========================================
+  final RxList<DebtorModel> bodies = <DebtorModel>[].obs;
+  final RxList<DebtorModel> filteredBodies = <DebtorModel>[].obs;
 
-  // --- LOADING STATES ---
-  RxBool isBodiesLoading = false.obs;
-  RxBool isSearching = false.obs;
-
-  final int _limit = 30;
-  List<DocumentSnapshot?> pageCursors = [null];
-  RxInt currentPage = 1.obs;
-  RxBool hasMore = true.obs;
-  var totalMarketOutstanding = 0.0.obs;
-  var totalMarketPayable = 0.0.obs;
-
-  var filteredBodies = <DebtorModel>[].obs;
-  RxBool gbIsLoading = false.obs;
-  RxBool isAddingBody = false.obs;
-  Timer? _searchDebounce;
-
-  DocumentSnapshot? _lastDocument;
+  // Loading States
+  final RxBool isBodiesLoading = false.obs;
+  final RxBool isSearching = false.obs;
+  final RxBool gbIsLoading = false.obs;
+  final RxBool isAddingBody = false.obs;
   final RxBool isMoreLoading = false.obs;
 
+  // Debtor Pagination
+  final int _limit = 30;
+  List<DocumentSnapshot?> pageCursors = [null];
+  final RxInt currentPage = 1.obs;
+  final RxBool hasMore = true.obs;
+  DocumentSnapshot? _lastDocument;
+
+  // Market Totals
+  final RxDouble totalMarketOutstanding = 0.0.obs;
+  final RxDouble totalMarketPayable = 0.0.obs;
+
+  // Transaction States
   final RxList<TransactionModel> currentTransactions = <TransactionModel>[].obs;
   final RxBool isTxLoading = false.obs;
   final RxBool hasMoreTx = true.obs;
   final int _txLimit = 20;
   List<DocumentSnapshot?> txPageCursors = [null];
-  RxInt currentTxPage = 1.obs;
+  final RxInt currentTxPage = 1.obs;
+  final Rx<DateTimeRange?> selectedDateRange = Rx<DateTimeRange?>(null);
 
-  Rx<DateTimeRange?> selectedDateRange = Rx<DateTimeRange?>(null);
+  Timer? _searchDebounce;
 
   final NumberFormat bdCurrency = NumberFormat.currency(
     locale: 'en_IN',
@@ -63,15 +66,16 @@ class DebatorController extends GetxController {
     calculateTotalOutstanding();
   }
 
+  // ==========================================
+  // 2. SEARCH & PAGINATION
+  // ==========================================
   void nextPage() {
-    if (isSearching.value) return;
-    if (!hasMore.value) return;
+    if (isSearching.value || !hasMore.value) return;
     loadPage(currentPage.value + 1);
   }
 
   void prevPage() {
-    if (isSearching.value) return;
-    if (currentPage.value <= 1) return;
+    if (isSearching.value || currentPage.value <= 1) return;
     loadPage(currentPage.value - 1);
   }
 
@@ -84,9 +88,10 @@ class DebatorController extends GetxController {
       return;
     }
 
-    _searchDebounce = Timer(const Duration(milliseconds: 500), () {
-      _performGlobalSearch(queryText);
-    });
+    _searchDebounce = Timer(
+      const Duration(milliseconds: 500),
+      () => _performGlobalSearch(queryText),
+    );
   }
 
   Future<void> _performGlobalSearch(String queryText) async {
@@ -96,7 +101,6 @@ class DebatorController extends GetxController {
     try {
       String qLower = queryText.trim().toLowerCase();
       Map<String, DebtorModel> results = {};
-
       List<String> searchTerms = qLower.split(RegExp(r'\s+'));
       String primaryTerm = searchTerms.first;
 
@@ -107,7 +111,6 @@ class DebatorController extends GetxController {
                 .where('searchKeywords', arrayContains: primaryTerm)
                 .limit(50)
                 .get();
-
         for (var doc in kwSnap.docs) {
           results[doc.id] = DebtorModel.fromFirestore(doc);
         }
@@ -121,11 +124,9 @@ class DebatorController extends GetxController {
           results.values.where((d) {
             String combinedString =
                 "${d.name} ${d.phone} ${d.nid} ${d.address}".toLowerCase();
-
             try {
               combinedString += " ${(d as dynamic).des}".toLowerCase();
             } catch (_) {}
-
             for (String term in searchTerms) {
               if (!combinedString.contains(term)) return false;
             }
@@ -138,20 +139,13 @@ class DebatorController extends GetxController {
     }
   }
 
-  Future<void> runServerSearch(String queryText) async {
-    searchDebtors(queryText);
-  }
+  Future<void> runServerSearch(String queryText) async =>
+      searchDebtors(queryText);
 
   List<String> _generateSearchKeywords(String name, String phone, String des) {
     Set<String> keywords = {};
-
-    String lowerName = name.trim().toLowerCase();
-    String lowerPhone = phone.trim().toLowerCase();
-    String lowerDes = des.trim().toLowerCase();
-
     void addAllSubstrings(String text) {
       if (text.isEmpty) return;
-
       if (text.length > 50) {
         List<String> words = text.split(RegExp(r'\s+'));
         for (String w in words) {
@@ -164,7 +158,6 @@ class DebatorController extends GetxController {
         }
         return;
       }
-
       for (int i = 0; i < text.length; i++) {
         for (int j = i + 1; j <= text.length; j++) {
           keywords.add(text.substring(i, j));
@@ -172,10 +165,9 @@ class DebatorController extends GetxController {
       }
     }
 
-    addAllSubstrings(lowerName);
-    addAllSubstrings(lowerPhone);
-    addAllSubstrings(lowerDes);
-
+    addAllSubstrings(name.trim().toLowerCase());
+    addAllSubstrings(phone.trim().toLowerCase());
+    addAllSubstrings(des.trim().toLowerCase());
     return keywords.toList();
   }
 
@@ -184,18 +176,16 @@ class DebatorController extends GetxController {
     try {
       final snap = await db.collection('debatorbody').get();
       final batch = db.batch();
-
       for (var doc in snap.docs) {
         final data = doc.data();
-        String name = data['name'] ?? '';
-        String phone = data['phone'] ?? '';
-        String des = data['des'] ?? '';
-
         batch.update(doc.reference, {
-          'searchKeywords': _generateSearchKeywords(name, phone, des),
+          'searchKeywords': _generateSearchKeywords(
+            data['name'] ?? '',
+            data['phone'] ?? '',
+            data['des'] ?? '',
+          ),
         });
       }
-
       await batch.commit();
       Get.snackbar("Success", "All Search Keywords Updated Successfully!");
     } catch (e) {
@@ -205,16 +195,14 @@ class DebatorController extends GetxController {
     }
   }
 
-  // =========================================================
-  // CALCULATIONS & LOADING (EID BONUS UPDATED)
-  // =========================================================
-
+  // ==========================================
+  // 3. CORE FINANCIAL CALCULATIONS (UNTOUCHED)
+  // ==========================================
   Future<void> calculateTotalOutstanding() async {
     try {
       final snap = await db.collection('debatorbody').get();
       double totalRec = 0;
       double totalPay = 0;
-
       for (var doc in snap.docs) {
         final data = doc.data();
         totalRec += (data['balance'] as num?)?.toDouble() ?? 0.0;
@@ -222,7 +210,9 @@ class DebatorController extends GetxController {
       }
       totalMarketOutstanding.value = totalRec;
       totalMarketPayable.value = totalPay;
-    } catch (e) {}
+    } catch (e) {
+      AppLogger.i(e.toString());
+    }
   }
 
   Stream<double> getLiveBalance(String debtorId) {
@@ -234,9 +224,7 @@ class DebatorController extends GetxController {
   }
 
   Future<void> loadPage(int pageIndex) async {
-    if (pageIndex < 1) return;
-    if (pageIndex > pageCursors.length) return;
-
+    if (pageIndex < 1 || pageIndex > pageCursors.length) return;
     isBodiesLoading.value = true;
     isSearching.value = false;
 
@@ -245,19 +233,15 @@ class DebatorController extends GetxController {
           .collection('debatorbody')
           .orderBy('createdAt', descending: true)
           .limit(_limit);
-
       DocumentSnapshot? startAfterDoc = pageCursors[pageIndex - 1];
-
       if (startAfterDoc != null) {
         query = query.startAfterDocument(startAfterDoc);
       }
 
       final snap = await query.get();
-
       if (snap.docs.isNotEmpty) {
         bodies.value =
             snap.docs.map((d) => DebtorModel.fromFirestore(d)).toList();
-
         if (snap.docs.length < _limit) {
           hasMore.value = false;
         } else {
@@ -296,20 +280,17 @@ class DebatorController extends GetxController {
           .collection('debatorbody')
           .orderBy('createdAt', descending: true)
           .limit(_limit);
-
       if (loadMore && _lastDocument != null) {
         query = query.startAfterDocument(_lastDocument!);
       }
 
       final snap = await query.get();
-
       if (snap.docs.length < _limit) hasMore.value = false;
 
       if (snap.docs.isNotEmpty) {
         _lastDocument = snap.docs.last;
         List<DebtorModel> newBodies =
             snap.docs.map((d) => DebtorModel.fromFirestore(d)).toList();
-
         if (loadMore) {
           bodies.addAll(newBodies);
         } else {
@@ -320,10 +301,7 @@ class DebatorController extends GetxController {
       }
 
       calculateTotalOutstanding();
-
-      if (!isSearching.value) {
-        filteredBodies.assignAll(bodies);
-      }
+      if (!isSearching.value) filteredBodies.assignAll(bodies);
     } catch (e) {
       Get.snackbar("Error", "Could not load debtors: $e");
     } finally {
@@ -340,11 +318,10 @@ class DebatorController extends GetxController {
               .doc(debtorId)
               .collection('transactions')
               .get();
-
-      double oldDueTotal = 0.0;
-      double oldDuePaid = 0.0;
-      double runningSales = 0.0;
-      double runningPaid = 0.0;
+      double oldDueTotal = 0.0,
+          oldDuePaid = 0.0,
+          runningSales = 0.0,
+          runningPaid = 0.0;
 
       for (var doc in snap.docs) {
         final data = doc.data();
@@ -354,7 +331,6 @@ class DebatorController extends GetxController {
         if (type == 'previous_due') {
           oldDueTotal += amount;
         } else if (type == 'loan_payment' || type == 'eid_bonus') {
-          // Eid Bonus acts identically to loan payment initially
           oldDuePaid += amount;
         } else if (type == 'credit' || type == 'advance_given') {
           runningSales += amount;
@@ -364,13 +340,10 @@ class DebatorController extends GetxController {
       }
 
       double currentLoan = oldDueTotal - oldDuePaid;
-      // If loan goes negative (meaning eid bonus or payments overflowed the loan),
-      // we apply the overflow to runningPaid!
       if (currentLoan < 0) {
         runningPaid += currentLoan.abs();
         currentLoan = 0;
       }
-
       double runningDue = runningSales - runningPaid;
 
       return {
@@ -390,10 +363,10 @@ class DebatorController extends GetxController {
         .collection('transactions')
         .snapshots()
         .map((snap) {
-          double oldDueTotal = 0.0;
-          double oldDuePaid = 0.0;
-          double runningSales = 0.0;
-          double runningPaid = 0.0;
+          double oldDueTotal = 0.0,
+              oldDuePaid = 0.0,
+              runningSales = 0.0,
+              runningPaid = 0.0;
 
           for (var doc in snap.docs) {
             final data = doc.data();
@@ -424,9 +397,8 @@ class DebatorController extends GetxController {
   }
 
   // =========================================================
-  // 2. TRANSACTION PAGINATION LOGIC
+  // 4. TRANSACTION OPERATIONS (UNTOUCHED CORE LOGIC)
   // =========================================================
-
   void clearTransactionState() {
     currentTransactions.clear();
     txPageCursors = [null];
@@ -455,9 +427,7 @@ class DebatorController extends GetxController {
   }
 
   Future<void> loadTxPage(String debtorId, int pageIndex) async {
-    if (pageIndex < 1) return;
-    if (pageIndex > txPageCursors.length) return;
-
+    if (pageIndex < 1 || pageIndex > txPageCursors.length) return;
     isTxLoading.value = true;
 
     try {
@@ -466,7 +436,6 @@ class DebatorController extends GetxController {
           .doc(debtorId)
           .collection('transactions')
           .orderBy('date', descending: true);
-
       if (selectedDateRange.value != null) {
         query = query
             .where(
@@ -482,7 +451,6 @@ class DebatorController extends GetxController {
               ),
             );
       }
-
       query = query.limit(_txLimit);
 
       DocumentSnapshot? startAfterDoc = txPageCursors[pageIndex - 1];
@@ -495,7 +463,6 @@ class DebatorController extends GetxController {
       if (snap.docs.isNotEmpty) {
         currentTransactions.value =
             snap.docs.map((d) => TransactionModel.fromFirestore(d)).toList();
-
         if (snap.docs.length < _txLimit) {
           hasMoreTx.value = false;
         } else {
@@ -512,6 +479,7 @@ class DebatorController extends GetxController {
         hasMoreTx.value = false;
       }
     } catch (e) {
+      AppLogger.i(e.toString());
     } finally {
       isTxLoading.value = false;
     }
@@ -525,7 +493,9 @@ class DebatorController extends GetxController {
         'lastTransactionDate': Timestamp.now(),
       });
       calculateTotalOutstanding();
-    } catch (e) {}
+    } catch (e) {
+      AppLogger.i(e.toString());
+    }
   }
 
   Future<void> addTransaction({
@@ -544,19 +514,13 @@ class DebatorController extends GetxController {
       if (!debtorSnap.exists) throw "Debtor not found";
       final String debtorName = debtorSnap.data()?['name'] ?? 'Unknown';
 
-      // ==========================================================
-      // SMART EID BONUS CALCULATION (Loan vs Running)
-      // ==========================================================
       double amountForRunningBills = 0.0;
       if (type.toLowerCase() == 'eid_bonus') {
         Map<String, double> breakdown = await getInstantDebtorBreakdown(
           debtorId,
         );
         double currentLoan = breakdown['loan'] ?? 0.0;
-        if (amount > currentLoan) {
-          amountForRunningBills =
-              amount - currentLoan; // Remaining spills to running bills
-        }
+        if (amount > currentLoan) amountForRunningBills = amount - currentLoan;
       }
 
       DocumentReference newTxRef =
@@ -581,10 +545,7 @@ class DebatorController extends GetxController {
       });
 
       String parsedMethod = (paymentMethodData['type'] ?? 'cash').toString();
-      if (type.toLowerCase() == 'eid_bonus') {
-        parsedMethod =
-            'eid_bonus'; // Override method for Eid Bonus specifically
-      }
+      if (type.toLowerCase() == 'eid_bonus') parsedMethod = 'eid_bonus';
 
       if (parsedMethod.toLowerCase() == 'cash' &&
           paymentMethodData.containsKey('bankName') &&
@@ -596,7 +557,6 @@ class DebatorController extends GetxController {
         parsedMethod = 'Bkash';
       }
 
-      // CASH LEDGER LOGIC (Eid Bonus safely bypasses this because it's NOT a collection)
       bool isCollection = [
         'debit',
         'loan_payment',
@@ -632,19 +592,14 @@ class DebatorController extends GetxController {
         });
       }
 
-      // =========================================================
-      // PERFECT BILL ALLOCATION LOGIC (WITH EID BONUS SPILLOVER)
-      // =========================================================
       bool isRunningBillPayment = [
         'debit',
         'collection',
         'payment',
         'received',
       ].contains(type.toLowerCase());
-
       double remainingToAllocate = amount;
 
-      // If it's an Eid Bonus AND there is an overflow into running bills, trigger allocation!
       if (type.toLowerCase() == 'eid_bonus' && amountForRunningBills > 0.01) {
         isRunningBillPayment = true;
         remainingToAllocate = amountForRunningBills;
@@ -665,8 +620,8 @@ class DebatorController extends GetxController {
                 .collection('sales_orders')
                 .where('debtorId', isEqualTo: debtorId)
                 .get();
-
         List<DocumentSnapshot> allOrders = ordersSnap.docs.toList();
+
         allOrders.sort((a, b) {
           final dataA = a.data() as Map<String, dynamic>;
           final dataB = b.data() as Map<String, dynamic>;
@@ -696,7 +651,7 @@ class DebatorController extends GetxController {
                         0.0) -
                     (double.tryParse(data['paid']?.toString() ?? '0') ?? 0.0);
               }
-              return pending > 0.5; // Small tolerance
+              return pending > 0.5;
             }).toList();
 
         if (pendingOrders.isNotEmpty) {
@@ -773,7 +728,6 @@ class DebatorController extends GetxController {
                     : remainingToAllocate;
             bool isNowFullyPaid = (actualPending - take) <= 0.5;
 
-            // 1. Update sales_orders perfectly
             Map<String, dynamic> orderUpdate = {
               "paid": FieldValue.increment(take),
               "paymentDetails.due": FieldValue.increment(-take),
@@ -783,7 +737,6 @@ class DebatorController extends GetxController {
             if (oData['customerName'] != debtorName) {
               orderUpdate['customerName'] = debtorName;
             }
-
             if (pType == 'bkash' && bNum.isNotEmpty) {
               orderUpdate["paymentDetails.bkashNumber"] = bNum;
             } else if (pType == 'nagad' && nNum.isNotEmpty) {
@@ -801,10 +754,8 @@ class DebatorController extends GetxController {
               orderUpdate["isFullyPaid"] = true;
               orderUpdate["status"] = "completed";
             }
-
             batch.update(orderDoc.reference, orderUpdate);
 
-            // RIPPLE EFFECT LOGIC
             int currentIndex = allOrders.indexWhere(
               (doc) => doc.id == orderDoc.id,
             );
@@ -816,11 +767,9 @@ class DebatorController extends GetxController {
               }
             }
 
-            // 2. Update strictly linked daily_sales document
             if (dailyDoc != null) {
               Map<String, dynamic> dData =
                   dailyDoc.data() as Map<String, dynamic>;
-
               final newHistoryEntry = {
                 'amount': take,
                 'note':
@@ -837,7 +786,6 @@ class DebatorController extends GetxController {
                 'accountNumber': accNum,
                 'sourceTxId': finalTxId,
               };
-
               Map<String, dynamic> dailyUpdate = {
                 "paid": currentPaidD + take,
                 "pending": currentPendingD - take,
@@ -847,10 +795,7 @@ class DebatorController extends GetxController {
                 "paymentMethod.$pType": FieldValue.increment(take),
               };
 
-              if (dData['name'] != debtorName) {
-                dailyUpdate['name'] = debtorName;
-              }
-
+              if (dData['name'] != debtorName) dailyUpdate['name'] = debtorName;
               if (pType == 'bkash' && bNum.isNotEmpty) {
                 dailyUpdate["paymentMethod.bkashNumber"] = bNum;
               } else if (pType == 'nagad' && nNum.isNotEmpty) {
@@ -863,10 +808,8 @@ class DebatorController extends GetxController {
                   dailyUpdate["paymentMethod.accountNumber"] = accNum;
                 }
               }
-
               batch.update(dailyDoc.reference, dailyUpdate);
             }
-
             hasUpdates = true;
             remainingToAllocate -= take;
           }
@@ -879,10 +822,7 @@ class DebatorController extends GetxController {
             });
             hasUpdates = true;
           }
-
-          if (hasUpdates) {
-            await batch.commit();
-          }
+          if (hasUpdates) await batch.commit();
         }
       }
 
@@ -950,7 +890,6 @@ class DebatorController extends GetxController {
         await doc.reference.delete();
       }
 
-      // Eid bonus is perfectly reversed from invoices here because of `sourceTxId` logic
       if (type == 'credit' ||
           type == 'debit' ||
           type == 'collection' ||
@@ -982,7 +921,7 @@ class DebatorController extends GetxController {
                 .get();
         List<String> orderTxIds = [];
         for (var doc in ordersByIdSnap.docs) {
-          orderTxIds.add((doc.data())['invoiceId'] ?? doc.id);
+          orderTxIds.add((doc.data() as Map)['invoiceId'] ?? doc.id);
         }
 
         for (int i = 0; i < orderTxIds.length; i += 10) {
@@ -1108,7 +1047,6 @@ class DebatorController extends GetxController {
             'date': Timestamp.fromDate(date),
             'paymentMethod': finalPaymentMethod,
           });
-
       await _recalculateSingleDebtorBalance(debtorId);
 
       QuerySnapshot lSnap =
@@ -1205,16 +1143,12 @@ class DebatorController extends GetxController {
           des.trim(),
         ),
       };
-
-      if (payments != null) {
-        updateData["payments"] = payments;
-      }
+      if (payments != null) updateData["payments"] = payments;
 
       await db.collection('debatorbody').doc(id).update(updateData);
 
       if (oldName != newName) {
         final batch = db.batch();
-
         final orderSnap =
             await db
                 .collection('sales_orders')
@@ -1223,7 +1157,7 @@ class DebatorController extends GetxController {
         List<String> linkedInvoiceIds = [];
         for (var doc in orderSnap.docs) {
           batch.update(doc.reference, {"customerName": newName.trim()});
-          linkedInvoiceIds.add((doc.data())['invoiceId'] ?? doc.id);
+          linkedInvoiceIds.add((doc.data() as Map)['invoiceId'] ?? doc.id);
         }
 
         final salesSnap =
@@ -1252,7 +1186,6 @@ class DebatorController extends GetxController {
             }
           }
         }
-
         await batch.commit();
       }
 
@@ -1275,10 +1208,8 @@ class DebatorController extends GetxController {
               .doc(id)
               .collection('transactions')
               .get();
-
       WriteBatch batch = db.batch();
       int count = 0;
-
       for (var doc in txSnap.docs) {
         batch.delete(doc.reference);
         count++;
@@ -1288,7 +1219,6 @@ class DebatorController extends GetxController {
           count = 0;
         }
       }
-
       batch.delete(db.collection('debatorbody').doc(id));
       await batch.commit();
 
@@ -1296,7 +1226,6 @@ class DebatorController extends GetxController {
       filteredBodies.removeWhere((element) => element.id == id);
 
       calculateTotalOutstanding();
-
       Get.snackbar("Success", "Debtor account deleted successfully.");
     } catch (e) {
       Get.snackbar("Error", "Failed to delete debtor: $e");
@@ -1305,27 +1234,29 @@ class DebatorController extends GetxController {
     }
   }
 
-  // ------------------------------------------------------------------
-  // 4. HELPER & PDF
-  // ------------------------------------------------------------------
-
-  Future<void> _silentAutoRepair() async {
+  // =========================================================
+  // 5. ENTERPRISE PDF GENERATORS (Upgraded)
+  // =========================================================
+  void _silentAutoRepair() async {
     try {
       final snap = await db.collection('debatorbody').get();
       final batch = db.batch();
       bool needsUpdate = false;
       for (var doc in snap.docs) {
-        if (!doc.data().containsKey('balance') ||
-            !doc.data().containsKey('purchaseDue')) {
+        if (!(doc.data() as Map).containsKey('balance') ||
+            !(doc.data() as Map).containsKey('purchaseDue')) {
           needsUpdate = true;
           batch.update(doc.reference, {
-            if (!doc.data().containsKey('balance')) 'balance': 0.0,
-            if (!doc.data().containsKey('purchaseDue')) 'purchaseDue': 0.0,
+            if (!(doc.data() as Map).containsKey('balance')) 'balance': 0.0,
+            if (!(doc.data() as Map).containsKey('purchaseDue'))
+              'purchaseDue': 0.0,
           });
         }
       }
       if (needsUpdate) await batch.commit();
-    } catch (e) {}
+    } catch (e) {
+      AppLogger.i(e.toString());
+    }
   }
 
   String _formatMethodForPdf(dynamic pm, [String? txType]) {
@@ -1333,376 +1264,28 @@ class DebatorController extends GetxController {
         ['credit', 'previous_due'].contains(txType.toLowerCase())) {
       return "-";
     }
-
     if (pm == null) return "Cash";
     if (pm is String) return pm;
     if (pm is Map) {
       String type = (pm['type'] ?? 'Cash').toString();
       String lowerType = type.toLowerCase();
-
-      if (lowerType == 'eid_bonus') return "Eid Bonus"; // Look clean on PDF
-
-      bool hasValidBankName =
+      if (lowerType == 'eid_bonus') return "Eid Bonus";
+      bool hasBank =
           pm.containsKey('bankName') &&
           pm['bankName'].toString().trim().isNotEmpty;
-
-      if (lowerType == 'cash' && hasValidBankName) {
-        return "Bank: ${pm['bankName']}";
-      }
+      if (lowerType == 'cash' && hasBank) return "Bank: ${pm['bankName']}";
       if (lowerType == 'bank') {
-        return hasValidBankName ? "Bank: ${pm['bankName']}" : "Bank";
+        return hasBank ? "Bank: ${pm['bankName']}" : "Bank";
       }
       if (lowerType.contains('bkash')) return "Bkash";
       if (lowerType.contains('nagad')) return "Nagad";
       if (lowerType.contains('rocket')) return "Rocket";
-
       return type.toUpperCase();
     }
     return "Cash";
   }
 
-  // =========================================================
-  // YEARLY EID BONUS REPORT
-  // =========================================================
-  Future<void> downloadYearlyEidBonusReport() async {
-    gbIsLoading.value = true;
-    try {
-      DateTime now = DateTime.now();
-      int currentYear = now.year;
-      DateTime startOfYear = DateTime(currentYear, 1, 1);
-      DateTime endOfYear = DateTime(currentYear, 12, 31, 23, 59, 59);
-
-      // Fetch all debtors to map their names and phones locally
-      QuerySnapshot debtorSnap = await db.collection('debatorbody').get();
-      Map<String, Map<String, dynamic>> debtorDataMap = {};
-      for (var d in debtorSnap.docs) {
-        debtorDataMap[d.id] = d.data() as Map<String, dynamic>;
-      }
-
-      List<Map<String, dynamic>> yearlyBonuses = [];
-      double totalBonus = 0.0;
-
-      // Ensure Firebase index exists for this collectionGroup search on 'type'
-      QuerySnapshot txSnap =
-          await db
-              .collectionGroup('transactions')
-              .where('type', isEqualTo: 'eid_bonus')
-              .get();
-
-      for (var doc in txSnap.docs) {
-        var data = doc.data() as Map<String, dynamic>;
-        DateTime date =
-            (data['date'] is Timestamp)
-                ? (data['date'] as Timestamp).toDate()
-                : (data['date'] as DateTime);
-
-        if (date.isAfter(startOfYear) && date.isBefore(endOfYear)) {
-          String debtorId = doc.reference.parent.parent!.id;
-          double amount = (data['amount'] as num?)?.toDouble() ?? 0.0;
-
-          yearlyBonuses.add({
-            'date': date,
-            'amount': amount,
-            'note': data['note'] ?? '',
-            'debtorName': debtorDataMap[debtorId]?['name'] ?? 'Unknown',
-            'debtorPhone': debtorDataMap[debtorId]?['phone'] ?? 'Unknown',
-          });
-          totalBonus += amount;
-        }
-      }
-
-      if (yearlyBonuses.isEmpty) {
-        Get.snackbar("Info", "No Eid Bonus has been given in $currentYear.");
-        return;
-      }
-
-      yearlyBonuses.sort(
-        (a, b) => (b['date'] as DateTime).compareTo(a['date'] as DateTime),
-      );
-
-      final pdf = pw.Document();
-
-      pdf.addPage(
-        pw.MultiPage(
-          pageFormat: PdfPageFormat.a4,
-          margin: const pw.EdgeInsets.all(32),
-          header:
-              (context) => pw.Column(
-                children: [
-                  pw.Row(
-                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                    children: [
-                      pw.Text(
-                        "EID BONUS REPORT - $currentYear",
-                        style: pw.TextStyle(
-                          fontWeight: pw.FontWeight.bold,
-                          fontSize: 18,
-                          color: PdfColors.green900,
-                        ),
-                      ),
-                      pw.Text(
-                        "Generated: ${DateFormat('dd MMM yyyy').format(now)}",
-                      ),
-                    ],
-                  ),
-                  pw.Divider(),
-                  pw.SizedBox(height: 10),
-                ],
-              ),
-          build: (context) {
-            return [
-              pw.Container(
-                padding: const pw.EdgeInsets.all(12),
-                decoration: pw.BoxDecoration(
-                  color: PdfColors.green50,
-                  border: pw.Border.all(color: PdfColors.green900),
-                ),
-                child: pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Text(
-                      "TOTAL EID BONUS GIVEN THIS YEAR:",
-                      style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-                    ),
-                    pw.Text(
-                      "${bdCurrency.format(totalBonus)} BDT",
-                      style: pw.TextStyle(
-                        fontWeight: pw.FontWeight.bold,
-                        fontSize: 16,
-                        color: PdfColors.green900,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              pw.SizedBox(height: 15),
-
-              pw.Table.fromTextArray(
-                border: pw.TableBorder.all(
-                  color: PdfColors.grey400,
-                  width: 0.5,
-                ),
-                headerDecoration: const pw.BoxDecoration(
-                  color: PdfColors.grey200,
-                ),
-                headerHeight: 28,
-                cellHeight: 25,
-                cellAlignments: {
-                  0: pw.Alignment.centerLeft,
-                  1: pw.Alignment.centerLeft,
-                  2: pw.Alignment.centerLeft,
-                  3: pw.Alignment.centerLeft,
-                  4: pw.Alignment.centerRight,
-                },
-                headers: ["SL", "Date", "Debtor Name", "Phone", "Bonus Amount"],
-                data: List<List<String>>.generate(yearlyBonuses.length, (idx) {
-                  final b = yearlyBonuses[idx];
-                  return [
-                    "${idx + 1}",
-                    DateFormat('dd/MM/yyyy').format(b['date'] as DateTime),
-                    b['debtorName'],
-                    b['debtorPhone'],
-                    bdCurrency.format(b['amount']),
-                  ];
-                }),
-              ),
-            ];
-          },
-        ),
-      );
-
-      await Printing.layoutPdf(
-        onLayout: (format) => pdf.save(),
-        name: 'Eid_Bonus_Report_$currentYear.pdf',
-      );
-    } catch (e) {
-      Get.snackbar("Error", "Could not generate report: $e");
-    } finally {
-      gbIsLoading.value = false;
-    }
-  }
-
-  Future<Uint8List> generatePDF(
-    String debtorName,
-    List<Map<String, dynamic>> transactions,
-  ) async {
-    final pdf = pw.Document();
-
-    transactions.sort((a, b) {
-      DateTime dA =
-          (a['date'] is Timestamp)
-              ? (a['date'] as Timestamp).toDate()
-              : (a['date'] as DateTime);
-      DateTime dB =
-          (b['date'] is Timestamp)
-              ? (b['date'] as Timestamp).toDate()
-              : (b['date'] as DateTime);
-      return dA.compareTo(dB);
-    });
-
-    double totalDebit = 0.0;
-    double totalCredit = 0.0;
-
-    for (var t in transactions) {
-      String type = (t['type'] ?? '').toString().toLowerCase();
-      bool isDebit = ['credit', 'previous_due', 'advance_given'].contains(type);
-      double amount = (t['amount'] as num?)?.toDouble() ?? 0.0;
-
-      if (isDebit) {
-        totalDebit += amount;
-      } else {
-        totalCredit += amount;
-      }
-    }
-
-    double netBalance = totalDebit - totalCredit;
-    String balanceLabel = "Net Balance";
-    if (netBalance > 0) {
-      balanceLabel = "Due Balance";
-    } else if (netBalance < 0) {
-      balanceLabel = "Advance Balance";
-    }
-
-    pdf.addPage(
-      pw.MultiPage(
-        pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.all(32),
-        header: (context) {
-          return pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
-                      pw.Text(
-                        "STATEMENT OF ACCOUNT",
-                        style: pw.TextStyle(
-                          fontSize: 18,
-                          fontWeight: pw.FontWeight.bold,
-                          color: PdfColors.blue900,
-                        ),
-                      ),
-                      pw.SizedBox(height: 4),
-                      pw.Text(
-                        "Account Name: $debtorName",
-                        style: pw.TextStyle(
-                          fontSize: 14,
-                          fontWeight: pw.FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                  pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.end,
-                    children: [
-                      pw.Text(
-                        "Date: ${DateFormat('dd MMM yyyy').format(DateTime.now())}",
-                        style: const pw.TextStyle(fontSize: 10),
-                      ),
-                      pw.Text(
-                        "Page ${context.pageNumber} of ${context.pagesCount}",
-                        style: const pw.TextStyle(fontSize: 10),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              pw.SizedBox(height: 20),
-            ],
-          );
-        },
-        build: (context) {
-          return [
-            pw.Table.fromTextArray(
-              border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.5),
-              headerDecoration: const pw.BoxDecoration(
-                color: PdfColors.grey200,
-              ),
-              headerHeight: 28,
-              cellHeight: 25,
-              cellAlignments: {
-                0: pw.Alignment.centerLeft,
-                1: pw.Alignment.centerLeft,
-                2: pw.Alignment.centerLeft,
-                3: pw.Alignment.centerRight,
-                4: pw.Alignment.centerRight,
-              },
-              headerStyle: pw.TextStyle(
-                fontWeight: pw.FontWeight.bold,
-                fontSize: 10,
-              ),
-              cellStyle: const pw.TextStyle(fontSize: 9),
-              headers: [
-                "Date",
-                "Description",
-                "Payment Method",
-                "Debit",
-                "Credit",
-              ],
-              data:
-                  transactions.map((t) {
-                    DateTime date =
-                        (t['date'] is Timestamp)
-                            ? (t['date'] as Timestamp).toDate()
-                            : t['date'];
-                    String type = (t['type'] ?? '').toString().toLowerCase();
-                    bool isDebit = [
-                      'credit',
-                      'previous_due',
-                      'advance_given',
-                    ].contains(type);
-                    double amount = (t['amount'] as num?)?.toDouble() ?? 0.0;
-                    String method = _formatMethodForPdf(
-                      t['paymentMethod'],
-                      type,
-                    );
-
-                    String desc =
-                        isDebit
-                            ? "DEBIT"
-                            : (type == 'eid_bonus' ? "EID BONUS" : "CREDIT");
-                    if (t['note'] != null &&
-                        t['note'].toString().trim().isNotEmpty) {
-                      desc += "\nNote: ${t['note']}";
-                    }
-
-                    return [
-                      DateFormat('dd/MM/yyyy').format(date),
-                      desc,
-                      method,
-                      isDebit ? bdCurrency.format(amount) : "",
-                      !isDebit ? bdCurrency.format(amount) : "",
-                    ];
-                  }).toList(),
-            ),
-
-            pw.SizedBox(height: 20),
-            pw.Container(
-              padding: const pw.EdgeInsets.all(12),
-              decoration: pw.BoxDecoration(
-                border: pw.Border.all(color: PdfColors.grey400),
-                color: PdfColors.grey50,
-              ),
-              child: pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
-                children: [
-                  _pdfStat("Total Debit", totalDebit, PdfColors.red900),
-                  _pdfStat("Total Credit", totalCredit, PdfColors.green900),
-                  _pdfStat(balanceLabel, netBalance.abs(), PdfColors.black),
-                ],
-              ),
-            ),
-          ];
-        },
-      ),
-    );
-
-    return pdf.save();
-  }
-
+  // --- INDIVIDUAL DEBTOR STATEMENT (NEW UPGRADE) ---
   Future<void> downloadFullDebtorStatement(
     String debtorId,
     String debtorName,
@@ -1732,49 +1315,464 @@ class DebatorController extends GetxController {
       }
 
       final snap = await query.get();
-
       if (snap.docs.isEmpty) {
         Get.snackbar("Info", "No transactions found to print.");
         return;
       }
 
-      List<Map<String, dynamic>> allTransactions =
-          snap.docs.map((d) {
-            return d.data() as Map<String, dynamic>;
-          }).toList();
+      List<Map<String, dynamic>> transactions =
+          snap.docs.map((d) => d.data() as Map<String, dynamic>).toList();
 
-      final pdfBytes = await generatePDF(debtorName, allTransactions);
+      // Sort Chronologically for PDF
+      transactions.sort((a, b) {
+        DateTime dA =
+            (a['date'] is Timestamp)
+                ? (a['date'] as Timestamp).toDate()
+                : (a['date'] as DateTime);
+        DateTime dB =
+            (b['date'] is Timestamp)
+                ? (b['date'] as Timestamp).toDate()
+                : (b['date'] as DateTime);
+        return dA.compareTo(dB);
+      });
+
+      double totalDebit = 0.0;
+      double totalCredit = 0.0;
+
+      for (var t in transactions) {
+        String type = (t['type'] ?? '').toString().toLowerCase();
+        bool isDebit = [
+          'credit',
+          'previous_due',
+          'advance_given',
+        ].contains(type);
+        double amount = (t['amount'] as num?)?.toDouble() ?? 0.0;
+        if (isDebit) {
+          totalDebit += amount;
+        } else {
+          totalCredit += amount;
+        }
+      }
+
+      double netBalance = totalDebit - totalCredit;
+      String balanceLabel =
+          netBalance > 0
+              ? "Due Balance"
+              : (netBalance < 0 ? "Advance Balance" : "Net Balance");
+
+      final pdf = pw.Document();
+      final fontReg = await PdfGoogleFonts.nunitoRegular();
+      final fontBold = await PdfGoogleFonts.nunitoBold();
+
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(32),
+          header:
+              (context) => pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text(
+                            "STATEMENT OF ACCOUNT",
+                            style: pw.TextStyle(
+                              font: fontBold,
+                              fontSize: 18,
+                              color: PdfColors.blue900,
+                            ),
+                          ),
+                          pw.SizedBox(height: 4),
+                          pw.Text(
+                            "Account Name: $debtorName",
+                            style: pw.TextStyle(font: fontBold, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                      pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.end,
+                        children: [
+                          pw.Text(
+                            "Date: ${DateFormat('dd MMM yyyy').format(DateTime.now())}",
+                            style: pw.TextStyle(font: fontReg, fontSize: 10),
+                          ),
+                          pw.Text(
+                            "Page ${context.pageNumber} of ${context.pagesCount}",
+                            style: pw.TextStyle(font: fontReg, fontSize: 10),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  pw.SizedBox(height: 15),
+                  pw.Divider(color: PdfColors.grey400),
+                  pw.SizedBox(height: 15),
+                ],
+              ),
+          build:
+              (context) => [
+                pw.TableHelper.fromTextArray(
+                  border: pw.TableBorder.all(
+                    color: PdfColors.grey400,
+                    width: 0.5,
+                  ),
+                  headerDecoration: const pw.BoxDecoration(
+                    color: PdfColors.blue800,
+                  ),
+                  headerStyle: pw.TextStyle(
+                    font: fontBold,
+                    fontSize: 9,
+                    color: PdfColors.white,
+                  ),
+                  cellStyle: pw.TextStyle(font: fontReg, fontSize: 9),
+                  cellPadding: const pw.EdgeInsets.symmetric(
+                    vertical: 6,
+                    horizontal: 8,
+                  ),
+                  headers: [
+                    "Date",
+                    "Description",
+                    "Payment Method",
+                    "Debit",
+                    "Credit",
+                  ],
+                  columnWidths: {
+                    0: const pw.FlexColumnWidth(1.5),
+                    1: const pw.FlexColumnWidth(3),
+                    2: const pw.FlexColumnWidth(2),
+                    3: const pw.FlexColumnWidth(1.5),
+                    4: const pw.FlexColumnWidth(1.5),
+                  },
+                  cellAlignments: {
+                    0: pw.Alignment.centerLeft,
+                    1: pw.Alignment.centerLeft,
+                    2: pw.Alignment.centerLeft,
+                    3: pw.Alignment.centerRight,
+                    4: pw.Alignment.centerRight,
+                  },
+                  data:
+                      transactions.map((t) {
+                        DateTime date =
+                            (t['date'] is Timestamp)
+                                ? (t['date'] as Timestamp).toDate()
+                                : t['date'];
+                        String type =
+                            (t['type'] ?? '').toString().toLowerCase();
+                        bool isDebit = [
+                          'credit',
+                          'previous_due',
+                          'advance_given',
+                        ].contains(type);
+                        double amount =
+                            (t['amount'] as num?)?.toDouble() ?? 0.0;
+                        String method = _formatMethodForPdf(
+                          t['paymentMethod'],
+                          type,
+                        );
+
+                        String desc =
+                            isDebit
+                                ? "DEBIT"
+                                : (type == 'eid_bonus'
+                                    ? "EID BONUS"
+                                    : "CREDIT");
+                        if (t['note'] != null &&
+                            t['note'].toString().trim().isNotEmpty) {
+                          desc += "\nNote: ${t['note']}";
+                        }
+
+                        return [
+                          DateFormat('dd/MM/yyyy').format(date),
+                          desc,
+                          method,
+                          isDebit ? bdCurrency.format(amount) : "-",
+                          !isDebit ? bdCurrency.format(amount) : "-",
+                        ];
+                      }).toList(),
+                ),
+                pw.SizedBox(height: 20),
+
+                // Summary Block
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(12),
+                  decoration: pw.BoxDecoration(
+                    border: pw.Border.all(color: PdfColors.blue400),
+                    color: PdfColors.blue50,
+                  ),
+                  child: pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
+                    children: [
+                      _pdfStat(
+                        "Total Debit",
+                        totalDebit,
+                        PdfColors.red900,
+                        fontReg,
+                        fontBold,
+                      ),
+                      _pdfStat(
+                        "Total Credit",
+                        totalCredit,
+                        PdfColors.green900,
+                        fontReg,
+                        fontBold,
+                      ),
+                      _pdfStat(
+                        balanceLabel,
+                        netBalance.abs(),
+                        PdfColors.blue900,
+                        fontReg,
+                        fontBold,
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Signatures
+                pw.Spacer(),
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Column(
+                      children: [
+                        pw.Container(
+                          width: 120,
+                          height: 1,
+                          color: PdfColors.black,
+                        ),
+                        pw.SizedBox(height: 5),
+                        pw.Text(
+                          "Prepared By",
+                          style: pw.TextStyle(font: fontBold, fontSize: 10),
+                        ),
+                      ],
+                    ),
+                    pw.Column(
+                      children: [
+                        pw.Container(
+                          width: 120,
+                          height: 1,
+                          color: PdfColors.black,
+                        ),
+                        pw.SizedBox(height: 5),
+                        pw.Text(
+                          "Authorized Signature",
+                          style: pw.TextStyle(font: fontBold, fontSize: 10),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ],
+        ),
+      );
 
       await Printing.layoutPdf(
-        onLayout: (format) async => pdfBytes,
+        onLayout: (format) async => pdf.save(),
         name: '${debtorName.replaceAll(' ', '_')}_Statement.pdf',
       );
     } catch (e) {
-      Get.snackbar("Error", "Could not generate full PDF: $e");
+      Get.snackbar("Error", "Could not generate PDF: $e");
     } finally {
       gbIsLoading.value = false;
     }
   }
 
-  Future<void> downloadAllDebtorsReport() async {
-    await _generateGeneralReport(title: "MARKET DUE REPORT", isPayable: false);
+  // --- EID BONUS REPORT (UPGRADED) ---
+  Future<void> downloadYearlyEidBonusReport() async {
+    gbIsLoading.value = true;
+    try {
+      DateTime now = DateTime.now();
+      DateTime startOfYear = DateTime(now.year, 1, 1);
+      DateTime endOfYear = DateTime(now.year, 12, 31, 23, 59, 59);
+
+      QuerySnapshot debtorSnap = await db.collection('debatorbody').get();
+      Map<String, Map<String, dynamic>> debtorDataMap = {};
+      for (var d in debtorSnap.docs) {
+        debtorDataMap[d.id] = d.data() as Map<String, dynamic>;
+      }
+
+      List<Map<String, dynamic>> yearlyBonuses = [];
+      double totalBonus = 0.0;
+
+      QuerySnapshot txSnap =
+          await db
+              .collectionGroup('transactions')
+              .where('type', isEqualTo: 'eid_bonus')
+              .get();
+
+      for (var doc in txSnap.docs) {
+        var data = doc.data() as Map<String, dynamic>;
+        DateTime date =
+            (data['date'] is Timestamp)
+                ? (data['date'] as Timestamp).toDate()
+                : (data['date'] as DateTime);
+        if (date.isAfter(startOfYear) && date.isBefore(endOfYear)) {
+          String debtorId = doc.reference.parent.parent!.id;
+          double amount = (data['amount'] as num?)?.toDouble() ?? 0.0;
+          yearlyBonuses.add({
+            'date': date,
+            'amount': amount,
+            'note': data['note'] ?? '',
+            'debtorName': debtorDataMap[debtorId]?['name'] ?? 'Unknown',
+            'debtorPhone': debtorDataMap[debtorId]?['phone'] ?? 'Unknown',
+          });
+          totalBonus += amount;
+        }
+      }
+
+      if (yearlyBonuses.isEmpty) {
+        Get.snackbar("Info", "No Eid Bonus given in ${now.year}.");
+        return;
+      }
+      yearlyBonuses.sort(
+        (a, b) => (b['date'] as DateTime).compareTo(a['date'] as DateTime),
+      );
+
+      final pdf = pw.Document();
+      final fontReg = await PdfGoogleFonts.nunitoRegular();
+      final fontBold = await PdfGoogleFonts.nunitoBold();
+
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(32),
+          header:
+              (context) => pw.Column(
+                children: [
+                  pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Text(
+                        "EID BONUS REPORT - ${now.year}",
+                        style: pw.TextStyle(
+                          font: fontBold,
+                          fontSize: 18,
+                          color: PdfColors.green900,
+                        ),
+                      ),
+                      pw.Text(
+                        "Generated: ${DateFormat('dd MMM yyyy').format(now)}",
+                        style: pw.TextStyle(font: fontReg, fontSize: 10),
+                      ),
+                    ],
+                  ),
+                  pw.Divider(color: PdfColors.grey300),
+                  pw.SizedBox(height: 10),
+                ],
+              ),
+          build:
+              (context) => [
+                pw.TableHelper.fromTextArray(
+                  border: pw.TableBorder.all(
+                    color: PdfColors.grey400,
+                    width: 0.5,
+                  ),
+                  headerDecoration: const pw.BoxDecoration(
+                    color: PdfColors.green800,
+                  ),
+                  headerStyle: pw.TextStyle(
+                    font: fontBold,
+                    fontSize: 9,
+                    color: PdfColors.white,
+                  ),
+                  cellStyle: pw.TextStyle(font: fontReg, fontSize: 9),
+                  cellPadding: const pw.EdgeInsets.symmetric(
+                    vertical: 6,
+                    horizontal: 8,
+                  ),
+                  headers: [
+                    "SL",
+                    "Date",
+                    "Debtor Name",
+                    "Phone",
+                    "Bonus Amount",
+                  ],
+                  columnWidths: {
+                    0: const pw.FlexColumnWidth(0.5),
+                    1: const pw.FlexColumnWidth(1.5),
+                    2: const pw.FlexColumnWidth(3),
+                    3: const pw.FlexColumnWidth(2),
+                    4: const pw.FlexColumnWidth(2),
+                  },
+                  data: List<List<String>>.generate(yearlyBonuses.length, (
+                    idx,
+                  ) {
+                    final b = yearlyBonuses[idx];
+                    return [
+                      "${idx + 1}",
+                      DateFormat('dd/MM/yyyy').format(b['date'] as DateTime),
+                      b['debtorName'],
+                      b['debtorPhone'],
+                      bdCurrency.format(b['amount']),
+                    ];
+                  }),
+                ),
+                pw.SizedBox(height: 15),
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.end,
+                  children: [
+                    pw.Container(
+                      padding: const pw.EdgeInsets.all(12),
+                      decoration: pw.BoxDecoration(
+                        color: PdfColors.green50,
+                        border: pw.Border.all(color: PdfColors.green300),
+                      ),
+                      child: pw.Row(
+                        children: [
+                          pw.Text(
+                            "TOTAL BONUS GIVEN:",
+                            style: pw.TextStyle(font: fontBold, fontSize: 10),
+                          ),
+                          pw.SizedBox(width: 10),
+                          pw.Text(
+                            "${bdCurrency.format(totalBonus)} BDT",
+                            style: pw.TextStyle(
+                              font: fontBold,
+                              fontSize: 14,
+                              color: PdfColors.green900,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+        ),
+      );
+
+      await Printing.layoutPdf(
+        onLayout: (format) => pdf.save(),
+        name: 'Eid_Bonus_Report_${now.year}.pdf',
+      );
+    } catch (e) {
+      Get.snackbar("Error", "Could not generate report: $e");
+    } finally {
+      gbIsLoading.value = false;
+    }
   }
 
-  Future<void> downloadAllPayablesReport() async {
-    await _generateGeneralReport(
-      title: "MARKET PAYABLE REPORT",
-      isPayable: true,
-    );
-  }
+  // --- MARKET REPORT (UPGRADED) ---
+  Future<void> downloadAllDebtorsReport() async => await _generateGeneralReport(
+    title: "MARKET DUE REPORT",
+    isPayable: false,
+  );
+  Future<void> downloadAllPayablesReport() async =>
+      await _generateGeneralReport(
+        title: "MARKET PAYABLE REPORT",
+        isPayable: true,
+      );
 
   Future<void> _generateGeneralReport({
     required String title,
     required bool isPayable,
   }) async {
+    gbIsLoading.value = true;
     try {
-      gbIsLoading.value = true;
-      Get.snackbar("Preparing", "Generating report...");
-
       final snap = await db.collection('debatorbody').get();
       final allDebtors =
           snap.docs
@@ -1787,18 +1785,15 @@ class DebatorController extends GetxController {
               })
               .whereType<DebtorModel>()
               .toList();
-
       final targetDebtors =
           allDebtors
               .where((d) => isPayable ? (d.purchaseDue > 0) : (d.balance > 0))
               .toList();
 
       if (targetDebtors.isEmpty) {
-        gbIsLoading.value = false;
         Get.snackbar("Info", "No data to print.");
         return;
       }
-
       targetDebtors.sort(
         (a, b) =>
             isPayable
@@ -1812,12 +1807,13 @@ class DebatorController extends GetxController {
       }
 
       final pdf = pw.Document();
-      const int rowsPerPage = 20;
-      final int totalPages = (targetDebtors.length / rowsPerPage).ceil();
+      final fontReg = await PdfGoogleFonts.nunitoRegular();
+      final fontBold = await PdfGoogleFonts.nunitoBold();
 
       pdf.addPage(
         pw.MultiPage(
           pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(32),
           header:
               (context) => pw.Column(
                 children: [
@@ -1827,86 +1823,97 @@ class DebatorController extends GetxController {
                       pw.Text(
                         title,
                         style: pw.TextStyle(
-                          fontWeight: pw.FontWeight.bold,
+                          font: fontBold,
                           fontSize: 18,
+                          color: PdfColors.blue900,
                         ),
                       ),
-                      pw.Text(DateFormat('dd MMM yyyy').format(DateTime.now())),
+                      pw.Text(
+                        "Date: ${DateFormat('dd MMM yyyy').format(DateTime.now())}",
+                        style: pw.TextStyle(font: fontReg, fontSize: 10),
+                      ),
                     ],
                   ),
-                  pw.Divider(),
+                  pw.Divider(color: PdfColors.grey300),
                   pw.SizedBox(height: 10),
                 ],
               ),
-          build: (context) {
-            List<pw.Widget> widgets = [];
-            widgets.add(
-              pw.Container(
-                padding: const pw.EdgeInsets.all(10),
-                decoration: pw.BoxDecoration(
-                  border: pw.Border.all(),
-                  color: PdfColors.grey100,
-                ),
-                child: pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Text(
-                      "TOTAL AMOUNT",
-                      style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-                    ),
-                    pw.Text(
-                      "${bdCurrency.format(grandTotal)} BDT",
-                      style: pw.TextStyle(
-                        fontWeight: pw.FontWeight.bold,
-                        fontSize: 16,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-            widgets.add(pw.SizedBox(height: 15));
-
-            for (int i = 0; i < totalPages; i++) {
-              int start = i * rowsPerPage;
-              int end =
-                  (start + rowsPerPage < targetDebtors.length)
-                      ? start + rowsPerPage
-                      : targetDebtors.length;
-              var chunk = targetDebtors.sublist(start, end);
-
-              widgets.add(
-                pw.Table.fromTextArray(
-                  context: context,
-                  border: null,
-                  headerDecoration: const pw.BoxDecoration(
-                    color: PdfColors.grey300,
+          build:
+              (context) => [
+                pw.TableHelper.fromTextArray(
+                  border: pw.TableBorder.all(
+                    color: PdfColors.grey400,
+                    width: 0.5,
                   ),
-                  headerHeight: 25,
-                  cellHeight: 30,
+                  headerDecoration: const pw.BoxDecoration(
+                    color: PdfColors.blue800,
+                  ),
+                  headerStyle: pw.TextStyle(
+                    font: fontBold,
+                    fontSize: 9,
+                    color: PdfColors.white,
+                  ),
+                  cellStyle: pw.TextStyle(font: fontReg, fontSize: 9),
+                  cellPadding: const pw.EdgeInsets.symmetric(
+                    vertical: 6,
+                    horizontal: 8,
+                  ),
+                  headers: ["SL", "Name", "Phone", "Amount"],
+                  columnWidths: {
+                    0: const pw.FlexColumnWidth(0.5),
+                    1: const pw.FlexColumnWidth(4),
+                    2: const pw.FlexColumnWidth(2),
+                    3: const pw.FlexColumnWidth(2),
+                  },
                   cellAlignments: {
                     0: pw.Alignment.centerLeft,
                     1: pw.Alignment.centerLeft,
                     2: pw.Alignment.centerLeft,
                     3: pw.Alignment.centerRight,
                   },
-                  headers: ["SL", "Name", "Phone", "Amount"],
-                  data: List<List<String>>.generate(chunk.length, (idx) {
-                    final d = chunk[idx];
-                    double val = isPayable ? d.purchaseDue : d.balance;
+                  data: List<List<String>>.generate(targetDebtors.length, (
+                    idx,
+                  ) {
+                    final d = targetDebtors[idx];
                     return [
-                      "${start + idx + 1}",
+                      "${idx + 1}",
                       d.name,
                       d.phone,
-                      bdCurrency.format(val),
+                      bdCurrency.format(isPayable ? d.purchaseDue : d.balance),
                     ];
                   }),
                 ),
-              );
-              if (i < totalPages - 1) widgets.add(pw.NewPage());
-            }
-            return widgets;
-          },
+                pw.SizedBox(height: 15),
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.end,
+                  children: [
+                    pw.Container(
+                      padding: const pw.EdgeInsets.all(12),
+                      decoration: pw.BoxDecoration(
+                        color: PdfColors.blue50,
+                        border: pw.Border.all(color: PdfColors.blue300),
+                      ),
+                      child: pw.Row(
+                        children: [
+                          pw.Text(
+                            "GRAND TOTAL:",
+                            style: pw.TextStyle(font: fontBold, fontSize: 10),
+                          ),
+                          pw.SizedBox(width: 10),
+                          pw.Text(
+                            "${bdCurrency.format(grandTotal)} BDT",
+                            style: pw.TextStyle(
+                              font: fontBold,
+                              fontSize: 14,
+                              color: PdfColors.blue900,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
         ),
       );
 
@@ -1921,20 +1928,27 @@ class DebatorController extends GetxController {
     }
   }
 
-  pw.Widget _pdfStat(String label, double val, PdfColor col) {
+  pw.Widget _pdfStat(
+    String label,
+    double val,
+    PdfColor col,
+    pw.Font fontReg,
+    pw.Font fontBold,
+  ) {
     return pw.Column(
       children: [
         pw.Text(
           label,
-          style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
+          style: pw.TextStyle(
+            font: fontReg,
+            fontSize: 10,
+            color: PdfColors.grey700,
+          ),
         ),
+        pw.SizedBox(height: 4),
         pw.Text(
           bdCurrency.format(val),
-          style: pw.TextStyle(
-            fontSize: 14,
-            fontWeight: pw.FontWeight.bold,
-            color: col,
-          ),
+          style: pw.TextStyle(font: fontBold, fontSize: 14, color: col),
         ),
       ],
     );

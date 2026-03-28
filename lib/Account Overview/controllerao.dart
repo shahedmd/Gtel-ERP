@@ -6,7 +6,7 @@ import 'package:get/get.dart';
 import 'package:gtel_erp/Account%20Overview/model.dart';
 import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
 import 'package:gtel_erp/Shipment/controller.dart';
-import 'package:gtel_erp/Web%20Screen/Debator%20Finance/debatorcontroller.dart';
+import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/gteldebtorcontroller.dart';
 import 'package:gtel_erp/Web%20Screen/Staff/controller.dart';
 import 'package:intl/intl.dart';
 

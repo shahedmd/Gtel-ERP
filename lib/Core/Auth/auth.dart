@@ -7,46 +7,26 @@ class AuthController extends GetxController {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   RxBool isLoading = false.obs;
 
-  final Rxn<User> _firebaseUser = Rxn<User>();
-  User? get user => _firebaseUser.value;
-
-  @override
-  void onInit() {
-    super.onInit();
-    _firebaseUser.bindStream(_auth.authStateChanges());
-  }
-
   @override
   void onReady() {
     super.onReady();
-    ever(_firebaseUser, _initialScreen);
-  }
 
-  // ==========================================
-  // THE TRAFFIC COP (Handles all routing & dialog closing)
-  // ==========================================
-  void _initialScreen(User? user) {
-    // 1. SAFELY CLOSE ANY OPEN LOADING DIALOGS FIRST
-    if (Get.isDialogOpen ?? false) {
-      Get.back();
-    }
-
-    // 2. ROUTE THE USER
-    if (user == null) {
-      AppLogger.w("User is not logged in. Navigating to Login Page.");
-      // Prevents routing to '/' if we are already on '/'
-      if (Get.currentRoute != '/') {
-        Get.offAllNamed('/');
-      }
-    } else {
-      AppLogger.i(
-        "User is logged in as ${user.email}. Navigating to Home Page.",
-      );
-      // Prevents routing to '/home' if we are already on '/home'
-      if (Get.currentRoute != '/home') {
+    // 1. CHECK ON APP BOOT (Delayed slightly so the screen exists before routing)
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (_auth.currentUser != null) {
+        AppLogger.i("Existing session found. Navigating to Home Page.");
         Get.offAllNamed('/home');
       }
-    }
+    });
+
+    // 2. PASSIVE BACKGROUND LISTENER
+    // (Only used to kick users back to login if their token expires or they are deleted)
+    _auth.authStateChanges().listen((User? user) {
+      if (user == null && Get.currentRoute != '/') {
+        AppLogger.w("Auth state null. Redirecting to Login.");
+        Get.offAllNamed('/');
+      }
+    });
   }
 
   String _handleAuthError(String code) {
@@ -75,18 +55,16 @@ class AuthController extends GetxController {
   // ==========================================
   Future<void> login(String email, String password) async {
     try {
+      // This will automatically show the spinner INSIDE your button on the UI
       isLoading.value = true;
-      Get.dialog(
-        const Center(child: CircularProgressIndicator()),
-        barrierDismissible: false,
-      );
 
-      // This triggers authStateChanges, which triggers _initialScreen
       await _auth.signInWithEmailAndPassword(
         email: email.trim(),
         password: password.trim(),
       );
 
+      // EXPLICIT ROUTING: Guarantees the page changes even if the stream gets cached
+      Get.offAllNamed('/home');
 
       Get.snackbar(
         "Welcome Back",
@@ -97,8 +75,6 @@ class AuthController extends GetxController {
         maxWidth: 400,
       );
     } on FirebaseAuthException catch (e) {
-      if (Get.isDialogOpen ?? false) Get.back();
-
       Get.snackbar(
         "Login Failed",
         _handleAuthError(e.code),
@@ -110,13 +86,13 @@ class AuthController extends GetxController {
         icon: const Icon(Icons.error_outline, color: Colors.white),
       );
     } catch (e) {
-      if (Get.isDialogOpen ?? false) Get.back();
       Get.snackbar(
         "Error",
         "Something went wrong. Please try again.",
         snackPosition: SnackPosition.BOTTOM,
       );
     } finally {
+      // Hides the button spinner
       isLoading.value = false;
     }
   }
@@ -124,17 +100,17 @@ class AuthController extends GetxController {
   // ==========================================
   // LOGOUT LOGIC
   // ==========================================
-  void logout() async {
+  Future<void> logout() async {
     try {
-      Get.dialog(
-        const Center(child: CircularProgressIndicator()),
-        barrierDismissible: false,
-      );
-
+      isLoading.value = true;
       await _auth.signOut();
+
+      // Explicitly route back to login
+      Get.offAllNamed('/');
     } catch (e) {
-      if (Get.isDialogOpen ?? false) Get.back();
       Get.snackbar("Logout Error", e.toString());
+    } finally {
+      isLoading.value = false;
     }
   }
 }

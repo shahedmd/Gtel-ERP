@@ -13,7 +13,7 @@ import 'package:gtel_erp/Core/Stock%20Management/chinaorderlist.dart';
 import 'package:gtel_erp/Core/Stock%20Management/localpurchaseapage.dart';
 import 'package:gtel_erp/Core/Stock%20Management/stockpage.dart';
 import 'package:gtel_erp/Vendor/vendorpage.dart';
-import 'package:gtel_erp/Web%20Screen/Debator%20Finance/debator.dart';
+import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/debtorlistuipage.dart';
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/purchasehistorypage.dart';
 import 'package:gtel_erp/Core/Gtel%20Expense/Daily%20Expense/dailyexpenseuipage.dart';
 import 'package:gtel_erp/Core/Gtel%20Expense/Monthly%20Expense/monthlyexpenseuipage.dart';
