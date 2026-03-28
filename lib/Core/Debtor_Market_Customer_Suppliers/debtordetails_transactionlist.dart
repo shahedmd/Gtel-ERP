@@ -2,13 +2,11 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:gtel_erp/Web%20Screen/Debator%20Finance/Debtor%20Purchase/purchasepage.dart';
 import 'package:intl/intl.dart';
-
-
 import 'gteldebtorcontroller.dart';
 import '../../Web Screen/Sales/controller.dart';
 import 'debtordartmodel.dart';
-import 'package:gtel_erp/Web%20Screen/Debator%20Finance/Debtor%20Purchase/purchasepage.dart';
 
 // --- THEME COLORS ---
 const Color darkSlate = Color(0xFF0F172A);
@@ -238,7 +236,7 @@ class Debatordetails extends StatelessWidget {
           icon: const Icon(Icons.add_card, color: Colors.white),
           label: const Text(
             "New Entry",
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
           ),
         ),
         body: SingleChildScrollView(
@@ -332,7 +330,7 @@ class Debatordetails extends StatelessWidget {
                           color: darkSlate,
                         ),
                         SizedBox(width: 10),
-                        Text("Purchases"),
+                        Text("Purchases", style: TextStyle(fontSize: 13)),
                       ],
                     ),
                   ),
@@ -342,7 +340,7 @@ class Debatordetails extends StatelessWidget {
                       children: [
                         Icon(Icons.edit, size: 16, color: activeAccent),
                         SizedBox(width: 10),
-                        Text("Profile"),
+                        Text("Profile",style: TextStyle(fontSize: 13)),
                       ],
                     ),
                   ),
@@ -356,7 +354,7 @@ class Debatordetails extends StatelessWidget {
                           color: debitColor,
                         ),
                         SizedBox(width: 10),
-                        Text("Statement"),
+                        Text("Statement",style: TextStyle(fontSize: 13)),
                       ],
                     ),
                   ),
@@ -583,9 +581,11 @@ class Debatordetails extends StatelessWidget {
 
   Widget _buildSearchField(DebtorDetailsController pageCtrl) {
     return TextField(
+      style: TextStyle(fontSize: 13),
       controller: pageCtrl.searchCtrl,
       decoration: InputDecoration(
         hintText: "Search Invoice, Note...",
+        hintStyle: TextStyle(fontSize: 12),
         prefixIcon: const Icon(Icons.search, size: 18, color: Colors.grey),
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(
@@ -1679,11 +1679,13 @@ class _AddTransactionDialogUI extends StatelessWidget {
     bool isNum = false,
   }) {
     return TextField(
+      style:  TextStyle(fontSize:13) ,
       controller: c,
       keyboardType: isNum ? TextInputType.number : TextInputType.text,
       decoration: InputDecoration(
         prefixIcon: Icon(icon, size: 16, color: textMuted),
         hintText: hint,
+        hintStyle: TextStyle(fontSize:13),
         filled: true,
         fillColor: bgGrey,
         isDense: true,
@@ -1753,31 +1755,31 @@ class _AddTransactionDialogUI extends StatelessWidget {
                             items: const [
                               DropdownMenuItem(
                                 value: 'credit',
-                                child: Text("🧾  New Sale/Bill (Debit)"),
+                                child: Text("🧾  New Sale/Bill (Debit)", style:  TextStyle(fontSize:13)),
                               ),
                               DropdownMenuItem(
                                 value: 'debit',
-                                child: Text("💵  Receive Payment (Credit)"),
+                                child: Text("💵  Receive Payment (Credit)", style:  TextStyle(fontSize:13)),
                               ),
                               DropdownMenuItem(
                                 value: 'eid_bonus',
-                                child: Text("🎁  Give Eid Bonus (Credit)"),
+                                child: Text("🎁  Give Eid Bonus (Credit)", style:  TextStyle(fontSize:13)),
                               ),
                               DropdownMenuItem(
                                 value: 'previous_due',
-                                child: Text("🏦  Add Old Debt (Debit)"),
+                                child: Text("🏦  Add Old Debt (Debit)", style:  TextStyle(fontSize:13)),
                               ),
                               DropdownMenuItem(
                                 value: 'loan_payment',
-                                child: Text("💰  Collect Old Debt (Credit)"),
+                                child: Text("💰  Collect Old Debt (Credit)", style:  TextStyle(fontSize:13)),
                               ),
                               DropdownMenuItem(
                                 value: 'advance_received',
-                                child: Text("⬅️  Receive Advance (Credit)"),
+                                child: Text("⬅️  Receive Advance (Credit)", style:  TextStyle(fontSize:13)),
                               ),
                               DropdownMenuItem(
                                 value: 'advance_given',
-                                child: Text("➡️  Give Advance (Debit)"),
+                                child: Text("➡️  Give Advance (Debit)", style:  TextStyle(fontSize:13)),
                               ),
                             ],
                             onChanged: (v) {
@@ -1814,7 +1816,7 @@ class _AddTransactionDialogUI extends StatelessWidget {
                                 formCtrl.isSubmitting.value
                                     ? null
                                     : () => Get.back(),
-                            child: const Text("Cancel"),
+                            child: const Text("Cancel",style:  TextStyle(fontSize:13)),
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -1848,6 +1850,7 @@ class _AddTransactionDialogUI extends StatelessWidget {
                                     : const Text(
                                       "Save Entry",
                                       style: TextStyle(
+                                        fontSize: 13,
                                         fontWeight: FontWeight.bold,
                                       ),
                                     ),
@@ -1887,7 +1890,7 @@ class _AddTransactionDialogUI extends StatelessWidget {
                       children: [
                         Icon(Icons.money, size: 16, color: Colors.green),
                         SizedBox(width: 8),
-                        Text("Cash"),
+                        Text("Cash",style:  TextStyle(fontSize:13)),
                       ],
                     ),
                   ),
@@ -1901,7 +1904,7 @@ class _AddTransactionDialogUI extends StatelessWidget {
                           color: Colors.indigo,
                         ),
                         SizedBox(width: 8),
-                        Text("Bank Transfer"),
+                        Text("Bank Transfer",style:  TextStyle(fontSize:13)),
                       ],
                     ),
                   ),
@@ -1915,7 +1918,7 @@ class _AddTransactionDialogUI extends StatelessWidget {
                           color: Colors.pink,
                         ),
                         SizedBox(width: 8),
-                        Text("Bkash"),
+                        Text("Bkash",style:  TextStyle(fontSize:13)),
                       ],
                     ),
                   ),
@@ -1929,7 +1932,7 @@ class _AddTransactionDialogUI extends StatelessWidget {
                           color: Colors.orange,
                         ),
                         SizedBox(width: 8),
-                        Text("Nagad"),
+                        Text("Nagad",style:  TextStyle(fontSize:13)),
                       ],
                     ),
                   ),
@@ -1943,7 +1946,7 @@ class _AddTransactionDialogUI extends StatelessWidget {
                           color: Colors.purple,
                         ),
                         SizedBox(width: 8),
-                        Text("Rocket"),
+                        Text("Rocket",style:  TextStyle(fontSize:13)),
                       ],
                     ),
                   ),

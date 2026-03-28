@@ -3,25 +3,22 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/debtordartmodel.dart';
+import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/createdebtordialog.dart';
+import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/debtordetails_transactionlist.dart';
+import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/gteldebtorcontroller.dart';
 import 'package:intl/intl.dart';
-import 'gteldebtorcontroller.dart';
-import 'createdebtordialog.dart';
-import 'debtordetails_transactionlist.dart';
+
 
 // --- ERP COLOR PALETTE ---
-const Color primaryColor = Color(0xFF2563EB); // Professional Blue
-const Color scaffoldBg = Color(0xFFF8FAFC); // Slate 50
+const Color primaryColor = Color(0xFF2563EB);
+const Color scaffoldBg = Color(0xFFF8FAFC);
 const Color surfaceWhite = Colors.white;
-const Color textDark = Color(0xFF0F172A); // Slate 900
-const Color textLight = Color(0xFF64748B); // Slate 500
-const Color borderCol = Color(0xFFE2E8F0); // Slate 200
-const Color successGreen = Color(0xFF16A34A); // Green 600
-const Color dangerRed = Color(0xFFDC2626); // Red 600
+const Color textDark = Color(0xFF0F172A);
+const Color textLight = Color(0xFF64748B);
+const Color borderCol = Color(0xFFE2E8F0);
+const Color successGreen = Color(0xFF16A34A);
+const Color dangerRed = Color(0xFFDC2626);
 
-// ==========================================
-// 1. MEMORY SAFE PAGE CONTROLLER (GetX)
-// ==========================================
 class DebtorPageController extends GetxController {
   final TextEditingController searchController = TextEditingController();
 
@@ -32,9 +29,6 @@ class DebtorPageController extends GetxController {
   }
 }
 
-// ==========================================
-// 2. MAIN PAGE (Stateless & Responsive)
-// ==========================================
 class Debatorpage extends StatelessWidget {
   Debatorpage({super.key});
 
@@ -100,15 +94,18 @@ class Debatorpage extends StatelessWidget {
         icon: const Icon(Icons.add, color: Colors.white),
         label: const Text(
           "New Debtor",
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 13,
+          ),
         ),
       ),
+      floatingActionButtonLocation:
+          FloatingActionButtonLocation.miniCenterFloat,
     );
   }
 
-  // ==========================================
-  // DASHBOARD & TOOLBAR
-  // ==========================================
   Widget _buildDashboardSection(bool isMobile) {
     return Container(
       color: surfaceWhite,
@@ -117,7 +114,6 @@ class Debatorpage extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Title & Reports
           if (isMobile) ...[
             const Text(
               "Debtor Ledger",
@@ -167,7 +163,6 @@ class Debatorpage extends StatelessWidget {
 
           const SizedBox(height: 20),
 
-          // KPI Cards
           Row(
             children: [
               Expanded(
@@ -197,16 +192,16 @@ class Debatorpage extends StatelessWidget {
           ),
           const SizedBox(height: 20),
 
-          // Search Bar
           Row(
             children: [
               Expanded(
                 child: TextField(
+                  style: const TextStyle(fontSize: 13),
                   controller: pageCtrl.searchController,
                   onChanged: (val) => controller.searchDebtors(val),
                   decoration: InputDecoration(
                     hintText: "Search name, description, or phone...",
-                    hintStyle: const TextStyle(fontSize: 14, color: textLight),
+                    hintStyle: const TextStyle(fontSize: 12, color: textLight),
                     prefixIcon: const Icon(Icons.search, color: textLight),
                     filled: true,
                     fillColor: scaffoldBg,
@@ -253,6 +248,7 @@ class Debatorpage extends StatelessWidget {
                 child: const Text(
                   "Search",
                   style: TextStyle(
+                    fontSize: 13,
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
                   ),
@@ -268,8 +264,15 @@ class Debatorpage extends StatelessWidget {
   List<Widget> _buildReportButtons() {
     return [
       _buildReportButton(
+        icon: Icons.sync,
+        label: "Sync Balances",
+        onTap: _confirmSyncDialog,
+        color: Colors.purple,
+      ),
+      const SizedBox(width: 8),
+      _buildReportButton(
         icon: Icons.auto_fix_high,
-        label: "Fix Search DB",
+        label: "Fix Search",
         onTap: _confirmRepairDialog,
         color: Colors.blueAccent,
       ),
@@ -336,7 +339,7 @@ class Debatorpage extends StatelessWidget {
                 Text(
                   title,
                   style: TextStyle(
-                    fontSize: isMobile ? 10 : 11,
+                    fontSize: isMobile ? 8 : 11,
                     fontWeight: FontWeight.w700,
                     color: textLight,
                   ),
@@ -392,9 +395,6 @@ class Debatorpage extends StatelessWidget {
     );
   }
 
-  // ==========================================
-  // DATA LAYOUT (Responsive)
-  // ==========================================
   Widget _buildDataLayout(bool isMobile) {
     return Obx(() {
       if (controller.isBodiesLoading.value) {
@@ -402,9 +402,7 @@ class Debatorpage extends StatelessWidget {
           child: CircularProgressIndicator(color: primaryColor),
         );
       }
-      if (controller.filteredBodies.isEmpty) {
-        return _buildEmptyState();
-      }
+      if (controller.filteredBodies.isEmpty) return _buildEmptyState();
 
       if (isMobile) {
         return ListView.separated(
@@ -475,10 +473,8 @@ class Debatorpage extends StatelessWidget {
   Widget _buildDesktopTable() {
     return LayoutBuilder(
       builder: (context, constraints) {
-        // Prevents "RenderFlex Overflow" by guaranteeing a minimum table width
         final tableWidth =
             constraints.maxWidth > 900 ? constraints.maxWidth : 900.0;
-
         return Scrollbar(
           controller: _vScroll,
           thumbVisibility: true,
@@ -512,11 +508,15 @@ class Debatorpage extends StatelessWidget {
     );
   }
 
-  Widget _buildDesktopRow(DebtorModel debtor) {
+  Widget _buildDesktopRow(dynamic debtor) {
+    // MEMORY SAFE: Read directly from static model instead of StreamBuilder!
+    double bal = debtor.balance;
+    bool isDue = bal > 0;
+
     return InkWell(
       onTap:
           () => Get.to(() => Debatordetails(id: debtor.id, name: debtor.name)),
-      hoverColor: const Color(0xFFF8FAFC),
+      hoverColor: Colors.grey.shade50,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
         decoration: const BoxDecoration(
@@ -524,7 +524,6 @@ class Debatorpage extends StatelessWidget {
         ),
         child: Row(
           children: [
-            // 1. Client Details
             Expanded(
               flex: 3,
               child: Row(
@@ -574,7 +573,6 @@ class Debatorpage extends StatelessWidget {
                 ],
               ),
             ),
-            // 2. Contact Info
             Expanded(
               flex: 2,
               child: Column(
@@ -605,48 +603,39 @@ class Debatorpage extends StatelessWidget {
                 ],
               ),
             ),
-            // 3. Live Balance (CRITICAL FIX: Fully accurate live stream)
             Expanded(
               flex: 2,
-              child: StreamBuilder<Map<String, double>>(
-                stream: controller.getDebtorBreakdown(debtor.id),
-                builder: (context, snapshot) {
-                  double bal = snapshot.data?['total'] ?? debtor.balance;
-                  bool isDue = bal > 0;
-                  return Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color:
-                              isDue
-                                  ? dangerRed.withValues(alpha: 0.1)
-                                  : successGreen.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          bdCurrency.format(bal),
-                          style: TextStyle(
-                            color: isDue ? dangerRed : successGreen,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
-                          ),
-                        ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color:
+                          isDue
+                              ? dangerRed.withValues(alpha: 0.1)
+                              : successGreen.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      bdCurrency.format(bal),
+                      style: TextStyle(
+                        color: isDue ? dangerRed : successGreen,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
                       ),
-                    ],
-                  );
-                },
+                    ),
+                  ),
+                ],
               ),
             ),
-            // 4. Location
             Expanded(
               flex: 2,
               child: Padding(
-                padding: const EdgeInsets.only(left: 16),
+                padding: const EdgeInsets.only(left: 10),
                 child: Text(
                   debtor.address.isNotEmpty ? debtor.address : "N/A",
                   style: const TextStyle(color: textLight, fontSize: 13),
@@ -655,7 +644,6 @@ class Debatorpage extends StatelessWidget {
                 ),
               ),
             ),
-            // 5. Action
             SizedBox(
               width: 70,
               child: PopupMenuButton<String>(
@@ -681,7 +669,7 @@ class Debatorpage extends StatelessWidget {
                             Icon(
                               Icons.visibility,
                               color: primaryColor,
-                              size: 18,
+                              size: 20,
                             ),
                             SizedBox(width: 10),
                             Text("View Account"),
@@ -692,7 +680,7 @@ class Debatorpage extends StatelessWidget {
                         value: 'delete',
                         child: Row(
                           children: [
-                            Icon(Icons.delete, color: dangerRed, size: 18),
+                            Icon(Icons.delete, color: dangerRed, size: 20),
                             SizedBox(width: 10),
                             Text(
                               "Delete Debtor",
@@ -710,7 +698,11 @@ class Debatorpage extends StatelessWidget {
     );
   }
 
-  Widget _buildMobileCard(DebtorModel debtor) {
+  Widget _buildMobileCard(dynamic debtor) {
+    // MEMORY SAFE: Read directly from static model instead of StreamBuilder!
+    double bal = debtor.balance;
+    bool isDue = bal > 0;
+
     return Container(
       decoration: BoxDecoration(
         color: surfaceWhite,
@@ -861,34 +853,26 @@ class Debatorpage extends StatelessWidget {
                             ),
                         ],
                       ),
-                      StreamBuilder<Map<String, double>>(
-                        stream: controller.getDebtorBreakdown(debtor.id),
-                        builder: (context, snapshot) {
-                          double bal =
-                              snapshot.data?['total'] ?? debtor.balance;
-                          bool isDue = bal > 0;
-                          return Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color:
-                                  isDue
-                                      ? dangerRed.withValues(alpha: 0.1)
-                                      : successGreen.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              bdCurrency.format(bal),
-                              style: TextStyle(
-                                color: isDue ? dangerRed : successGreen,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 13,
-                              ),
-                            ),
-                          );
-                        },
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color:
+                              isDue
+                                  ? dangerRed.withValues(alpha: 0.1)
+                                  : successGreen.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          bdCurrency.format(bal),
+                          style: TextStyle(
+                            color: isDue ? dangerRed : successGreen,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -934,8 +918,8 @@ class Debatorpage extends StatelessWidget {
         children: [
           Container(
             padding: const EdgeInsets.all(24),
-            decoration: const BoxDecoration(
-              color: Color(0xFFF1F5F9),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade100,
               shape: BoxShape.circle,
             ),
             child: Icon(
@@ -950,10 +934,10 @@ class Debatorpage extends StatelessWidget {
             style: TextStyle(
               color: textDark,
               fontSize: 16,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w600,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 5),
           const Text(
             "Try checking for spelling or using a different keyword.",
             style: TextStyle(color: textLight, fontSize: 14),
@@ -963,90 +947,65 @@ class Debatorpage extends StatelessWidget {
     );
   }
 
-  // ==========================================
-  // FOOTER & DIALOGS
-  // ==========================================
   Widget _buildPaginationFooter() {
     return Obx(() {
       if (controller.isSearching.value) return const SizedBox.shrink();
 
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-        color: surfaceWhite,
+        decoration: const BoxDecoration(
+          color: surfaceWhite,
+          border: Border(top: BorderSide(color: borderCol)),
+        ),
         child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text(
-              "Page Navigation",
-              style: TextStyle(
-                color: textLight,
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
+            ElevatedButton.icon(
+              onPressed:
+                  controller.currentPage.value > 1 ? controller.prevPage : null,
+              icon: const Icon(Icons.arrow_back_ios, size: 14),
+              label: const Text("Previous"),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: scaffoldBg,
+                foregroundColor: textDark,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
+                ),
+                disabledBackgroundColor: Colors.grey.shade100,
+                disabledForegroundColor: Colors.grey.shade400,
               ),
             ),
-            Row(
-              children: [
-                ElevatedButton.icon(
-                  onPressed:
-                      controller.currentPage.value > 1
-                          ? controller.prevPage
-                          : null,
-                  icon: const Icon(Icons.chevron_left, size: 16),
-                  label: const Text("Prev"),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: scaffoldBg,
-                    foregroundColor: textDark,
-                    elevation: 0,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                    disabledBackgroundColor: Colors.grey.shade100,
-                    disabledForegroundColor: Colors.grey.shade400,
-                  ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              margin: const EdgeInsets.symmetric(horizontal: 10),
+              decoration: BoxDecoration(
+                color: primaryColor.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                "Page ${controller.currentPage.value}",
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: primaryColor,
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
-                  ),
-                  margin: const EdgeInsets.symmetric(horizontal: 12),
-                  decoration: BoxDecoration(
-                    color: primaryColor.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    "Page ${controller.currentPage.value}",
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: primaryColor,
-                      fontSize: 13,
-                    ),
-                  ),
+              ),
+            ),
+            ElevatedButton.icon(
+              onPressed: controller.hasMore.value ? controller.nextPage : null,
+              icon: const Icon(Icons.arrow_forward_ios, size: 14),
+              label: const Text("Next"),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: scaffoldBg,
+                foregroundColor: textDark,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
                 ),
-                ElevatedButton(
-                  onPressed:
-                      controller.hasMore.value ? controller.nextPage : null,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: scaffoldBg,
-                    foregroundColor: textDark,
-                    elevation: 0,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                    disabledBackgroundColor: Colors.grey.shade100,
-                    disabledForegroundColor: Colors.grey.shade400,
-                  ),
-                  child: const Row(
-                    children: [
-                      Text("Next"),
-                      SizedBox(width: 4),
-                      Icon(Icons.chevron_right, size: 16),
-                    ],
-                  ),
-                ),
-              ],
+                disabledBackgroundColor: Colors.grey.shade100,
+                disabledForegroundColor: Colors.grey.shade400,
+              ),
             ),
           ],
         ),
@@ -1054,10 +1013,30 @@ class Debatorpage extends StatelessWidget {
     });
   }
 
+  // ==========================================
+  // DIALOGS
+  // ==========================================
+  void _confirmSyncDialog() {
+    Get.defaultDialog(
+      title: "Synchronize Balances",
+      middleText:
+          "This will recalculate all debtor balances perfectly from their transaction history to fix any mismatches in your PDFs or Dashboard.",
+      textConfirm: "Sync Now",
+      textCancel: "Cancel",
+      confirmTextColor: Colors.white,
+      buttonColor: primaryColor,
+      onConfirm: () {
+        Get.back();
+        controller.syncAllBalances();
+      },
+    );
+  }
+
   void _confirmRepairDialog() {
     Get.defaultDialog(
       title: "Upgrade Search Data",
-      middleText: "Update database to support multi-word search?",
+      middleText:
+          "This will update all existing debtors in the database to support the new multi-word description search.",
       textConfirm: "Upgrade Now",
       textCancel: "Cancel",
       confirmTextColor: Colors.white,
@@ -1069,7 +1048,7 @@ class Debatorpage extends StatelessWidget {
     );
   }
 
-  void _confirmDeleteDebtor(DebtorModel debtor) {
+  void _confirmDeleteDebtor(dynamic debtor) {
     Get.dialog(
       AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -1090,10 +1069,7 @@ class Debatorpage extends StatelessWidget {
         actions: [
           TextButton(
             onPressed: () => Get.back(),
-            child: const Text(
-              "Cancel",
-              style: TextStyle(color: textLight, fontWeight: FontWeight.bold),
-            ),
+            child: const Text("Cancel", style: TextStyle(color: textLight)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
@@ -1108,10 +1084,7 @@ class Debatorpage extends StatelessWidget {
             },
             child: const Text(
               "Delete Forever",
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-              ),
+              style: TextStyle(color: Colors.white),
             ),
           ),
         ],

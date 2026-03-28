@@ -1,5 +1,6 @@
 // ignore_for_file: avoid_print, empty_catches, deprecated_member_use
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
 import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/gteldebtorcontroller.dart';
@@ -12,9 +13,19 @@ import 'package:printing/printing.dart';
 class DebtorPurchaseController extends GetxController {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  // Dependencies
-  final ProductController stockCtrl = Get.find<ProductController>();
-  final DebatorController debtorCtrl = Get.find<DebatorController>();
+  // ==========================================
+  // SAFE DEPENDENCIES (THIS FIXES THE CRASH)
+  // ==========================================
+  final ProductController stockCtrl =
+      Get.isRegistered<ProductController>()
+          ? Get.find<ProductController>()
+          : Get.put(ProductController());
+
+  final DebatorController debtorCtrl =
+      Get.isRegistered<DebatorController>()
+          ? Get.find<DebatorController>()
+          : Get.put(DebatorController());
+
   final DailyExpensesController dailyExpenseCtrl =
       Get.isRegistered<DailyExpensesController>()
           ? Get.find<DailyExpensesController>()
@@ -115,6 +126,70 @@ class DebtorPurchaseController extends GetxController {
       Get.snackbar("Error", "Could not load data: $e");
     } finally {
       isLoading.value = false;
+    }
+  }
+
+  Future<void> fixPayableBalance(String debtorId) async {
+    try {
+      // 1. Show loading indicator
+      Get.dialog(
+        const Center(child: CircularProgressIndicator(color: Colors.blue)),
+        barrierDismissible: false,
+      );
+
+      // 2. Fetch ALL purchase transactions for this debtor
+      final snap =
+          await FirebaseFirestore.instance
+              .collection('debatorbody')
+              .doc(debtorId)
+              .collection('purchases')
+              .get();
+
+      double accuratePayable = 0.0;
+
+      // 3. Recalculate based on the exact same logic as your UI
+      for (var doc in snap.docs) {
+        final data = doc.data();
+        String type = (data['type'] ?? '').toString().toLowerCase();
+        double amount =
+            double.tryParse(
+              (data['totalAmount'] ?? data['amount']).toString(),
+            ) ??
+            0.0;
+
+        if (type == 'invoice') {
+          accuratePayable += amount;
+        } else if (type == 'payment' || type == 'adjustment') {
+          accuratePayable -= amount;
+        }
+      }
+
+      // 4. Update the main debtor document with the corrected total
+      await FirebaseFirestore.instance
+          .collection('debatorbody')
+          .doc(debtorId)
+          .update({'purchaseDue': accuratePayable});
+
+      Get.back(); // close loading dialog
+
+      Get.snackbar(
+        "Synced!",
+        "Payable balance corrected to Tk ${accuratePayable.toStringAsFixed(2)}",
+        backgroundColor: Colors.green,
+        colorText: Colors.white,
+        snackPosition: SnackPosition.BOTTOM,
+      );
+
+      // Refresh the page data
+      await loadPurchases(debtorId);
+    } catch (e) {
+      if (Get.isDialogOpen ?? false) Get.back();
+      Get.snackbar(
+        "Error",
+        "Could not sync balance: $e",
+        backgroundColor: Colors.redAccent,
+        colorText: Colors.white,
+      );
     }
   }
 

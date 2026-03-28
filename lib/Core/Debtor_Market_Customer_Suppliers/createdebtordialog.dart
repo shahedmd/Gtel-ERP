@@ -1,5 +1,3 @@
-// ignore_for_file: deprecated_member_use
-
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
@@ -13,11 +11,6 @@ const Color textMuted = Color(0xFF64748B);
 const Color dangerRed = Color(0xFFDC2626);
 const Color successGreen = Color(0xFF16A34A);
 
-// ============================================================================
-// 1. MEMORY-SAFE CONTROLLERS (GetX)
-// ============================================================================
-
-/// Safely holds state and controllers for a single dynamic payment method
 class PaymentMethodState {
   final RxString type;
   final TextEditingController numC; // Handles bkash/nagad
@@ -380,6 +373,7 @@ class _AddDebtorDialogUI extends StatelessWidget {
                       child: const Text(
                         "Cancel",
                         style: TextStyle(
+                          fontSize: 13,
                           color: textMuted,
                           fontWeight: FontWeight.bold,
                         ),
@@ -414,7 +408,7 @@ class _AddDebtorDialogUI extends StatelessWidget {
                               )
                               : const Text(
                                 "Confirm & Save",
-                                style: TextStyle(fontWeight: FontWeight.bold),
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                               ),
                     ),
                   ),

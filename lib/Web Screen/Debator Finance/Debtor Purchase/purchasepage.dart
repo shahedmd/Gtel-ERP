@@ -1,11 +1,8 @@
-// ignore_for_file: deprecated_member_use
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
 import 'package:intl/intl.dart';
-
-// IMPORTANT: Ensure these match your project structure
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/Debtor%20Purchase/dialog.dart';
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/Debtor%20Purchase/purchasecontroller.dart';
 
@@ -24,6 +21,11 @@ class DebtorPurchasePage extends StatelessWidget {
       Get.isRegistered<DebtorPurchaseController>()
           ? Get.find<DebtorPurchaseController>()
           : Get.put(DebtorPurchaseController());
+
+  final productController =
+      Get.isRegistered<ProductController>()
+          ? Get.find<ProductController>()
+          : Get.put(ProductController());
 
   // THEME COLORS (ERP Standard)
   static const Color darkSlate = Color(0xFF111827); // Dark header
@@ -150,7 +152,7 @@ class DebtorPurchasePage extends StatelessWidget {
             () => Container(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.05),
+                color: Colors.white.withValues(alpha:  0.05),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: Colors.white12),
               ),
@@ -338,15 +340,15 @@ class DebtorPurchasePage extends StatelessWidget {
     String badgeLabel = "UNKNOWN";
 
     if (isInvoice) {
-      badgeBg = activeAccent.withOpacity(0.1);
+      badgeBg = activeAccent.withValues( alpha: 0.1);
       badgeText = activeAccent;
       badgeLabel = "PURCHASE";
     } else if (isPay) {
-      badgeBg = debitGreen.withOpacity(0.1);
+      badgeBg = debitGreen.withValues( alpha: 0.1);
       badgeText = debitGreen;
       badgeLabel = "PAYMENT";
     } else if (isAdj) {
-      badgeBg = warningOrange.withOpacity(0.1);
+      badgeBg = warningOrange.withValues( alpha: 0.1);
       badgeText = warningOrange;
       badgeLabel = "CONTRA";
     }
@@ -544,7 +546,7 @@ class DebtorPurchasePage extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
-                color: activeAccent.withOpacity(0.1),
+                color: activeAccent.withValues( alpha: .1),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(
