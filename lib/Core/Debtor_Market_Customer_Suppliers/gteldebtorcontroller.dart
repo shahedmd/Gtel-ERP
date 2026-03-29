@@ -302,7 +302,12 @@ class DebatorController extends GetxController {
   Future<void> runServerSearch(String queryText) async =>
       searchDebtors(queryText);
 
-  List<String> _generateSearchKeywords(String name, String phone, String des) {
+  List<String> _generateSearchKeywords(
+    String name,
+    String phone,
+    String des,
+    String address,
+  ) {
     Set<String> keywords = {};
     void addAllSubstrings(String text) {
       if (text.isEmpty) return;
@@ -328,6 +333,7 @@ class DebatorController extends GetxController {
     addAllSubstrings(name.trim().toLowerCase());
     addAllSubstrings(phone.trim().toLowerCase());
     addAllSubstrings(des.trim().toLowerCase());
+    addAllSubstrings(address.trim().toLowerCase()); // Added address to keywords
     return keywords.toList();
   }
 
@@ -343,6 +349,7 @@ class DebatorController extends GetxController {
             data['name'] ?? '',
             data['phone'] ?? '',
             data['des'] ?? '',
+            data['address'] ?? '', // Added address parameter
           ),
         });
       }
@@ -350,6 +357,124 @@ class DebatorController extends GetxController {
       Get.snackbar("Success", "All Search Keywords Updated Successfully!");
     } catch (e) {
       Get.snackbar("Error", "Failed to fix search data: $e");
+    } finally {
+      gbIsLoading.value = false;
+    }
+  }
+
+  Future<void> addBody({
+    required String name,
+    required String des,
+    required String nid,
+    required String phone,
+    required String address,
+    required List<Map<String, dynamic>> payments,
+  }) async {
+    isAddingBody.value = true;
+    try {
+      await db.collection('debatorbody').add({
+        "name": name.trim(),
+        "des": des.trim(),
+        "nid": nid,
+        "phone": phone.trim(),
+        "address": address,
+        "payments": payments,
+        "balance": 0.0,
+        "purchaseDue": 0.0,
+        "searchKeywords": _generateSearchKeywords(
+          name.trim(),
+          phone.trim(),
+          des.trim(),
+          address.trim(), // Added address parameter
+        ),
+        "createdAt": Timestamp.now(),
+        "lastTransactionDate": Timestamp.now(),
+      });
+      await loadBodies(loadMore: false);
+      Get.back();
+    } catch (e) {
+      Get.snackbar("Error", e.toString());
+    } finally {
+      isAddingBody.value = false;
+    }
+  }
+
+  Future<void> editDebtor({
+    required String id,
+    required String oldName,
+    required String newName,
+    required String des,
+    required String nid,
+    required String phone,
+    required String address,
+    List<Map<String, dynamic>>? payments,
+  }) async {
+    gbIsLoading.value = true;
+    try {
+      Map<String, dynamic> updateData = {
+        "name": newName.trim(),
+        "des": des.trim(),
+        "nid": nid,
+        "phone": phone.trim(),
+        "address": address,
+        "searchKeywords": _generateSearchKeywords(
+          newName.trim(),
+          phone.trim(),
+          des.trim(),
+          address.trim(), // Added address parameter
+        ),
+      };
+      if (payments != null) updateData["payments"] = payments;
+
+      await db.collection('debatorbody').doc(id).update(updateData);
+
+      if (oldName != newName) {
+        final batch = db.batch();
+        final orderSnap =
+            await db
+                .collection('sales_orders')
+                .where('debtorId', isEqualTo: id)
+                .get();
+        List<String> linkedInvoiceIds = [];
+        for (var doc in orderSnap.docs) {
+          batch.update(doc.reference, {"customerName": newName.trim()});
+          linkedInvoiceIds.add((doc.data() as Map)['invoiceId'] ?? doc.id);
+        }
+
+        final salesSnap =
+            await db
+                .collection('daily_sales')
+                .where('name', isEqualTo: oldName)
+                .get();
+        for (var doc in salesSnap.docs) {
+          batch.update(doc.reference, {"name": newName.trim()});
+        }
+
+        for (int i = 0; i < linkedInvoiceIds.length; i += 10) {
+          int end =
+              i + 10 > linkedInvoiceIds.length
+                  ? linkedInvoiceIds.length
+                  : i + 10;
+          List<String> chunk = linkedInvoiceIds.sublist(i, end);
+          if (chunk.isNotEmpty) {
+            final chunkSnap =
+                await db
+                    .collection('daily_sales')
+                    .where('transactionId', whereIn: chunk)
+                    .get();
+            for (var doc in chunkSnap.docs) {
+              batch.update(doc.reference, {"name": newName.trim()});
+            }
+          }
+        }
+        await batch.commit();
+      }
+
+      await loadBodies(loadMore: false);
+      Get.back();
+      Get.snackbar("Success", "Debtor profile updated");
+    } catch (e) {
+      Get.snackbar("Error", "Update failed: $e");
     } finally {
       gbIsLoading.value = false;
     }
@@ -1220,122 +1345,6 @@ class DebatorController extends GetxController {
       Get.snackbar("Success", "Updated successfully");
     } catch (e) {
       Get.snackbar("Error", e.toString());
-    } finally {
-      gbIsLoading.value = false;
-    }
-  }
-
-  Future<void> addBody({
-    required String name,
-    required String des,
-    required String nid,
-    required String phone,
-    required String address,
-    required List<Map<String, dynamic>> payments,
-  }) async {
-    isAddingBody.value = true;
-    try {
-      await db.collection('debatorbody').add({
-        "name": name.trim(),
-        "des": des.trim(),
-        "nid": nid,
-        "phone": phone.trim(),
-        "address": address,
-        "payments": payments,
-        "balance": 0.0,
-        "purchaseDue": 0.0,
-        "searchKeywords": _generateSearchKeywords(
-          name.trim(),
-          phone.trim(),
-          des.trim(),
-        ),
-        "createdAt": Timestamp.now(),
-        "lastTransactionDate": Timestamp.now(),
-      });
-      await loadBodies(loadMore: false);
-      Get.back();
-    } catch (e) {
-      Get.snackbar("Error", e.toString());
-    } finally {
-      isAddingBody.value = false;
-    }
-  }
-
-  Future<void> editDebtor({
-    required String id,
-    required String oldName,
-    required String newName,
-    required String des,
-    required String nid,
-    required String phone,
-    required String address,
-    List<Map<String, dynamic>>? payments,
-  }) async {
-    gbIsLoading.value = true;
-    try {
-      Map<String, dynamic> updateData = {
-        "name": newName.trim(),
-        "des": des.trim(),
-        "nid": nid,
-        "phone": phone.trim(),
-        "address": address,
-        "searchKeywords": _generateSearchKeywords(
-          newName.trim(),
-          phone.trim(),
-          des.trim(),
-        ),
-      };
-      if (payments != null) updateData["payments"] = payments;
-
-      await db.collection('debatorbody').doc(id).update(updateData);
-
-      if (oldName != newName) {
-        final batch = db.batch();
-        final orderSnap =
-            await db
-                .collection('sales_orders')
-                .where('debtorId', isEqualTo: id)
-                .get();
-        List<String> linkedInvoiceIds = [];
-        for (var doc in orderSnap.docs) {
-          batch.update(doc.reference, {"customerName": newName.trim()});
-          linkedInvoiceIds.add((doc.data() as Map)['invoiceId'] ?? doc.id);
-        }
-
-        final salesSnap =
-            await db
-                .collection('daily_sales')
-                .where('name', isEqualTo: oldName)
-                .get();
-        for (var doc in salesSnap.docs) {
-          batch.update(doc.reference, {"name": newName.trim()});
-        }
-
-        for (int i = 0; i < linkedInvoiceIds.length; i += 10) {
-          int end =
-              i + 10 > linkedInvoiceIds.length
-                  ? linkedInvoiceIds.length
-                  : i + 10;
-          List<String> chunk = linkedInvoiceIds.sublist(i, end);
-          if (chunk.isNotEmpty) {
-            final chunkSnap =
-                await db
-                    .collection('daily_sales')
-                    .where('transactionId', whereIn: chunk)
-                    .get();
-            for (var doc in chunkSnap.docs) {
-              batch.update(doc.reference, {"name": newName.trim()});
-            }
-          }
-        }
-        await batch.commit();
-      }
-
-      await loadBodies(loadMore: false);
-      Get.back();
-      Get.snackbar("Success", "Debtor profile updated");
-    } catch (e) {
-      Get.snackbar("Error", "Update failed: $e");
     } finally {
       gbIsLoading.value = false;
     }

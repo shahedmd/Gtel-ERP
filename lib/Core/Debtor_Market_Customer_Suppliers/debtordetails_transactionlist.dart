@@ -161,8 +161,16 @@ class DebtorDetailsController extends GetxController {
   }
 
   void printInvoice(String invoiceId) async {
+    BuildContext? dialogContext;
     Get.dialog(
-      const Center(child: CircularProgressIndicator(color: activeAccent)),
+      Builder(
+        builder: (ctx) {
+          dialogContext = ctx;
+          return const Center(
+            child: CircularProgressIndicator(color: activeAccent),
+          );
+        },
+      ),
       barrierDismissible: false,
     );
     try {
@@ -173,7 +181,11 @@ class DebtorDetailsController extends GetxController {
     } catch (e) {
       Get.snackbar("Error", "Could not load invoice: $e");
     } finally {
-      if (Get.isDialogOpen ?? false) Get.back();
+      if (dialogContext != null && dialogContext!.mounted) {
+        Navigator.of(dialogContext!).pop();
+      } else if (Get.isDialogOpen ?? false) {
+        Get.back();
+      }
     }
   }
 }
@@ -236,7 +248,11 @@ class Debatordetails extends StatelessWidget {
           icon: const Icon(Icons.add_card, color: Colors.white),
           label: const Text(
             "New Entry",
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 13,
+            ),
           ),
         ),
         body: SingleChildScrollView(
@@ -340,7 +356,7 @@ class Debatordetails extends StatelessWidget {
                       children: [
                         Icon(Icons.edit, size: 16, color: activeAccent),
                         SizedBox(width: 10),
-                        Text("Profile",style: TextStyle(fontSize: 13)),
+                        Text("Profile", style: TextStyle(fontSize: 13)),
                       ],
                     ),
                   ),
@@ -354,7 +370,7 @@ class Debatordetails extends StatelessWidget {
                           color: debitColor,
                         ),
                         SizedBox(width: 10),
-                        Text("Statement",style: TextStyle(fontSize: 13)),
+                        Text("Statement", style: TextStyle(fontSize: 13)),
                       ],
                     ),
                   ),
@@ -734,7 +750,6 @@ class Debatordetails extends StatelessWidget {
   ) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        // Dynamic width constraint: ensures it takes 100% of available space but scrolls horizontally if screen is too small
         final tableWidth =
             constraints.maxWidth > 1000 ? constraints.maxWidth : 1000.0;
 
@@ -755,17 +770,13 @@ class Debatordetails extends StatelessWidget {
                   controller: _hScroll,
                   scrollDirection: Axis.horizontal,
                   child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                      minWidth: constraints.maxWidth,
-                    ), // Guarantees centering
+                    constraints: BoxConstraints(minWidth: constraints.maxWidth),
                     child: Center(
                       child: SizedBox(
-                        width:
-                            tableWidth, // Guarantees header and rows perfectly align
+                        width: tableWidth,
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            // TABLE HEADER
                             Container(
                               color: const Color(0xFFF1F5F9),
                               padding: const EdgeInsets.symmetric(
@@ -802,7 +813,6 @@ class Debatordetails extends StatelessWidget {
                                 ],
                               ),
                             ),
-                            // TABLE ROWS OR EMPTY STATE
                             if (txList.isEmpty)
                               const Padding(
                                 padding: EdgeInsets.all(40),
@@ -1366,69 +1376,80 @@ class Debatordetails extends StatelessWidget {
   ) {
     final RxBool isDeleting = false.obs;
     Get.dialog(
-      AlertDialog(
-        title: const Text(
-          "Confirm Delete",
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-        content: Text(
-          "Are you sure you want to delete this transaction of Tk ${tx.debitAmount > 0 ? tx.debitAmount : tx.creditAmount}?",
-        ),
-        actions: [
-          Obx(
-            () => TextButton(
-              onPressed: isDeleting.value ? null : () => Get.back(),
-              child: const Text("Cancel"),
-            ),
-          ),
-          Obx(
-            () => ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                foregroundColor: Colors.white,
+      Builder(
+        builder:
+            (dialogContext) => AlertDialog(
+              title: const Text(
+                "Confirm Delete",
+                style: TextStyle(fontWeight: FontWeight.bold),
               ),
-              onPressed:
-                  isDeleting.value
-                      ? null
-                      : () async {
-                        isDeleting.value = true;
-                        try {
-                          if (tx.pairedTx != null) {
-                            await mainCtrl.deleteTransaction(
-                              debtorId,
-                              tx.originalTx.id,
-                            );
-                            await mainCtrl.deleteTransaction(
-                              debtorId,
-                              tx.pairedTx!.id,
-                            );
-                          } else {
-                            await mainCtrl.deleteTransaction(
-                              debtorId,
-                              tx.originalTx.id,
-                            );
-                          }
-                          Get.back();
-                        } catch (e) {
-                          Get.snackbar("Error", "Failed to delete transaction");
-                        } finally {
-                          isDeleting.value = false;
-                        }
-                      },
-              child:
-                  isDeleting.value
-                      ? const SizedBox(
-                        height: 16,
-                        width: 16,
-                        child: CircularProgressIndicator(
-                          color: Colors.white,
-                          strokeWidth: 2,
-                        ),
-                      )
-                      : const Text("Delete Forever"),
+              content: Text(
+                "Are you sure you want to delete this transaction of Tk ${tx.debitAmount > 0 ? tx.debitAmount : tx.creditAmount}?",
+              ),
+              actions: [
+                Obx(
+                  () => TextButton(
+                    onPressed:
+                        isDeleting.value
+                            ? null
+                            : () => Navigator.of(dialogContext).pop(),
+                    child: const Text("Cancel"),
+                  ),
+                ),
+                Obx(
+                  () => ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      foregroundColor: Colors.white,
+                    ),
+                    onPressed:
+                        isDeleting.value
+                            ? null
+                            : () async {
+                              isDeleting.value = true;
+                              try {
+                                if (tx.pairedTx != null) {
+                                  await mainCtrl.deleteTransaction(
+                                    debtorId,
+                                    tx.originalTx.id,
+                                  );
+                                  await mainCtrl.deleteTransaction(
+                                    debtorId,
+                                    tx.pairedTx!.id,
+                                  );
+                                } else {
+                                  await mainCtrl.deleteTransaction(
+                                    debtorId,
+                                    tx.originalTx.id,
+                                  );
+                                }
+                                if (dialogContext.mounted) {
+                                  Navigator.of(dialogContext).pop();
+                                }
+                              } catch (e) {
+                                Get.snackbar(
+                                  "Error",
+                                  "Failed to delete transaction",
+                                );
+                              } finally {
+                                isDeleting.value = false;
+                              }
+                            },
+                    child:
+                        isDeleting.value
+                            ? const SizedBox(
+                              height: 16,
+                              width: 16,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            )
+                            : const Text("Delete Forever"),
+                  ),
+                ),
+              ],
             ),
-          ),
-        ],
       ),
       barrierDismissible: false,
     );
@@ -1452,145 +1473,262 @@ class Debatordetails extends StatelessWidget {
     DebatorController mainCtrl,
   ) {
     final RxString selectedFilter = 'All Time'.obs;
+    final Rx<DateTimeRange?> customRange = Rx<DateTimeRange?>(null);
 
     Get.dialog(
-      AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Row(
-          children: [
-            Icon(FontAwesomeIcons.filePdf, color: debitColor, size: 20),
-            SizedBox(width: 10),
-            Text(
-              "Export Statement",
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-            ),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              "Select the timeframe for this ledger report:",
-              style: TextStyle(color: textMuted, fontSize: 13),
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(
-                color: bgGrey,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey.shade300),
+      Builder(
+        builder:
+            (dialogContext) => AlertDialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
               ),
-              child: Obx(
-                () => DropdownButtonHideUnderline(
-                  child: DropdownButton<String>(
-                    value: selectedFilter.value,
-                    isExpanded: true,
-                    items: const [
-                      DropdownMenuItem(
-                        value: 'Last 3 Days',
-                        child: Text(
-                          "Last 3 Days",
-                          style: TextStyle(fontWeight: FontWeight.w600),
+              title: const Row(
+                children: [
+                  Icon(FontAwesomeIcons.filePdf, color: debitColor, size: 20),
+                  SizedBox(width: 10),
+                  Text(
+                    "Export Statement",
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                  ),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    "Select the timeframe for this ledger report:",
+                    style: TextStyle(color: textMuted, fontSize: 13),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      color: bgGrey,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: Obx(
+                      () => DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          value: selectedFilter.value,
+                          isExpanded: true,
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'Last 3 Days',
+                              child: Text(
+                                "Last 3 Days",
+                                style: TextStyle(fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                            DropdownMenuItem(
+                              value: 'Last 7 Days',
+                              child: Text(
+                                "Last 7 Days",
+                                style: TextStyle(fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                            DropdownMenuItem(
+                              value: 'Last 30 Days',
+                              child: Text(
+                                "Last 30 Days",
+                                style: TextStyle(fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                            DropdownMenuItem(
+                              value: 'Last 90 Days',
+                              child: Text(
+                                "Last 90 Days",
+                                style: TextStyle(fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                            DropdownMenuItem(
+                              value: 'All Time',
+                              child: Text(
+                                "All Time (Full Ledger)",
+                                style: TextStyle(fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                            DropdownMenuItem(
+                              value: 'Custom Range',
+                              child: Text(
+                                "Custom Date Range...",
+                                style: TextStyle(fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                          ],
+                          onChanged: (val) async {
+                            if (val == 'Custom Range') {
+                              DateTimeRange? picked = await showDateRangePicker(
+                                context: dialogContext,
+                                firstDate: DateTime(2000),
+                                lastDate: DateTime(2100),
+                                builder: (context, child) {
+                                  return Theme(
+                                    data: ThemeData.light().copyWith(
+                                      colorScheme: const ColorScheme.light(
+                                        primary: darkSlate,
+                                        onPrimary: Colors.white,
+                                      ),
+                                    ),
+                                    child: child!,
+                                  );
+                                },
+                              );
+                              if (picked != null) {
+                                customRange.value = picked;
+                                selectedFilter.value = val!;
+                              }
+                            } else if (val != null) {
+                              selectedFilter.value = val;
+                            }
+                          },
                         ),
                       ),
-                      DropdownMenuItem(
-                        value: 'Last 7 Days',
-                        child: Text(
-                          "Last 7 Days",
-                          style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  Obx(() {
+                    if (selectedFilter.value == 'Custom Range' &&
+                        customRange.value != null) {
+                      final start = DateFormat(
+                        'dd MMM yyyy',
+                      ).format(customRange.value!.start);
+                      final end = DateFormat(
+                        'dd MMM yyyy',
+                      ).format(customRange.value!.end);
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 16.0),
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: activeAccent.withValues(alpha: 0.05),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: activeAccent.withValues(alpha: 0.2),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.date_range,
+                                size: 16,
+                                color: activeAccent,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  "$start  ➔  $end",
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    color: darkSlate,
+                                  ),
+                                ),
+                              ),
+                              InkWell(
+                                onTap: () async {
+                                  DateTimeRange? picked =
+                                      await showDateRangePicker(
+                                        context: dialogContext,
+                                        initialDateRange: customRange.value,
+                                        firstDate: DateTime(2000),
+                                        lastDate: DateTime(2100),
+                                      );
+                                  if (picked != null) {
+                                    customRange.value = picked;
+                                  }
+                                },
+                                child: const Text(
+                                  "Change",
+                                  style: TextStyle(
+                                    color: activeAccent,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                      DropdownMenuItem(
-                        value: 'Last 30 Days',
-                        child: Text(
-                          "Last 30 Days",
-                          style: TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                      ),
-                      DropdownMenuItem(
-                        value: 'Last 90 Days',
-                        child: Text(
-                          "Last 90 Days",
-                          style: TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                      ),
-                      DropdownMenuItem(
-                        value: 'All Time',
-                        child: Text(
-                          "All Time (Full Ledger)",
-                          style: TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                      ),
-                    ],
-                    onChanged: (val) {
-                      if (val != null) selectedFilter.value = val;
-                    },
+                      );
+                    }
+                    return const SizedBox.shrink();
+                  }),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text(
+                    "Cancel",
+                    style: TextStyle(
+                      color: textMuted,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Get.back(),
-            child: const Text(
-              "Cancel",
-              style: TextStyle(color: textMuted, fontWeight: FontWeight.bold),
-            ),
-          ),
-          ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: debitColor,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-            onPressed: () {
-              Get.back();
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: debitColor,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  onPressed: () {
+                    DateTimeRange? range;
+                    DateTime now = DateTime.now();
 
-              DateTimeRange? range;
-              DateTime now = DateTime.now();
+                    if (selectedFilter.value == 'Last 3 Days') {
+                      range = DateTimeRange(
+                        start: now.subtract(const Duration(days: 3)),
+                        end: now,
+                      );
+                    } else if (selectedFilter.value == 'Last 7 Days') {
+                      range = DateTimeRange(
+                        start: now.subtract(const Duration(days: 7)),
+                        end: now,
+                      );
+                    } else if (selectedFilter.value == 'Last 30 Days') {
+                      range = DateTimeRange(
+                        start: now.subtract(const Duration(days: 30)),
+                        end: now,
+                      );
+                    } else if (selectedFilter.value == 'Last 90 Days') {
+                      range = DateTimeRange(
+                        start: now.subtract(const Duration(days: 90)),
+                        end: now,
+                      );
+                    } else if (selectedFilter.value == 'Custom Range') {
+                      if (customRange.value == null) {
+                        Get.snackbar(
+                          "Missing Info",
+                          "Please select a valid date range.",
+                          backgroundColor: Colors.red.shade600,
+                          colorText: Colors.white,
+                        );
+                        return;
+                      }
+                      range = customRange.value;
+                    }
 
-              if (selectedFilter.value == 'Last 3 Days') {
-                range = DateTimeRange(
-                  start: now.subtract(const Duration(days: 3)),
-                  end: now,
-                );
-              } else if (selectedFilter.value == 'Last 7 Days') {
-                range = DateTimeRange(
-                  start: now.subtract(const Duration(days: 7)),
-                  end: now,
-                );
-              } else if (selectedFilter.value == 'Last 30 Days') {
-                range = DateTimeRange(
-                  start: now.subtract(const Duration(days: 30)),
-                  end: now,
-                );
-              } else if (selectedFilter.value == 'Last 90 Days') {
-                range = DateTimeRange(
-                  start: now.subtract(const Duration(days: 90)),
-                  end: now,
-                );
-              }
+                    Navigator.of(dialogContext).pop();
 
-              mainCtrl.selectedDateRange.value = range;
-              mainCtrl.downloadFullDebtorStatement(debtorId, debtorName).then((
-                _,
-              ) {
-                mainCtrl.setDateFilter(null, debtorId);
-              });
-            },
-            icon: const Icon(Icons.download, size: 16),
-            label: const Text(
-              "Generate PDF",
-              style: TextStyle(fontWeight: FontWeight.bold),
+                    mainCtrl.selectedDateRange.value = range;
+                    mainCtrl
+                        .downloadFullDebtorStatement(debtorId, debtorName)
+                        .then((_) {
+                          mainCtrl.setDateFilter(null, debtorId);
+                        });
+                  },
+                  icon: const Icon(Icons.download, size: 16),
+                  label: const Text(
+                    "Generate PDF",
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
             ),
-          ),
-        ],
       ),
     );
   }
@@ -1626,7 +1764,7 @@ class _AddTxFormController extends GetxController {
     super.onClose();
   }
 
-  Future<void> save() async {
+  Future<void> save(BuildContext context) async {
     if (amountC.text.isEmpty) return;
     isSubmitting.value = true;
     try {
@@ -1657,7 +1795,9 @@ class _AddTxFormController extends GetxController {
         date: selectedDate.value,
         paymentMethodData: pm,
       );
-      Get.back();
+      if (context.mounted) {
+        Navigator.of(context).pop();
+      }
     } catch (e) {
       Get.snackbar("Error", "Failed to add transaction");
     } finally {
@@ -1679,13 +1819,13 @@ class _AddTransactionDialogUI extends StatelessWidget {
     bool isNum = false,
   }) {
     return TextField(
-      style:  TextStyle(fontSize:13) ,
+      style: TextStyle(fontSize: 13),
       controller: c,
       keyboardType: isNum ? TextInputType.number : TextInputType.text,
       decoration: InputDecoration(
         prefixIcon: Icon(icon, size: 16, color: textMuted),
         hintText: hint,
-        hintStyle: TextStyle(fontSize:13),
+        hintStyle: TextStyle(fontSize: 13),
         filled: true,
         fillColor: bgGrey,
         isDense: true,
@@ -1755,31 +1895,52 @@ class _AddTransactionDialogUI extends StatelessWidget {
                             items: const [
                               DropdownMenuItem(
                                 value: 'credit',
-                                child: Text("🧾  New Sale/Bill (Debit)", style:  TextStyle(fontSize:13)),
+                                child: Text(
+                                  "🧾  New Sale/Bill (Debit)",
+                                  style: TextStyle(fontSize: 13),
+                                ),
                               ),
                               DropdownMenuItem(
                                 value: 'debit',
-                                child: Text("💵  Receive Payment (Credit)", style:  TextStyle(fontSize:13)),
+                                child: Text(
+                                  "💵  Receive Payment (Credit)",
+                                  style: TextStyle(fontSize: 13),
+                                ),
                               ),
                               DropdownMenuItem(
                                 value: 'eid_bonus',
-                                child: Text("🎁  Give Eid Bonus (Credit)", style:  TextStyle(fontSize:13)),
+                                child: Text(
+                                  "🎁  Give Eid Bonus (Credit)",
+                                  style: TextStyle(fontSize: 13),
+                                ),
                               ),
                               DropdownMenuItem(
                                 value: 'previous_due',
-                                child: Text("🏦  Add Old Debt (Debit)", style:  TextStyle(fontSize:13)),
+                                child: Text(
+                                  "🏦  Add Old Debt (Debit)",
+                                  style: TextStyle(fontSize: 13),
+                                ),
                               ),
                               DropdownMenuItem(
                                 value: 'loan_payment',
-                                child: Text("💰  Collect Old Debt (Credit)", style:  TextStyle(fontSize:13)),
+                                child: Text(
+                                  "💰  Collect Old Debt (Credit)",
+                                  style: TextStyle(fontSize: 13),
+                                ),
                               ),
                               DropdownMenuItem(
                                 value: 'advance_received',
-                                child: Text("⬅️  Receive Advance (Credit)", style:  TextStyle(fontSize:13)),
+                                child: Text(
+                                  "⬅️  Receive Advance (Credit)",
+                                  style: TextStyle(fontSize: 13),
+                                ),
                               ),
                               DropdownMenuItem(
                                 value: 'advance_given',
-                                child: Text("➡️  Give Advance (Debit)", style:  TextStyle(fontSize:13)),
+                                child: Text(
+                                  "➡️  Give Advance (Debit)",
+                                  style: TextStyle(fontSize: 13),
+                                ),
                               ),
                             ],
                             onChanged: (v) {
@@ -1815,8 +1976,11 @@ class _AddTransactionDialogUI extends StatelessWidget {
                             onPressed:
                                 formCtrl.isSubmitting.value
                                     ? null
-                                    : () => Get.back(),
-                            child: const Text("Cancel",style:  TextStyle(fontSize:13)),
+                                    : () => Navigator.of(context).pop(),
+                            child: const Text(
+                              "Cancel",
+                              style: TextStyle(fontSize: 13),
+                            ),
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -1836,7 +2000,7 @@ class _AddTransactionDialogUI extends StatelessWidget {
                             onPressed:
                                 formCtrl.isSubmitting.value
                                     ? null
-                                    : formCtrl.save,
+                                    : () => formCtrl.save(context),
                             child:
                                 formCtrl.isSubmitting.value
                                     ? const SizedBox(
@@ -1890,7 +2054,7 @@ class _AddTransactionDialogUI extends StatelessWidget {
                       children: [
                         Icon(Icons.money, size: 16, color: Colors.green),
                         SizedBox(width: 8),
-                        Text("Cash",style:  TextStyle(fontSize:13)),
+                        Text("Cash", style: TextStyle(fontSize: 13)),
                       ],
                     ),
                   ),
@@ -1904,7 +2068,7 @@ class _AddTransactionDialogUI extends StatelessWidget {
                           color: Colors.indigo,
                         ),
                         SizedBox(width: 8),
-                        Text("Bank Transfer",style:  TextStyle(fontSize:13)),
+                        Text("Bank Transfer", style: TextStyle(fontSize: 13)),
                       ],
                     ),
                   ),
@@ -1918,7 +2082,7 @@ class _AddTransactionDialogUI extends StatelessWidget {
                           color: Colors.pink,
                         ),
                         SizedBox(width: 8),
-                        Text("Bkash",style:  TextStyle(fontSize:13)),
+                        Text("Bkash", style: TextStyle(fontSize: 13)),
                       ],
                     ),
                   ),
@@ -1932,7 +2096,7 @@ class _AddTransactionDialogUI extends StatelessWidget {
                           color: Colors.orange,
                         ),
                         SizedBox(width: 8),
-                        Text("Nagad",style:  TextStyle(fontSize:13)),
+                        Text("Nagad", style: TextStyle(fontSize: 13)),
                       ],
                     ),
                   ),
@@ -1946,7 +2110,7 @@ class _AddTransactionDialogUI extends StatelessWidget {
                           color: Colors.purple,
                         ),
                         SizedBox(width: 8),
-                        Text("Rocket",style:  TextStyle(fontSize:13)),
+                        Text("Rocket", style: TextStyle(fontSize: 13)),
                       ],
                     ),
                   ),
@@ -2029,7 +2193,7 @@ class _EditTxFormController extends GetxController {
     super.onClose();
   }
 
-  Future<void> save() async {
+  Future<void> save(BuildContext context) async {
     isSubmitting.value = true;
     try {
       Map<String, dynamic> pm = {'type': 'cash'};
@@ -2062,7 +2226,9 @@ class _EditTxFormController extends GetxController {
         date: tx.date,
         paymentMethod: pm,
       );
-      Get.back();
+      if (context.mounted) {
+        Navigator.of(context).pop();
+      }
     } catch (e) {
       Get.snackbar("Error", "Failed to update transaction");
     } finally {
@@ -2219,7 +2385,7 @@ class _EditTransactionDialogUI extends StatelessWidget {
                             onPressed:
                                 formCtrl.isSubmitting.value
                                     ? null
-                                    : () => Get.back(),
+                                    : () => Navigator.of(context).pop(),
                             child: const Text("Cancel"),
                           ),
                         ),
@@ -2240,7 +2406,7 @@ class _EditTransactionDialogUI extends StatelessWidget {
                             onPressed:
                                 formCtrl.isSubmitting.value
                                     ? null
-                                    : formCtrl.save,
+                                    : () => formCtrl.save(context),
                             child:
                                 formCtrl.isSubmitting.value
                                     ? const SizedBox(
@@ -2426,7 +2592,7 @@ class _EditProfileFormController extends GetxController {
     super.onClose();
   }
 
-  Future<void> save() async {
+  Future<void> save(BuildContext context) async {
     isSubmitting.value = true;
     try {
       await mainCtrl.editDebtor(
@@ -2439,7 +2605,9 @@ class _EditProfileFormController extends GetxController {
         address: addressC.text,
         payments: debtor.payments,
       );
-      Get.back();
+      if (context.mounted) {
+        Navigator.of(context).pop();
+      }
     } catch (e) {
       Get.snackbar("Error", "Failed to update profile");
     } finally {
@@ -2497,7 +2665,10 @@ class _EditProfileDialogUI extends StatelessWidget {
       actions: [
         Obx(
           () => TextButton(
-            onPressed: formCtrl.isSubmitting.value ? null : () => Get.back(),
+            onPressed:
+                formCtrl.isSubmitting.value
+                    ? null
+                    : () => Navigator.of(context).pop(),
             child: const Text("Cancel"),
           ),
         ),
@@ -2507,7 +2678,10 @@ class _EditProfileDialogUI extends StatelessWidget {
               backgroundColor: activeAccent,
               foregroundColor: Colors.white,
             ),
-            onPressed: formCtrl.isSubmitting.value ? null : formCtrl.save,
+            onPressed:
+                formCtrl.isSubmitting.value
+                    ? null
+                    : () => formCtrl.save(context),
             child:
                 formCtrl.isSubmitting.value
                     ? const SizedBox(
