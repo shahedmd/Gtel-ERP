@@ -916,6 +916,7 @@ class _AddExpenseDialog extends StatelessWidget {
                       child: const Text(
                         "Cancel",
                         style: TextStyle(
+                          fontSize: 13,
                           color: DailyExpensesPage.textMuted,
                           fontWeight: FontWeight.bold,
                         ),
@@ -986,7 +987,7 @@ class _AddExpenseDialog extends StatelessWidget {
       },
       icon: const Icon(Icons.calendar_today, size: 16),
       label: Obx(
-        () => Text(DateFormat('dd MMM yyyy').format(formCtrl.addDate.value)),
+        () => Text(DateFormat('dd MMM yyyy').format(formCtrl.addDate.value), style: TextStyle(fontSize: 13),),
       ),
       style: OutlinedButton.styleFrom(
         foregroundColor: DailyExpensesPage.darkSlate,

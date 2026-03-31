@@ -1,24 +1,20 @@
-// ignore_for_file: deprecated_member_use, avoid_print, empty_catches, prefer_interpolation_to_compose_strings
-
 import 'dart:async';
 import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:gtel_erp/Core/Utils/app_logger.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-
-// IMPORTANT: Update these imports to match your actual file structure
 import '../Core/Stock Management/stockcontroller.dart';
 import '../Core/Stock Management/stockproductmodel.dart';
 import '../Core/Debtor_Market_Customer_Suppliers/gteldebtorcontroller.dart';
 import '../Core/Debtor_Market_Customer_Suppliers/debtordartmodel.dart';
 import '../Web Screen/Sales/controller.dart';
 
-// --- SALES CART ITEM MODEL ---
 class SalesCartItem {
   final Product product;
   RxInt quantity;
@@ -49,9 +45,19 @@ class LiveSalesController extends GetxController {
   final RxList<SalesCartItem> cart = <SalesCartItem>[].obs;
   final RxBool isProcessing = false.obs;
 
-  // Debtor Selection & Search State
+  // --- AGENT DEBTOR SEARCH STATE ---
   final Rxn<DebtorModel> selectedDebtor = Rxn<DebtorModel>();
   final RxList<DebtorModel> filteredDebtors = <DebtorModel>[].obs;
+
+  // --- REGULAR CUSTOMER SEARCH STATE (WHOLESALE/VIP) ---
+  final Rxn<Map<String, dynamic>> selectedRegularCustomer =
+      Rxn<Map<String, dynamic>>();
+  final RxList<Map<String, dynamic>> filteredRegularCustomers =
+      <Map<String, dynamic>>[].obs;
+
+  // --- NEW: LOCAL CACHE FOR REGULAR CUSTOMERS (Makes search blazing fast and flexible) ---
+  final RxList<Map<String, dynamic>> allRegularCustomersCache =
+      <Map<String, dynamic>>[].obs;
 
   // Search Debounce Timer
   Timer? _searchDebounce;
@@ -85,8 +91,6 @@ class LiveSalesController extends GetxController {
   final RxDouble debtorOldDue = 0.0.obs;
   final RxDouble debtorRunningDue = 0.0.obs;
   double get totalPreviousDue => debtorOldDue.value + debtorRunningDue.value;
-
-  // --- TEXT CONTROLLERS ---
   final debtorPhoneSearch = TextEditingController();
   final nameC = TextEditingController();
   final phoneC = TextEditingController();
@@ -95,12 +99,8 @@ class LiveSalesController extends GetxController {
   final challanC = TextEditingController();
   final cartonsC = TextEditingController();
   final otherCourierC = TextEditingController();
-
   final discountC = TextEditingController();
-  final discountNoteC =
-      TextEditingController(); // <-- TEXT INPUT FOR DISCOUNT NOTE
-
-  // Payment Controllers
+  final discountNoteC = TextEditingController();
   final cashC = TextEditingController();
   final bkashC = TextEditingController();
   final bkashNumberC = TextEditingController();
@@ -109,7 +109,6 @@ class LiveSalesController extends GetxController {
   final bankC = TextEditingController();
   final bankNameC = TextEditingController();
   final bankAccC = TextEditingController();
-
   final RxDouble discountVal = 0.0.obs;
   final RxnString selectedCourier = RxnString();
   final RxDouble totalPaidInput = 0.0.obs;
@@ -126,37 +125,43 @@ class LiveSalesController extends GetxController {
   @override
   void onInit() {
     super.onInit();
+
+    // NEW: Fetch all non-agent customers into local cache when controller initializes
+    _fetchAllRegularCustomers();
+
     cashC.addListener(updatePaymentCalculations);
     bkashC.addListener(updatePaymentCalculations);
     nagadC.addListener(updatePaymentCalculations);
     bankC.addListener(updatePaymentCalculations);
 
-    // --- DEBTOR SEARCH LISTENER ---
+    // --- UNIFIED SEARCH LISTENER ---
     debtorPhoneSearch.addListener(() {
-      if (customerType.value != 'AGENT') return;
-
       String query = debtorPhoneSearch.text.trim();
-
-      if (selectedDebtor.value != null &&
-          query != selectedDebtor.value!.phone) {
-        selectedDebtor.value = null;
-      }
 
       if (query.isEmpty) {
         filteredDebtors.clear();
-        return;
-      }
-
-      if (selectedDebtor.value != null &&
-          query == selectedDebtor.value!.phone) {
-        filteredDebtors.clear();
+        filteredRegularCustomers.clear();
         return;
       }
 
       if (_searchDebounce?.isActive ?? false) _searchDebounce!.cancel();
 
-      _searchDebounce = Timer(const Duration(milliseconds: 500), () {
-        _searchGlobalAgent(query);
+      _searchDebounce = Timer(const Duration(milliseconds: 300), () {
+        if (customerType.value == 'AGENT') {
+          // Ignore if already selected
+          if (selectedDebtor.value != null &&
+              query == selectedDebtor.value!.phone) {
+            return;
+          }
+          _searchGlobalAgent(query);
+        } else {
+          // Ignore if already selected
+          if (selectedRegularCustomer.value != null &&
+              query == selectedRegularCustomer.value!['phone']) {
+            return;
+          }
+          _searchRegularCustomer(query);
+        }
       });
     });
 
@@ -188,6 +193,21 @@ class LiveSalesController extends GetxController {
     });
   }
 
+  // --- NEW: FETCH REGULAR CUSTOMERS IN BACKGROUND ---
+  Future<void> _fetchAllRegularCustomers() async {
+    try {
+      var snap = await _db.collection('customers').get();
+      allRegularCustomersCache.value =
+          snap.docs
+              .map((doc) => {'id': doc.id, ...doc.data()})
+              .where((c) => c['type'] != 'AGENT')
+              .toList();
+    } catch (e) {
+      AppLogger.i("Error fetching regular customers: $e");
+    }
+  }
+
+  // SEARCH AGENT
   Future<void> _searchGlobalAgent(String queryText) async {
     try {
       String q = queryText.trim();
@@ -202,7 +222,6 @@ class LiveSalesController extends GetxController {
               .where('searchKeywords', arrayContains: qLower)
               .limit(10)
               .get();
-
       var phoneSnap =
           await _db
               .collection('debatorbody')
@@ -210,7 +229,6 @@ class LiveSalesController extends GetxController {
               .where('phone', isLessThan: '$q\uf8ff')
               .limit(10)
               .get();
-
       var nameCapSnap =
           await _db
               .collection('debatorbody')
@@ -218,7 +236,6 @@ class LiveSalesController extends GetxController {
               .where('name', isLessThan: '$qCap\uf8ff')
               .limit(10)
               .get();
-
       var nameLowerSnap =
           await _db
               .collection('debatorbody')
@@ -257,7 +274,78 @@ class LiveSalesController extends GetxController {
 
       filteredDebtors.value = results.values.toList();
     } catch (e) {
-      print("Global Agent Search Error: $e");
+      AppLogger.i("Global Agent Search Error: $e");
+    }
+  }
+
+  // --- NEW: FLEXIBLE SEARCH REGULAR CUSTOMER (WHOLESALE/VIP) ---
+  Future<void> _searchRegularCustomer(String queryText) async {
+    try {
+      String q = queryText.trim();
+      String qLower = q.toLowerCase();
+      String qCap = qLower.capitalizeFirst ?? qLower;
+
+      Map<String, Map<String, dynamic>> results = {};
+
+      // 1. PERFECT LOCAL SEARCH: Matches ANY part of the name or phone, completely case-insensitive
+      var localMatches =
+          allRegularCustomersCache.where((c) {
+            String name = (c['name'] ?? '').toString().toLowerCase();
+            String phone = (c['phone'] ?? '').toString().toLowerCase();
+            return name.contains(qLower) || phone.contains(qLower);
+          }).toList();
+
+      for (var m in localMatches) {
+        results[m['id']] = m;
+      }
+
+      // 2. FIRESTORE FALLBACK (Runs just in case the cache is still loading)
+      var phoneSnap =
+          await _db
+              .collection('customers')
+              .where('phone', isGreaterThanOrEqualTo: q)
+              .where('phone', isLessThan: '$q\uf8ff')
+              .limit(5)
+              .get();
+      var nameLowerSnap =
+          await _db
+              .collection('customers')
+              .where('name', isGreaterThanOrEqualTo: qLower)
+              .where('name', isLessThan: '$qLower\uf8ff')
+              .limit(5)
+              .get();
+      var nameCapSnap =
+          await _db
+              .collection('customers')
+              .where('name', isGreaterThanOrEqualTo: qCap)
+              .where('name', isLessThan: '$qCap\uf8ff')
+              .limit(5)
+              .get();
+      var kwSnap =
+          await _db
+              .collection('customers')
+              .where('searchKeywords', arrayContains: qLower)
+              .limit(5)
+              .get();
+
+      for (var doc in phoneSnap.docs) {
+        results[doc.id] = {'id': doc.id, ...doc.data()};
+      }
+      for (var doc in nameLowerSnap.docs) {
+        results[doc.id] = {'id': doc.id, ...doc.data()};
+      }
+      for (var doc in nameCapSnap.docs) {
+        results[doc.id] = {'id': doc.id, ...doc.data()};
+      }
+      for (var doc in kwSnap.docs) {
+        results[doc.id] = {'id': doc.id, ...doc.data()};
+      }
+
+      // Exclude AGENTS to prevent duplication and limit to 15 results
+      filteredRegularCustomers.value =
+          results.values.where((c) => c['type'] != 'AGENT').take(15).toList();
+    } catch (e) {
+      AppLogger.i("Regular Customer Search Error: $e");
     }
   }
 
@@ -265,6 +353,16 @@ class LiveSalesController extends GetxController {
     selectedDebtor.value = debtor;
     debtorPhoneSearch.text = debtor.phone;
     filteredDebtors.clear();
+  }
+
+  void selectRegularCustomerFromDropdown(Map<String, dynamic> customer) {
+    selectedRegularCustomer.value = customer;
+    debtorPhoneSearch.text = customer['phone'] ?? '';
+    nameC.text = customer['name'] ?? '';
+    phoneC.text = customer['phone'] ?? '';
+    addressC.text = customer['address'] ?? '';
+    shopC.text = customer['shop'] ?? '';
+    filteredRegularCustomers.clear();
   }
 
   void refreshPage() {
@@ -282,8 +380,10 @@ class LiveSalesController extends GetxController {
 
   void _handleTypeChange() {
     selectedDebtor.value = null;
+    selectedRegularCustomer.value = null; // Clear regular customer state
     debtorPhoneSearch.clear();
     filteredDebtors.clear();
+    filteredRegularCustomers.clear(); // Clear regular customer search
     debtorOldDue.value = 0.0;
     debtorRunningDue.value = 0.0;
 
@@ -725,7 +825,7 @@ class LiveSalesController extends GetxController {
         "items": orderItems,
         "subtotal": subtotalAmount,
         "discount": discountVal.value,
-        "discountNote": discountNoteC.text.trim(), // <-- SAVING DISCOUNT NOTE
+        "discountNote": discountNoteC.text.trim(),
         "grandTotal": grandTotal,
         "paid": allocatedToInvoice,
         "totalCost": totalInvoiceCost,
@@ -757,7 +857,6 @@ class LiveSalesController extends GetxController {
           masterPaymentMap,
         );
       } else if (customerType.value == "AGENT" && debtorId != null) {
-        // Handle Agent Transaction (Ledgers, Running Due payment, etc.)
         await _handleAgentTransaction(
           batch,
           debtorId,
@@ -774,6 +873,7 @@ class LiveSalesController extends GetxController {
           sellerUid,
         );
       } else {
+        // --- SAVING REGULAR WHOLESALE/VIP CUSTOMERS ---
         DocumentReference custRef = _db.collection('customers').doc(fPhone);
         batch.set(custRef, {
           "name": fName,
@@ -783,7 +883,20 @@ class LiveSalesController extends GetxController {
           "type": customerType.value,
           "lastInv": invNo,
           "lastShopDate": FieldValue.serverTimestamp(),
+          "searchKeywords": _generateSearchKeywords(
+            fName,
+            fPhone,
+          ), // <-- Added Keyword Generation
         }, SetOptions(merge: true));
+
+        // --- NEW: Update Local Customer Cache Immediately ---
+        _updateCustomerCache(
+          fPhone,
+          fName,
+          shopC.text,
+          addressC.text,
+          customerType.value,
+        );
 
         DocumentReference custOrdRef = custRef.collection('orders').doc(invNo);
         batch.set(custOrdRef, {
@@ -795,8 +908,6 @@ class LiveSalesController extends GetxController {
         });
 
         DocumentReference dailyRef = _db.collection('daily_sales').doc();
-
-        // --- EXACT DAILY_SALES SCHEMA (Non-Agent) ---
         double invoiceDue = _round(grandTotal - allocatedToInvoice);
         Map<String, dynamic> methodMap = _extractPaymentFor(allocatedToInvoice);
         methodMap['pending'] = invoiceDue;
@@ -857,8 +968,7 @@ class LiveSalesController extends GetxController {
         authorizedName: sellerName,
         authorizedPhone: sellerPhone,
         discount: discountVal.value,
-        discountNote:
-            discountNoteC.text.trim(), // <-- PASSING DISCOUNT NOTE TO PDF
+        discountNote: discountNoteC.text.trim(),
         packagerName: selectedPackager.value,
       );
 
@@ -885,6 +995,34 @@ class LiveSalesController extends GetxController {
       );
     } finally {
       isProcessing.value = false;
+    }
+  }
+
+  void _updateCustomerCache(
+    String phone,
+    String name,
+    String shop,
+    String address,
+    String type,
+  ) {
+    if (type == 'AGENT') return;
+
+    var existingIndex = allRegularCustomersCache.indexWhere(
+      (c) => c['phone'] == phone || c['id'] == phone,
+    );
+    Map<String, dynamic> updatedCust = {
+      'id': phone,
+      'phone': phone,
+      'name': name,
+      'shop': shop,
+      'address': address,
+      'type': type,
+    };
+
+    if (existingIndex >= 0) {
+      allRegularCustomersCache[existingIndex] = updatedCust; // Update existing
+    } else {
+      allRegularCustomersCache.add(updatedCust); // Add new
     }
   }
 
@@ -945,7 +1083,6 @@ class LiveSalesController extends GetxController {
 
     if ((masterPaymentMap['paidForInvoice'] as double) > 0) {
       DocumentReference dailyRef = _db.collection('daily_sales').doc();
-
       Map<String, dynamic> condMethodMap = _extractPaymentFor(
         masterPaymentMap['paidForInvoice'],
       );
@@ -999,7 +1136,6 @@ class LiveSalesController extends GetxController {
     Map masterPaymentMap,
     String sellerUid,
   ) async {
-    // 1. Analytics / History
     DocumentReference analyticsRef = _db
         .collection('debtor_transaction_history')
         .doc(invNo);
@@ -1017,7 +1153,6 @@ class LiveSalesController extends GetxController {
       "soldByPhone": sellerPhone,
     });
 
-    // 2. Handle Old Loan Payment (If any)
     if (allocatedToOldDue > 0) {
       DocumentReference oldPayRef =
           _db
@@ -1025,7 +1160,6 @@ class LiveSalesController extends GetxController {
               .doc(debtorId)
               .collection('transactions')
               .doc();
-
       String oldPayTxId = oldPayRef.id;
 
       batch.set(oldPayRef, {
@@ -1040,7 +1174,6 @@ class LiveSalesController extends GetxController {
         "collectedByPhone": sellerPhone,
       });
 
-      // --- EXACT CASH LEDGER SCHEMA ---
       _insertCashLedgerRecords(
         batch: batch,
         payMap: _extractPaymentFor(allocatedToOldDue),
@@ -1051,7 +1184,6 @@ class LiveSalesController extends GetxController {
       );
     }
 
-    // 3. Record the Current Sale (Credit)
     DocumentReference creditRef = _db
         .collection('debatorbody')
         .doc(debtorId)
@@ -1068,7 +1200,6 @@ class LiveSalesController extends GetxController {
       "soldByPhone": sellerPhone,
     });
 
-    // 4. Record Payment for Current Sale (Debit)
     if (allocatedToInvoice > 0) {
       DocumentReference debitRef = _db
           .collection('debatorbody')
@@ -1088,10 +1219,8 @@ class LiveSalesController extends GetxController {
       });
     }
 
-    // 5. Handle Surplus / Running Due Payment (IMMUNE TO NAME CHANGES NOW!)
     if (allocatedToPrevRunningDue > 0) {
       String surplusTxId = "${invNo}_surplus";
-
       DocumentReference surplusRef = _db
           .collection('debatorbody')
           .doc(debtorId)
@@ -1118,15 +1247,12 @@ class LiveSalesController extends GetxController {
         sellerUid: sellerUid,
       );
 
-      // --- LOGIC: FIND AND PAY PREVIOUS BILLS (BY ID INSTEAD OF NAME) ---
       try {
         QuerySnapshot ordersSnap =
             await _db
                 .collection('sales_orders')
                 .where('debtorId', isEqualTo: debtorId)
                 .get();
-
-        // 🌟 GET ALL ORDERS & SORT THEM FOR THE MIDDLE INVOICE RIPPLE EFFECT 🌟
         List<DocumentSnapshot> allOrders = ordersSnap.docs.toList();
         allOrders.sort((a, b) {
           final dataA = a.data() as Map<String, dynamic>;
@@ -1157,7 +1283,7 @@ class LiveSalesController extends GetxController {
                         0.0) -
                     (double.tryParse(data['paid']?.toString() ?? '0') ?? 0.0);
               }
-              return pending > 0.5; // Small tolerance
+              return pending > 0.5;
             }).toList();
 
         double remainingToAllocate = allocatedToPrevRunningDue;
@@ -1165,7 +1291,6 @@ class LiveSalesController extends GetxController {
 
         for (var orderDoc in pendingOrders) {
           if (remainingToAllocate <= 0.01) break;
-
           Map<String, dynamic> oData = orderDoc.data() as Map<String, dynamic>;
           String saleTxId = oData['invoiceId'] ?? orderDoc.id;
 
@@ -1175,7 +1300,6 @@ class LiveSalesController extends GetxController {
                   .where('transactionId', isEqualTo: saleTxId)
                   .limit(1)
                   .get();
-
           double currentPendingD = 0.0;
           double currentPaidD = 0.0;
           double currentLedgerPaidD = 0.0;
@@ -1192,7 +1316,6 @@ class LiveSalesController extends GetxController {
                 double.tryParse(dData['ledgerPaid']?.toString() ?? '0') ?? 0.0;
           }
 
-          // Ghost Due Check
           double salesOrderPending =
               oData['paymentDetails'] != null &&
                       oData['paymentDetails']['due'] != null
@@ -1205,12 +1328,10 @@ class LiveSalesController extends GetxController {
                       (double.tryParse(oData['paid']?.toString() ?? '0') ??
                           0.0));
 
-          // 👉 TRUE PENDING
           double actualPending =
               dailyDoc != null ? currentPendingD : salesOrderPending;
 
           if (actualPending <= 0.5) {
-            // 🚑 AUTO-HEAL
             if (salesOrderPending > 0.5) {
               batch.update(orderDoc.reference, {
                 "paid":
@@ -1221,7 +1342,7 @@ class LiveSalesController extends GetxController {
                 "status": "completed",
               });
             }
-            continue; // Move to next order!
+            continue;
           }
 
           double take =
@@ -1241,7 +1362,6 @@ class LiveSalesController extends GetxController {
           String bankName = surplusMethodMap['bankName'] ?? '';
           String accNum = surplusMethodMap['accountNumber'] ?? '';
 
-          // A. UPDATE SALES_ORDERS
           Map<String, dynamic> orderUpdate = {
             "paid": FieldValue.increment(take),
             "paymentDetails.due": FieldValue.increment(-take),
@@ -1250,7 +1370,6 @@ class LiveSalesController extends GetxController {
           if (oData['customerName'] != fName) {
             orderUpdate['customerName'] = fName;
           }
-
           if (sCash > 0) {
             orderUpdate["paymentDetails.cash"] = FieldValue.increment(sCash);
           }
@@ -1282,8 +1401,6 @@ class LiveSalesController extends GetxController {
           }
           batch.update(orderDoc.reference, orderUpdate);
 
-          // ---> 🌟 NEW LOGIC: RIPPLE EFFECT FOR MIDDLE INVOICES 🌟 <---
-          // Accumulate reductions for every invoice created AFTER the one we just paid.
           int currentIndex = allOrders.indexWhere(
             (doc) => doc.id == orderDoc.id,
           );
@@ -1294,9 +1411,7 @@ class LiveSalesController extends GetxController {
                   (middleInvoiceReductions[newerDocId] ?? 0.0) + take;
             }
           }
-          // ---> 🌟 END NEW LOGIC 🌟 <---
 
-          // B. FIND AND UPDATE STRICTLY LINKED DAILY_SALES
           if (dailyDoc != null) {
             final newHistoryEntry = {
               'amount': take,
@@ -1308,7 +1423,6 @@ class LiveSalesController extends GetxController {
               'bankName': bankName,
               'accountNumber': accNum,
             };
-
             Map<String, dynamic> dailyUpdate = {
               "paid": currentPaidD + take,
               "pending": currentPendingD - take,
@@ -1316,9 +1430,7 @@ class LiveSalesController extends GetxController {
               "status": (currentPendingD - take) <= 0.5 ? "paid" : "partial",
               "paymentHistory": FieldValue.arrayUnion([newHistoryEntry]),
             };
-
             if (dailyDoc.get('name') != fName) dailyUpdate['name'] = fName;
-
             if (sCash > 0) {
               dailyUpdate["paymentMethod.cash"] = FieldValue.increment(sCash);
             }
@@ -1343,29 +1455,23 @@ class LiveSalesController extends GetxController {
                 dailyUpdate["paymentMethod.accountNumber"] = accNum;
               }
             }
-
             batch.update(dailyDoc.reference, dailyUpdate);
           }
-
           remainingToAllocate -= take;
         }
 
-        // ---> 🌟 APPLY ALL RIPPLE UPDATES AT ONCE TO THE BATCH 🌟 <---
         middleInvoiceReductions.forEach((docId, totalTake) {
           batch.update(_db.collection('sales_orders').doc(docId), {
             "snapshotRunningDue": FieldValue.increment(-totalTake),
           });
         });
       } catch (e) {
-        print("Error allocating surplus to old bills: $e");
+        AppLogger.i("Error allocating surplus to old bills: $e");
       }
     }
 
-    // 6. Create Daily Sales Entry for CURRENT Invoice
     DocumentReference dailyRef = _db.collection('daily_sales').doc();
     double due = grandTotal - allocatedToInvoice;
-
-    // --- EXACT DAILY_SALES SCHEMA (AGENT) ---
     Map<String, dynamic> agentMethodMap = _extractPaymentFor(
       allocatedToInvoice,
     );
@@ -1414,10 +1520,7 @@ class LiveSalesController extends GetxController {
 
     double totalInput = rawCash + rawBkash + rawNagad + rawBank;
 
-    double finalCash = 0.0;
-    double finalBkash = 0.0;
-    double finalNagad = 0.0;
-    double finalBank = 0.0;
+    double finalCash = 0.0, finalBkash = 0.0, finalNagad = 0.0, finalBank = 0.0;
 
     if (totalInput > 0 && targetAmount > 0) {
       double ratio = targetAmount / totalInput;
@@ -1468,7 +1571,7 @@ class LiveSalesController extends GetxController {
     if (targetAmount <= 0.01) type = "Due";
 
     return {
-      "method": type.toLowerCase(), // Safe for DB rules
+      "method": type.toLowerCase(),
       "cash": _round(finalCash),
       "bkash": _round(finalBkash),
       "nagad": _round(finalNagad),
@@ -1478,11 +1581,10 @@ class LiveSalesController extends GetxController {
       "nagadNumber": nagadNumberC.text.trim(),
       "bankName": bankNameC.text.trim(),
       "accountNumber": bankAccC.text.trim(),
-      "pending": 0.0, // Matches daily_sales schema correctly
+      "pending": 0.0,
     };
   }
 
-  // --- EXACT PAYMENT DETAILS SCHEMA FOR SALES_ORDERS ---
   Map<String, dynamic> _createPaymentMap(
     double oldDue,
     double inv,
@@ -1527,7 +1629,7 @@ class LiveSalesController extends GetxController {
         calculatedCourierDue.value = 0.0;
       }
     } catch (e) {
-      print(e);
+      AppLogger.i(e.toString());
     }
   }
 
@@ -1542,7 +1644,7 @@ class LiveSalesController extends GetxController {
     otherCourierC.clear();
 
     discountC.clear();
-    discountNoteC.clear(); // <-- RESET DISCOUNT NOTE
+    discountNoteC.clear();
 
     cashC.clear();
     bkashC.clear();
@@ -1552,13 +1654,21 @@ class LiveSalesController extends GetxController {
     bankC.clear();
     bankNameC.clear();
     bankAccC.clear();
+
     discountVal.value = 0.0;
     totalPaidInput.value = 0.0;
     changeReturn.value = 0.0;
     selectedCourier.value = null;
     calculatedCourierDue.value = 0.0;
+
+    // Clear Agent Search
     selectedDebtor.value = null;
     filteredDebtors.clear();
+
+    // Clear Regular Customer Search
+    selectedRegularCustomer.value = null;
+    filteredRegularCustomers.clear();
+
     debtorPhoneSearch.clear();
     debtorOldDue.value = 0.0;
     debtorRunningDue.value = 0.0;
@@ -1656,7 +1766,7 @@ class LiveSalesController extends GetxController {
     required String authorizedName,
     required String authorizedPhone,
     double discount = 0.0,
-    String discountNote = "", // <-- ADDED TO PDF
+    String discountNote = "",
     String? packagerName,
   }) async {
     final pdf = pw.Document();
@@ -1665,21 +1775,17 @@ class LiveSalesController extends GetxController {
     final regularFont = await PdfGoogleFonts.robotoRegular();
     final italicFont = await PdfGoogleFonts.robotoItalic();
 
-    // Calculate Paid Amounts
     double paidOld = double.tryParse(payMap['paidForOldDue'].toString()) ?? 0.0;
     double paidPrevRun =
         double.tryParse(payMap['paidForPrevRunning'].toString()) ?? 0.0;
     double invDue = double.tryParse(payMap['due'].toString()) ?? 0.0;
 
-    // 🌟 FIX FOR PDF DISPLAY 🌟
-    // Calculate total money received from customer so that 'Paid Amount' does not confuse them visually
     double totalPaidForInvoice =
         double.tryParse(payMap['paidForInvoice']?.toString() ?? '0') ?? 0.0;
     double totalPaidInput =
         double.tryParse(payMap['totalPaidInput']?.toString() ?? '0') ??
         totalPaidForInvoice;
 
-    // Detect Payment Methods for String Generation
     List<String> methodsUsed = [];
     if ((double.tryParse(payMap['cash']?.toString() ?? '0') ?? 0) > 0) {
       methodsUsed.add('Cash');
@@ -1705,7 +1811,6 @@ class LiveSalesController extends GetxController {
 
     double remainingOldDue = oldDueSnap - paidOld;
     if (remainingOldDue < 0) remainingOldDue = 0;
-
     double remainingPrevRunning = runningDueSnap - paidPrevRun;
     if (remainingPrevRunning < 0) remainingPrevRunning = 0;
 
@@ -1761,7 +1866,7 @@ class LiveSalesController extends GetxController {
               items,
               boldFont,
               regularFont,
-              discountNote, // <-- PASSED DOWN
+              discountNote,
             ),
             pw.SizedBox(height: 5),
             _buildNewDues(totalPreviousBalance, netTotalDue, regularFont),
@@ -1825,7 +1930,6 @@ class LiveSalesController extends GetxController {
     await Printing.layoutPdf(onLayout: (f) => pdf.save());
   }
 
-  // --- COMPONENT: TOP HEADER ---
   pw.Widget _buildNewHeader(
     pw.Font bold,
     pw.Font reg,
@@ -1857,7 +1961,7 @@ class LiveSalesController extends GetxController {
               ),
               pw.SizedBox(height: 2),
               pw.Text(
-                "6/24A(7th Floor) Gulistan Shopping Complex (Hall Market)\n2 Bangabandu Avenue, Dhaka 1000",
+                "6/24A(6th Floor) Gulistan Shopping Complex (Hall Market)\n2 Bangabandu Avenue, Dhaka 1000",
                 style: pw.TextStyle(font: reg, fontSize: 9),
               ),
               pw.Text(
@@ -1935,7 +2039,6 @@ class LiveSalesController extends GetxController {
     );
   }
 
-  // --- COMPONENT: CUSTOMER BOX ---
   pw.Widget _buildNewCustomerBox(
     String name,
     String address,
@@ -2008,7 +2111,6 @@ class LiveSalesController extends GetxController {
     );
   }
 
-  // --- COMPONENT: ITEMS TABLE ---
   pw.Widget _buildNewTable(
     List<Map<String, dynamic>> items,
     pw.Font bold,
@@ -2069,19 +2171,14 @@ class LiveSalesController extends GetxController {
     List items,
     pw.Font bold,
     pw.Font reg,
-    String discountNote, // <-- ADDED TO SUMMARY
+    String discountNote,
   ) {
     int totalQty = items.fold(
       0,
       (sumv, item) => sumv + ((item['qty'] as num?)?.toInt() ?? 0),
     );
-
-    // FORMAT DISCOUNT STRING CLEANLY
     String discountLabel = "Less Discount";
-    if (discountNote.isNotEmpty) {
-      discountLabel +=
-          " ($discountNote)"; // Dynamically appends exactly what you typed
-    }
+    if (discountNote.isNotEmpty) discountLabel += " ($discountNote)";
 
     return pw.Container(
       decoration: const pw.BoxDecoration(
@@ -2126,12 +2223,7 @@ class LiveSalesController extends GetxController {
                     bold,
                     reg,
                   ),
-                  _sumRow(
-                    discountLabel, // <-- DYNAMIC DISCOUNT LABEL
-                    discount.toStringAsFixed(2),
-                    reg,
-                    reg,
-                  ),
+                  _sumRow(discountLabel, discount.toStringAsFixed(2), reg, reg),
                   _sumRow("Add VAT", "0.00", reg, reg),
                   _sumRow("Add Extra Charges", "0.00", reg, reg),
                   pw.Divider(thickness: 0.5, height: 8),
@@ -2159,7 +2251,6 @@ class LiveSalesController extends GetxController {
     );
   }
 
-  // --- COMPONENT: DUES SECTION ---
   pw.Widget _buildNewDues(double prevDue, double netDue, pw.Font reg) {
     return pw.Container(
       width: 200,
@@ -2180,7 +2271,6 @@ class LiveSalesController extends GetxController {
     );
   }
 
-  // --- COMPONENT: PAID STAMP ---
   pw.Widget _buildPaidStamp(pw.Font bold, pw.Font reg) {
     return pw.Container(
       margin: const pw.EdgeInsets.symmetric(vertical: 20),
@@ -2226,7 +2316,6 @@ class LiveSalesController extends GetxController {
     );
   }
 
-  // --- COMPONENT: TAKA IN WORDS BOX ---
   pw.Widget _buildWordsBox(double currentInvTotal, pw.Font bold) {
     return pw.Container(
       width: double.infinity,
@@ -2239,7 +2328,6 @@ class LiveSalesController extends GetxController {
     );
   }
 
-  // --- COMPONENT: SIGNATURES ---
   pw.Widget _buildNewSignatures(pw.Font reg) {
     return pw.Row(
       mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
@@ -2278,7 +2366,6 @@ class LiveSalesController extends GetxController {
     );
   }
 
-  // --- COMPONENT: FOOTER ---
   pw.Widget _buildNewFooter(pw.Context context, pw.Font reg) {
     return pw.Column(
       mainAxisSize: pw.MainAxisSize.min,
@@ -2314,10 +2401,8 @@ class LiveSalesController extends GetxController {
     );
   }
 
-  // --- COMPONENT: NEW CHALLAN CENTER BOX ---
   pw.Widget _buildChallanCenterBox(pw.Font bold, pw.Font reg, double due) {
     bool isPaid = due <= 0;
-
     return pw.Container(
       width: double.infinity,
       padding: const pw.EdgeInsets.all(20),
@@ -2441,7 +2526,6 @@ class LiveSalesController extends GetxController {
     );
   }
 
-  // --- UPDATED SAFE _sumRow: THIS PREVENTS LONG DISCOUNT NOTES FROM CRASHING THE PDF ---
   pw.Widget _sumRow(
     String label,
     String value,

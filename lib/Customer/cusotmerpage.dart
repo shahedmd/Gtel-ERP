@@ -1,5 +1,6 @@
 // ignore_for_file: deprecated_member_use
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Customer/customercontroller.dart';
@@ -28,61 +29,72 @@ class CustomerAnalyticsPage extends StatelessWidget {
           style: TextStyle(
             color: textDark,
             fontWeight: FontWeight.bold,
-            fontSize: 18,
+            fontSize: 16,
           ),
         ),
         backgroundColor: Colors.white,
-        elevation: 0,
+        elevation: 1,
         iconTheme: const IconThemeData(color: textDark),
         actions: [
-          IconButton(
-            onPressed: () => controller.downloadPdf(),
-            icon: const Icon(Icons.picture_as_pdf_outlined, color: Colors.red),
-            tooltip: "Export PDF",
-          ),
-          const SizedBox(width: 10),
+          // 1. ADDED LOADING INDICATOR FOR PDF GENERATION
+          Obx(() {
+            if (controller.isPdfGenerating.value) {
+              return const Padding(
+                padding: EdgeInsets.only(right: 20),
+                child: Center(
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      color: Colors.red,
+                      strokeWidth: 2,
+                    ),
+                  ),
+                ),
+              );
+            }
+            return IconButton(
+              onPressed: () => controller.downloadPdf(),
+              icon: const Icon(Icons.picture_as_pdf, color: Colors.red),
+              tooltip: "Export PDF",
+            );
+          }),
+          const SizedBox(width: 5),
         ],
       ),
-      body: Column(
-        children: [
-          // 1. FILTER & SUMMARY
-          _buildTopSection(context),
-
-          // 2. DATA TABLE HEADER
-          _buildTableHeader(),
-
-          // 3. PAGINATED LIST
-          Expanded(
-            child: Obx(() {
-              if (controller.isLoading.value) {
-                return const Center(
+      body: CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(child: _buildTopSection(context)),
+          SliverToBoxAdapter(child: _buildTableHeader()),
+          Obx(() {
+            if (controller.isLoading.value) {
+              return const SliverFillRemaining(
+                child: Center(
                   child: CircularProgressIndicator(color: brandBlue),
-                );
-              }
-              if (controller.paginatedList.isEmpty) {
-                return _buildEmptyState();
-              }
-              return ListView.separated(
-                padding: EdgeInsets.zero,
-                itemCount: controller.paginatedList.length,
-                separatorBuilder:
-                    (c, i) => const Divider(height: 1, color: borderGrey),
-                itemBuilder: (context, index) {
-                  final item = controller.paginatedList[index];
-                  // Calculate absolute rank based on page
-                  final rank =
-                      ((controller.currentPage.value - 1) *
-                          controller.itemsPerPage) +
-                      index +
-                      1;
-                  return _buildTableRow(item, rank, index % 2 == 0);
-                },
+                ),
               );
-            }),
-          ),
-
-          // 4. PAGINATION CONTROLS
-          _buildPaginationControls(),
+            }
+            if (controller.paginatedList.isEmpty) {
+              return SliverFillRemaining(child: _buildEmptyState());
+            }
+            return SliverList(
+              delegate: SliverChildBuilderDelegate((context, index) {
+                final item = controller.paginatedList[index];
+                final rank =
+                    ((controller.currentPage.value - 1) *
+                        controller.itemsPerPage) +
+                    index +
+                    1;
+                return Column(
+                  children: [
+                    _buildTableRow(item, rank, index % 2 == 0),
+                    const Divider(height: 1, color: borderGrey),
+                  ],
+                );
+              }, childCount: controller.paginatedList.length),
+            );
+          }),
+          SliverToBoxAdapter(child: _buildPaginationControls()),
         ],
       ),
     );
@@ -91,155 +103,168 @@ class CustomerAnalyticsPage extends StatelessWidget {
   Widget _buildTopSection(BuildContext context) {
     return Container(
       color: Colors.white,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       child: Column(
         children: [
-          // Filters
           Row(
             children: [
-              // 1. Report Type Dropdown (Daily, Monthly, Yearly)
+              Expanded(
+                flex: 2,
+                child: SizedBox(
+                  height: 36,
+                  child: TextField(
+                    onChanged: (val) => controller.searchQuery.value = val,
+                    decoration: InputDecoration(
+                      hintText: "Search Name or Phone...",
+                      hintStyle: const TextStyle(fontSize: 13),
+                      prefixIcon: const Icon(
+                        Icons.search,
+                        size: 18,
+                        color: Colors.grey,
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+                      filled: true,
+                      fillColor: bgLight,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(6),
+                        borderSide: const BorderSide(color: borderGrey),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(6),
+                        borderSide: const BorderSide(color: borderGrey),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 1,
+                child: Container(
+                  height: 36,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  decoration: BoxDecoration(
+                    color: bgLight,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: borderGrey),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: Obx(
+                      () => DropdownButton<String>(
+                        isExpanded: true,
+                        value: controller.selectedGroup.value,
+                        icon: const Icon(
+                          Icons.filter_list,
+                          size: 16,
+                          color: brandBlue,
+                        ),
+                        items:
+                            controller.groupOptions
+                                .map(
+                                  (e) => DropdownMenuItem(
+                                    value: e,
+                                    child: Text(
+                                      e,
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                        onChanged: (v) => controller.selectedGroup.value = v!,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
               Container(
-                height: 40,
-                padding: const EdgeInsets.symmetric(horizontal: 10),
+                height: 36,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
                 decoration: BoxDecoration(
                   color: bgLight,
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(6),
                   border: Border.all(color: borderGrey),
                 ),
                 child: DropdownButtonHideUnderline(
                   child: Obx(
                     () => DropdownButton<String>(
-                      value: controller.reportType.value,
-                      icon: const Icon(Icons.keyboard_arrow_down, size: 18),
+                      value: controller.selectedDateFilter.value,
+                      icon: const Icon(Icons.keyboard_arrow_down, size: 16),
                       items:
-                          ['Daily', 'Monthly', 'Yearly']
+                          controller.dateFilterOptions
                               .map(
                                 (e) => DropdownMenuItem(
                                   value: e,
                                   child: Text(
                                     e,
                                     style: const TextStyle(
-                                      fontSize: 13,
+                                      fontSize: 12,
                                       fontWeight: FontWeight.w600,
                                     ),
                                   ),
                                 ),
                               )
                               .toList(),
-                      onChanged: (v) => controller.reportType.value = v!,
+                      onChanged:
+                          (v) => controller.selectedDateFilter.value = v!,
                     ),
                   ),
                 ),
               ),
-              const SizedBox(width: 10),
-
-              // 2. Conditional Inputs
+              const SizedBox(width: 8),
               Expanded(
                 child: Obx(() {
-                  String type = controller.reportType.value;
-                  return Row(
-                    children: [
-                      // If DAILY: Show Date Picker
-                      if (type == 'Daily')
-                        InkWell(
-                          onTap: () async {
-                            DateTime? picked = await showDatePicker(
-                              context: context,
-                              initialDate: controller.selectedDate.value,
-                              firstDate: DateTime(2022),
-                              lastDate: DateTime.now(),
-                              builder: (context, child) {
-                                return Theme(
-                                  data: ThemeData.light().copyWith(
-                                    primaryColor: brandBlue,
-                                    colorScheme: const ColorScheme.light(
-                                      primary: brandBlue,
-                                    ),
-                                  ),
-                                  child: child!,
-                                );
-                              },
-                            );
-                            if (picked != null) {
-                              controller.selectedDate.value = picked;
-                            }
-                          },
-                          child: Container(
-                            height: 40,
-                            padding: const EdgeInsets.symmetric(horizontal: 12),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              border: Border.all(color: borderGrey),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            alignment: Alignment.centerLeft,
-                            child: Row(
-                              children: [
-                                const Icon(
-                                  Icons.calendar_today,
-                                  size: 14,
-                                  color: Colors.grey,
-                                ),
-                                const SizedBox(width: 8),
-                                Text(
-                                  DateFormat(
-                                    'dd MMM yyyy',
-                                  ).format(controller.selectedDate.value),
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              ],
-                            ),
+                  if (controller.selectedDateFilter.value == 'Custom') {
+                    return Row(
+                      children: [
+                        _buildDatePicker(
+                          context,
+                          controller.customStartDate.value,
+                          (date) => controller.customStartDate.value = date,
+                        ),
+                        const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 4),
+                          child: Text(
+                            "-",
+                            style: TextStyle(fontWeight: FontWeight.bold),
                           ),
                         ),
-
-                      // If MONTHLY or YEARLY: Show Year
-                      if (type != 'Daily')
-                        Obx(
-                          () => _dropdown(
-                            width: 80,
-                            value: controller.selectedYear.value,
-                            items: List.generate(
-                              5,
-                              (i) => DateTime.now().year - i,
-                            ),
-                            onChanged: (v) => controller.selectedYear.value = v,
-                          ),
+                        _buildDatePicker(
+                          context,
+                          controller.customEndDate.value,
+                          (date) => controller.customEndDate.value = date,
                         ),
-
-                      if (type != 'Daily') const SizedBox(width: 10),
-
-                      // If MONTHLY: Show Month
-                      // FIX: Removed Obx() wrapper here because _monthDropdown has its own internal Obx
-                      if (type == 'Monthly') _monthDropdown(),
-                    ],
-                  );
+                      ],
+                    );
+                  }
+                  return const SizedBox();
                 }),
               ),
-
-              const SizedBox(width: 10),
-
-              ElevatedButton.icon(
-                onPressed: () => controller.generateReport(),
-                icon: const Icon(Icons.search, size: 18),
-                label: const Text("Generate"),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: brandBlue,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 12,
+              const SizedBox(width: 8),
+              SizedBox(
+                height: 36,
+                child: ElevatedButton.icon(
+                  onPressed: () => controller.generateReport(),
+                  icon: const Icon(Icons.analytics, size: 16),
+                  label: const Text("Generate", style: TextStyle(fontSize: 12)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: brandBlue,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
                   ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 20),
-
-          // Summary Cards
+          const SizedBox(height: 10),
           Obx(
             () => Row(
               children: [
@@ -249,14 +274,14 @@ class CustomerAnalyticsPage extends StatelessWidget {
                   Icons.groups,
                   Colors.purple,
                 ),
-                const SizedBox(width: 15),
+                const SizedBox(width: 10),
                 _summaryCard(
                   "Total Sales",
                   "Tk ${controller.formatCurrency(controller.periodTotalSales.value)}",
                   Icons.bar_chart,
                   darkBlue,
                 ),
-                const SizedBox(width: 15),
+                const SizedBox(width: 10),
                 _summaryCard(
                   "Total Profit",
                   "Tk ${controller.formatCurrency(controller.periodTotalProfit.value)}",
@@ -271,67 +296,33 @@ class CustomerAnalyticsPage extends StatelessWidget {
     );
   }
 
-  // --- WIDGET HELPERS ---
-
-  Widget _dropdown({
-    required double width,
-    required int value,
-    required List<int> items,
-    required Function(int) onChanged,
-  }) {
-    return Container(
-      width: width,
-      height: 40,
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: borderGrey),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<int>(
-          value: value,
-          icon: const Icon(Icons.keyboard_arrow_down, size: 18),
-          items:
-              items
-                  .map(
-                    (i) =>
-                        DropdownMenuItem(value: i, child: Text(i.toString())),
-                  )
-                  .toList(),
-          onChanged: (v) => onChanged(v!),
-        ),
-      ),
-    );
-  }
-
-  Widget _monthDropdown() {
-    return Container(
-      width: 100,
-      height: 40,
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: borderGrey),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: Obx(
-          () => DropdownButton<int>(
-            value: controller.selectedMonth.value,
-            icon: const Icon(Icons.keyboard_arrow_down, size: 18),
-            items:
-                List.generate(12, (i) => i + 1)
-                    .map(
-                      (m) => DropdownMenuItem(
-                        value: m,
-                        child: Text(
-                          DateFormat('MMM').format(DateTime(2022, m)),
-                        ),
-                      ),
-                    )
-                    .toList(),
-            onChanged: (v) => controller.selectedMonth.value = v!,
+  Widget _buildDatePicker(
+    BuildContext context,
+    DateTime initialDate,
+    Function(DateTime) onPicked,
+  ) {
+    return Expanded(
+      child: InkWell(
+        onTap: () async {
+          DateTime? picked = await showDatePicker(
+            context: context,
+            initialDate: initialDate,
+            firstDate: DateTime(2020),
+            lastDate: DateTime.now(),
+          );
+          if (picked != null) onPicked(picked);
+        },
+        child: Container(
+          height: 36,
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          decoration: BoxDecoration(
+            border: Border.all(color: borderGrey),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            DateFormat('dd MMM yy').format(initialDate),
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
           ),
         ),
       ),
@@ -340,17 +331,15 @@ class CustomerAnalyticsPage extends StatelessWidget {
 
   Widget _buildTableHeader() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: const BoxDecoration(
-        color: darkBlue,
-        border: Border(bottom: BorderSide(color: borderGrey)),
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: const BoxDecoration(color: darkBlue),
       child: Row(
         children: [
           _headerText("Rank", flex: 1, align: TextAlign.center),
-          _headerText("Customer Name / Phone", flex: 4),
-          _headerText("Orders", flex: 2, align: TextAlign.center),
-          _headerText("Total Sales", flex: 3, align: TextAlign.right),
+          _headerText("Customer Info", flex: 4),
+          _headerText("Type", flex: 2, align: TextAlign.center),
+          _headerText("Orders", flex: 1, align: TextAlign.center),
+          _headerText("Total Sales", flex: 2, align: TextAlign.right),
           _headerText("Profit", flex: 2, align: TextAlign.right),
         ],
       ),
@@ -370,127 +359,205 @@ class CustomerAnalyticsPage extends StatelessWidget {
         style: const TextStyle(
           color: Colors.white,
           fontWeight: FontWeight.bold,
-          fontSize: 13,
+          fontSize: 11,
         ),
       ),
     );
   }
 
   Widget _buildTableRow(CustomerAnalyticsModel item, int rank, bool isEven) {
-    return Container(
-      color: isEven ? Colors.white : bgLight,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(
-        children: [
-          Expanded(
-            flex: 1,
-            child: Text(
-              "#$rank",
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                color: Colors.grey,
+    return InkWell(
+      onTap: () {
+        controller.loadCustomerDetails(item);
+        Get.to(() => CustomerDetailsPage());
+      },
+      hoverColor: Colors.blue.withOpacity(0.1),
+      child: Container(
+        color: isEven ? Colors.white : bgLight,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: [
+            Expanded(
+              flex: 1,
+              child: Text(
+                "#$rank",
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey,
+                  fontSize: 12,
+                ),
               ),
             ),
-          ),
-          Expanded(
-            flex: 4,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  item.name,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    color: textDark,
-                    fontSize: 13,
-                  ),
-                ),
-                if (item.phone.isNotEmpty)
+            Expanded(
+              flex: 4,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   Text(
-                    item.phone,
-                    style: const TextStyle(fontSize: 11, color: Colors.grey),
-                  ),
-                if (item.shopName.isNotEmpty)
-                  Text(
-                    item.shopName,
+                    item.name,
                     style: const TextStyle(
-                      fontSize: 10,
-                      color: Colors.blueGrey,
-                      fontStyle: FontStyle.italic,
+                      fontWeight: FontWeight.w600,
+                      color: textDark,
+                      fontSize: 12,
                     ),
                   ),
-              ],
-            ),
-          ),
-          Expanded(
-            flex: 2,
-            child: Text(
-              item.orderCount.toString(),
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ),
-          Expanded(
-            flex: 3,
-            child: Text(
-              controller.formatCurrency(item.totalSales),
-              textAlign: TextAlign.right,
-              style: const TextStyle(
-                fontWeight: FontWeight.w600,
-                color: textDark,
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      const Icon(Icons.phone, size: 10, color: Colors.grey),
+                      const SizedBox(width: 4),
+                      Text(
+                        item.phone.isEmpty ? "No Phone" : item.phone,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.location_on,
+                        size: 10,
+                        color: Colors.blueGrey,
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          item.address,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 10,
+                            color: Colors.blueGrey,
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
-          ),
-          Expanded(
-            flex: 2,
-            child: Text(
-              controller.formatCurrency(item.totalProfit),
-              textAlign: TextAlign.right,
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                color: Colors.green,
+            Expanded(
+              flex: 2,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color:
+                        item.customerType == 'AGENT'
+                            ? Colors.orange.withOpacity(0.1)
+                            : Colors.blue.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(
+                      color:
+                          item.customerType == 'AGENT'
+                              ? Colors.orange
+                              : Colors.blue,
+                      width: 0.5,
+                    ),
+                  ),
+                  child: Text(
+                    item.customerType,
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
+                      color:
+                          item.customerType == 'AGENT'
+                              ? Colors.orange[800]
+                              : Colors.blue[800],
+                    ),
+                  ),
+                ),
               ),
             ),
-          ),
-        ],
+            Expanded(
+              flex: 1,
+              child: Text(
+                item.orderCount.toString(),
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+            Expanded(
+              flex: 2,
+              child: Text(
+                controller.formatCurrency(item.totalSales),
+                textAlign: TextAlign.right,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: textDark,
+                  fontSize: 11,
+                ),
+              ),
+            ),
+            Expanded(
+              flex: 2,
+              child: Text(
+                controller.formatCurrency(item.totalProfit),
+                textAlign: TextAlign.right,
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.green,
+                  fontSize: 11,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildPaginationControls() {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: borderGrey)),
-      ),
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+      color: Colors.white,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Obx(
             () => Text(
-              "Showing ${controller.paginatedList.length} of ${controller.totalItems.value} records",
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
+              "Showing ${controller.paginatedList.length} of ${controller.totalItems.value}",
+              style: const TextStyle(fontSize: 11, color: Colors.grey),
             ),
           ),
           Row(
             children: [
               IconButton(
                 onPressed: () => controller.prevPage(),
-                icon: const Icon(Icons.chevron_left),
+                icon: const Icon(Icons.chevron_left, size: 20),
                 splashRadius: 20,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
               ),
+              const SizedBox(width: 10),
               Obx(
                 () => Text(
                   "Page ${controller.currentPage.value} of ${controller.totalPages}",
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                  ),
                 ),
               ),
+              const SizedBox(width: 10),
               IconButton(
                 onPressed: () => controller.nextPage(),
-                icon: const Icon(Icons.chevron_right),
+                icon: const Icon(Icons.chevron_right, size: 20),
                 splashRadius: 20,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
               ),
             ],
           ),
@@ -502,10 +569,10 @@ class CustomerAnalyticsPage extends StatelessWidget {
   Widget _summaryCard(String title, String value, IconData icon, Color color) {
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.all(15),
+        padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
           color: color.withOpacity(0.05),
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(6),
           border: Border.all(color: color.withOpacity(0.1)),
         ),
         child: Column(
@@ -513,26 +580,29 @@ class CustomerAnalyticsPage extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(icon, size: 16, color: color),
-                const SizedBox(width: 5),
-                Text(
-                  title,
-                  style: TextStyle(
-                    color: color,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 11,
+                Icon(icon, size: 14, color: color),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: TextStyle(
+                      color: color,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 9,
+                    ),
+                    maxLines: 1,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 5),
+            const SizedBox(height: 4),
             FittedBox(
               child: Text(
                 value,
-                style: TextStyle(
+                style: const TextStyle(
                   color: textDark,
                   fontWeight: FontWeight.w900,
-                  fontSize: 18,
+                  fontSize: 15,
                 ),
               ),
             ),
@@ -547,19 +617,396 @@ class CustomerAnalyticsPage extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.analytics_outlined, size: 60, color: Colors.grey[300]),
+          Icon(Icons.analytics_outlined, size: 50, color: Colors.grey[300]),
           const SizedBox(height: 10),
           Text(
             "No records found",
-            style: TextStyle(color: Colors.grey[500], fontSize: 16),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            "Try changing the date filters",
-            style: TextStyle(color: Colors.grey[400], fontSize: 12),
+            style: TextStyle(color: Colors.grey[500], fontSize: 14),
           ),
         ],
       ),
+    );
+  }
+}
+
+// =========================================================================
+// CUSTOMER DETAILS & INVOICE HISTORY PAGE
+// =========================================================================
+class CustomerDetailsPage extends StatelessWidget {
+  CustomerDetailsPage({super.key});
+
+  final controller = Get.find<CustomerAnalyticsController>();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: CustomerAnalyticsPage.bgLight,
+      appBar: AppBar(
+        title: const Text(
+          "Customer History",
+          style: TextStyle(
+            color: CustomerAnalyticsPage.textDark,
+            fontWeight: FontWeight.bold,
+            fontSize: 16,
+          ),
+        ),
+        backgroundColor: Colors.white,
+        elevation: 1,
+        iconTheme: const IconThemeData(color: CustomerAnalyticsPage.textDark),
+      ),
+      body: NotificationListener<ScrollNotification>(
+        onNotification: (ScrollNotification scrollInfo) {
+          if (!controller.isDetailsLoadingMore.value &&
+              controller.hasMoreInvoices.value &&
+              scrollInfo.metrics.pixels >=
+                  scrollInfo.metrics.maxScrollExtent - 50) {
+            controller.loadMoreInvoices();
+          }
+          return false;
+        },
+        child: Obx(() {
+          final profile = controller.selectedCustomerProfile.value;
+          if (profile == null) {
+            return const Center(child: Text("Error: No Customer Selected"));
+          }
+
+          return CustomScrollView(
+            slivers: [
+              // PROFILE CARD
+              SliverToBoxAdapter(
+                child: Container(
+                  color: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            profile.name,
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: CustomerAnalyticsPage.darkBlue,
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: CustomerAnalyticsPage.brandBlue,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              profile.customerType,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 10,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      _infoRow(Icons.phone, profile.phone),
+                      const SizedBox(height: 4),
+                      _infoRow(
+                        Icons.store,
+                        profile.shopName.isEmpty
+                            ? "No Shop Name"
+                            : profile.shopName,
+                      ),
+                      const SizedBox(height: 4),
+                      _infoRow(Icons.location_on, profile.address),
+                      const Divider(height: 20),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceAround,
+                        children: [
+                          _profileStat(
+                            "Total Orders",
+                            profile.orderCount.toString(),
+                          ),
+                          _profileStat(
+                            "Total Sales",
+                            "৳${controller.formatCurrency(profile.totalSales)}",
+                          ),
+                          _profileStat(
+                            "Total Profit",
+                            "৳${controller.formatCurrency(profile.totalProfit)}",
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // TRANSACTION HISTORY TITLE
+              SliverToBoxAdapter(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  margin: const EdgeInsets.only(top: 8),
+                  color: CustomerAnalyticsPage.darkBlue,
+                  child: const Text(
+                    "Recent Invoice History",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ),
+
+              // INVOICE LIST
+              if (controller.isDetailsLoading.value)
+                const SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.all(20),
+                    child: Center(child: CircularProgressIndicator()),
+                  ),
+                )
+              else if (controller.selectedCustomerInvoices.isEmpty)
+                const SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.all(20),
+                    child: Center(
+                      child: Text(
+                        "No transactions found.",
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    ),
+                  ),
+                )
+              else
+                SliverList(
+                  delegate: SliverChildBuilderDelegate((context, index) {
+                    var invoice = controller.selectedCustomerInvoices[index];
+                    DateTime date =
+                        (invoice['timestamp'] as Timestamp).toDate();
+                    String documentId = invoice['id']; // Used for reprinting
+
+                    bool isFullyPaid = invoice['isFullyPaid'] ?? false;
+                    double grandTotal =
+                        double.tryParse(invoice['grandTotal'].toString()) ??
+                        0.0;
+                    double paid =
+                        double.tryParse(invoice['paid'].toString()) ?? 0.0;
+                    double profit =
+                        double.tryParse(invoice['profit'].toString()) ?? 0.0;
+                    double due = grandTotal - paid;
+
+                    return Card(
+                      margin: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(6),
+                        side: const BorderSide(
+                          color: CustomerAnalyticsPage.borderGrey,
+                        ),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  "Invoice: ${invoice['invoiceId']}",
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                                Text(
+                                  DateFormat(
+                                    'dd MMM yyyy, hh:mm a',
+                                  ).format(date),
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.grey,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      "Amount: ৳${controller.formatCurrency(grandTotal)}",
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      "Profit: ৳${controller.formatCurrency(profit)}",
+                                      style: const TextStyle(
+                                        color: Colors.green,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+
+                                // 3. BADGE & REPRINT BUTTON ROW
+                                Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 4,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color:
+                                            isFullyPaid
+                                                ? Colors.green.withOpacity(0.1)
+                                                : Colors.red.withOpacity(0.1),
+                                        borderRadius: BorderRadius.circular(4),
+                                        border: Border.all(
+                                          color:
+                                              isFullyPaid
+                                                  ? Colors.green
+                                                  : Colors.red,
+                                        ),
+                                      ),
+                                      child: Column(
+                                        children: [
+                                          Text(
+                                            isFullyPaid ? "PAID" : "DUE",
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 11,
+                                              color:
+                                                  isFullyPaid
+                                                      ? Colors.green
+                                                      : Colors.red,
+                                            ),
+                                          ),
+                                          if (!isFullyPaid && due > 0)
+                                            Text(
+                                              "৳${controller.formatCurrency(due)}",
+                                              style: const TextStyle(
+                                                fontSize: 10,
+                                                color: Colors.red,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+
+                                    // REPRINT BUTTON
+                                    Obx(() {
+                                      if (controller
+                                              .reprintingInvoiceId
+                                              .value ==
+                                          documentId) {
+                                        return const SizedBox(
+                                          width: 32,
+                                          height: 32,
+                                          child: Padding(
+                                            padding: EdgeInsets.all(6.0),
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                            ),
+                                          ),
+                                        );
+                                      }
+                                      return IconButton(
+                                        icon: const Icon(
+                                          Icons.print,
+                                          color: Colors.blue,
+                                        ),
+                                        tooltip: "Reprint Invoice",
+                                        onPressed:
+                                            () => controller.reprintInvoice(
+                                              documentId,
+                                            ),
+                                      );
+                                    }),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }, childCount: controller.selectedCustomerInvoices.length),
+                ),
+
+              // LOAD MORE INDICATOR
+              if (controller.isDetailsLoadingMore.value)
+                const SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(vertical: 20),
+                    child: Center(
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                ),
+
+              // SPACING AT BOTTOM
+              const SliverToBoxAdapter(child: SizedBox(height: 20)),
+            ],
+          );
+        }),
+      ),
+    );
+  }
+
+  Widget _infoRow(IconData icon, String text) {
+    return Row(
+      children: [
+        Icon(icon, size: 12, color: Colors.grey[600]),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            text,
+            style: TextStyle(color: Colors.grey[800], fontSize: 12),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _profileStat(String title, String value) {
+    return Column(
+      children: [
+        Text(title, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+            color: CustomerAnalyticsPage.textDark,
+          ),
+        ),
+      ],
     );
   }
 }

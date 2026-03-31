@@ -1,17 +1,26 @@
+// model.dart
 class CustomerAnalyticsModel {
-  final String name;
-  final String phone;
-  final String shopName;
+  String name;
+  String phone;
+  String shopName;
+  String address;
+  String customerType;
   int orderCount;
   double totalSales;
   double totalProfit;
+  String? lastInvoiceId;
+  DateTime? lastInvoiceDate;
 
   CustomerAnalyticsModel({
     required this.name,
     required this.phone,
     required this.shopName,
-    this.orderCount = 0,
-    this.totalSales = 0.0,
-    this.totalProfit = 0.0,
+    required this.address,
+    required this.customerType,
+    required this.orderCount,
+    required this.totalSales,
+    required this.totalProfit,
+    this.lastInvoiceId,
+    this.lastInvoiceDate,
   });
 }

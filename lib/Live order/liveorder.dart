@@ -1,9 +1,5 @@
-// ignore_for_file: deprecated_member_use
-
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-
-// IMPORTANT: Ensure this import points to your actual controller file
 import 'package:gtel_erp/Live%20order/salemodel.dart';
 
 class LiveOrderSalesPage extends StatelessWidget {
@@ -11,26 +7,21 @@ class LiveOrderSalesPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Inject the controller
     final controller = Get.put(LiveSalesController());
-
-    // UI Local State for Cart Search
     final RxString cartSearchQuery = ''.obs;
 
-    // --- RESPONSIVE BREAKPOINT ---
-    final bool isDesktop = MediaQuery.of(context).size.width >= 900;
+    final double screenWidth = MediaQuery.sizeOf(context).width;
+    final double screenHeight = MediaQuery.sizeOf(context).height;
+    final bool isDesktop = screenWidth >= 900;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF1F5F9), // Slate-100 background
-      // 1. FULL PAGE SCROLLABLE
+      backgroundColor: const Color(0xFFF1F5F9),
       body: SingleChildScrollView(
-        physics: const ClampingScrollPhysics(),
+        physics: const BouncingScrollPhysics(),
         child: Column(
           children: [
-            // Top Bar
             _buildTopBar(controller, isDesktop),
 
-            // Control Panel (Customer & Payment)
             Container(
               color: Colors.white,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
@@ -45,22 +36,21 @@ class LiveOrderSalesPage extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
+
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child:
                   isDesktop
                       ? SizedBox(
-                        height: 850,
+                        height: screenHeight > 800 ? screenHeight * 0.75 : 650,
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            // Inventory (Left)
                             Expanded(
                               flex: 6,
                               child: _productInventoryTable(controller, true),
                             ),
                             const SizedBox(width: 12),
-                            // Cart (Right)
                             Expanded(
                               flex: 4,
                               child: _buildCartSection(
@@ -74,25 +64,13 @@ class LiveOrderSalesPage extends StatelessWidget {
                       )
                       : Column(
                         children: [
-                          SizedBox(
-                            height: 600,
-                            child: _productInventoryTable(controller, false),
-                          ),
+                          _productInventoryTable(controller, false),
                           const SizedBox(height: 16),
-                          SizedBox(
-                            height: 600,
-                            child: _buildCartSection(
-                              controller,
-                              cartSearchQuery,
-                              false,
-                            ),
-                          ),
+                          _buildCartSection(controller, cartSearchQuery, false),
                         ],
                       ),
             ),
-
-            // Bottom Padding for scrolling ease
-            const SizedBox(height: 40),
+            const SizedBox(height: 60),
           ],
         ),
       ),
@@ -106,7 +84,7 @@ class LiveOrderSalesPage extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.1),
+            color: Colors.white.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Obx(
@@ -140,7 +118,7 @@ class LiveOrderSalesPage extends StatelessWidget {
             Text(
               "Sales & Inventory System",
               style: TextStyle(
-                color: Colors.white.withOpacity(0.7),
+                color: Colors.white.withValues(alpha: 0.7),
                 fontSize: 11,
               ),
             ),
@@ -154,7 +132,7 @@ class LiveOrderSalesPage extends StatelessWidget {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.2),
+            color: Colors.black.withValues(alpha: 0.2),
             borderRadius: BorderRadius.circular(30),
           ),
           child: Row(
@@ -188,7 +166,7 @@ class LiveOrderSalesPage extends StatelessWidget {
         const SizedBox(width: 16),
         Container(
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.1),
+            color: Colors.white.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(8),
           ),
           child: IconButton(
@@ -212,7 +190,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                 ? const Color(0xFFC2410C)
                 : const Color(0xFF0F172A),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 6),
+          BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 6),
         ],
       ),
       child:
@@ -228,6 +206,7 @@ class LiveOrderSalesPage extends StatelessWidget {
     );
   }
 
+  // --- 2. CUSTOMER SECTION (UPDATED FOR UNIFIED SEARCH) ---
   Widget _buildCustomerSection(
     LiveSalesController controller,
     bool isDesktop,
@@ -236,7 +215,7 @@ class LiveOrderSalesPage extends StatelessWidget {
     return Obx(() {
       bool isAgent = controller.customerType.value == "AGENT";
 
-      // 2.1 Reusable Tabs
+      // Reusable Tabs
       Widget tabsBlock = SizedBox(
         width: isDesktop ? 320 : double.infinity,
         child: Row(
@@ -266,7 +245,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                             isSelected
                                 ? [
                                   BoxShadow(
-                                    color: Colors.blue.withOpacity(0.3),
+                                    color: Colors.blue.withValues(alpha: 0.3),
                                     blurRadius: 4,
                                     offset: const Offset(0, 2),
                                   ),
@@ -289,22 +268,25 @@ class LiveOrderSalesPage extends StatelessWidget {
         ),
       );
 
-      // 2.2 Reusable Agent Search
+      // --- DYNAMIC SEARCH FIELD BLOCK ---
+      bool showAgentList = isAgent && controller.filteredDebtors.isNotEmpty;
+      bool showRegularList =
+          !isAgent && controller.filteredRegularCustomers.isNotEmpty;
+
       Widget searchFieldBlock = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _erpInput(
             controller.debtorPhoneSearch,
-            "Search Existing Agent...",
+            isAgent
+                ? "Search Existing Agent..."
+                : "Search Customer by Phone/Name...",
             icon: Icons.search,
             highlight: true,
             fillColor: Colors.yellow.shade50,
           ),
-          Obx(() {
-            if (controller.filteredDebtors.isEmpty) {
-              return const SizedBox.shrink();
-            }
-            return Container(
+          if (showAgentList || showRegularList)
+            Container(
               constraints: const BoxConstraints(maxHeight: 200),
               margin: const EdgeInsets.only(top: 4),
               decoration: BoxDecoration(
@@ -313,7 +295,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                 borderRadius: BorderRadius.circular(6),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.1),
+                    color: Colors.black.withValues(alpha: 0.1),
                     blurRadius: 8,
                     offset: const Offset(0, 4),
                   ),
@@ -322,15 +304,36 @@ class LiveOrderSalesPage extends StatelessWidget {
               child: ListView.separated(
                 shrinkWrap: true,
                 padding: EdgeInsets.zero,
-                itemCount: controller.filteredDebtors.length,
+                itemCount:
+                    isAgent
+                        ? controller.filteredDebtors.length
+                        : controller.filteredRegularCustomers.length,
                 separatorBuilder: (_, __) => const Divider(height: 1),
                 itemBuilder: (context, i) {
-                  final debtor = controller.filteredDebtors[i];
-                  return InkWell(
-                    onTap: () {
+                  String cName = "";
+                  String cPhone = "";
+                  VoidCallback onTap;
+
+                  if (isAgent) {
+                    final debtor = controller.filteredDebtors[i];
+                    cName = debtor.name;
+                    cPhone = debtor.phone;
+                    onTap = () {
                       FocusScope.of(context).unfocus();
                       controller.selectDebtorFromDropdown(debtor);
-                    },
+                    };
+                  } else {
+                    final cust = controller.filteredRegularCustomers[i];
+                    cName = cust['name'] ?? 'Unknown';
+                    cPhone = cust['phone'] ?? '';
+                    onTap = () {
+                      FocusScope.of(context).unfocus();
+                      controller.selectRegularCustomerFromDropdown(cust);
+                    };
+                  }
+
+                  return InkWell(
+                    onTap: onTap,
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 12,
@@ -343,7 +346,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                debtor.name,
+                                cName,
                                 style: const TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.bold,
@@ -351,7 +354,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                                 ),
                               ),
                               Text(
-                                debtor.phone,
+                                cPhone,
                                 style: const TextStyle(
                                   fontSize: 11,
                                   color: Colors.grey,
@@ -370,97 +373,140 @@ class LiveOrderSalesPage extends StatelessWidget {
                   );
                 },
               ),
-            );
-          }),
+            ),
         ],
       );
 
-      Widget badgeBlock =
-          controller.selectedDebtor.value != null
-              ? Container(
-                height: 40,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                decoration: BoxDecoration(
-                  color: Colors.green.shade50,
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: Colors.green.shade200),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.verified,
-                          size: 18,
-                          color: Colors.green,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          "FOUND",
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.green.shade700,
-                          ),
-                        ),
-                      ],
-                    ),
-                    Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        const Text(
-                          "Previous Due",
-                          style: TextStyle(fontSize: 9, color: Colors.grey),
-                        ),
-                        Text(
-                          "৳${controller.totalPreviousDue.toStringAsFixed(0)}",
-                          style: const TextStyle(
-                            color: Colors.red,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              )
-              : Container(
-                height: 40,
-                alignment: Alignment.centerLeft,
-                child: const Text(
-                  "* To create NEW Agent, ignore search and fill info below.",
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: Colors.grey,
-                    fontStyle: FontStyle.italic,
+      // --- DYNAMIC BADGE BLOCK ---
+      Widget badgeBlock;
+      if (isAgent) {
+        badgeBlock =
+            controller.selectedDebtor.value != null
+                ? Container(
+                  height: 40,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.green.shade200),
                   ),
-                ),
-              );
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.verified,
+                            size: 18,
+                            color: Colors.green,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            "AGENT FOUND",
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.green.shade700,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          const Text(
+                            "Previous Due",
+                            style: TextStyle(fontSize: 9, color: Colors.grey),
+                          ),
+                          Text(
+                            "৳${controller.totalPreviousDue.toStringAsFixed(0)}",
+                            style: const TextStyle(
+                              color: Colors.red,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                )
+                : Container(
+                  height: 40,
+                  alignment: Alignment.centerLeft,
+                  child: const Text(
+                    "* To create NEW Agent, ignore search and fill info below.",
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.grey,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                );
+      } else {
+        badgeBlock =
+            controller.selectedRegularCustomer.value != null
+                ? Container(
+                  height: 40,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.blue.shade200),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.verified_user,
+                        size: 18,
+                        color: Colors.blue,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        "CUSTOMER FOUND",
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue.shade700,
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+                : Container(
+                  height: 40,
+                  alignment: Alignment.centerLeft,
+                  child: const Text(
+                    "* To create NEW Customer, ignore search and fill info below.",
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.grey,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                );
+      }
 
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Row 1: Tabs & Search
           if (isDesktop)
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 tabsBlock,
                 const SizedBox(width: 16),
-                if (isAgent)
-                  Expanded(
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(flex: 5, child: searchFieldBlock),
-                        const SizedBox(width: 12),
-                        Expanded(flex: 4, child: badgeBlock),
-                      ],
-                    ),
+                Expanded(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(flex: 5, child: searchFieldBlock),
+                      const SizedBox(width: 12),
+                      Expanded(flex: 4, child: badgeBlock),
+                    ],
                   ),
+                ),
               ],
             )
           else
@@ -468,18 +514,15 @@ class LiveOrderSalesPage extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 tabsBlock,
-                if (isAgent) ...[
-                  const SizedBox(height: 12),
-                  searchFieldBlock,
-                  const SizedBox(height: 8),
-                  badgeBlock,
-                ],
+                const SizedBox(height: 12),
+                searchFieldBlock,
+                const SizedBox(height: 8),
+                badgeBlock,
               ],
             ),
 
           const SizedBox(height: 12),
 
-          // Row 2: Manual Info Fields
           if (isDesktop)
             Row(
               children: [
@@ -498,8 +541,18 @@ class LiveOrderSalesPage extends StatelessWidget {
                   flex: 3,
                   child: _erpInput(
                     controller.nameC,
-                    "Customer Name",
+                    "Shop Name",
                     icon: Icons.person,
+                  ),
+                ),
+                const SizedBox(width: 10),
+
+                Expanded(
+                  flex: 2,
+                  child: _erpInput(
+                    controller.shopC,
+                    "Customer Name",
+                    icon: Icons.store,
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -512,14 +565,6 @@ class LiveOrderSalesPage extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 10),
-                Expanded(
-                  flex: 2,
-                  child: _erpInput(
-                    controller.shopC,
-                    "Shop Name",
-                    icon: Icons.store,
-                  ),
-                ),
               ],
             )
           else
@@ -548,8 +593,6 @@ class LiveOrderSalesPage extends StatelessWidget {
                 _erpInput(controller.shopC, "Shop Name", icon: Icons.store),
               ],
             ),
-
-          // Row 3: Logistics (Uses Wrap to naturally flow on Mobile)
           Padding(
             padding: const EdgeInsets.only(top: 12),
             child: Wrap(
@@ -588,7 +631,6 @@ class LiveOrderSalesPage extends StatelessWidget {
                     ),
                   ),
                 ),
-
                 if (controller.isConditionSale.value) ...[
                   if (isDesktop)
                     Container(
@@ -597,7 +639,6 @@ class LiveOrderSalesPage extends StatelessWidget {
                       color: Colors.grey.shade300,
                       margin: const EdgeInsets.symmetric(horizontal: 6),
                     ),
-
                   Container(
                     height: 40,
                     width: isDesktop ? 200 : double.infinity,
@@ -632,24 +673,22 @@ class LiveOrderSalesPage extends StatelessWidget {
                       ),
                     ),
                   ),
-
                   SizedBox(
                     width:
                         isDesktop
                             ? 140
-                            : (MediaQuery.of(context).size.width / 2) - 22,
+                            : (MediaQuery.sizeOf(context).width / 2) - 22,
                     child: _erpInput(
                       controller.challanC,
                       "Challan No",
                       icon: Icons.receipt,
                     ),
                   ),
-
                   SizedBox(
                     width:
                         isDesktop
                             ? 100
-                            : (MediaQuery.of(context).size.width / 2) - 22,
+                            : (MediaQuery.sizeOf(context).width / 2) - 22,
                     child: _erpInput(
                       controller.cartonsC,
                       "Carton Qty",
@@ -657,7 +696,6 @@ class LiveOrderSalesPage extends StatelessWidget {
                       icon: Icons.inventory_2,
                     ),
                   ),
-
                   if (controller.selectedCourier.value == 'Other')
                     SizedBox(
                       width: isDesktop ? 250 : double.infinity,
@@ -684,7 +722,7 @@ class LiveOrderSalesPage extends StatelessWidget {
       height: 85,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.green.shade50.withOpacity(0.5),
+        color: Colors.green.shade50.withValues(alpha: 0.5),
         border: Border.all(color: Colors.green.shade200),
         borderRadius: BorderRadius.circular(8),
       ),
@@ -752,13 +790,10 @@ class LiveOrderSalesPage extends StatelessWidget {
     );
 
     Widget mobileBankingBlock = Container(
-      height:
-          isDesktop
-              ? 85
-              : null, // Uses original 85 height on Desktop to fix bugs
+      height: isDesktop ? 85 : null,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.pink.shade50.withOpacity(0.3),
+        color: Colors.pink.shade50.withValues(alpha: 0.3),
         border: Border.all(color: Colors.pink.shade100),
         borderRadius: BorderRadius.circular(8),
       ),
@@ -800,7 +835,7 @@ class LiveOrderSalesPage extends StatelessWidget {
     Widget bankBlock = Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.blue.shade50.withOpacity(0.3),
+        color: Colors.blue.shade50.withValues(alpha: 0.3),
         border: Border.all(color: Colors.blue.shade100),
         borderRadius: BorderRadius.circular(8),
       ),
@@ -826,7 +861,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                   Expanded(
                     child: _erpInput(
                       controller.bankNameC,
-                      "Bank Name (e.g. City Bank)",
+                      "Bank Name",
                       icon: Icons.business,
                     ),
                   ),
@@ -874,7 +909,6 @@ class LiveOrderSalesPage extends StatelessWidget {
               ),
     );
 
-    // Identical return type to original code for Desktop to enforce safe layout.
     if (isDesktop) {
       return Column(
         children: [
@@ -909,18 +943,168 @@ class LiveOrderSalesPage extends StatelessWidget {
     RxString searchQuery,
     bool isDesktop,
   ) {
+    Widget cartListBuilder = Obx(() {
+      if (controller.cart.isEmpty) {
+        return Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.remove_shopping_cart,
+                size: 40,
+                color: Colors.grey.shade300,
+              ),
+              const SizedBox(height: 10),
+              Text(
+                "Cart is Empty",
+                style: TextStyle(color: Colors.grey.shade400),
+              ),
+            ],
+          ),
+        );
+      }
+
+      final filteredCart =
+          controller.cart.where((item) {
+            final query = searchQuery.value.toLowerCase();
+            return item.product.name.toLowerCase().contains(query) ||
+                item.product.model.toLowerCase().contains(query);
+          }).toList();
+
+      if (filteredCart.isEmpty) {
+        return const Center(child: Text("No item found matching query"));
+      }
+
+      bool isPriceFixed =
+          (controller.customerType.value == 'VIP' ||
+              controller.customerType.value == 'AGENT');
+
+      return ListView.separated(
+        shrinkWrap: !isDesktop,
+        physics:
+            isDesktop
+                ? const AlwaysScrollableScrollPhysics()
+                : const NeverScrollableScrollPhysics(),
+        padding: EdgeInsets.zero,
+        itemCount: filteredCart.length,
+        separatorBuilder: (_, __) => const Divider(height: 1),
+        itemBuilder: (context, index) {
+          final item = filteredCart[index];
+          final originalIndex = controller.cart.indexOf(item);
+          final isLoss = item.isLoss;
+
+          return Container(
+            color: index % 2 == 0 ? Colors.white : Colors.grey.shade50,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  flex: 5,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        item.product.model,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 14,
+                          color: Color(0xFF1E293B),
+                        ),
+                      ),
+                      Text(
+                        item.product.name,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          SizedBox(
+                            width: 80,
+                            height: 28,
+                            child: CartPriceEditor(
+                              initialPrice: item.priceAtSale,
+                              isLoss: isLoss,
+                              readOnly: isPriceFixed,
+                              onChanged:
+                                  (v) => controller.updateItemPrice(
+                                    originalIndex,
+                                    v,
+                                  ),
+                            ),
+                          ),
+                          if (isLoss)
+                            const Padding(
+                              padding: EdgeInsets.only(left: 4),
+                              child: Icon(
+                                Icons.warning_amber,
+                                color: Colors.red,
+                                size: 16,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                CartQuantityEditor(
+                  currentQty: item.quantity.value,
+                  maxStock: item.product.stockQty,
+                  onIncrease: () {
+                    if (item.quantity.value < item.product.stockQty) {
+                      item.quantity.value++;
+                      controller.cart.refresh();
+                      controller.updatePaymentCalculations();
+                    }
+                  },
+                  onDecrease: () {
+                    if (item.quantity.value > 1) {
+                      item.quantity.value--;
+                      controller.cart.refresh();
+                      controller.updatePaymentCalculations();
+                    } else {
+                      controller.cart.removeAt(originalIndex);
+                      controller.updatePaymentCalculations();
+                    }
+                  },
+                  onSubmit: (v) => controller.updateQuantity(originalIndex, v),
+                ),
+                Expanded(
+                  flex: 3,
+                  child: Text(
+                    "৳${item.subtotal.toStringAsFixed(0)}",
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+    });
+
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.grey.shade300),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+          ),
         ],
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // Header & Search
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -992,159 +1176,8 @@ class LiveOrderSalesPage extends StatelessWidget {
             ),
           ),
 
-          // Cart List
-          Expanded(
-            child: Obx(() {
-              if (controller.cart.isEmpty) {
-                return Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.remove_shopping_cart,
-                        size: 40,
-                        color: Colors.grey.shade300,
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        "Cart is Empty",
-                        style: TextStyle(color: Colors.grey.shade400),
-                      ),
-                    ],
-                  ),
-                );
-              }
+          isDesktop ? Expanded(child: cartListBuilder) : cartListBuilder,
 
-              final filteredCart =
-                  controller.cart.where((item) {
-                    final query = searchQuery.value.toLowerCase();
-                    return item.product.name.toLowerCase().contains(query) ||
-                        item.product.model.toLowerCase().contains(query);
-                  }).toList();
-
-              if (filteredCart.isEmpty) {
-                return const Center(
-                  child: Text("No item found matching query"),
-                );
-              }
-
-              bool isPriceFixed =
-                  (controller.customerType.value == 'VIP' ||
-                      controller.customerType.value == 'AGENT');
-
-              return ListView.separated(
-                padding: EdgeInsets.zero,
-                itemCount: filteredCart.length,
-                separatorBuilder: (_, __) => const Divider(height: 1),
-                itemBuilder: (context, index) {
-                  final item = filteredCart[index];
-                  final originalIndex = controller.cart.indexOf(item);
-                  final isLoss = item.isLoss;
-
-                  return Container(
-                    color: index % 2 == 0 ? Colors.white : Colors.grey.shade50,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          flex: 5,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                item.product.model,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 14,
-                                  color: Color(0xFF1E293B),
-                                ),
-                              ),
-                              Text(
-                                item.product.name,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey,
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              Row(
-                                children: [
-                                  SizedBox(
-                                    width: 80,
-                                    height: 28,
-                                    child: CartPriceEditor(
-                                      initialPrice: item.priceAtSale,
-                                      isLoss: isLoss,
-                                      readOnly: isPriceFixed,
-                                      onChanged:
-                                          (v) => controller.updateItemPrice(
-                                            originalIndex,
-                                            v,
-                                          ),
-                                    ),
-                                  ),
-                                  if (isLoss)
-                                    const Padding(
-                                      padding: EdgeInsets.only(left: 4),
-                                      child: Icon(
-                                        Icons.warning_amber,
-                                        color: Colors.red,
-                                        size: 16,
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                        CartQuantityEditor(
-                          currentQty: item.quantity.value,
-                          maxStock: item.product.stockQty,
-                          onIncrease: () {
-                            if (item.quantity.value < item.product.stockQty) {
-                              item.quantity.value++;
-                              controller.cart.refresh();
-                              controller.updatePaymentCalculations();
-                            }
-                          },
-                          onDecrease: () {
-                            if (item.quantity.value > 1) {
-                              item.quantity.value--;
-                              controller.cart.refresh();
-                              controller.updatePaymentCalculations();
-                            } else {
-                              controller.cart.removeAt(originalIndex);
-                              controller.updatePaymentCalculations();
-                            }
-                          },
-                          onSubmit:
-                              (v) =>
-                                  controller.updateQuantity(originalIndex, v),
-                        ),
-                        Expanded(
-                          flex: 3,
-                          child: Text(
-                            "৳${item.subtotal.toStringAsFixed(0)}",
-                            textAlign: TextAlign.right,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 15,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              );
-            }),
-          ),
-
-          // Cart Footer
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -1183,7 +1216,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                           vertical: 4,
                         ),
                         decoration: BoxDecoration(
-                          color: clr.withOpacity(0.1),
+                          color: clr.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(
@@ -1199,8 +1232,6 @@ class LiveOrderSalesPage extends StatelessWidget {
                   );
                 }),
                 const SizedBox(height: 16),
-
-                // --- NEW DISCOUNT ROW INCLUDING DISCOUNT NOTE ---
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -1255,13 +1286,13 @@ class LiveOrderSalesPage extends StatelessWidget {
                           color: Colors.black87,
                         ),
                         decoration: InputDecoration(
-                          labelText: "Discount Note (Optional)",
+                          labelText: "Discount Note",
                           labelStyle: const TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 11,
                             color: Colors.grey,
                           ),
-                          hintText: "e.g., Damaged Box, Eid...",
+                          hintText: "e.g., Damaged Box...",
                           hintStyle: const TextStyle(
                             fontSize: 11,
                             color: Colors.black38,
@@ -1290,8 +1321,6 @@ class LiveOrderSalesPage extends StatelessWidget {
                     ),
                   ],
                 ),
-
-                // ------------------------------------------------
                 const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,
@@ -1356,185 +1385,190 @@ class LiveOrderSalesPage extends StatelessWidget {
     LiveSalesController controller,
     bool isDesktop,
   ) {
-    // Extracted the core table builder so we can wrap it horizontally for mobile
     Widget buildTableContent() {
-      return Column(
-        children: [
-          // Table Headers
-          Container(
-            color: const Color(0xFFF1F5F9),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            child: Row(
-              children: const [
-                Expanded(
-                  flex: 4,
-                  child: Text(
-                    "PRODUCT NAME",
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey,
-                    ),
-                  ),
+      Widget tableHeaders = Container(
+        color: const Color(0xFFF1F5F9),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: const [
+            Expanded(
+              flex: 4,
+              child: Text(
+                "PRODUCT NAME",
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey,
                 ),
-                Expanded(
-                  flex: 2,
-                  child: Text(
-                    "MODEL",
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey,
-                    ),
-                  ),
-                ),
-                Expanded(
-                  flex: 1,
-                  child: Text(
-                    "STOCK",
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey,
-                    ),
-                  ),
-                ),
-                Expanded(
-                  flex: 2,
-                  child: Text(
-                    "RATE",
-                    textAlign: TextAlign.right,
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey,
-                    ),
-                  ),
-                ),
-                SizedBox(width: 50),
-              ],
+              ),
             ),
-          ),
+            Expanded(
+              flex: 2,
+              child: Text(
+                "MODEL",
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey,
+                ),
+              ),
+            ),
+            Expanded(
+              flex: 1,
+              child: Text(
+                "STOCK",
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey,
+                ),
+              ),
+            ),
+            Expanded(
+              flex: 2,
+              child: Text(
+                "RATE",
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey,
+                ),
+              ),
+            ),
+            SizedBox(width: 50),
+          ],
+        ),
+      );
 
-          // Product List
-          Expanded(
-            child: Obx(() {
-              if (controller.productCtrl.isLoading.value) {
-                return const Center(child: CircularProgressIndicator());
-              }
+      Widget productListBuilder = Obx(() {
+        if (controller.productCtrl.isLoading.value) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(24.0),
+              child: CircularProgressIndicator(),
+            ),
+          );
+        }
 
-              return ListView.separated(
-                itemCount: controller.productCtrl.allProducts.length,
-                separatorBuilder: (_, __) => const Divider(height: 1),
-                itemBuilder: (context, index) {
-                  final p = controller.productCtrl.allProducts[index];
-                  final stockColor =
-                      p.stockQty == 0
-                          ? Colors.red
-                          : (p.stockQty < 5 ? Colors.orange : Colors.green);
+        return ListView.separated(
+          shrinkWrap: !isDesktop,
+          physics:
+              isDesktop
+                  ? const AlwaysScrollableScrollPhysics()
+                  : const NeverScrollableScrollPhysics(),
+          itemCount: controller.productCtrl.allProducts.length,
+          separatorBuilder: (_, __) => const Divider(height: 1),
+          itemBuilder: (context, index) {
+            final p = controller.productCtrl.allProducts[index];
+            final stockColor =
+                p.stockQty == 0
+                    ? Colors.red
+                    : (p.stockQty < 5 ? Colors.orange : Colors.green);
 
-                  return Material(
-                    color: Colors.white,
-                    child: InkWell(
-                      onTap: () => controller.addToCart(p),
-                      hoverColor: Colors.blue.withOpacity(0.05),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 10,
+            return Material(
+              color: Colors.white,
+              child: InkWell(
+                onTap: () => controller.addToCart(p),
+                hoverColor: Colors.blue.withValues(alpha: 0.05),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 10,
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        flex: 4,
+                        child: Text(
+                          p.name,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF334155),
+                          ),
                         ),
+                      ),
+                      Expanded(
+                        flex: 2,
+                        child: Text(
+                          p.model,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.blue,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        flex: 1,
                         child: Row(
                           children: [
-                            Expanded(
-                              flex: 4,
-                              child: Text(
-                                p.name,
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                  color: Color(0xFF334155),
-                                ),
-                              ),
-                            ),
-                            Expanded(
-                              flex: 2,
-                              child: Text(
-                                p.model,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.blue,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ),
-                            Expanded(
-                              flex: 1,
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.circle,
-                                    size: 8,
-                                    color: stockColor,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    p.stockQty.toString(),
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold,
-                                      color: stockColor,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Expanded(
-                              flex: 2,
-                              child: Obx(() {
-                                double price =
-                                    controller.customerType.value == "AGENT"
-                                        ? p.agent
-                                        : p.wholesale;
-                                return Text(
-                                  "৳${price.toStringAsFixed(0)}",
-                                  textAlign: TextAlign.right,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 13,
-                                  ),
-                                );
-                              }),
-                            ),
-                            const SizedBox(width: 10),
-                            SizedBox(
-                              width: 40,
-                              height: 30,
-                              child: ElevatedButton(
-                                onPressed: () => controller.addToCart(p),
-                                style: ElevatedButton.styleFrom(
-                                  padding: EdgeInsets.zero,
-                                  backgroundColor: Colors.blue.shade50,
-                                  elevation: 0,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                ),
-                                child: const Icon(
-                                  Icons.add,
-                                  color: Colors.blue,
-                                  size: 18,
-                                ),
+                            Icon(Icons.circle, size: 8, color: stockColor),
+                            const SizedBox(width: 6),
+                            Text(
+                              p.stockQty.toString(),
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: stockColor,
                               ),
                             ),
                           ],
                         ),
                       ),
-                    ),
-                  );
-                },
-              );
-            }),
-          ),
+                      Expanded(
+                        flex: 2,
+                        child: Obx(() {
+                          double price =
+                              controller.customerType.value == "AGENT"
+                                  ? p.agent
+                                  : p.wholesale;
+                          return Text(
+                            "৳${price.toStringAsFixed(0)}",
+                            textAlign: TextAlign.right,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                          );
+                        }),
+                      ),
+                      const SizedBox(width: 10),
+                      SizedBox(
+                        width: 40,
+                        height: 30,
+                        child: ElevatedButton(
+                          onPressed: () => controller.addToCart(p),
+                          style: ElevatedButton.styleFrom(
+                            padding: EdgeInsets.zero,
+                            backgroundColor: Colors.blue.shade50,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                          ),
+                          child: const Icon(
+                            Icons.add,
+                            color: Colors.blue,
+                            size: 18,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      });
+
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          tableHeaders,
+          isDesktop ? Expanded(child: productListBuilder) : productListBuilder,
         ],
       );
     }
@@ -1546,8 +1580,8 @@ class LiveOrderSalesPage extends StatelessWidget {
         border: Border.all(color: Colors.grey.shade300),
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // Table Toolbar
           Padding(
             padding: const EdgeInsets.all(16),
             child:
@@ -1573,6 +1607,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                           width: 250,
                           height: 40,
                           child: TextField(
+                            style: const TextStyle(fontSize: 13),
                             onChanged: (v) => controller.productCtrl.search(v),
                             decoration: InputDecoration(
                               hintText: "Search Name / Model / Code...",
@@ -1611,9 +1646,11 @@ class LiveOrderSalesPage extends StatelessWidget {
                         SizedBox(
                           height: 40,
                           child: TextField(
+                            style: TextStyle(fontSize: 13),
                             onChanged: (v) => controller.productCtrl.search(v),
                             decoration: InputDecoration(
                               hintText: "Search Name / Model...",
+                              hintStyle: TextStyle(fontSize: 12),
                               prefixIcon: const Icon(Icons.search, size: 18),
                               contentPadding: EdgeInsets.zero,
                               border: OutlineInputBorder(
@@ -1626,22 +1663,13 @@ class LiveOrderSalesPage extends StatelessWidget {
                     ),
           ),
 
-          // Main Table Area - Handled for mobile horizontal scrolling safely
-          Expanded(
-            child:
-                isDesktop
-                    ? buildTableContent()
-                    : SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: SizedBox(
-                        width:
-                            700, // Forces the original row spacing to prevent UI squash bugs
-                        child: buildTableContent(),
-                      ),
-                    ),
-          ),
+          isDesktop
+              ? Expanded(child: buildTableContent())
+              : SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: SizedBox(width: 700, child: buildTableContent()),
+              ),
 
-          // Pagination Footer
           Container(
             height: 40,
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -1682,7 +1710,6 @@ class LiveOrderSalesPage extends StatelessWidget {
     );
   }
 
-  // --- HELPER: ERP STYLE INPUTS ---
   Widget _erpInput(
     TextEditingController c,
     String hint, {
@@ -1749,11 +1776,11 @@ class LiveOrderSalesPage extends StatelessWidget {
           ),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(6),
-            borderSide: BorderSide(color: color.withOpacity(0.3)),
+            borderSide: BorderSide(color: color.withValues(alpha: 0.3)),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(6),
-            borderSide: BorderSide(color: color.withOpacity(0.3)),
+            borderSide: BorderSide(color: color.withValues(alpha: 0.3)),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(6),
@@ -1768,7 +1795,7 @@ class LiveOrderSalesPage extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// LOGIC WIDGETS (Untouched)
+// LOGIC WIDGETS
 // ---------------------------------------------------------------------------
 
 class CartQuantityEditor extends StatefulWidget {
@@ -1943,6 +1970,6 @@ class _CartPriceEditorState extends State<CartPriceEditor> {
       onSubmitted: (v) {
         if (!widget.readOnly) widget.onChanged(v);
       },
-    ); 
+    );
   }
 }

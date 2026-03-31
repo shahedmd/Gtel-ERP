@@ -134,7 +134,7 @@ class ProductScreen extends StatelessWidget {
                     value: 'shipments',
                     child: ListTile(
                       leading: Icon(Icons.local_shipping, color: Colors.orange),
-                      title: Text("Shipments", style: TextStyle(fontSize: 13),),
+                      title: Text("Shipments", style: TextStyle(fontSize: 13)),
                       contentPadding: EdgeInsets.zero,
                     ),
                   ),
@@ -142,7 +142,10 @@ class ProductScreen extends StatelessWidget {
                     value: 'service',
                     child: ListTile(
                       leading: Icon(Icons.handyman, color: Colors.orange),
-                      title: Text("Service Center", style: TextStyle(fontSize: 13)),
+                      title: Text(
+                        "Service Center",
+                        style: TextStyle(fontSize: 13),
+                      ),
                       contentPadding: EdgeInsets.zero,
                     ),
                   ),
@@ -158,7 +161,10 @@ class ProductScreen extends StatelessWidget {
                     value: 'refresh',
                     child: ListTile(
                       leading: Icon(Icons.refresh, color: Colors.blue),
-                      title: Text("Refresh Data", style: TextStyle(fontSize: 13)),
+                      title: Text(
+                        "Refresh Data",
+                        style: TextStyle(fontSize: 13),
+                      ),
                       contentPadding: EdgeInsets.zero,
                     ),
                   ),
@@ -169,13 +175,13 @@ class ProductScreen extends StatelessWidget {
             onPressed: () => Get.to(() => OnGoingShipmentsPage()),
             style: TextButton.styleFrom(foregroundColor: Colors.orange[700]),
             icon: const Icon(Icons.local_shipping, size: 20),
-            label: const Text("Shipments",style: TextStyle(fontSize: 13)),
+            label: const Text("Shipments", style: TextStyle(fontSize: 13)),
           ),
           TextButton.icon(
             onPressed: () => Get.to(() => ServicePage()),
             style: TextButton.styleFrom(foregroundColor: Colors.orange[700]),
             icon: const Icon(Icons.handyman_outlined, size: 20),
-            label: const Text("Service Center",style: TextStyle(fontSize: 13)),
+            label: const Text("Service Center", style: TextStyle(fontSize: 13)),
           ),
           const SizedBox(width: 8),
           TextButton.icon(
@@ -185,7 +191,7 @@ class ProductScreen extends StatelessWidget {
               foregroundColor: const Color(0xFFDC2626),
             ),
             icon: const Icon(Icons.warning_amber_rounded, size: 20),
-            label: const Text("Alerts",style: TextStyle(fontSize: 13)),
+            label: const Text("Alerts", style: TextStyle(fontSize: 13)),
           ),
           const SizedBox(width: 8),
           IconButton(
@@ -393,7 +399,6 @@ class ProductScreen extends StatelessWidget {
                   borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
                 ),
               ),
-              
             ),
           ),
           const SizedBox(width: 12),
@@ -473,7 +478,7 @@ class ProductScreen extends StatelessWidget {
               controller: _horizontalScrollController,
               scrollDirection: Axis.horizontal,
               child: SizedBox(
-                width: 1220,
+                width: 1300,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -491,6 +496,8 @@ class ProductScreen extends StatelessWidget {
                           _headerCell('PROFIT', 100),
                           _headerCell('STOCK', 80),
                           _headerCell('ON WAY', 80),
+                          _headerCell('SHIP DATE', 80),
+
                           _headerCell('SEA / AIR', 100),
                           _headerCell('AVG COST', 100),
                           _headerCell('AGENT', 100),
@@ -564,6 +571,21 @@ class ProductScreen extends StatelessWidget {
                                       "-",
                                       style: TextStyle(color: Colors.grey),
                                     ),
+                                80,
+                              ),
+                              _dataCell(
+                                Text(
+                                  p.shipmentDate != null
+                                      ? DateFormat(
+                                        'yyyy-MM-dd',
+                                      ).format(p.shipmentDate!)
+                                      : 'No date', // Handle null case
+                                  style: const TextStyle(
+                                    color: Color(0xFF047857),
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                  ),
+                                ),
                                 80,
                               ),
                               _dataCell(

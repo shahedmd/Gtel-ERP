@@ -2,9 +2,10 @@
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:intl/intl.dart';
+
 // Ensure this import points to your actual controller file location
 import 'package:gtel_erp/Cash/controller.dart';
-import 'package:intl/intl.dart';
 
 class CashDrawerView extends StatelessWidget {
   // Use Get.put to instantiate the controller if not already present
@@ -21,15 +22,22 @@ class CashDrawerView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // --- RESPONSIVE BREAKPOINTS ---
+    final double screenWidth = MediaQuery.sizeOf(context).width;
+    final bool isMobile = screenWidth < 600;
+
+    // Configured mobile standard font as requested
+    final double normalFont = isMobile ? 13.0 : 14.0;
+
     return Scaffold(
       backgroundColor: bgLight,
       appBar: AppBar(
-        title: const Text(
+        title: Text(
           "Treasury & Cash Flow",
           style: TextStyle(
             color: darkBlue,
             fontWeight: FontWeight.bold,
-            fontSize: 18,
+            fontSize: isMobile ? 16 : 18,
           ),
         ),
         backgroundColor: Colors.white,
@@ -52,7 +60,7 @@ class CashDrawerView extends StatelessWidget {
       body: Column(
         children: [
           // 1. FILTER BAR
-          _buildFilterBar(context),
+          _buildFilterBar(context, normalFont),
 
           // 2. MAIN CONTENT
           Expanded(
@@ -70,297 +78,339 @@ class CashDrawerView extends StatelessWidget {
               return RefreshIndicator(
                 onRefresh: () async => controller.fetchData(),
                 child: SingleChildScrollView(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // A. GRAND TOTAL CARD
-                      Container(
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [darkBlue, darkBlue.withOpacity(0.9)],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                          borderRadius: BorderRadius.circular(12),
-                          boxShadow: [
-                            BoxShadow(
-                              color: darkBlue.withOpacity(0.3),
-                              blurRadius: 10,
-                              offset: const Offset(0, 4),
-                            ),
-                          ],
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  physics: const AlwaysScrollableScrollPhysics(
+                    parent: BouncingScrollPhysics(),
+                  ),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(
+                        maxWidth: 1200,
+                      ), // Desktop ultra-wide protection
+                      child: Padding(
+                        padding: EdgeInsets.all(isMobile ? 12.0 : 20.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  "NET LIQUID ASSETS",
-                                  style: TextStyle(
-                                    color: Colors.white70,
-                                    fontSize: 12,
-                                    letterSpacing: 1.2,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  "${currencyFormatter.format(controller.grandTotal.value)} ৳",
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 28,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ],
-                            ),
+                            // A. GRAND TOTAL CARD
                             Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 8,
-                              ),
+                              padding: EdgeInsets.all(isMobile ? 16 : 24),
                               decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.15),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.white24),
+                                gradient: LinearGradient(
+                                  colors: [darkBlue, darkBlue.withOpacity(0.9)],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                ),
+                                borderRadius: BorderRadius.circular(12),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: darkBlue.withOpacity(0.3),
+                                    blurRadius: 10,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ],
                               ),
                               child: Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
                                 children: [
-                                  const Icon(
-                                    Icons.calendar_today,
-                                    color: Colors.white,
-                                    size: 14,
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          "NET LIQUID ASSETS",
+                                          style: TextStyle(
+                                            color: Colors.white70,
+                                            fontSize: normalFont,
+                                            letterSpacing: 1.2,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        FittedBox(
+                                          fit: BoxFit.scaleDown,
+                                          alignment: Alignment.centerLeft,
+                                          child: Text(
+                                            "${currencyFormatter.format(controller.grandTotal.value)} ৳",
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: isMobile ? 24 : 32,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    DateFormat('dd MMM').format(
-                                          controller.selectedRange.value.start,
-                                        ) +
-                                        (controller.filterType.value !=
-                                                DateFilter.daily
-                                            ? " - ${DateFormat('dd MMM').format(controller.selectedRange.value.end)}"
-                                            : ""),
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w500,
+                                  const SizedBox(width: 12),
+                                  Container(
+                                    padding: EdgeInsets.symmetric(
+                                      horizontal: isMobile ? 8 : 12,
+                                      vertical: 8,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withOpacity(0.15),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(color: Colors.white24),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        const Icon(
+                                          Icons.calendar_today,
+                                          color: Colors.white,
+                                          size: 14,
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          DateFormat('dd MMM').format(
+                                                controller
+                                                    .selectedRange
+                                                    .value
+                                                    .start,
+                                              ) +
+                                              (controller.filterType.value !=
+                                                      DateFilter.daily
+                                                  ? " - ${DateFormat('dd MMM').format(controller.selectedRange.value.end)}"
+                                                  : ""),
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: normalFont - 1,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ],
                               ),
                             ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 20),
+                            const SizedBox(height: 16),
 
-                      // B. SUMMARY ROW
-                      Row(
-                        children: [
-                          _summaryItem(
-                            "Total Income",
-                            controller.rawSalesTotal.value +
-                                controller.rawCollectionTotal.value,
-                            Colors.green.shade700,
-                            Icons.arrow_downward,
-                          ),
-                          const SizedBox(width: 12),
-                          _summaryItem(
-                            "Expenses/Out",
-                            controller.rawExpenseTotal.value,
-                            Colors.red.shade700,
-                            Icons.arrow_upward,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 24),
-
-                      // C. ASSETS GRID
-                      const Text(
-                        "ACCOUNTS BREAKDOWN",
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.grey,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      GridView.count(
-                        crossAxisCount: 2,
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        childAspectRatio: 6,
-                        mainAxisSpacing: 12,
-                        crossAxisSpacing: 12,
-                        children: [
-                          _assetCard(
-                            "Cash in Hand",
-                            controller.netCash.value,
-                            Icons.payments_outlined,
-                            Colors.teal,
-                          ),
-                          _assetCard(
-                            "Bank Accounts",
-                            controller.netBank.value,
-                            Icons.account_balance_outlined,
-                            Colors.indigo,
-                          ),
-                          _assetCard(
-                            "Bkash Wallet",
-                            controller.netBkash.value,
-                            Icons.phone_android_outlined,
-                            Colors.pink,
-                          ),
-                          _assetCard(
-                            "Nagad Wallet",
-                            controller.netNagad.value,
-                            Icons.local_offer_outlined,
-                            Colors.orange,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 24),
-
-                      // D. QUICK ACTIONS (Updated for 3 actions)
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _actionBtn(
-                              "Deposit",
-                              Icons.add_circle_outline,
-                              Colors.teal.shade600,
-                              () => _showAddDialog(),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: _actionBtn(
-                              "Withdraw",
-                              Icons.remove_circle_outline,
-                              Colors.red.shade600,
-                              () => _showWithdrawDialog(context),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: _actionBtn(
-                              "Transfer",
-                              Icons.swap_horiz_outlined,
-                              Colors.orange.shade800,
-                              () => _showTransferDialog(),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 30),
-
-                      // E. TRANSACTION HEADER
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text(
-                            "RECENT ACTIVITY",
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.grey,
-                              letterSpacing: 0.5,
-                            ),
-                          ),
-                          Text(
-                            "Total: ${controller.totalItems.value}",
-                            style: const TextStyle(
-                              fontSize: 10,
-                              color: Colors.grey,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-
-                      // F. TRANSACTIONS LIST
-                      Container(
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: borderCol),
-                        ),
-                        child: Column(
-                          children: [
-                            if (controller.paginatedTransactions.isEmpty)
-                              const Padding(
-                                padding: EdgeInsets.all(30.0),
-                                child: Text(
-                                  "No transactions found in this period.",
+                            // B. SUMMARY ROW
+                            Row(
+                              children: [
+                                _summaryItem(
+                                  "Total Income",
+                                  controller.rawSalesTotal.value +
+                                      controller.rawCollectionTotal.value,
+                                  Colors.green.shade700,
+                                  Icons.arrow_downward,
+                                  normalFont,
                                 ),
-                              )
-                            else
-                              ListView.separated(
-                                shrinkWrap: true,
-                                physics: const NeverScrollableScrollPhysics(),
-                                itemCount:
-                                    controller.paginatedTransactions.length,
-                                separatorBuilder:
-                                    (c, i) => Divider(
-                                      height: 1,
-                                      color: Colors.grey.shade200,
-                                    ),
-                                itemBuilder:
-                                    (context, index) => _transactionRow(
-                                      controller.paginatedTransactions[index],
-                                    ),
-                              ),
-                          ],
-                        ),
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      // G. PAGINATION CONTROLS
-                      if (controller.totalItems.value > 0)
-                        Container(
-                          padding: const EdgeInsets.symmetric(vertical: 10),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              _pageBtn(
-                                icon: Icons.chevron_left,
-                                onTap:
-                                    controller.currentPage.value > 1
-                                        ? () => controller.previousPage()
-                                        : null,
-                              ),
-                              Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 20,
+                                const SizedBox(width: 12),
+                                _summaryItem(
+                                  "Expenses/Out",
+                                  controller.rawExpenseTotal.value,
+                                  Colors.red.shade700,
+                                  Icons.arrow_upward,
+                                  normalFont,
                                 ),
-                                child: Text(
-                                  "Page ${controller.currentPage.value} of $totalPages",
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: darkBlue,
-                                    fontSize: 13,
+                              ],
+                            ),
+                            const SizedBox(height: 24),
+
+                            // C. ASSETS GRID (Responsive!)
+                            Text(
+                              "ACCOUNTS BREAKDOWN",
+                              style: TextStyle(
+                                fontSize: normalFont - 1,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.grey,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            GridView.extent(
+                              maxCrossAxisExtent:
+                                  300, // Automatically adapts to screen width
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              childAspectRatio: isMobile ? 2.5 : 3.0,
+                              mainAxisSpacing: 12,
+                              crossAxisSpacing: 12,
+                              children: [
+                                _assetCard(
+                                  "Cash in Hand",
+                                  controller.netCash.value,
+                                  Icons.payments_outlined,
+                                  Colors.teal,
+                                  normalFont,
+                                ),
+                                _assetCard(
+                                  "Bank Accounts",
+                                  controller.netBank.value,
+                                  Icons.account_balance_outlined,
+                                  Colors.indigo,
+                                  normalFont,
+                                ),
+                                _assetCard(
+                                  "Bkash Wallet",
+                                  controller.netBkash.value,
+                                  Icons.phone_android_outlined,
+                                  Colors.pink,
+                                  normalFont,
+                                ),
+                                _assetCard(
+                                  "Nagad Wallet",
+                                  controller.netNagad.value,
+                                  Icons.local_offer_outlined,
+                                  Colors.orange,
+                                  normalFont,
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 24),
+
+                            // D. QUICK ACTIONS
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: _actionBtn(
+                                    "Deposit",
+                                    Icons.add_circle_outline,
+                                    Colors.teal.shade600,
+                                    () => _showAddDialog(),
+                                    normalFont,
                                   ),
                                 ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: _actionBtn(
+                                    "Withdraw",
+                                    Icons.remove_circle_outline,
+                                    Colors.red.shade600,
+                                    () => _showWithdrawDialog(context),
+                                    normalFont,
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: _actionBtn(
+                                    "Transfer",
+                                    Icons.swap_horiz_outlined,
+                                    Colors.orange.shade800,
+                                    () => _showTransferDialog(),
+                                    normalFont,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 30),
+
+                            // E. TRANSACTION HEADER
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  "RECENT ACTIVITY",
+                                  style: TextStyle(
+                                    fontSize: normalFont - 1,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.grey,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                                Text(
+                                  "Total: ${controller.totalItems.value}",
+                                  style: TextStyle(
+                                    fontSize: normalFont - 2,
+                                    color: Colors.grey,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+
+                            // F. TRANSACTIONS LIST
+                            Container(
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: borderCol),
                               ),
-                              _pageBtn(
-                                icon: Icons.chevron_right,
-                                onTap:
-                                    controller.currentPage.value < totalPages
-                                        ? () => controller.nextPage()
-                                        : null,
+                              child: Column(
+                                children: [
+                                  if (controller.paginatedTransactions.isEmpty)
+                                    Padding(
+                                      padding: const EdgeInsets.all(30.0),
+                                      child: Text(
+                                        "No transactions found in this period.",
+                                        style: TextStyle(fontSize: normalFont),
+                                      ),
+                                    )
+                                  else
+                                    ListView.separated(
+                                      shrinkWrap: true,
+                                      physics:
+                                          const NeverScrollableScrollPhysics(),
+                                      itemCount:
+                                          controller
+                                              .paginatedTransactions
+                                              .length,
+                                      separatorBuilder:
+                                          (c, i) => Divider(
+                                            height: 1,
+                                            color: Colors.grey.shade200,
+                                          ),
+                                      itemBuilder:
+                                          (context, index) => _transactionRow(
+                                            controller
+                                                .paginatedTransactions[index],
+                                            normalFont,
+                                          ),
+                                    ),
+                                ],
                               ),
-                            ],
-                          ),
+                            ),
+
+                            const SizedBox(height: 16),
+
+                            // G. PAGINATION CONTROLS
+                            if (controller.totalItems.value > 0)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 10,
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    _pageBtn(
+                                      icon: Icons.chevron_left,
+                                      onTap:
+                                          controller.currentPage.value > 1
+                                              ? () => controller.previousPage()
+                                              : null,
+                                    ),
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 20,
+                                      ),
+                                      child: Text(
+                                        "Page ${controller.currentPage.value} of $totalPages",
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          color: darkBlue,
+                                          fontSize: normalFont,
+                                        ),
+                                      ),
+                                    ),
+                                    _pageBtn(
+                                      icon: Icons.chevron_right,
+                                      onTap:
+                                          controller.currentPage.value <
+                                                  totalPages
+                                              ? () => controller.nextPage()
+                                              : null,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            const SizedBox(height: 40),
+                          ],
                         ),
-                      const SizedBox(height: 40),
-                    ],
+                      ),
+                    ),
                   ),
                 ),
               );
@@ -392,7 +442,13 @@ class CashDrawerView extends StatelessWidget {
     );
   }
 
-  Widget _summaryItem(String label, double val, Color col, IconData icon) {
+  Widget _summaryItem(
+    String label,
+    double val,
+    Color col,
+    IconData icon,
+    double baseFont,
+  ) {
     return Expanded(
       child: Container(
         padding: const EdgeInsets.all(12),
@@ -413,7 +469,7 @@ class CashDrawerView extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(icon, size: 12, color: col.withOpacity(0.7)),
+                Icon(icon, size: 14, color: col.withOpacity(0.7)),
                 const SizedBox(width: 4),
                 Expanded(
                   child: Text(
@@ -421,7 +477,7 @@ class CashDrawerView extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 10,
+                      fontSize: baseFont - 2,
                       color: Colors.grey.shade600,
                       fontWeight: FontWeight.w600,
                     ),
@@ -435,7 +491,7 @@ class CashDrawerView extends StatelessWidget {
               child: Text(
                 currencyFormatter.format(val),
                 style: TextStyle(
-                  fontSize: 16,
+                  fontSize: baseFont + 4,
                   fontWeight: FontWeight.bold,
                   color: col,
                 ),
@@ -447,7 +503,13 @@ class CashDrawerView extends StatelessWidget {
     );
   }
 
-  Widget _assetCard(String title, double val, IconData icon, Color col) {
+  Widget _assetCard(
+    String title,
+    double val,
+    IconData icon,
+    Color col,
+    double baseFont,
+  ) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
@@ -480,8 +542,10 @@ class CashDrawerView extends StatelessWidget {
               children: [
                 Text(
                   title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 11,
+                    fontSize: baseFont - 2,
                     fontWeight: FontWeight.w600,
                     color: Colors.grey.shade700,
                   ),
@@ -491,8 +555,8 @@ class CashDrawerView extends StatelessWidget {
                   fit: BoxFit.scaleDown,
                   child: Text(
                     "${currencyFormatter.format(val)} ৳",
-                    style: const TextStyle(
-                      fontSize: 14,
+                    style: TextStyle(
+                      fontSize: baseFont + 2,
                       fontWeight: FontWeight.bold,
                       color: darkBlue,
                     ),
@@ -506,7 +570,7 @@ class CashDrawerView extends StatelessWidget {
     );
   }
 
-  Widget _transactionRow(DrawerTransaction tx) {
+  Widget _transactionRow(DrawerTransaction tx, double baseFont) {
     bool isCredit = tx.type == 'sale' || tx.type == 'collection';
     bool isDebit = tx.type == 'expense' || tx.type == 'withdraw';
     bool isTransfer = tx.type == 'transfer';
@@ -551,8 +615,8 @@ class CashDrawerView extends StatelessWidget {
                   tx.description,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 13,
+                  style: TextStyle(
+                    fontSize: baseFont,
                     fontWeight: FontWeight.w600,
                     color: darkBlue,
                   ),
@@ -562,7 +626,10 @@ class CashDrawerView extends StatelessWidget {
                   children: [
                     Text(
                       DateFormat('dd MMM HH:mm').format(tx.date),
-                      style: const TextStyle(fontSize: 11, color: Colors.grey),
+                      style: TextStyle(
+                        fontSize: baseFont - 2,
+                        color: Colors.grey,
+                      ),
                     ),
                     const SizedBox(width: 6),
                     Container(
@@ -577,7 +644,7 @@ class CashDrawerView extends StatelessWidget {
                     Text(
                       tx.method.toUpperCase(),
                       style: TextStyle(
-                        fontSize: 10,
+                        fontSize: baseFont - 3,
                         fontWeight: FontWeight.bold,
                         color: Colors.grey.shade700,
                       ),
@@ -590,7 +657,7 @@ class CashDrawerView extends StatelessWidget {
                     child: Text(
                       "${tx.bankName ?? ''} ${tx.accountDetails != null ? '(${tx.accountDetails})' : ''}",
                       style: TextStyle(
-                        fontSize: 10,
+                        fontSize: baseFont - 3,
                         color: Colors.grey.shade500,
                       ),
                       maxLines: 1,
@@ -602,13 +669,16 @@ class CashDrawerView extends StatelessWidget {
           ),
           Expanded(
             flex: 2,
-            child: Text(
-              "${isTransfer ? '' : (isDebit ? '-' : '+')}${currencyFormatter.format(tx.amount)}",
-              textAlign: TextAlign.right,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.bold,
-                color: amountColor,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: Text(
+                "${isTransfer ? '' : (isDebit ? '-' : '+')}${currencyFormatter.format(tx.amount)}",
+                style: TextStyle(
+                  fontSize: baseFont + 1,
+                  fontWeight: FontWeight.bold,
+                  color: amountColor,
+                ),
               ),
             ),
           ),
@@ -617,12 +687,12 @@ class CashDrawerView extends StatelessWidget {
     );
   }
 
-  // Re-designed action button to fit 3 items horizontally nicely
   Widget _actionBtn(
     String label,
     IconData icon,
     Color col,
     VoidCallback onTap,
+    double baseFont,
   ) {
     return ElevatedButton(
       onPressed: onTap,
@@ -636,13 +706,13 @@ class CashDrawerView extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 22),
+          Icon(icon, size: 20),
           const SizedBox(height: 6),
           FittedBox(
             fit: BoxFit.scaleDown,
             child: Text(
               label,
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+              style: TextStyle(fontSize: baseFont, fontWeight: FontWeight.bold),
             ),
           ),
         ],
@@ -650,7 +720,7 @@ class CashDrawerView extends StatelessWidget {
     );
   }
 
-  Widget _buildFilterBar(BuildContext context) {
+  Widget _buildFilterBar(BuildContext context, double baseFont) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: const BoxDecoration(
@@ -659,11 +729,11 @@ class CashDrawerView extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Expanded(child: _filterBtn("Today", DateFilter.daily)),
+          Expanded(child: _filterBtn("Today", DateFilter.daily, baseFont)),
           const SizedBox(width: 8),
-          Expanded(child: _filterBtn("Month", DateFilter.monthly)),
+          Expanded(child: _filterBtn("Month", DateFilter.monthly, baseFont)),
           const SizedBox(width: 8),
-          Expanded(child: _filterBtn("Year", DateFilter.yearly)),
+          Expanded(child: _filterBtn("Year", DateFilter.yearly, baseFont)),
           const SizedBox(width: 8),
 
           InkWell(
@@ -705,7 +775,7 @@ class CashDrawerView extends StatelessWidget {
     );
   }
 
-  Widget _filterBtn(String label, DateFilter type) {
+  Widget _filterBtn(String label, DateFilter type, double baseFont) {
     return Obx(() {
       bool sel = controller.filterType.value == type;
       return InkWell(
@@ -722,7 +792,7 @@ class CashDrawerView extends StatelessWidget {
           child: Text(
             label,
             style: TextStyle(
-              fontSize: 12,
+              fontSize: baseFont,
               fontWeight: FontWeight.bold,
               color: sel ? Colors.white : Colors.grey.shade700,
             ),
@@ -830,7 +900,7 @@ class CashDrawerView extends StatelessWidget {
                           bankName: bankName.text,
                           accountNo: accNo.text,
                         );
-                        Get.back();
+                        Get.back(); // Close Dialog
                       }
                     },
                     style: ElevatedButton.styleFrom(
@@ -857,7 +927,6 @@ class CashDrawerView extends StatelessWidget {
     );
   }
 
-  // --- NEW: WITHDRAW / CASHOUT DIALOG ---
   void _showWithdrawDialog(BuildContext context) {
     final amt = TextEditingController();
     final note = TextEditingController();
@@ -888,8 +957,6 @@ class CashDrawerView extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 20),
-
-                    // Date Picker
                     InkWell(
                       onTap: () async {
                         DateTime? picked = await showDatePicker(
@@ -930,8 +997,6 @@ class CashDrawerView extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 12),
-
-                    // Method Selector
                     DropdownButtonFormField<String>(
                       value: method,
                       dropdownColor: Colors.white,
@@ -956,8 +1021,6 @@ class CashDrawerView extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 12),
-
-                    // Amount
                     TextField(
                       controller: amt,
                       keyboardType: TextInputType.number,
@@ -967,8 +1030,6 @@ class CashDrawerView extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 12),
-
-                    // Note
                     TextField(
                       controller: note,
                       decoration: _inputDeco(
@@ -978,7 +1039,6 @@ class CashDrawerView extends StatelessWidget {
                     ),
                     const SizedBox(height: 12),
 
-                    // Extra Details if not Cash
                     if (method != 'Cash') ...[
                       TextField(
                         controller: bankName,
@@ -1020,6 +1080,7 @@ class CashDrawerView extends StatelessWidget {
                             bankName: bankName.text,
                             accountNo: accNo.text,
                           );
+                          Get.back(); // Fixed missing close dialog call
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.red.shade600,
@@ -1053,7 +1114,6 @@ class CashDrawerView extends StatelessWidget {
     final accNo = TextEditingController();
     final note = TextEditingController();
 
-    // Default selections
     String fromMethod = 'bank';
     String toMethod = 'cash';
     final RxString fromVal = fromMethod.obs;
@@ -1086,7 +1146,6 @@ class CashDrawerView extends StatelessWidget {
                   ),
                   const SizedBox(height: 20),
 
-                  // FROM -> TO ROW
                   Row(
                     children: [
                       Expanded(
@@ -1117,7 +1176,6 @@ class CashDrawerView extends StatelessWidget {
                                       .toList(),
                               onChanged: (v) {
                                 fromVal.value = v!;
-                                // Prevent selecting same value
                                 if (toVal.value == v) {
                                   toVal.value = (v == 'cash') ? 'bank' : 'cash';
                                 }
@@ -1199,7 +1257,6 @@ class CashDrawerView extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
 
-                  // Details Section (Visible if Bank/Bkash/Nagad involved)
                   if (fromVal.value != 'cash' || toVal.value != 'cash') ...[
                     TextField(
                       controller: bankName,
@@ -1220,8 +1277,8 @@ class CashDrawerView extends StatelessWidget {
                     controller: note,
                     decoration: _inputDeco("Note (Optional)", Icons.note),
                   ),
-
                   const SizedBox(height: 24),
+
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
@@ -1239,6 +1296,7 @@ class CashDrawerView extends StatelessWidget {
                                     ? note.text
                                     : "Transfer: ${_capitalize(fromVal.value)} to ${_capitalize(toVal.value)}",
                           );
+                          Get.back(); // Close Dialog
                         }
                       },
                       style: ElevatedButton.styleFrom(

@@ -34,9 +34,14 @@ class DailyOverviewPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // --- RESPONSIVE BREAKPOINTS ---
+    final double screenWidth = MediaQuery.sizeOf(context).width;
+    final bool isMobile = screenWidth < 600;
+    final bool isDesktop = screenWidth >= 850;
+
     return Scaffold(
       backgroundColor: slateLight,
-      appBar: _buildAppBar(context),
+      appBar: _buildAppBar(context, isMobile),
       body: Obx(() {
         if (ctrl.isLoadingHistory.value) {
           return const Center(
@@ -58,57 +63,60 @@ class DailyOverviewPage extends StatelessWidget {
         }
 
         return SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 0. BALANCE SHEET
-              _buildBalanceSheetSection(),
+          physics: const BouncingScrollPhysics(),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                maxWidth: 1200,
+              ), // Max width for Ultra-wide Desktop
+              child: Padding(
+                padding: EdgeInsets.all(isMobile ? 12.0 : 20.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // 0. BALANCE SHEET
+                    _buildBalanceSheetSection(isMobile),
+                    const SizedBox(height: 20),
 
-              const SizedBox(height: 20),
+                    // 1. TODAY'S STATS CARDS
+                    _buildSummarySection(isMobile),
+                    const SizedBox(height: 16),
 
-              // 1. TODAY'S STATS CARDS
-              _buildSummarySection(),
+                    // 2. CHART & BREAKDOWN SECTION
+                    _buildChartSection(isMobile),
+                    const SizedBox(height: 24),
 
-              const SizedBox(height: 16),
-
-              // 2. CHART & BREAKDOWN SECTION
-              _buildChartSection(),
-
-              const SizedBox(height: 24),
-
-              // 3. THE LEDGER (Two Columns)
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    "TRANSACTION LEDGER",
-                    style: TextStyle(
-                      color: slateMedium,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.2,
+                    // 3. THE LEDGER HEADER
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          "TRANSACTION LEDGER",
+                          style: TextStyle(
+                            color: slateMedium,
+                            fontSize: isMobile ? 11 : 12,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1.2,
+                          ),
+                        ),
+                        Text(
+                          "Sorted by Time (Newest First)",
+                          style: TextStyle(
+                            color: slateMedium.withOpacity(0.8),
+                            fontSize: isMobile ? 10 : 11,
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                  Text(
-                    "Sorted by Time (Newest First)",
-                    style: TextStyle(
-                      color: slateMedium.withOpacity(0.8),
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
+                    const SizedBox(height: 12),
 
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  // Responsive switching for Tablet/Web vs Mobile
-                  if (constraints.maxWidth > 800) {
-                    return Row(
+                    // 4. THE LEDGER COLUMNS (Responsive Flex)
+                    Flex(
+                      direction: isDesktop ? Axis.horizontal : Axis.vertical,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Expanded(
+                          flex: isDesktop ? 1 : 0,
                           child: _buildLedgerColumn(
                             title: "CASH IN / INCOME",
                             total: ctrl.totalCashIn.value,
@@ -117,8 +125,12 @@ class DailyOverviewPage extends StatelessWidget {
                             icon: FontAwesomeIcons.arrowDown,
                           ),
                         ),
-                        const SizedBox(width: 16),
+                        SizedBox(
+                          height: isDesktop ? 0 : 20,
+                          width: isDesktop ? 16 : 0,
+                        ),
                         Expanded(
+                          flex: isDesktop ? 1 : 0,
                           child: _buildLedgerColumn(
                             title: "CASH OUT / EXPENSE",
                             total: ctrl.totalCashOut.value,
@@ -128,32 +140,12 @@ class DailyOverviewPage extends StatelessWidget {
                           ),
                         ),
                       ],
-                    );
-                  } else {
-                    return Column(
-                      children: [
-                        _buildLedgerColumn(
-                          title: "CASH IN / INCOME",
-                          total: ctrl.totalCashIn.value,
-                          items: ctrl.cashInList,
-                          colorTheme: successGreen,
-                          icon: FontAwesomeIcons.arrowDown,
-                        ),
-                        const SizedBox(height: 20),
-                        _buildLedgerColumn(
-                          title: "CASH OUT / EXPENSE",
-                          total: ctrl.totalCashOut.value,
-                          items: ctrl.cashOutList,
-                          colorTheme: errorRed,
-                          icon: FontAwesomeIcons.arrowUp,
-                        ),
-                      ],
-                    );
-                  }
-                },
+                    ),
+                    const SizedBox(height: 40),
+                  ],
+                ),
               ),
-              const SizedBox(height: 40),
-            ],
+            ),
           ),
         );
       }),
@@ -163,11 +155,11 @@ class DailyOverviewPage extends StatelessWidget {
   // =========================================
   // APP BAR
   // =========================================
-  PreferredSizeWidget _buildAppBar(BuildContext context) {
+  PreferredSizeWidget _buildAppBar(BuildContext context, bool isMobile) {
     return AppBar(
       backgroundColor: surfaceWhite,
       elevation: 0,
-      titleSpacing: 0,
+      titleSpacing: isMobile ? 0 : 16,
       centerTitle: false,
       bottom: PreferredSize(
         preferredSize: const Size.fromHeight(1),
@@ -180,18 +172,21 @@ class DailyOverviewPage extends StatelessWidget {
       title: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             "Daily Cash Ledger",
             style: TextStyle(
               color: slateDark,
               fontWeight: FontWeight.w700,
-              fontSize: 18,
+              fontSize: isMobile ? 16 : 18,
             ),
           ),
           Obx(
             () => Text(
-              DateFormat('EEEE, dd MMMM yyyy').format(ctrl.selectedDate.value),
-              style: const TextStyle(color: slateMedium, fontSize: 12),
+              DateFormat('EEEE, dd MMM yyyy').format(ctrl.selectedDate.value),
+              style: TextStyle(
+                color: slateMedium,
+                fontSize: isMobile ? 11 : 12,
+              ),
             ),
           ),
         ],
@@ -215,23 +210,32 @@ class DailyOverviewPage extends StatelessWidget {
           icon: const Icon(Icons.calendar_today_outlined, color: slateMedium),
           tooltip: "Select Date",
         ),
-        Container(
-          margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          child: ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: slateDark,
-              foregroundColor: Colors.white,
-              elevation: 0,
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(6),
-              ),
-            ),
+
+        // Responsive Print Button
+        if (isMobile)
+          IconButton(
             onPressed: () => ctrl.generateLedgerPdf(),
-            icon: const Icon(Icons.print, size: 16),
-            label: const Text("Print PDF"),
+            icon: const Icon(Icons.print, color: slateDark),
+            tooltip: "Print PDF",
+          )
+        else
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: slateDark,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(6),
+                ),
+              ),
+              onPressed: () => ctrl.generateLedgerPdf(),
+              icon: const Icon(Icons.print, size: 16),
+              label: const Text("Print PDF"),
+            ),
           ),
-        ),
       ],
     );
   }
@@ -239,10 +243,10 @@ class DailyOverviewPage extends StatelessWidget {
   // =========================================
   // 0. BALANCE SHEET SECTION
   // =========================================
-  Widget _buildBalanceSheetSection() {
+  Widget _buildBalanceSheetSection(bool isMobile) {
     final currency = NumberFormat("#,##0.00");
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.all(isMobile ? 16 : 20),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
@@ -282,6 +286,7 @@ class DailyOverviewPage extends StatelessWidget {
             children: [
               // Previous
               Expanded(
+                flex: 3,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -294,20 +299,31 @@ class DailyOverviewPage extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 6),
-                    Text(
-                      "৳${currency.format(ctrl.previousCash.value)}",
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 18,
-                        color: slateDark,
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        "৳${currency.format(ctrl.previousCash.value)}",
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                          color: slateDark,
+                        ),
                       ),
                     ),
                   ],
                 ),
               ),
-              Container(width: 1, height: 40, color: borderGrey),
+              Container(
+                width: 1,
+                height: 40,
+                color: borderGrey,
+                margin: const EdgeInsets.symmetric(horizontal: 8),
+              ),
+
               // Today's Net
               Expanded(
+                flex: 3,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
@@ -320,23 +336,34 @@ class DailyOverviewPage extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 6),
-                    Text(
-                      "${ctrl.netCashBalance.value >= 0 ? '+' : ''}৳${currency.format(ctrl.netCashBalance.value)}",
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 18,
-                        color:
-                            ctrl.netCashBalance.value >= 0
-                                ? successGreen
-                                : errorRed,
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.center,
+                      child: Text(
+                        "${ctrl.netCashBalance.value >= 0 ? '+' : ''}৳${currency.format(ctrl.netCashBalance.value)}",
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                          color:
+                              ctrl.netCashBalance.value >= 0
+                                  ? successGreen
+                                  : errorRed,
+                        ),
                       ),
                     ),
                   ],
                 ),
               ),
-              Container(width: 1, height: 40, color: borderGrey),
+              Container(
+                width: 1,
+                height: 40,
+                color: borderGrey,
+                margin: const EdgeInsets.symmetric(horizontal: 8),
+              ),
+
               // Total
               Expanded(
+                flex: 4, // Give slightly more room for the final closing cash
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
@@ -349,12 +376,16 @@ class DailyOverviewPage extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 6),
-                    Text(
-                      "৳${currency.format(ctrl.closingCash.value)}",
-                      style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 22,
-                        color: Colors.blue.shade800,
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        "৳${currency.format(ctrl.closingCash.value)}",
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 22,
+                          color: Colors.blue.shade800,
+                        ),
                       ),
                     ),
                   ],
@@ -370,7 +401,7 @@ class DailyOverviewPage extends StatelessWidget {
   // =========================================
   // 1. STATS SECTION
   // =========================================
-  Widget _buildSummarySection() {
+  Widget _buildSummarySection(bool isMobile) {
     return SizedBox(
       height: 100,
       child: Row(
@@ -385,7 +416,7 @@ class DailyOverviewPage extends StatelessWidget {
               border: successGreen.withOpacity(0.2),
             ),
           ),
-          const SizedBox(width: 12),
+          SizedBox(width: isMobile ? 8 : 12),
           Expanded(
             child: _statCard(
               title: "TODAY'S EXPENSE",
@@ -423,13 +454,17 @@ class DailyOverviewPage extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                title,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: color.withOpacity(0.9),
-                  letterSpacing: 0.5,
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: color.withOpacity(0.9),
+                    letterSpacing: 0.5,
+                  ),
                 ),
               ),
               Icon(icon, size: 16, color: color),
@@ -455,9 +490,9 @@ class DailyOverviewPage extends StatelessWidget {
   // =========================================
   // 2. CHART SECTION
   // =========================================
-  Widget _buildChartSection() {
+  Widget _buildChartSection(bool isMobile) {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.all(isMobile ? 16 : 20),
       decoration: BoxDecoration(
         color: surfaceWhite,
         borderRadius: BorderRadius.circular(10),
@@ -465,22 +500,30 @@ class DailyOverviewPage extends StatelessWidget {
       ),
       child: Column(
         children: [
-          const Row(
+          Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
                 "Income Source Breakdown",
                 style: TextStyle(
                   fontWeight: FontWeight.w700,
-                  fontSize: 14,
+                  fontSize: isMobile ? 13 : 14,
                   color: slateDark,
                 ),
               ),
-              Icon(FontAwesomeIcons.chartPie, color: slateMedium, size: 16),
+              const Icon(
+                FontAwesomeIcons.chartPie,
+                color: slateMedium,
+                size: 16,
+              ),
             ],
           ),
           const SizedBox(height: 24),
-          Row(
+
+          // Responsive layout for Chart & Legends
+          Flex(
+            direction: isMobile ? Axis.vertical : Axis.horizontal,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               // Pie Chart
               SizedBox(
@@ -506,38 +549,76 @@ class DailyOverviewPage extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(width: 40),
-              // Legend
-              Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    _chartLegendItem(
-                      "Cash",
-                      ctrl.methodBreakdown['Cash'] ?? 0,
-                      colCash,
+
+              SizedBox(height: isMobile ? 24 : 0, width: isMobile ? 0 : 40),
+
+              // Legends
+              isMobile
+                  ? Wrap(
+                    spacing: 16,
+                    runSpacing: 12,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      _chartLegendItem(
+                        "Cash",
+                        ctrl.methodBreakdown['Cash'] ?? 0,
+                        colCash,
+                        isMobile,
+                      ),
+                      _chartLegendItem(
+                        "Bkash",
+                        ctrl.methodBreakdown['Bkash'] ?? 0,
+                        colBkash,
+                        isMobile,
+                      ),
+                      _chartLegendItem(
+                        "Nagad",
+                        ctrl.methodBreakdown['Nagad'] ?? 0,
+                        colNagad,
+                        isMobile,
+                      ),
+                      _chartLegendItem(
+                        "Bank",
+                        ctrl.methodBreakdown['Bank'] ?? 0,
+                        colBank,
+                        isMobile,
+                      ),
+                    ],
+                  )
+                  : Expanded(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        _chartLegendItem(
+                          "Cash",
+                          ctrl.methodBreakdown['Cash'] ?? 0,
+                          colCash,
+                          isMobile,
+                        ),
+                        const SizedBox(height: 12),
+                        _chartLegendItem(
+                          "Bkash",
+                          ctrl.methodBreakdown['Bkash'] ?? 0,
+                          colBkash,
+                          isMobile,
+                        ),
+                        const SizedBox(height: 12),
+                        _chartLegendItem(
+                          "Nagad",
+                          ctrl.methodBreakdown['Nagad'] ?? 0,
+                          colNagad,
+                          isMobile,
+                        ),
+                        const SizedBox(height: 12),
+                        _chartLegendItem(
+                          "Bank",
+                          ctrl.methodBreakdown['Bank'] ?? 0,
+                          colBank,
+                          isMobile,
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 12),
-                    _chartLegendItem(
-                      "Bkash",
-                      ctrl.methodBreakdown['Bkash'] ?? 0,
-                      colBkash,
-                    ),
-                    const SizedBox(height: 12),
-                    _chartLegendItem(
-                      "Nagad",
-                      ctrl.methodBreakdown['Nagad'] ?? 0,
-                      colNagad,
-                    ),
-                    const SizedBox(height: 12),
-                    _chartLegendItem(
-                      "Bank",
-                      ctrl.methodBreakdown['Bank'] ?? 0,
-                      colBank,
-                    ),
-                  ],
-                ),
-              ),
+                  ),
             ],
           ),
         ],
@@ -595,12 +676,21 @@ class DailyOverviewPage extends StatelessWidget {
     ];
   }
 
-  Widget _chartLegendItem(String label, double amount, Color color) {
+  Widget _chartLegendItem(
+    String label,
+    double amount,
+    Color color,
+    bool isMobile,
+  ) {
     if (amount == 0) return const SizedBox.shrink();
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+
+    Widget content = Row(
+      mainAxisSize: isMobile ? MainAxisSize.min : MainAxisSize.max,
+      mainAxisAlignment:
+          isMobile ? MainAxisAlignment.start : MainAxisAlignment.spaceBetween,
       children: [
         Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
             Container(
               width: 12,
@@ -610,7 +700,7 @@ class DailyOverviewPage extends StatelessWidget {
                 borderRadius: BorderRadius.circular(4),
               ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 8),
             Text(
               label,
               style: const TextStyle(
@@ -621,6 +711,7 @@ class DailyOverviewPage extends StatelessWidget {
             ),
           ],
         ),
+        SizedBox(width: isMobile ? 12 : 0),
         Text(
           "৳${NumberFormat("#,##0").format(amount)}",
           style: const TextStyle(
@@ -631,10 +722,22 @@ class DailyOverviewPage extends StatelessWidget {
         ),
       ],
     );
+
+    return isMobile
+        ? Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: surfaceWhite,
+            border: Border.all(color: borderGrey),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: content,
+        )
+        : content;
   }
 
   // =========================================
-  // 3. LEDGER COLUMNS (UPDATED UI)
+  // 3. LEDGER COLUMNS
   // =========================================
   Widget _buildLedgerColumn({
     required String title,
@@ -675,16 +778,19 @@ class DailyOverviewPage extends StatelessWidget {
               children: [
                 Icon(icon, size: 14, color: colorTheme),
                 const SizedBox(width: 8),
-                Text(
-                  title,
-                  style: TextStyle(
-                    color: colorTheme,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12,
-                    letterSpacing: 0.5,
+                Expanded(
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: colorTheme,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                      letterSpacing: 0.5,
+                    ),
                   ),
                 ),
-                const Spacer(),
                 Text(
                   "৳${NumberFormat("#,##0").format(total)}",
                   style: TextStyle(
@@ -696,6 +802,7 @@ class DailyOverviewPage extends StatelessWidget {
               ],
             ),
           ),
+
           // List
           if (items.isEmpty)
             Padding(
@@ -703,7 +810,7 @@ class DailyOverviewPage extends StatelessWidget {
               child: Center(
                 child: Column(
                   children: [
-                    Icon(
+                    const Icon(
                       FontAwesomeIcons.folderOpen,
                       size: 28,
                       color: borderGrey,
@@ -729,17 +836,14 @@ class DailyOverviewPage extends StatelessWidget {
               separatorBuilder:
                   (c, i) =>
                       Divider(height: 1, color: borderGrey.withOpacity(0.5)),
-              itemBuilder: (ctx, i) {
-                final item = items[i];
-                return _buildLedgerItemRow(item);
-              },
+              itemBuilder: (ctx, i) => _buildLedgerItemRow(items[i]),
             ),
         ],
       ),
     );
   }
 
-  // --- NEW: CLEAN LIST ITEM ROW ---
+  // --- CLEAN LIST ITEM ROW ---
   Widget _buildLedgerItemRow(LedgerItem item) {
     bool isIncome = item.type == 'income';
     Color amountColor = isIncome ? successGreen : errorRed;
@@ -753,7 +857,7 @@ class DailyOverviewPage extends StatelessWidget {
           _buildMethodIcon(item.method),
           const SizedBox(width: 14),
 
-          // 2. Details (Title, Subtitle & Badge)
+          // 2. Details
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -763,7 +867,7 @@ class DailyOverviewPage extends StatelessWidget {
                   children: [
                     Flexible(
                       child: Text(
-                        item.title, // e.g. "Condition Sale", "Deposit", "Expense"
+                        item.title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -780,7 +884,7 @@ class DailyOverviewPage extends StatelessWidget {
                 if (item.subtitle.isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Text(
-                    item.subtitle, // e.g. Customer Name, Bank Details, Note
+                    item.subtitle,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -823,7 +927,7 @@ class DailyOverviewPage extends StatelessWidget {
     );
   }
 
-  // --- HELPER: Visual Icon for the left side of the row ---
+  // --- HELPER: Visual Icon ---
   Widget _buildMethodIcon(String method) {
     IconData icon = FontAwesomeIcons.moneyBillWave;
     Color color = colCash;
@@ -852,7 +956,7 @@ class DailyOverviewPage extends StatelessWidget {
     );
   }
 
-  // --- HELPER: Small Badge next to the Title ---
+  // --- HELPER: Small Badge ---
   Widget _createMethodBadge(String method) {
     Color bg = slateLight;
     Color fg = slateMedium;

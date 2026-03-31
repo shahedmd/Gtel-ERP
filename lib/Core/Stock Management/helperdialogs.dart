@@ -34,17 +34,19 @@ Widget _buildField(
   return Padding(
     padding: const EdgeInsets.symmetric(vertical: 6),
     child: TextFormField(
+      
       controller: c,
       keyboardType: type ?? TextInputType.text,
       readOnly: readOnly,
       onTap: onTap,
       style: TextStyle(
-        fontSize: 14,
+        fontSize: 13,
         fontWeight: readOnly ? FontWeight.bold : FontWeight.normal,
         color: readOnly ? Colors.blue[900] : Colors.black,
       ),
       decoration: InputDecoration(
         labelText: label,
+        labelStyle: TextStyle(fontSize: 13),
         prefixIcon: Icon(
           icon,
           size: 18,
@@ -77,7 +79,7 @@ Widget _sectionHeader(String title) {
     child: Text(
       title.toUpperCase(),
       style: TextStyle(
-        fontSize: 11,
+        fontSize: 13,
         fontWeight: FontWeight.bold,
         color: Colors.blue[800],
         letterSpacing: 1.2,

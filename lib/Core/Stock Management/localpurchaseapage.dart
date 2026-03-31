@@ -419,7 +419,7 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
             ) {
               _internalSupplierCtrl = controller;
               return TextField(
-                style: TextStyle(fontSize:13),
+                style: TextStyle(fontSize: 13),
                 controller: controller,
                 focusNode: focusNode,
                 decoration: InputDecoration(
@@ -1503,7 +1503,11 @@ class _CreateProductInlineDialogState extends State<CreateProductInlineDialog> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       title: const Text(
         "Create New Product",
-        style: TextStyle(fontWeight: FontWeight.bold, color: darkSlate),
+        style: TextStyle(
+          fontWeight: FontWeight.bold,
+          color: darkSlate,
+          fontSize: 13,
+        ),
       ),
       content: SizedBox(
         width: 500,
@@ -1516,6 +1520,7 @@ class _CreateProductInlineDialogState extends State<CreateProductInlineDialog> {
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
                   color: activeAccent,
+                  fontSize: 13,
                 ),
               ),
               const SizedBox(height: 10),
@@ -1619,7 +1624,10 @@ class _CreateProductInlineDialogState extends State<CreateProductInlineDialog> {
       actions: [
         TextButton(
           onPressed: () => Get.back(),
-          child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
+          child: const Text(
+            "Cancel",
+            style: TextStyle(color: Colors.grey, fontSize: 13),
+          ),
         ),
         Obx(
           () => ElevatedButton(
@@ -1643,7 +1651,7 @@ class _CreateProductInlineDialogState extends State<CreateProductInlineDialog> {
                     )
                     : const Text(
                       "Create & Select",
-                      style: TextStyle(color: Colors.white),
+                      style: TextStyle(color: Colors.white, fontSize: 13),
                     ),
           ),
         ),
@@ -1698,6 +1706,7 @@ class _CreateProductInlineDialogState extends State<CreateProductInlineDialog> {
     bool isNumber = false,
   }) {
     return TextField(
+      style: TextStyle(fontSize: 13),
       controller: ctrl,
       keyboardType:
           isNumber
@@ -1705,6 +1714,7 @@ class _CreateProductInlineDialogState extends State<CreateProductInlineDialog> {
               : TextInputType.text,
       decoration: InputDecoration(
         labelText: label,
+        labelStyle: TextStyle(fontSize: 13),
         isDense: true,
         filled: true,
         fillColor: bgGrey,

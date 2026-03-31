@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
+
 // REPLACE with your actual path to the controller file
 import 'controller.dart';
 
@@ -21,16 +22,28 @@ class ProfitView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // --- RESPONSIVE BREAKPOINTS & TYPOGRAPHY ---
+    final double screenWidth = MediaQuery.sizeOf(context).width;
+    final bool isMobile = screenWidth < 600;
+
+    // Set base font to 13 for mobile, 14 for larger screens as requested
+    final double baseFont = isMobile ? 13.0 : 14.0;
+
     return Scaffold(
       backgroundColor: bgLight,
       appBar: AppBar(
-        title: const Text(
+        title: Text(
           "P&L Analysis",
-          style: TextStyle(color: darkBlue, fontWeight: FontWeight.bold),
+          style: TextStyle(
+            color: darkBlue,
+            fontWeight: FontWeight.bold,
+            fontSize: isMobile ? 16 : 18,
+          ),
         ),
         backgroundColor: Colors.white,
         elevation: 0,
         centerTitle: false,
+        iconTheme: const IconThemeData(color: darkBlue),
         actions: [
           IconButton(
             icon: const Icon(Icons.picture_as_pdf, color: brandRed),
@@ -41,7 +54,7 @@ class ProfitView extends StatelessWidget {
             icon: const Icon(Icons.refresh, color: brandBlue),
             onPressed: controller.refreshData,
           ),
-          const SizedBox(width: 10),
+          SizedBox(width: isMobile ? 10 : 20),
         ],
       ),
       body: Obx(() {
@@ -52,216 +65,238 @@ class ProfitView extends StatelessWidget {
         }
 
         return SingleChildScrollView(
-          padding: const EdgeInsets.all(20.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // --- FILTERS (UPDATED) ---
-              _buildFilterChips(context), // Pass context here
-              const SizedBox(height: 20),
-
-              // ============================================================
-              // 1. REVENUE VS CASH (The Big Picture)
-              // ============================================================
-              Row(
-                children: [
-                  Expanded(
-                    child: _buildMetricCard(
-                      title: "TOTAL INVOICED",
-                      subtitle: "(Sales Revenue)",
-                      value: controller.totalRevenue.value,
-                      color: brandBlue,
-                      icon: Icons.receipt_long_rounded,
-                    ),
-                  ),
-                  const SizedBox(width: 15),
-                  Expanded(
-                    child: _buildMetricCard(
-                      title: "ACTUAL CASH IN",
-                      subtitle: "(Total Collected)",
-                      value: controller.totalCollected.value,
-                      color: brandGreen,
-                      icon: Icons.savings_rounded,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 15),
-
-              // ============================================================
-              // 2. NET RECEIVABLES GAP
-              // ============================================================
-              _buildNetPendingGapCard(), // Renamed for clarity
-
-              const SizedBox(height: 30),
-
-              // ============================================================
-              // 3. PROFITABILITY
-              // ============================================================
-              _buildSectionHeader("PROFITABILITY ANALYSIS"),
-              const SizedBox(height: 15),
-
-              Row(
-                children: [
-                  // PAPER PROFIT
-                  Expanded(
-                    child: _buildProfitCard(
-                      label: "Paper Profit",
-                      subLabel: "Based on Invoices",
-                      amount: controller.profitOnRevenue.value,
-                      textColor: darkBlue,
-                      bgColor: Colors.white,
-                      borderColor: Colors.grey.shade200,
-                    ),
-                  ),
-                  const SizedBox(width: 15),
-                  // CASH PROFIT
-                  Expanded(
-                    child: _buildProfitCard(
-                      label: "CASH PROFIT",
-                      subLabel: "Realized in Hand",
-                      amount: controller.netRealizedProfit.value,
-                      textColor: Colors.white,
-                      bgColor: brandGreen,
-                      borderColor: brandGreen,
-                      isHighlighted: true,
-                    ),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 10),
-
-              // Average Margin
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(
-                  vertical: 8,
-                  horizontal: 12,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.05),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: brandBlue.withOpacity(0.1)),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
+          physics: const BouncingScrollPhysics(),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                maxWidth: 1200,
+              ), // Protects ultra-wide desktop monitors
+              child: Padding(
+                padding: EdgeInsets.all(isMobile ? 16.0 : 24.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(
-                      Icons.pie_chart_outline,
-                      size: 14,
-                      color: brandBlue,
+                    // --- FILTERS ---
+                    _buildFilterChips(context, baseFont),
+                    const SizedBox(height: 20),
+
+                    // ============================================================
+                    // 1. REVENUE VS CASH (The Big Picture)
+                    // ============================================================
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildMetricCard(
+                            title: "TOTAL INVOICED",
+                            subtitle: "(Sales Revenue)",
+                            value: controller.totalRevenue.value,
+                            color: brandBlue,
+                            icon: Icons.receipt_long_rounded,
+                            baseFont: baseFont,
+                          ),
+                        ),
+                        SizedBox(width: isMobile ? 12 : 16),
+                        Expanded(
+                          child: _buildMetricCard(
+                            title: "ACTUAL CASH IN",
+                            subtitle: "(Total Collected)",
+                            value: controller.totalCollected.value,
+                            color: brandGreen,
+                            icon: Icons.savings_rounded,
+                            baseFont: baseFont,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(height: 16),
+
+                    // ============================================================
+                    // 2. NET RECEIVABLES GAP
+                    // ============================================================
+                    _buildNetPendingGapCard(baseFont, isMobile),
+
+                    const SizedBox(height: 30),
+
+                    // ============================================================
+                    // 3. PROFITABILITY
+                    // ============================================================
+                    _buildSectionHeader("PROFITABILITY ANALYSIS", baseFont),
+                    const SizedBox(height: 16),
+
+                    Row(
+                      children: [
+                        // PAPER PROFIT
+                        Expanded(
+                          child: _buildProfitCard(
+                            label: "Paper Profit",
+                            subLabel: "Based on Invoices",
+                            amount: controller.profitOnRevenue.value,
+                            textColor: darkBlue,
+                            bgColor: Colors.white,
+                            borderColor: Colors.grey.shade200,
+                            baseFont: baseFont,
+                            isMobile: isMobile,
+                          ),
+                        ),
+                        SizedBox(width: isMobile ? 12 : 16),
+                        // CASH PROFIT
+                        Expanded(
+                          child: _buildProfitCard(
+                            label: "CASH PROFIT",
+                            subLabel: "Realized in Hand",
+                            amount: controller.netRealizedProfit.value,
+                            textColor: Colors.white,
+                            bgColor: brandGreen,
+                            borderColor: brandGreen,
+                            isHighlighted: true,
+                            baseFont: baseFont,
+                            isMobile: isMobile,
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    // Average Margin
+                    Container(
+                      width: double.infinity,
+                      padding: EdgeInsets.symmetric(
+                        vertical: isMobile ? 10 : 12,
+                        horizontal: 16,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.withOpacity(0.05),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: brandBlue.withOpacity(0.1)),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(
+                            Icons.pie_chart_outline,
+                            size: 16,
+                            color: brandBlue,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            "Average Profit Margin: ",
+                            style: TextStyle(
+                              fontSize: baseFont - 1,
+                              color: darkBlue.withOpacity(0.7),
+                            ),
+                          ),
+                          Text(
+                            "${(controller.effectiveProfitMargin.value * 100).toStringAsFixed(1)}%",
+                            style: TextStyle(
+                              fontSize: baseFont + 1,
+                              fontWeight: FontWeight.bold,
+                              color: brandBlue,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 30),
+
+                    // ============================================================
+                    // 4. BREAKDOWNS
+                    // ============================================================
+                    _buildSectionHeader("SOURCE BREAKDOWN", baseFont),
+                    const SizedBox(height: 16),
+
+                    // Sales Breakdown
                     Text(
-                      "Average Profit Margin: ",
+                      "Sales Volume (By Type)",
                       style: TextStyle(
-                        fontSize: 12,
-                        color: darkBlue.withOpacity(0.7),
+                        fontSize: baseFont - 2,
+                        color: Colors.grey,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        _buildMiniStat(
+                          "Daily/Retail",
+                          controller.saleDailyCustomer.value,
+                          Colors.blueGrey,
+                          baseFont,
+                        ),
+                        const SizedBox(width: 10),
+                        _buildMiniStat(
+                          "Debtor Credit",
+                          controller.saleDebtor.value,
+                          brandOrange,
+                          baseFont,
+                        ),
+                        const SizedBox(width: 10),
+                        _buildMiniStat(
+                          "Courier Cond.",
+                          controller.saleCondition.value,
+                          Colors.purple,
+                          baseFont,
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // Collection Breakdown
                     Text(
-                      "${(controller.effectiveProfitMargin.value * 100).toStringAsFixed(1)}%",
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.bold,
-                        color: brandBlue,
+                      "Cash Received (By Source)",
+                      style: TextStyle(
+                        fontSize: baseFont - 2,
+                        color: Colors.grey,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        _buildMiniStat(
+                          "Direct Cash",
+                          controller.collectionCustomer.value,
+                          brandBlue,
+                          baseFont,
+                        ),
+                        const SizedBox(width: 10),
+                        _buildMiniStat(
+                          "Old Due Paid",
+                          controller.collectionDebtor.value,
+                          Colors.teal,
+                          baseFont,
+                        ),
+                        const SizedBox(width: 10),
+                        _buildMiniStat(
+                          "Condition Paid",
+                          controller.collectionCondition.value,
+                          Colors.indigo,
+                          baseFont,
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 30),
+
+                    // ============================================================
+                    // 5. TRANSACTION LIST
+                    // ============================================================
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        _buildSectionHeader("RECENT INVOICES", baseFont),
+                        _buildSortDropdown(baseFont),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    _buildTransactionList(baseFont),
+                    const SizedBox(height: 50),
                   ],
                 ),
               ),
-
-              const SizedBox(height: 30),
-
-              // ============================================================
-              // 4. BREAKDOWNS
-              // ============================================================
-              _buildSectionHeader("SOURCE BREAKDOWN"),
-              const SizedBox(height: 15),
-
-              // Sales Breakdown
-              const Text(
-                "Sales Volume (By Type)",
-                style: TextStyle(
-                  fontSize: 11,
-                  color: Colors.grey,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  _buildMiniStat(
-                    "Daily/Retail",
-                    controller.saleDailyCustomer.value,
-                    Colors.blueGrey,
-                  ),
-                  const SizedBox(width: 10),
-                  _buildMiniStat(
-                    "Debtor Credit",
-                    controller.saleDebtor.value,
-                    brandOrange,
-                  ),
-                  const SizedBox(width: 10),
-                  _buildMiniStat(
-                    "Courier Cond.",
-                    controller.saleCondition.value,
-                    Colors.purple,
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 15),
-
-              // Collection Breakdown
-              const Text(
-                "Cash Received (By Source)",
-                style: TextStyle(
-                  fontSize: 11,
-                  color: Colors.grey,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  _buildMiniStat(
-                    "Direct Cash",
-                    controller.collectionCustomer.value,
-                    brandBlue,
-                  ),
-                  const SizedBox(width: 10),
-                  _buildMiniStat(
-                    "Old Due Paid",
-                    controller.collectionDebtor.value,
-                    Colors.teal,
-                  ),
-                  const SizedBox(width: 10),
-                  _buildMiniStat(
-                    "Condition Paid",
-                    controller.collectionCondition.value,
-                    Colors.indigo,
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 30),
-
-              // ============================================================
-              // 5. TRANSACTION LIST
-              // ============================================================
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  _buildSectionHeader("RECENT INVOICES"),
-                  _buildSortDropdown(),
-                ],
-              ),
-              const SizedBox(height: 15),
-              _buildTransactionList(),
-              const SizedBox(height: 50),
-            ],
+            ),
           ),
         );
       }),
@@ -272,12 +307,13 @@ class ProfitView extends StatelessWidget {
   // WIDGET HELPERS
   // --------------------------------------------------------------------------
 
-  // --- 1. UPDATED FILTER CHIPS WITH CUSTOM DATE ---
-  Widget _buildFilterChips(BuildContext context) {
+  // --- 1. FILTER CHIPS WITH CUSTOM DATE ---
+  Widget _buildFilterChips(BuildContext context, double baseFont) {
     List<String> presets = ['Today', 'This Month', 'Last 30 Days', 'This Year'];
 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
+      physics: const BouncingScrollPhysics(),
       child: Row(
         children: [
           // Standard Presets
@@ -294,7 +330,7 @@ class ProfitView extends StatelessWidget {
                   labelStyle: TextStyle(
                     color: isSelected ? Colors.white : darkBlue,
                     fontWeight: FontWeight.bold,
-                    fontSize: 12,
+                    fontSize: baseFont - 1,
                   ),
                   backgroundColor: Colors.white,
                   side: BorderSide(color: Colors.grey.shade200),
@@ -308,7 +344,7 @@ class ProfitView extends StatelessWidget {
           Obx(() {
             bool isCustom = controller.selectedFilterLabel.value == 'Custom';
 
-            // Format label if custom is selected (e.g. "12 Feb - 15 Feb")
+            // Format label if custom is selected
             String label =
                 isCustom
                     ? "${DateFormat('dd MMM').format(controller.startDate.value)} - ${DateFormat('dd MMM').format(controller.endDate.value)}"
@@ -325,7 +361,7 @@ class ProfitView extends StatelessWidget {
               labelStyle: TextStyle(
                 color: isCustom ? Colors.white : darkBlue,
                 fontWeight: FontWeight.bold,
-                fontSize: 12,
+                fontSize: baseFont - 1,
               ),
               side: BorderSide(
                 color: isCustom ? brandBlue : Colors.grey.shade200,
@@ -345,6 +381,7 @@ class ProfitView extends StatelessWidget {
     required double value,
     required Color color,
     required IconData icon,
+    required double baseFont,
   }) {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -376,16 +413,16 @@ class ProfitView extends StatelessWidget {
               ),
               Text(
                 subtitle,
-                style: const TextStyle(fontSize: 9, color: Colors.grey),
+                style: TextStyle(fontSize: baseFont - 4, color: Colors.grey),
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           Text(
             title,
             style: TextStyle(
               color: darkBlue.withOpacity(0.6),
-              fontSize: 10,
+              fontSize: baseFont - 3,
               fontWeight: FontWeight.w700,
             ),
           ),
@@ -396,7 +433,7 @@ class ProfitView extends StatelessWidget {
             child: Text(
               "Tk ${NumberFormat('#,##0').format(value)}",
               style: TextStyle(
-                fontSize: 18,
+                fontSize: baseFont + 6,
                 fontWeight: FontWeight.bold,
                 color: darkBlue,
               ),
@@ -408,12 +445,9 @@ class ProfitView extends StatelessWidget {
   }
 
   // --- NET PENDING GAP CARD ---
-  Widget _buildNetPendingGapCard() {
+  Widget _buildNetPendingGapCard(double baseFont, bool isMobile) {
     return Obx(() {
       double pendingChange = controller.netPendingChange.value;
-      // Positive = Sales > Collection (Bad/Neutral - Market Debt Grew)
-      // Negative = Collection > Sales (Good - Recovered Money)
-
       bool debtIncreased = pendingChange > 0;
 
       Color statusColor = debtIncreased ? Colors.orange.shade800 : brandGreen;
@@ -445,14 +479,18 @@ class ProfitView extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      Icon(icon, size: 16, color: statusColor),
-                      const SizedBox(width: 6),
-                      Text(
-                        mainText,
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: statusColor,
-                          fontSize: 12,
+                      Icon(icon, size: 18, color: statusColor),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          mainText,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: statusColor,
+                            fontSize: baseFont - 1,
+                          ),
                         ),
                       ),
                     ],
@@ -462,18 +500,22 @@ class ProfitView extends StatelessWidget {
                     subText,
                     style: TextStyle(
                       color: statusColor.withOpacity(0.8),
-                      fontSize: 11,
+                      fontSize: baseFont - 2,
                     ),
                   ),
                 ],
               ),
             ),
-            Text(
-              "Tk ${NumberFormat('#,##0').format(pendingChange.abs())}",
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 18,
-                color: statusColor,
+            const SizedBox(width: 10),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                "Tk ${NumberFormat('#,##0').format(pendingChange.abs())}",
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: isMobile ? 18 : 20,
+                  color: statusColor,
+                ),
               ),
             ),
           ],
@@ -490,10 +532,12 @@ class ProfitView extends StatelessWidget {
     required Color textColor,
     required Color bgColor,
     required Color borderColor,
+    required double baseFont,
+    required bool isMobile,
     bool isHighlighted = false,
   }) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(isMobile ? 16 : 20),
       decoration: BoxDecoration(
         color: bgColor,
         borderRadius: BorderRadius.circular(16),
@@ -522,7 +566,7 @@ class ProfitView extends StatelessWidget {
             style: TextStyle(
               color:
                   isHighlighted ? Colors.white.withOpacity(0.9) : Colors.grey,
-              fontSize: 10,
+              fontSize: baseFont - 3,
               fontWeight: FontWeight.bold,
               letterSpacing: 0.5,
             ),
@@ -533,7 +577,7 @@ class ProfitView extends StatelessWidget {
             child: Text(
               NumberFormat('#,##0').format(amount),
               style: TextStyle(
-                fontSize: 22,
+                fontSize: isMobile ? 22 : 26,
                 fontWeight: FontWeight.bold,
                 color: textColor,
               ),
@@ -545,7 +589,7 @@ class ProfitView extends StatelessWidget {
             style: TextStyle(
               color:
                   isHighlighted ? Colors.white.withOpacity(0.8) : Colors.grey,
-              fontSize: 9,
+              fontSize: baseFont - 4,
             ),
           ),
         ],
@@ -554,7 +598,12 @@ class ProfitView extends StatelessWidget {
   }
 
   // --- MINI STAT ---
-  Widget _buildMiniStat(String label, double value, Color color) {
+  Widget _buildMiniStat(
+    String label,
+    double value,
+    Color color,
+    double baseFont,
+  ) {
     return Expanded(
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
@@ -567,18 +616,18 @@ class ProfitView extends StatelessWidget {
           children: [
             Text(
               label,
-              style: const TextStyle(fontSize: 10, color: Colors.grey),
+              style: TextStyle(fontSize: baseFont - 3, color: Colors.grey),
               textAlign: TextAlign.center,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 6),
             FittedBox(
               fit: BoxFit.scaleDown,
               child: Text(
                 NumberFormat.compact().format(value),
                 style: TextStyle(
-                  fontSize: 14,
+                  fontSize: baseFont + 2,
                   fontWeight: FontWeight.bold,
                   color: color,
                 ),
@@ -591,12 +640,12 @@ class ProfitView extends StatelessWidget {
   }
 
   // --- SECTION HEADER ---
-  Widget _buildSectionHeader(String title) {
+  Widget _buildSectionHeader(String title, double baseFont) {
     return Text(
       title,
-      style: const TextStyle(
+      style: TextStyle(
         color: darkBlue,
-        fontSize: 14,
+        fontSize: baseFont + 2,
         fontWeight: FontWeight.bold,
         letterSpacing: 0.5,
       ),
@@ -604,10 +653,10 @@ class ProfitView extends StatelessWidget {
   }
 
   // --- SORT DROPDOWN ---
-  Widget _buildSortDropdown() {
+  Widget _buildSortDropdown(double baseFont) {
     return Obx(
       () => Container(
-        height: 30,
+        height: 32,
         padding: const EdgeInsets.symmetric(horizontal: 10),
         decoration: BoxDecoration(
           color: Colors.white,
@@ -617,8 +666,12 @@ class ProfitView extends StatelessWidget {
         child: DropdownButtonHideUnderline(
           child: DropdownButton<String>(
             value: controller.sortOption.value,
-            icon: const Icon(Icons.arrow_drop_down, size: 16),
-            style: const TextStyle(fontSize: 11, color: darkBlue),
+            icon: const Icon(Icons.arrow_drop_down, size: 18),
+            style: TextStyle(
+              fontSize: baseFont - 2,
+              color: darkBlue,
+              fontWeight: FontWeight.w600,
+            ),
             items:
                 ['Date (Newest)', 'Profit (High > Low)', 'Loss (High > Low)']
                     .map(
@@ -634,7 +687,7 @@ class ProfitView extends StatelessWidget {
   }
 
   // --- TRANSACTION LIST ---
-  Widget _buildTransactionList() {
+  Widget _buildTransactionList(double baseFont) {
     return Obx(() {
       if (controller.transactionList.isEmpty) {
         return Container(
@@ -644,10 +697,10 @@ class ProfitView extends StatelessWidget {
             color: Colors.white,
             borderRadius: BorderRadius.circular(12),
           ),
-          child: const Center(
+          child: Center(
             child: Text(
               "No sales records for this period",
-              style: TextStyle(color: Colors.grey),
+              style: TextStyle(color: Colors.grey, fontSize: baseFont),
             ),
           ),
         );
@@ -691,41 +744,43 @@ class ProfitView extends StatelessWidget {
                     children: [
                       Text(
                         item['name'] ?? 'Unknown',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontWeight: FontWeight.bold,
-                          fontSize: 13,
+                          fontSize: baseFont,
                           color: darkBlue,
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      const SizedBox(height: 2),
+                      const SizedBox(height: 4),
                       Text(
                         DateFormat('dd MMM • hh:mm a').format(item['date']),
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: Colors.grey,
-                          fontSize: 10,
+                          fontSize: baseFont - 3,
                         ),
                       ),
                     ],
                   ),
                 ),
+                const SizedBox(width: 8),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Text(
                       "Tk ${NumberFormat('#,##0').format(item['total'])}",
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        fontSize: 13,
+                        fontSize: baseFont,
                         color: darkBlue,
                       ),
                     ),
+                    const SizedBox(height: 2),
                     Text(
                       "Profit: ${NumberFormat('#,##0').format(item['profit'])}",
                       style: TextStyle(
                         color: isLoss ? brandRed : brandGreen,
-                        fontSize: 11,
+                        fontSize: baseFont - 2,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
