@@ -43,7 +43,23 @@ class ProfitController extends GetxController {
   @override
   void onInit() {
     super.onInit();
-    setDateRange('This Month');
+    // [FIX 1] Immediately show loading so the screen isn't blank
+    isLoading.value = true;
+
+    // Safely set an initial date range so the UI has valid dates immediately
+    final now = DateTime.now();
+    startDate.value = DateTime(now.year, now.month, 1);
+    endDate.value = DateTime(now.year, now.month + 1, 0, 23, 59, 59);
+  }
+
+  @override
+  void onReady() {
+    super.onReady();
+    // [FIX 2] Wait 250ms for the page transition animation to finish smoothly
+    // BEFORE starting the heavy Firestore fetching and calculations.
+    Future.delayed(const Duration(milliseconds: 250), () {
+      setDateRange('This Month');
+    });
   }
 
   void refreshData() => fetchProfitAndLoss();
@@ -208,7 +224,14 @@ class ProfitController extends GetxController {
 
     List<Map<String, dynamic>> tempTransactions = [];
 
+    // [FIX 3] Add a counter to yield the thread and stop micro-freezes
+    int loopCounter = 0;
+
     for (var doc in invoiceSnap.docs) {
+      loopCounter++;
+      // Yield every 100 documents to let the UI spin the loader freely
+      if (loopCounter % 100 == 0) await Future.delayed(Duration.zero);
+
       var data = doc.data() as Map<String, dynamic>;
 
       String status = (data['status'] ?? '').toString().toLowerCase();
@@ -338,7 +361,13 @@ class ProfitController extends GetxController {
             )
             .get();
 
+    //[FIX 4] Counter for daily collections loop
+    int dailyCounter = 0;
+
     for (var doc in dailySnap.docs) {
+      dailyCounter++;
+      if (dailyCounter % 100 == 0) await Future.delayed(Duration.zero);
+
       var data = doc.data() as Map<String, dynamic>;
 
       // Get the amount actually paid
@@ -390,7 +419,13 @@ class ProfitController extends GetxController {
               .where('type', isEqualTo: 'deposit')
               .get();
 
+      // [FIX 5] Counter for ledger loop
+      int ledgerCounter = 0;
+
       for (var doc in ledgerSnap.docs) {
+        ledgerCounter++;
+        if (ledgerCounter % 100 == 0) await Future.delayed(Duration.zero);
+
         var data = doc.data() as Map<String, dynamic>;
         String source = (data['source'] ?? '').toString().toLowerCase();
 

@@ -542,7 +542,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                   child: _erpInput(
                     controller.nameC,
                     "Shop Name",
-                    icon: Icons.person,
+                    icon: Icons.store,
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -552,7 +552,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                   child: _erpInput(
                     controller.shopC,
                     "Customer Name",
-                    icon: Icons.store,
+                    icon: Icons.person,
                   ),
                 ),
                 const SizedBox(width: 10),

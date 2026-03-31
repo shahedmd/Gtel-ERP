@@ -1063,7 +1063,7 @@ class DailySalesController extends GetxController {
               ),
               pw.SizedBox(height: 2),
               pw.Text(
-                "6/24A(7th Floor) Gulistan Shopping Complex (Hall Market)\n2 Bangabandu Avenue, Dhaka 1000",
+                "6/24A(6th Floor) Gulistan Shopping Complex (Hall Market)\n2 Bangabandu Avenue, Dhaka 1000",
                 style: pw.TextStyle(font: reg, fontSize: 9),
               ),
               pw.Text(
