@@ -186,26 +186,23 @@ class ConditionSalesPage extends StatelessWidget {
   // ==============================================================================
   Widget _buildFilters(BuildContext context, ConditionSalesController ctrl) {
     return Container(
+      width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-      child: Row(
+      child: Wrap(
+        spacing: 12,
+        runSpacing: 12,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           _filterChip(ctrl, "Today"),
-          const SizedBox(width: 8),
           _filterChip(ctrl, "This Month"),
-          const SizedBox(width: 8),
           _filterChip(ctrl, "Last Month"),
-          const SizedBox(width: 8),
           _filterChip(ctrl, "This Year"),
-          const SizedBox(width: 8),
           _filterChip(ctrl, "All Time"),
-          const SizedBox(width: 8),
           _customDateChip(context, ctrl),
-          const SizedBox(width: 16),
 
           // Courier Dropdown Filter
           Obx(() {
             List<String> couriers = ["All", ...ctrl.courierBalances.keys];
-            // Ensure selected value exists in the list
             if (!couriers.contains(ctrl.selectedCourierFilter.value)) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 ctrl.selectedCourierFilter.value = "All";
@@ -245,8 +242,7 @@ class ConditionSalesPage extends StatelessWidget {
                   onChanged: (val) {
                     if (val != null) {
                       ctrl.selectedCourierFilter.value = val;
-                      ctrl.filteredOrders
-                          .refresh(); // Trigger client side filter
+                      // Observer `ever` in controller handles the actual sorting now!
                     }
                   },
                 ),
@@ -254,10 +250,9 @@ class ConditionSalesPage extends StatelessWidget {
             );
           }),
 
-          const Spacer(),
           // Search Bar
           Container(
-            width: 300,
+            width: 280, // Restricts width but uses Wrap gracefully
             height: 40,
             padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
@@ -268,7 +263,7 @@ class ConditionSalesPage extends StatelessWidget {
             child: TextField(
               onChanged: (v) => ctrl.searchQuery.value = v,
               decoration: const InputDecoration(
-                hintText: "Search Invoice, Phone, Challan...",
+                hintText: "Search Name, Challan, Invoice...",
                 hintStyle: TextStyle(fontSize: 13),
                 border: InputBorder.none,
                 icon: Icon(Icons.search, size: 20, color: Colors.grey),
@@ -770,7 +765,6 @@ class ConditionSalesPage extends StatelessWidget {
                   Expanded(
                     child: ElevatedButton(
                       onPressed: () {
-                        // Dialog closes inside the controller function
                         ctrl.deleteConditionSale(order);
                       },
                       style: ElevatedButton.styleFrom(

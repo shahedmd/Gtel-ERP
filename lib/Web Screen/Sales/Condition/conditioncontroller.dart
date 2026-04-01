@@ -51,6 +51,11 @@ class ConditionSalesController extends GetxController {
     loadConditionSales();
 
     ever(selectedFilter, (_) => _handleFilterChange());
+    ever(customDateRange, (_) => _handleFilterChange());
+
+    // FIX: Listen to Courier Filter Dropdown Changes
+    ever(selectedCourierFilter, (_) => applyClientSideFilters());
+
     ever(searchQuery, (val) {
       if (_debounce?.isActive ?? false) _debounce!.cancel();
       _debounce = Timer(const Duration(milliseconds: 500), () {
@@ -61,7 +66,6 @@ class ConditionSalesController extends GetxController {
         }
       });
     });
-    ever(customDateRange, (_) => _handleFilterChange());
   }
 
   // ==============================================================================
@@ -77,8 +81,6 @@ class ConditionSalesController extends GetxController {
     }
   }
 
-  // ✨ FIX 1: By removing 'isCondition' from the database query and doing it in Dart,
-  // we bypass the missing index error that was returning 0 results.
   Future<void> _performServerSideSearch(String query) async {
     isLoading.value = true;
     allOrders.clear();
@@ -86,34 +88,96 @@ class ConditionSalesController extends GetxController {
     hasMore.value = false;
 
     try {
-      QuerySnapshot snap;
-      snap =
+      String q = query.trim();
+      Iterable<DocumentSnapshot> searchResults = [];
+
+      // 1. Search by Invoice ID
+      QuerySnapshot snap =
           await _db
               .collection('sales_orders')
-              .where('invoiceId', isEqualTo: query.trim())
+              .where('invoiceId', isEqualTo: q)
               .get();
+      searchResults = snap.docs;
 
-      if (snap.docs.isEmpty) {
+      // 2. Search by Phone Number
+      if (searchResults.isEmpty) {
         snap =
             await _db
                 .collection('sales_orders')
-                .where('customerPhone', isEqualTo: query.trim())
+                .where('customerPhone', isEqualTo: q)
                 .orderBy('timestamp', descending: true)
                 .limit(20)
                 .get();
+        searchResults = snap.docs;
       }
 
-      if (snap.docs.isEmpty) {
+      // 3. Search by Challan No
+      if (searchResults.isEmpty) {
         snap =
             await _db
                 .collection('sales_orders')
-                .where('challanNo', isEqualTo: query.trim())
+                .where('challanNo', isEqualTo: q)
                 .get();
+        searchResults = snap.docs;
       }
 
-      // Filter locally in Dart to avoid Composite Index crash
+      // 4. Search by Customer Name (Case-Insensitive Multi-Query Workaround)
+      if (searchResults.isEmpty && q.isNotEmpty) {
+        // Prepare common text cases
+        String lowerCase = q.toLowerCase();
+        String upperCase = q.toUpperCase();
+        // Converts "john doe" to "John Doe"
+        String titleCase = q
+            .split(' ')
+            .map(
+              (word) =>
+                  word.isNotEmpty
+                      ? '${word[0].toUpperCase()}${word.substring(1).toLowerCase()}'
+                      : '',
+            )
+            .join(' ');
+
+        // Run queries concurrently for maximum speed
+        var results = await Future.wait([
+          _db
+              .collection('sales_orders')
+              .where('customerName', isGreaterThanOrEqualTo: lowerCase)
+              .where('customerName', isLessThanOrEqualTo: lowerCase + '\uf8ff')
+              .limit(20)
+              .get(),
+          _db
+              .collection('sales_orders')
+              .where('customerName', isGreaterThanOrEqualTo: upperCase)
+              .where('customerName', isLessThanOrEqualTo: upperCase + '\uf8ff')
+              .limit(20)
+              .get(),
+          _db
+              .collection('sales_orders')
+              .where('customerName', isGreaterThanOrEqualTo: titleCase)
+              .where('customerName', isLessThanOrEqualTo: titleCase + '\uf8ff')
+              .limit(20)
+              .get(),
+          _db
+              .collection('sales_orders')
+              .where('customerName', isGreaterThanOrEqualTo: q)
+              .where('customerName', isLessThanOrEqualTo: q + '\uf8ff')
+              .limit(20)
+              .get(),
+        ]);
+
+        // Merge results and remove duplicates (if any matched multiple times)
+        Map<String, DocumentSnapshot> uniqueDocs = {};
+        for (var res in results) {
+          for (var doc in res.docs) {
+            uniqueDocs[doc.id] = doc;
+          }
+        }
+        searchResults = uniqueDocs.values;
+      }
+
+      // Filter local Condition constraints
       List<ConditionOrderModel> tempOrders = [];
-      for (var doc in snap.docs) {
+      for (var doc in searchResults) {
         final data = doc.data() as Map<String, dynamic>;
         if (data['isCondition'] == true) {
           tempOrders.add(ConditionOrderModel.fromFirestore(doc));
@@ -121,8 +185,7 @@ class ConditionSalesController extends GetxController {
       }
 
       allOrders.value = tempOrders;
-      filteredOrders.value = allOrders;
-      _calculateStats();
+      applyClientSideFilters();
     } catch (e) {
       print("Search Error: $e");
     } finally {
@@ -171,8 +234,7 @@ class ConditionSalesController extends GetxController {
           allOrders.value = newOrders;
         }
       }
-      _applyClientSideFilters();
-      _calculateStats();
+      applyClientSideFilters();
     } catch (e) {
       print("Error loading sales: $e");
     } finally {
@@ -181,7 +243,6 @@ class ConditionSalesController extends GetxController {
     }
   }
 
-  // ✨ FIX 2: Bypassing the Composite Index trap on Date Filters.
   Future<void> fetchReportData() async {
     isLoading.value = true;
     allOrders.clear();
@@ -218,7 +279,6 @@ class ConditionSalesController extends GetxController {
     }
 
     try {
-      // ONLY querying the timestamp bypasses the index error.
       QuerySnapshot snap =
           await _db
               .collection('sales_orders')
@@ -230,7 +290,6 @@ class ConditionSalesController extends GetxController {
               .orderBy('timestamp', descending: true)
               .get();
 
-      // Filter locally in Dart to only show condition sales
       List<ConditionOrderModel> tempOrders = [];
       for (var doc in snap.docs) {
         final data = doc.data() as Map<String, dynamic>;
@@ -240,8 +299,7 @@ class ConditionSalesController extends GetxController {
       }
 
       allOrders.value = tempOrders;
-      _applyClientSideFilters();
-      _calculateStats();
+      applyClientSideFilters();
     } catch (e) {
       print("Report Error: $e");
     } finally {
@@ -249,20 +307,34 @@ class ConditionSalesController extends GetxController {
     }
   }
 
-  void _applyClientSideFilters() {
+  // FIX: Dynamic Sorting & Courier Filtering Application
+  void applyClientSideFilters() {
     List<ConditionOrderModel> temp = List.from(allOrders);
+
+    // 1. Courier Filter check
     if (selectedCourierFilter.value != "All") {
       temp =
           temp
               .where((o) => o.courierName == selectedCourierFilter.value)
               .toList();
     }
+
+    // 2. Sorting Logic (Due items top, Paid items bottom, internally sorted by Date)
+    temp.sort((a, b) {
+      bool aIsPaid = a.courierDue <= 1.0;
+      bool bIsPaid = b.courierDue <= 1.0;
+
+      if (aIsPaid == bIsPaid) {
+        return b.date.compareTo(a.date);
+      }
+      return aIsPaid ? 1 : -1;
+    });
+
     filteredOrders.value = temp;
     _calculateStats();
   }
 
   void _calculateStats() async {
-    // 1. If looking at "All Time", fetch the real total from courier ledgers instantly!
     if (selectedFilter.value == "All Time" && searchQuery.value.isEmpty) {
       try {
         final snap = await _db.collection('courier_ledgers').get();
@@ -277,15 +349,12 @@ class ConditionSalesController extends GetxController {
             total += due;
           }
         }
-
         courierBalances.value = cBalances;
         totalPendingAmount.value = total;
       } catch (e) {
         print("Global Stat Error: $e");
       }
-    }
-    // 2. If filtering or searching, sum up the currently loaded items
-    else {
+    } else {
       double total = 0.0;
       Map<String, double> cBalances = {};
 
@@ -300,7 +369,6 @@ class ConditionSalesController extends GetxController {
           }
         }
       }
-
       totalPendingAmount.value = total;
       courierBalances.value = cBalances;
     }
@@ -316,7 +384,6 @@ class ConditionSalesController extends GetxController {
     receivedAmount = double.parse(receivedAmount.toStringAsFixed(2));
 
     if (receivedAmount > order.courierDue + 1) {
-      // +1 tolerance
       Get.snackbar("Error", "Amount exceeds due balance");
       return;
     }
@@ -467,6 +534,10 @@ class ConditionSalesController extends GetxController {
     }
   }
 
+  // ==============================================================================
+  // PRINTING & PDF GENERATION (Kept Intact)
+  // ==============================================================================
+
   Future<void> printInvoice(ConditionOrderModel order) async {
     isLoading.value = true;
     try {
@@ -493,14 +564,11 @@ class ConditionSalesController extends GetxController {
       Map<String, dynamic> paymentMap = Map<String, dynamic>.from(
         data['paymentDetails'] ?? {},
       );
-
       double realDue =
           double.tryParse(data['courierDue']?.toString() ?? '0') ?? 0.0;
       paymentMap['due'] = realDue;
 
       double discountVal = (data['discount'] as num?)?.toDouble() ?? 0.0;
-
-      // 🌟 FIX PART A: EXTRACT THE DISCOUNT NOTE FROM FIRESTORE FOR REPRINT 🌟
       String savedDiscountNote = data['discountNote'] ?? "";
 
       double oldDueSnap =
@@ -543,8 +611,7 @@ class ConditionSalesController extends GetxController {
         authorizedName: sellerName,
         authorizedPhone: sellerPhone,
         discount: discountVal,
-        discountNote:
-            savedDiscountNote, // 🌟 FIX PART B: PASS THE SAVED NOTE TO PDF 🌟
+        discountNote: savedDiscountNote,
         packagerName: packagerName,
       );
     } catch (e) {
@@ -572,7 +639,7 @@ class ConditionSalesController extends GetxController {
     required String authorizedName,
     required String authorizedPhone,
     double discount = 0.0,
-    String discountNote = "", // <-- ADDED PARAMETER
+    String discountNote = "",
     String? packagerName,
   }) async {
     final pdf = pw.Document();
@@ -670,7 +737,7 @@ class ConditionSalesController extends GetxController {
               items,
               boldFont,
               regularFont,
-              discountNote, // <-- PASSING IT DOWN TO SUMMARY
+              discountNote,
             ),
             pw.SizedBox(height: 5),
             _buildNewDues(totalPreviousBalance, netTotalDue, regularFont),
@@ -1052,18 +1119,15 @@ class ConditionSalesController extends GetxController {
     List items,
     pw.Font bold,
     pw.Font reg,
-    String discountNote, // <-- ADDED TO SUMMARY
+    String discountNote,
   ) {
     int totalQty = items.fold(
       0,
       (sumv, item) => sumv + ((item['qty'] as num?)?.toInt() ?? 0),
     );
-
-    // FORMAT DISCOUNT STRING CLEANLY
     String discountLabel = "Less Discount";
     if (discountNote.isNotEmpty) {
-      discountLabel +=
-          " ($discountNote)"; // Dynamically appends exactly what was saved
+      discountLabel += " ($discountNote)";
     }
 
     return pw.Container(
@@ -1109,12 +1173,7 @@ class ConditionSalesController extends GetxController {
                     bold,
                     reg,
                   ),
-                  _sumRow(
-                    discountLabel, // <-- DYNAMIC DISCOUNT LABEL
-                    discount.toStringAsFixed(2),
-                    reg,
-                    reg,
-                  ),
+                  _sumRow(discountLabel, discount.toStringAsFixed(2), reg, reg),
                   _sumRow("Add VAT", "0.00", reg, reg),
                   _sumRow("Add Extra Charges", "0.00", reg, reg),
                   pw.Divider(thickness: 0.5, height: 8),
@@ -1322,7 +1381,6 @@ class ConditionSalesController extends GetxController {
 
   pw.Widget _buildChallanCenterBox(pw.Font bold, pw.Font reg, double due) {
     bool isPaid = due <= 0;
-
     return pw.Container(
       width: double.infinity,
       padding: const pw.EdgeInsets.all(20),
@@ -1416,7 +1474,6 @@ class ConditionSalesController extends GetxController {
     );
   }
 
-  // --- UPDATED SAFE _sumRow: PREVENTS LONG NOTES FROM CRASHING THE PDF ---
   pw.Widget _sumRow(
     String label,
     String value,
@@ -1427,8 +1484,7 @@ class ConditionSalesController extends GetxController {
       padding: const pw.EdgeInsets.symmetric(vertical: 2),
       child: pw.Row(
         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-        crossAxisAlignment:
-            pw.CrossAxisAlignment.start, // Safely handles multi-line wraps
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
           pw.Expanded(
             child: pw.Text(
@@ -1473,6 +1529,10 @@ class ConditionSalesController extends GetxController {
     );
   }
 
+  // ==============================================================================
+  // ACTIONS (Update & Delete)
+  // ==============================================================================
+
   Future<void> updateChallanNumber(
     String invoiceId,
     String phone,
@@ -1489,16 +1549,19 @@ class ConditionSalesController extends GetxController {
           .collection('sales_orders')
           .doc(invoiceId);
       batch.update(masterRef, {'challanNo': newChallan});
+
       DocumentReference subOrderRef = _db
           .collection('condition_customers')
           .doc(phone)
           .collection('orders')
           .doc(invoiceId);
       batch.update(subOrderRef, {'challanNo': newChallan});
+
       DocumentReference custRef = _db
           .collection('condition_customers')
           .doc(phone);
       batch.update(custRef, {'lastChallan': newChallan});
+
       await batch.commit();
 
       if (selectedFilter.value == "All Time") {
@@ -1591,7 +1654,6 @@ class ConditionSalesController extends GetxController {
         DocumentReference custRef = _db
             .collection('condition_customers')
             .doc(customerPhone);
-
         if (currentCourierDue > 0) {
           batch.update(custRef, {
             "totalCourierDue": FieldValue.increment(-currentCourierDue),
@@ -1611,7 +1673,6 @@ class ConditionSalesController extends GetxController {
               .collection('daily_sales')
               .where('transactionId', isEqualTo: invoiceId)
               .get();
-
       for (var doc in dailySnaps.docs) {
         batch.delete(doc.reference);
       }
@@ -1619,18 +1680,17 @@ class ConditionSalesController extends GetxController {
       await batch.commit();
 
       allOrders.removeWhere((o) => o.invoiceId == invoiceId);
-      _applyClientSideFilters();
+      applyClientSideFilters(); // Replaced here as well
 
       if (Get.isDialogOpen ?? false) Get.back();
 
       Get.snackbar(
         "Deleted Successfully",
-        "Condition Sale removed & Stock restored to SEA.",
+        "Condition Sale removed & Stock restored.",
         backgroundColor: Colors.green,
         colorText: Colors.white,
       );
     } catch (e) {
-      print("Delete Condition Error: $e");
       Get.snackbar(
         "Error",
         "Could not delete order: $e",

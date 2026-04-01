@@ -1,7 +1,7 @@
 // ignore_for_file: deprecated_member_use, avoid_print, empty_catches
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/material.dart'; // Required for DateRangePicker
+import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
@@ -16,16 +16,16 @@ class ProfitController extends GetxController {
   // --- FILTERS ---
   var startDate = DateTime.now().obs;
   var endDate = DateTime.now().obs;
-  var selectedFilterLabel = "This Month".obs;
+  var selectedFilterLabel = "Today".obs; // Default to Today
 
   // --- METRICS ---
-  var totalRevenue = 0.0.obs; // Total Sales (Grand Total)
-  var totalCostOfGoods = 0.0.obs; // Total Cost
-  var profitOnRevenue = 0.0.obs; // PAPER PROFIT (Accrual)
+  var totalRevenue = 0.0.obs;
+  var totalCostOfGoods = 0.0.obs;
+  var profitOnRevenue = 0.0.obs;
 
-  var totalCollected = 0.0.obs; // Total Cash In Hand (Actual Cash)
-  var netRealizedProfit = 0.0.obs; // YOUR MAIN PROFIT (Based on isFullyPaid)
-  var netPendingChange = 0.0.obs; // Receivables Gap
+  var totalCollected = 0.0.obs;
+  var netRealizedProfit = 0.0.obs;
+  var netPendingChange = 0.0.obs;
   var effectiveProfitMargin = 0.0.obs;
 
   // --- BREAKDOWNS ---
@@ -43,26 +43,33 @@ class ProfitController extends GetxController {
   @override
   void onInit() {
     super.onInit();
-    // [FIX 1] Immediately show loading so the screen isn't blank
     isLoading.value = true;
 
-    // Safely set an initial date range so the UI has valid dates immediately
+    // Set default values to TODAY
     final now = DateTime.now();
-    startDate.value = DateTime(now.year, now.month, 1);
-    endDate.value = DateTime(now.year, now.month + 1, 0, 23, 59, 59);
+    startDate.value = DateTime(now.year, now.month, now.day);
+    endDate.value = DateTime(now.year, now.month, now.day, 23, 59, 59);
   }
 
   @override
   void onReady() {
     super.onReady();
-    // [FIX 2] Wait 250ms for the page transition animation to finish smoothly
-    // BEFORE starting the heavy Firestore fetching and calculations.
+    // Trigger Today's fetch on page load
     Future.delayed(const Duration(milliseconds: 250), () {
-      setDateRange('This Month');
+      setDateRange('Today');
     });
   }
 
   void refreshData() => fetchProfitAndLoss();
+
+  // --- FAST PARSING HELPER ---
+  double _parseDouble(dynamic val) {
+    if (val == null) return 0.0;
+    if (val is double) return val;
+    if (val is int) return val.toDouble();
+    if (val is String) return double.tryParse(val) ?? 0.0;
+    return 0.0;
+  }
 
   // --- SORTING ---
   void sortTransactions(String? type) {
@@ -80,10 +87,8 @@ class ProfitController extends GetxController {
   }
 
   // =========================================================================
-  // DATE FILTERS & CUSTOM PICKER
+  // DATE FILTERS (Restored YOUR Original Formula)
   // =========================================================================
-
-  // 1. Standard Presets (Today, This Month, etc.)
   void setDateRange(String type) {
     selectedFilterLabel.value = type;
     final now = DateTime.now();
@@ -102,16 +107,14 @@ class ProfitController extends GetxController {
       endDate.value = DateTime(now.year, 12, 31, 23, 59, 59);
     }
 
-    // Trigger fetch automatically
     fetchProfitAndLoss();
   }
 
-  // 2. Custom Date Range Picker (New Feature)
   Future<void> pickDateRange(BuildContext context) async {
     final DateTimeRange? picked = await showDateRangePicker(
       context: context,
-      firstDate: DateTime(2022), // Adjust to your app's start year
-      lastDate: DateTime.now(),
+      firstDate: DateTime(2022),
+      lastDate: DateTime(2050), // Prevents Crash
       initialDateRange: DateTimeRange(
         start: startDate.value,
         end: endDate.value,
@@ -121,9 +124,6 @@ class ProfitController extends GetxController {
           data: ThemeData.light().copyWith(
             primaryColor: Colors.blue[900],
             colorScheme: ColorScheme.light(primary: Colors.blue[900]!),
-            buttonTheme: const ButtonThemeData(
-              textTheme: ButtonTextTheme.primary,
-            ),
           ),
           child: child!,
         );
@@ -131,16 +131,12 @@ class ProfitController extends GetxController {
     );
 
     if (picked != null) {
-      selectedFilterLabel.value = 'Custom'; // Update label for UI highlight
-
-      // Set Start Date (Beginning of day)
+      selectedFilterLabel.value = 'Custom';
       startDate.value = DateTime(
         picked.start.year,
         picked.start.month,
         picked.start.day,
       );
-
-      // Set End Date (End of day)
       endDate.value = DateTime(
         picked.end.year,
         picked.end.month,
@@ -149,8 +145,6 @@ class ProfitController extends GetxController {
         59,
         59,
       );
-
-      // Fetch data for the selected range
       fetchProfitAndLoss();
     }
   }
@@ -163,26 +157,48 @@ class ProfitController extends GetxController {
     _resetMetrics();
 
     try {
-      // 1. Process SALES
-      // This now uses isFullyPaid to count profit immediately
-      double salesProfit = await _processSalesData();
+      final startTS = Timestamp.fromDate(startDate.value);
+      final endTS = Timestamp.fromDate(endDate.value);
 
-      // 2. Calculate Global Average Margin (For reference)
+      final coreResults = await Future.wait([
+        _db
+            .collection('sales_orders')
+            .where('timestamp', isGreaterThanOrEqualTo: startTS)
+            .where('timestamp', isLessThanOrEqualTo: endTS)
+            .get(),
+        _db
+            .collection('daily_sales')
+            .where('timestamp', isGreaterThanOrEqualTo: startTS)
+            .where('timestamp', isLessThanOrEqualTo: endTS)
+            .get(),
+      ]);
+
+      QuerySnapshot? ledgerSnap;
+      try {
+        ledgerSnap =
+            await _db
+                .collection('cash_ledger')
+                .where('timestamp', isGreaterThanOrEqualTo: startTS)
+                .where('timestamp', isLessThanOrEqualTo: endTS)
+                .where('type', isEqualTo: 'deposit')
+                .get();
+      } catch (e) {
+        print("Ledger error (Safe to ignore): $e");
+      }
+
+      double salesProfit = await _processSalesData(coreResults[0]);
+
       if (totalRevenue.value > 0) {
         effectiveProfitMargin.value =
             profitOnRevenue.value / totalRevenue.value;
       }
 
-      // 3. Process COLLECTIONS
-      // (Money coming in from PREVIOUS dues)
-      double oldDueCashProfit = await _processCollectionData();
+      double oldDueCashProfit = await _processCollectionData(
+        coreResults[1],
+        ledgerSnap,
+      );
 
-      // 4. FINAL PROFIT CALCULATION
-      // Profit = (Profit from Sales marked Fully Paid) + (Profit from Old Collections)
       netRealizedProfit.value = salesProfit + oldDueCashProfit;
-
-      // 5. Net Receivables Gap
-      // (Total Sales - Total Cash Collected)
       netPendingChange.value = totalRevenue.value - totalCollected.value;
 
       sortTransactions(null);
@@ -194,96 +210,60 @@ class ProfitController extends GetxController {
     }
   }
 
-  // -------------------------------------------------------------------------
-  // 1. SALES DATA (UPDATED LOGIC)
-  // -------------------------------------------------------------------------
-  Future<double> _processSalesData() async {
-    QuerySnapshot invoiceSnap =
-        await _db
-            .collection('sales_orders')
-            .where(
-              'timestamp',
-              isGreaterThanOrEqualTo: Timestamp.fromDate(startDate.value),
-            )
-            .where(
-              'timestamp',
-              isLessThanOrEqualTo: Timestamp.fromDate(endDate.value),
-            )
-            .get();
-
-    double tRev = 0;
-    double tCost = 0;
-    double tPaperProfit = 0; // Total Potential Profit
-
-    // This tracks the profit based on your "isFullyPaid" rule
-    double tCalculatedProfit = 0;
-
-    double tDaily = 0;
-    double tDebtor = 0;
-    double tCondition = 0;
-
+  Future<double> _processSalesData(QuerySnapshot invoiceSnap) async {
+    double tRev = 0, tCost = 0, tPaperProfit = 0, tCalculatedProfit = 0;
+    double tDaily = 0, tDebtor = 0, tCondition = 0;
     List<Map<String, dynamic>> tempTransactions = [];
 
-    // [FIX 3] Add a counter to yield the thread and stop micro-freezes
     int loopCounter = 0;
 
     for (var doc in invoiceSnap.docs) {
       loopCounter++;
-      // Yield every 100 documents to let the UI spin the loader freely
-      if (loopCounter % 100 == 0) await Future.delayed(Duration.zero);
+      if (loopCounter % 500 == 0) {
+        await Future.delayed(const Duration(milliseconds: 1));
+      }
 
       var data = doc.data() as Map<String, dynamic>;
 
-      String status = (data['status'] ?? '').toString().toLowerCase();
+      String status =
+          data['status'] is String ? data['status'].toLowerCase() : '';
       if (status == 'deleted' || status == 'cancelled') continue;
 
-      // --- 1. DATA EXTRACTION ---
-      double amount = double.tryParse(data['grandTotal'].toString()) ?? 0;
-      double cost = double.tryParse(data['totalCost'].toString()) ?? 0;
+      double amount = _parseDouble(data['grandTotal']);
+      double cost = _parseDouble(data['totalCost']);
       bool isFullyPaid = data['isFullyPaid'] == true;
 
-      // Get Profit
-      double docProfit = 0;
-      if (data['profit'] != null) {
-        docProfit = double.tryParse(data['profit'].toString()) ?? 0;
-      } else {
-        docProfit = amount - cost;
-      }
+      double docProfit =
+          data['profit'] != null
+              ? _parseDouble(data['profit'])
+              : (amount - cost);
 
-      // Get Paid Amount (for Pending Column display)
       double paidNow = 0;
       if (data['paymentDetails'] != null && data['paymentDetails'] is Map) {
-        paidNow =
-            double.tryParse(
-              data['paymentDetails']['totalPaidInput'].toString(),
-            ) ??
-            0;
+        paidNow = _parseDouble(data['paymentDetails']['totalPaidInput']);
       }
 
-      // --- 2. THE FIX: PROFIT COUNTING LOGIC ---
       if (isFullyPaid) {
-        // RULE: If isFullyPaid is TRUE, we count 100% of the profit immediately.
-        // This includes Credit Sales that are "Settled" to Ledger.
         tCalculatedProfit += docProfit;
       } else {
-        // RULE: If NOT fully paid (Partial), calculate ratio.
         if (amount > 0 && paidNow > 0) {
-          double paidRatio = (paidNow / amount);
-          if (paidRatio > 1.0) paidRatio = 1.0;
+          double paidRatio = (paidNow / amount).clamp(0.0, 1.0);
           tCalculatedProfit += (docProfit * paidRatio);
         }
       }
 
-      // --- 3. AGGREGATES ---
       tRev += amount;
       tCost += cost;
       tPaperProfit += docProfit;
 
-      // Customer Classification
-      String type = (data['customerType'] ?? '').toString().toLowerCase();
+      String type =
+          data['customerType'] is String
+              ? data['customerType'].toLowerCase()
+              : '';
       bool isCondition = data['isCondition'] == true;
       String name = data['customerName'] ?? 'Unknown';
 
+      // Restored original Date extracting just in case Strings were messing it up
       DateTime date;
       if (data['timestamp'] != null) {
         date = (data['timestamp'] as Timestamp).toDate();
@@ -299,8 +279,7 @@ class ProfitController extends GetxController {
         tDaily += amount;
       }
 
-      // Visual Pending Amount
-      double pending = amount - paidNow;
+      double pending = (amount - paidNow);
       if (pending < 0) pending = 0;
 
       tempTransactions.add({
@@ -318,141 +297,80 @@ class ProfitController extends GetxController {
         'profit': docProfit,
         'pending': pending,
         'isLoss': docProfit < 0,
-        // Helper to see why it was counted
-        'status_debug': isFullyPaid ? 'Full/Credit' : 'Partial',
       });
     }
 
     saleDailyCustomer.value = tDaily;
     saleDebtor.value = tDebtor;
     saleCondition.value = tCondition;
-
     totalRevenue.value = tRev;
     totalCostOfGoods.value = tCost;
     profitOnRevenue.value = tPaperProfit;
-
     transactionList.value = tempTransactions;
 
     return tCalculatedProfit;
   }
 
-  // -------------------------------------------------------------------------
-  // 2. COLLECTION DATA (FIXED)
-  // -------------------------------------------------------------------------
-  Future<double> _processCollectionData() async {
-    double tColCust = 0;
-    double tColDebtor = 0;
-    double tColCond = 0;
-    double oldMoneyCollected = 0.0;
-
-    // A. DAILY SALES COLLECTION
-    // This loops through everything generated by the POS system.
-    // It captures: Fresh Sales, Condition Payments, AND Old Due/Loan Recoveries.
-    QuerySnapshot dailySnap =
-        await _db
-            .collection('daily_sales')
-            .where(
-              'timestamp',
-              isGreaterThanOrEqualTo: Timestamp.fromDate(startDate.value),
-            )
-            .where(
-              'timestamp',
-              isLessThanOrEqualTo: Timestamp.fromDate(endDate.value),
-            )
-            .get();
-
-    //[FIX 4] Counter for daily collections loop
-    int dailyCounter = 0;
+  Future<double> _processCollectionData(
+    QuerySnapshot dailySnap,
+    QuerySnapshot? ledgerSnap,
+  ) async {
+    double tColCust = 0, tColDebtor = 0, tColCond = 0, oldMoneyCollected = 0.0;
+    int loopCounter = 0;
 
     for (var doc in dailySnap.docs) {
-      dailyCounter++;
-      if (dailyCounter % 100 == 0) await Future.delayed(Duration.zero);
+      loopCounter++;
+      if (loopCounter % 500 == 0) {
+        await Future.delayed(const Duration(milliseconds: 1));
+      }
 
       var data = doc.data() as Map<String, dynamic>;
-
-      // Get the amount actually paid
-      double amount = double.tryParse(data['paid'].toString()) ?? 0;
+      double amount = _parseDouble(data['paid']);
       if (amount <= 0) continue;
 
-      String type = (data['customerType'] ?? '').toString().toLowerCase();
-      String source = (data['source'] ?? '').toString().toLowerCase();
+      String type =
+          data['customerType'] is String
+              ? data['customerType'].toLowerCase()
+              : '';
+      String source =
+          data['source'] is String ? data['source'].toLowerCase() : '';
 
-      // --- LOGIC TO CLASSIFY INCOME ---
-
-      // 1. Condition / Courier Payments
       if (source.contains('condition') || type == 'courier_payment') {
         tColCond += amount;
         oldMoneyCollected += amount;
-      }
-      // 2. Old Due / Loan Recovery / Debtor Payments
-      // This catches the 15,400 if it is recorded as a payment in daily_sales
-      else if (type == 'debtor' ||
+      } else if (type == 'debtor' ||
           source.contains('payment') ||
           source.contains('due') ||
           source.contains('old') ||
           source.contains('recovery')) {
         tColDebtor += amount;
         oldMoneyCollected += amount;
-      }
-      // 3. Fresh Customer Sales (Standard Cash/Digital)
-      else {
+      } else {
         tColCust += amount;
-        // We do NOT add to oldMoneyCollected here, because fresh sales profit
-        // is already calculated in _processSalesData based on the full amount.
       }
     }
 
-    // B. LEDGER (MANUAL DEPOSITS ONLY)
-    // FIX: We removed 'pos_old_due' from here to stop the double counting.
-    try {
-      QuerySnapshot ledgerSnap =
-          await _db
-              .collection('cash_ledger')
-              .where(
-                'timestamp',
-                isGreaterThanOrEqualTo: Timestamp.fromDate(startDate.value),
-              )
-              .where(
-                'timestamp',
-                isLessThanOrEqualTo: Timestamp.fromDate(endDate.value),
-              )
-              .where('type', isEqualTo: 'deposit')
-              .get();
-
-      // [FIX 5] Counter for ledger loop
-      int ledgerCounter = 0;
-
+    if (ledgerSnap != null) {
       for (var doc in ledgerSnap.docs) {
-        ledgerCounter++;
-        if (ledgerCounter % 100 == 0) await Future.delayed(Duration.zero);
-
         var data = doc.data() as Map<String, dynamic>;
-        String source = (data['source'] ?? '').toString().toLowerCase();
+        String source =
+            data['source'] is String ? data['source'].toLowerCase() : '';
 
-        // ONLY count deposits that are MANUALLY entered (not from POS).
-        // If the source is 'pos_old_due', we ignore it here because
-        // it was already counted in Section A (daily_sales) above.
         if (source == 'manual_deposit') {
-          double amount = double.tryParse(data['amount'].toString()) ?? 0;
+          double amount = _parseDouble(data['amount']);
           if (amount > 0) {
             tColDebtor += amount;
             oldMoneyCollected += amount;
           }
         }
       }
-    } catch (e) {
-      print("Ledger Error: $e");
     }
 
-    // Update Observables
     collectionCustomer.value = tColCust;
     collectionDebtor.value = tColDebtor;
     collectionCondition.value = tColCond;
-
-    // Total Cash In Hand
     totalCollected.value = tColCust + tColDebtor + tColCond;
 
-    // Return the estimated profit generated from collecting old debts
     return oldMoneyCollected * effectiveProfitMargin.value;
   }
 
@@ -462,11 +380,11 @@ class ProfitController extends GetxController {
     saleCondition.value = 0;
     totalRevenue.value = 0;
     totalCostOfGoods.value = 0;
+    profitOnRevenue.value = 0;
     collectionCustomer.value = 0;
     collectionDebtor.value = 0;
     collectionCondition.value = 0;
     totalCollected.value = 0;
-    profitOnRevenue.value = 0;
     netRealizedProfit.value = 0;
     netPendingChange.value = 0;
     effectiveProfitMargin.value = 0;
@@ -524,7 +442,6 @@ class ProfitController extends GetxController {
               ),
               pw.SizedBox(height: 20),
 
-              // TRADING ACCOUNT
               pw.Container(
                 padding: const pw.EdgeInsets.all(10),
                 color: PdfColors.grey100,
@@ -550,7 +467,6 @@ class ProfitController extends GetxController {
               ),
               pw.SizedBox(height: 15),
 
-              // CASH/REALIZED ACCOUNT
               pw.Container(
                 padding: const pw.EdgeInsets.all(10),
                 decoration: pw.BoxDecoration(
@@ -591,10 +507,8 @@ class ProfitController extends GetxController {
                   ],
                 ),
               ),
-
               pw.SizedBox(height: 15),
 
-              // RECEIVABLES
               pw.Container(
                 padding: const pw.EdgeInsets.all(10),
                 color:
@@ -635,7 +549,6 @@ class ProfitController extends GetxController {
                   ],
                 ),
               ),
-
               pw.SizedBox(height: 25),
               pw.Text(
                 "Sales Breakdown",
@@ -643,7 +556,6 @@ class ProfitController extends GetxController {
               ),
               pw.SizedBox(height: 5),
 
-              // Table
               pw.Table(
                 border: pw.TableBorder.all(
                   color: PdfColors.grey300,

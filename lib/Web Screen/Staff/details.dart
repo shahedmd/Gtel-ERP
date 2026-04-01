@@ -4,12 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:intl/intl.dart';
+import 'package:printing/printing.dart'; // <-- Added Printing package
+import 'package:pdf/pdf.dart'; // <-- Added PDF package for PdfPageFormat
+import 'dart:typed_data';
+
 import 'addsalary.dart';
 import 'controller.dart';
 import 'model.dart';
-import 'dart:js_interop';
-import 'dart:typed_data';
-import 'package:web/web.dart' as web;
 
 const Color darkSlate = Color(0xFF111827);
 const Color activeAccent = Color(0xFF3B82F6);
@@ -45,7 +46,7 @@ class StaffDetailsPage extends StatelessWidget {
             fontSize: 20,
           ),
         ),
-        actions: [
+        actions:[
           IconButton(
             onPressed: () => _showEditDialog(context),
             icon: const Icon(Icons.edit, color: activeAccent),
@@ -80,7 +81,7 @@ class StaffDetailsPage extends StatelessWidget {
         padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+          children:[
             _buildInfoSummary(),
             const SizedBox(height: 32),
             const Text(
@@ -120,7 +121,7 @@ class StaffDetailsPage extends StatelessWidget {
       content: SizedBox(
         width: 400,
         child: Column(
-          children: [
+          children:[
             TextField(
               controller: nameC,
               decoration: const InputDecoration(
@@ -163,7 +164,7 @@ class StaffDetailsPage extends StatelessWidget {
             ),
             const SizedBox(height: 15),
             Row(
-              children: [
+              children:[
                 const Text("Joining Date: "),
                 TextButton(
                   onPressed: () async {
@@ -242,7 +243,7 @@ class StaffDetailsPage extends StatelessWidget {
           }
 
           return Row(
-            children: [
+            children:[
               _statCard(
                 "Base Salary",
                 "Tk ${staff.salary}",
@@ -285,7 +286,7 @@ class StaffDetailsPage extends StatelessWidget {
           color: Colors.white,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: Colors.black12),
-          boxShadow: [
+          boxShadow:[
             BoxShadow(
               color: Colors.black.withOpacity(0.03),
               blurRadius: 8,
@@ -294,7 +295,7 @@ class StaffDetailsPage extends StatelessWidget {
           ],
         ),
         child: Row(
-          children: [
+          children:[
             CircleAvatar(
               backgroundColor: color.withOpacity(0.1),
               child: FaIcon(icon, size: 16, color: color),
@@ -303,7 +304,7 @@ class StaffDetailsPage extends StatelessWidget {
             Flexible(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+                children:[
                   Text(
                     label,
                     style: const TextStyle(color: Colors.grey, fontSize: 12),
@@ -311,7 +312,7 @@ class StaffDetailsPage extends StatelessWidget {
                   ),
                   Text(
                     value,
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
                       color: darkSlate,
@@ -336,7 +337,7 @@ class StaffDetailsPage extends StatelessWidget {
         border: Border.all(color: Colors.black12),
       ),
       child: Column(
-        children: [
+        children:[
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 15),
             decoration: const BoxDecoration(
@@ -346,8 +347,8 @@ class StaffDetailsPage extends StatelessWidget {
                 topRight: Radius.circular(11),
               ),
             ),
-            child: Row(
-              children: const [
+            child: const Row(
+              children:[
                 Expanded(flex: 2, child: _HeaderTxt("Date")),
                 Expanded(flex: 2, child: _HeaderTxt("Type")),
                 Expanded(flex: 2, child: _HeaderTxt("Month/Ref")),
@@ -410,7 +411,7 @@ class StaffDetailsPage extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 15),
       child: Row(
-        children: [
+        children:[
           Expanded(
             flex: 2,
             child: Text(
@@ -421,7 +422,7 @@ class StaffDetailsPage extends StatelessWidget {
           Expanded(
             flex: 2,
             child: Row(
-              children: [
+              children:[
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 8,
@@ -472,7 +473,7 @@ class StaffDetailsPage extends StatelessWidget {
             width: 80,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.end,
-              children: [
+              children:[
                 if (typeLabel == "BONUS")
                   IconButton(
                     icon: const Icon(
@@ -561,30 +562,27 @@ class StaffDetailsPage extends StatelessWidget {
     );
   }
 
+  // --- UPDATED PDF DOWNLOAD HANDLER ---
   Future<void> _handlePdfDownload(String staffId) async {
     try {
       final staff = controller.staffList.firstWhere((s) => s.id == staffId);
       final transactions = await controller.streamSalaries(staffId).first;
-      final List<int> pdfData = await controller.generateProfessionalPDF(
+      
+      // We receive standard Uint8List from the controller now
+      final Uint8List pdfData = await controller.generateProfessionalPDF(
         staff,
         transactions,
       );
 
-      final Uint8List uint8list = Uint8List.fromList(pdfData);
-      final JSUint8Array jsBytes = uint8list.toJS;
-      final blobParts = [jsBytes].toJS as JSArray<web.BlobPart>;
-      final blob = web.Blob(
-        blobParts,
-        web.BlobPropertyBag(type: 'application/pdf'),
-      );
-      final String url = web.URL.createObjectURL(blob);
-      final web.HTMLAnchorElement anchor =
-          web.document.createElement('a') as web.HTMLAnchorElement;
-      anchor.href = url;
       final timestamp = DateTime.now().millisecondsSinceEpoch;
-      anchor.download = "Ledger_${staff.name}_$timestamp.pdf";
-      anchor.click();
-      web.URL.revokeObjectURL(url);
+      final fileName = "Ledger_${staff.name.replaceAll(' ', '_')}_$timestamp.pdf";
+
+      // Replaced web-blob download with Printing package for Print preview dialog
+      await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => pdfData,
+        name: fileName,
+      );
+
     } catch (e) {
       debugPrint("Error generating PDF: $e");
       Get.snackbar("Error", "Could not generate PDF statement.");

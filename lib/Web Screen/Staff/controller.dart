@@ -1,9 +1,6 @@
-// ignore_for_file: deprecated_member_use, constant_identifier_names, avoid_web_libraries_in_flutter, curly_braces_in_flow_control_structures
+// ignore_for_file: deprecated_member_use, constant_identifier_names, curly_braces_in_flow_control_structures
 import 'dart:typed_data';
-import 'dart:js_interop';
 import 'package:gtel_erp/Cash/controller.dart';
-import 'package:web/web.dart' as web; // For Web Download
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -11,6 +8,7 @@ import 'package:gtel_erp/Core/Gtel%20Expense/Daily%20Expense/dailyexpensecontrol
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart'; // <-- Added Printing package
 import 'model.dart';
 
 // --- UPDATE 2: Added BONUS to Transaction Types ---
@@ -287,7 +285,7 @@ class StaffController extends GetxController {
       double totalDisbursed = 0.0;
       double totalLiability = 0.0;
 
-      List<List<String>> reportData = [];
+      List<List<String>> reportData =[];
 
       for (var staff in staffList) {
         QuerySnapshot salarySnap =
@@ -337,15 +335,15 @@ class StaffController extends GetxController {
           pageFormat: PdfPageFormat.a4,
           margin: const pw.EdgeInsets.all(30),
           build:
-              (context) => [
+              (context) =>[
                 pw.Header(
                   level: 0,
                   child: pw.Row(
                     mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                    children: [
+                    children:[
                       pw.Column(
                         crossAxisAlignment: pw.CrossAxisAlignment.start,
-                        children: [
+                        children:[
                           pw.Text(
                             "MONTHLY PAYROLL SHEET",
                             style: pw.TextStyle(
@@ -385,7 +383,7 @@ class StaffController extends GetxController {
                     mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
                     children: [
                       pw.Column(
-                        children: [
+                        children:[
                           pw.Text("Total Commitment"),
                           pw.Text(
                             totalLiability.toStringAsFixed(0),
@@ -394,7 +392,7 @@ class StaffController extends GetxController {
                         ],
                       ),
                       pw.Column(
-                        children: [
+                        children:[
                           pw.Text("Total Disbursed"),
                           pw.Text(
                             totalDisbursed.toStringAsFixed(0),
@@ -406,7 +404,7 @@ class StaffController extends GetxController {
                         ],
                       ),
                       pw.Column(
-                        children: [
+                        children:[
                           pw.Text("Pending Due"),
                           pw.Text(
                             (totalLiability - totalDisbursed).toStringAsFixed(
@@ -426,7 +424,7 @@ class StaffController extends GetxController {
                 pw.SizedBox(height: 15),
 
                 pw.Table.fromTextArray(
-                  headers: [
+                  headers:[
                     "Staff Name",
                     "Desig.",
                     "Base Salary",
@@ -463,7 +461,12 @@ class StaffController extends GetxController {
       );
 
       final Uint8List bytes = await pdf.save();
-      _downloadWebPdf(bytes, "Payroll_$month.pdf");
+      
+      // <-- Changed to use Printing package -->
+      await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => bytes,
+        name: "Payroll_$month.pdf",
+      );
 
       Get.snackbar(
         "Success",
@@ -507,13 +510,13 @@ class StaffController extends GetxController {
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(32),
         build:
-            (context) => [
+            (context) =>[
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
+                children:[
                   pw.Column(
                     crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
+                    children:[
                       pw.Text(
                         "G-TEL ERP SYSTEM",
                         style: pw.TextStyle(
@@ -533,7 +536,7 @@ class StaffController extends GetxController {
                   ),
                   pw.Column(
                     crossAxisAlignment: pw.CrossAxisAlignment.end,
-                    children: [
+                    children:[
                       pw.Text("Date: $formattedDate"),
                       pw.Text(
                         "Ref: STF-${staff.id.substring(0, 5).toUpperCase()}",
@@ -552,10 +555,10 @@ class StaffController extends GetxController {
                 ),
                 child: pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
+                  children:[
                     pw.Column(
                       crossAxisAlignment: pw.CrossAxisAlignment.start,
-                      children: [
+                      children:[
                         _pdfRow("Employee:", staff.name),
                         _pdfRow("Designation:", staff.des),
                         _pdfRow("Phone:", staff.phone),
@@ -563,10 +566,10 @@ class StaffController extends GetxController {
                     ),
                     pw.Column(
                       crossAxisAlignment: pw.CrossAxisAlignment.start,
-                      children: [
+                      children:[
                         _pdfRow("Base Salary:", "${staff.salary}"),
                         pw.Row(
-                          children: [
+                          children:[
                             pw.Text(
                               "Current Debt: ",
                               style: pw.TextStyle(
@@ -609,7 +612,7 @@ class StaffController extends GetxController {
                 data:
                     transactions
                         .map(
-                          (s) => [
+                          (s) =>[
                             DateFormat('dd/MM/yy').format(s.date),
                             s.type ?? "SALARY",
                             s.month,
@@ -622,7 +625,7 @@ class StaffController extends GetxController {
               pw.SizedBox(height: 20),
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.end,
-                children: [
+                children:[
                   pw.Container(
                     width: 220,
                     padding: const pw.EdgeInsets.all(8),
@@ -630,10 +633,10 @@ class StaffController extends GetxController {
                       border: pw.Border.all(color: PdfColors.grey400),
                     ),
                     child: pw.Column(
-                      children: [
+                      children:[
                         pw.Row(
                           mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                          children: [
+                          children:[
                             pw.Text(
                               "Total Salary Paid:",
                               style: const pw.TextStyle(fontSize: 10),
@@ -650,7 +653,7 @@ class StaffController extends GetxController {
                           pw.Row(
                             mainAxisAlignment:
                                 pw.MainAxisAlignment.spaceBetween,
-                            children: [
+                            children:[
                               pw.Text(
                                 "Total Bonus Paid:",
                                 style: pw.TextStyle(
@@ -670,7 +673,7 @@ class StaffController extends GetxController {
                         ],
                         pw.Row(
                           mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                          children: [
+                          children:[
                             pw.Text(
                               "Total Advances Taken:",
                               style: pw.TextStyle(
@@ -690,7 +693,7 @@ class StaffController extends GetxController {
                         pw.Divider(),
                         pw.Row(
                           mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                          children: [
+                          children:[
                             pw.Text(
                               "Net Outflow:",
                               style: pw.TextStyle(
@@ -745,7 +748,7 @@ class StaffController extends GetxController {
                 padding: const pw.EdgeInsets.all(20),
                 child: pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
+                  children:[
                     pw.Center(
                       child: pw.Text(
                         "G-TEL ERP",
@@ -771,10 +774,10 @@ class StaffController extends GetxController {
                     pw.SizedBox(height: 10),
                     pw.Row(
                       mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                      children: [
+                      children:[
                         pw.Column(
                           crossAxisAlignment: pw.CrossAxisAlignment.start,
-                          children: [
+                          children:[
                             _pdfRow("Staff Name:", staff.name),
                             _pdfRow("Designation:", staff.des),
                             _pdfRow("Phone:", staff.phone),
@@ -782,7 +785,7 @@ class StaffController extends GetxController {
                         ),
                         pw.Column(
                           crossAxisAlignment: pw.CrossAxisAlignment.end,
-                          children: [
+                          children:[
                             pw.Text(
                               "Date: ${DateFormat('dd MMM yyyy').format(date)}",
                             ),
@@ -797,7 +800,7 @@ class StaffController extends GetxController {
                       color: PdfColors.grey100,
                       child: pw.Row(
                         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                        children: [
+                        children:[
                           pw.Text(
                             "BONUS AMOUNT:",
                             style: pw.TextStyle(
@@ -832,7 +835,7 @@ class StaffController extends GetxController {
                     pw.Spacer(),
                     pw.Row(
                       mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                      children: [
+                      children:[
                         pw.Container(
                           width: 100,
                           decoration: const pw.BoxDecoration(
@@ -866,10 +869,13 @@ class StaffController extends GetxController {
       );
 
       final Uint8List bytes = await pdf.save();
-      _downloadWebPdf(
-        bytes,
-        "BonusSlip_${staff.name.replaceAll(' ', '_')}.pdf",
+
+      // <-- Changed to use Printing package -->
+      await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => bytes,
+        name: "BonusSlip_${staff.name.replaceAll(' ', '_')}.pdf",
       );
+
     } catch (e) {
       Get.snackbar("Error", "Could not generate Bonus Slip: $e");
     }
@@ -884,7 +890,7 @@ class StaffController extends GetxController {
       final pdf = pw.Document();
       double totalBonusDisbursed = 0.0;
 
-      List<List<String>> reportData = [];
+      List<List<String>> reportData =[];
 
       for (var staff in staffList) {
         QuerySnapshot bonusSnap =
@@ -934,15 +940,15 @@ class StaffController extends GetxController {
           pageFormat: PdfPageFormat.a4,
           margin: const pw.EdgeInsets.all(30),
           build:
-              (context) => [
+              (context) =>[
                 pw.Header(
                   level: 0,
                   child: pw.Row(
                     mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                    children: [
+                    children:[
                       pw.Column(
                         crossAxisAlignment: pw.CrossAxisAlignment.start,
-                        children: [
+                        children:[
                           pw.Text(
                             "MONTHLY BONUS REPORT",
                             style: pw.TextStyle(
@@ -980,7 +986,7 @@ class StaffController extends GetxController {
                   ),
                   child: pw.Row(
                     mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                    children: [
+                    children:[
                       pw.Text(
                         "Total Bonus Disbursed:",
                         style: pw.TextStyle(
@@ -1003,7 +1009,7 @@ class StaffController extends GetxController {
                 pw.SizedBox(height: 15),
 
                 pw.Table.fromTextArray(
-                  headers: [
+                  headers:[
                     "Staff Name",
                     "Designation",
                     "Phone",
@@ -1038,7 +1044,12 @@ class StaffController extends GetxController {
       );
 
       final Uint8List bytes = await pdf.save();
-      _downloadWebPdf(bytes, "BonusReport_$month.pdf");
+      
+      // <-- Changed to use Printing package -->
+      await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => bytes,
+        name: "BonusReport_$month.pdf",
+      );
 
       Get.snackbar(
         "Success",
@@ -1057,7 +1068,7 @@ class StaffController extends GetxController {
     return pw.Padding(
       padding: const pw.EdgeInsets.symmetric(vertical: 2),
       child: pw.Row(
-        children: [
+        children:[
           pw.SizedBox(
             width: 70,
             child: pw.Text(
@@ -1069,22 +1080,5 @@ class StaffController extends GetxController {
         ],
       ),
     );
-  }
-
-  // Helper for Web Download
-  void _downloadWebPdf(Uint8List data, String filename) {
-    final JSUint8Array jsBytes = data.toJS;
-    final blobParts = [jsBytes].toJS as JSArray<web.BlobPart>;
-    final blob = web.Blob(
-      blobParts,
-      web.BlobPropertyBag(type: 'application/pdf'),
-    );
-    final String url = web.URL.createObjectURL(blob);
-    final web.HTMLAnchorElement anchor =
-        web.document.createElement('a') as web.HTMLAnchorElement;
-    anchor.href = url;
-    anchor.download = filename;
-    anchor.click();
-    web.URL.revokeObjectURL(url);
   }
 }
