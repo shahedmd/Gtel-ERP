@@ -13,7 +13,7 @@ class CustomerAnalyticsController extends GetxController {
 
   // --- STATE ---
   var isLoading = false.obs;
-  var isPdfGenerating = false.obs; // NEW: Controls PDF Spinner
+  var isPdfGenerating = false.obs; // Controls PDF Spinner
 
   List<CustomerAnalyticsModel> _fetchedData = [];
   List<CustomerAnalyticsModel> _filteredData = [];
@@ -53,7 +53,7 @@ class CustomerAnalyticsController extends GetxController {
   DocumentSnapshot? _lastInvoiceDoc;
   final int invoiceLimitPerPage = 20;
 
-  // NEW: REPRINTING STATE
+  // REPRINTING STATE
   var reprintingInvoiceId = ''.obs;
 
   @override
@@ -132,10 +132,15 @@ class CustomerAnalyticsController extends GetxController {
           continue;
         }
 
+        // ==========================================
+        // UPDATED: Now grouping by customerName
+        // ==========================================
+        String name = (data['customerName'] ?? '').toString().trim();
+        if (name.isEmpty) name = "Guest";
+
         String phone = (data['customerPhone'] ?? '').toString().trim();
         if (phone.isEmpty) phone = "Unknown";
 
-        String name = data['customerName'] ?? 'Guest';
         String shop = data['shopName'] ?? '';
         String address =
             data['deliveryAddress'] ?? data['address'] ?? 'No Address';
@@ -147,11 +152,17 @@ class CustomerAnalyticsController extends GetxController {
         double saleAmt = double.tryParse(data['grandTotal'].toString()) ?? 0.0;
         double profitAmt = double.tryParse(data['profit'].toString()) ?? 0.0;
 
-        if (tempMap.containsKey(phone)) {
-          var entry = tempMap[phone]!;
+        // Group by customerName instead of phone
+        if (tempMap.containsKey(name)) {
+          var entry = tempMap[name]!;
           entry.totalSales += saleAmt;
           entry.totalProfit += profitAmt;
           entry.orderCount += 1;
+
+          // If a customer was saved without a phone earlier, update if phone is found
+          if (entry.phone == 'Unknown' && phone != 'Unknown') {
+            entry.phone = phone;
+          }
 
           if (entry.address == 'No Address' && address != 'No Address') {
             entry.address = address;
@@ -162,7 +173,7 @@ class CustomerAnalyticsController extends GetxController {
             entry.lastInvoiceDate = docDate;
           }
         } else {
-          tempMap[phone] = CustomerAnalyticsModel(
+          tempMap[name] = CustomerAnalyticsModel(
             name: name,
             phone: phone,
             shopName: shop,
@@ -257,7 +268,10 @@ class CustomerAnalyticsController extends GetxController {
       QuerySnapshot snap =
           await _db
               .collection('sales_orders')
-              .where('customerPhone', isEqualTo: customer.phone)
+              // ==========================================
+              // UPDATED: Now filtering by customerName
+              // ==========================================
+              .where('customerName', isEqualTo: customer.name)
               .orderBy('timestamp', descending: true)
               .limit(invoiceLimitPerPage)
               .get();
@@ -297,9 +311,12 @@ class CustomerAnalyticsController extends GetxController {
       QuerySnapshot snap =
           await _db
               .collection('sales_orders')
+              // ==========================================
+              // UPDATED: Now filtering by customerName
+              // ==========================================
               .where(
-                'customerPhone',
-                isEqualTo: selectedCustomerProfile.value!.phone,
+                'customerName',
+                isEqualTo: selectedCustomerProfile.value!.name,
               )
               .orderBy('timestamp', descending: true)
               .startAfterDocument(_lastInvoiceDoc!)
@@ -339,7 +356,6 @@ class CustomerAnalyticsController extends GetxController {
       return;
     }
 
-    // ENABLE PDF LOADING INDICATOR
     isPdfGenerating.value = true;
 
     try {
@@ -395,7 +411,7 @@ class CustomerAnalyticsController extends GetxController {
             return [
               pw.SizedBox(height: 10),
 
-              // NEW TABLE STRUCTURE SHOWING LAST ORDER DATE
+              // TABLE STRUCTURE SHOWING LAST ORDER DATE
               pw.Table.fromTextArray(
                 headers: [
                   "Customer Name",
@@ -426,7 +442,6 @@ class CustomerAnalyticsController extends GetxController {
                     item.address.isEmpty || item.address == 'No Address'
                         ? '-'
                         : item.address,
-                    // 2. UPDATED TO SHOW DATE INSTEAD OF INVOICE ID
                     item.lastInvoiceDate != null
                         ? DateFormat(
                           'dd MMM yyyy',
@@ -444,12 +459,12 @@ class CustomerAnalyticsController extends GetxController {
     } catch (e) {
       Get.snackbar("Error", "Could not generate PDF: $e");
     } finally {
-      isPdfGenerating.value = false; // DISABLE PDF LOADING INDICATOR
+      isPdfGenerating.value = false;
     }
   }
 
   // =================================================================================
-  // 3. REPRINT INVOICE FEATURE (Imported flawlessly from DailySalesController)
+  // 3. REPRINT INVOICE FEATURE
   // =================================================================================
   Future<void> reprintInvoice(String invoiceId) async {
     reprintingInvoiceId.value = invoiceId;
@@ -538,12 +553,13 @@ class CustomerAnalyticsController extends GetxController {
                   (pm['type'] ?? '').toString().trim().toLowerCase();
               if (valBank.isNotEmpty) {
                 detectedType = 'bank';
-              } else if (valBkash.isNotEmpty)
-                {detectedType = 'bkash';}
-              else if (valNagad.isNotEmpty)
-                {detectedType = 'nagad';}
-              else if (explicitType.isNotEmpty && explicitType != 'cash')
-                {detectedType = explicitType;}
+              } else if (valBkash.isNotEmpty) {
+                detectedType = 'bkash';
+              } else if (valNagad.isNotEmpty) {
+                detectedType = 'nagad';
+              } else if (explicitType.isNotEmpty && explicitType != 'cash') {
+                detectedType = explicitType;
+              }
 
               payMap[detectedType] = realTimePaid;
               if (pm['number'] != null) {
@@ -602,8 +618,7 @@ class CustomerAnalyticsController extends GetxController {
       }
 
       await _generatePdf(
-        data['invoiceId'] ??
-            invoiceId, // Pass visible string ID to PDF, not Doc ID
+        data['invoiceId'] ?? invoiceId,
         name,
         phone,
         payMap,

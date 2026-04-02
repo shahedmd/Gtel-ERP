@@ -435,10 +435,13 @@ class HotSellingProductPage extends StatelessWidget {
 
           Row(
             children: [
-              _paginationBtn(
-                icon: Icons.chevron_left,
-                onTap: controller.prevPage,
-                isEnabled: controller.currentPage.value > 1,
+              // Add Obx here 👇
+              Obx(
+                () => _paginationBtn(
+                  icon: Icons.chevron_left,
+                  onTap: controller.prevPage,
+                  isEnabled: controller.currentPage.value > 1,
+                ),
               ),
               const SizedBox(width: 10),
               Container(

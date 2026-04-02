@@ -2,6 +2,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:gtel_erp/Core/Gtel%20Expense/Monthly%20Expense/montlyexpensecontroller.dart';
 import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
 import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/gteldebtorcontroller.dart';
 import 'package:gtel_erp/Core/Gtel%20Expense/Daily%20Expense/dailyexpensecontroller.dart';
@@ -26,10 +27,16 @@ class DebtorPurchaseController extends GetxController {
           ? Get.find<DebatorController>()
           : Get.put(DebatorController());
 
-  final DailyExpensesController dailyExpenseCtrl =
-      Get.isRegistered<DailyExpensesController>()
-          ? Get.find<DailyExpensesController>()
-          : Get.put(DailyExpensesController());
+  // FIXED: Converted to a getter and injected Monthly first
+  DailyExpensesController get dailyExpenseCtrl {
+    if (!Get.isRegistered<MonthlyExpensesController>()) {
+      Get.put(MonthlyExpensesController());
+    }
+    if (!Get.isRegistered<DailyExpensesController>()) {
+      Get.put(DailyExpensesController());
+    }
+    return Get.find<DailyExpensesController>();
+  }
 
   // --- STATE VARIABLES ---
   var purchases = <Map<String, dynamic>>[].obs;
@@ -639,7 +646,7 @@ class DebtorPurchaseController extends GetxController {
                   "status": "completed",
                 });
               }
-              continue; // টাকা কাটবে না, পরের বিলে চলে যাবে!
+              continue; // টাকা কাটবেকারি না, পরের বিলে চলে যাবে!
             }
 
             double take =
