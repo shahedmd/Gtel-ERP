@@ -93,6 +93,21 @@ class ShipmentController extends GetxController {
   final RxList<OnHoldItem> onHoldItems = <OnHoldItem>[].obs;
   final RxList<OnHoldItem> filteredOnHoldItems = <OnHoldItem>[].obs;
 
+  // --- MANIFEST LOCAL SEARCH ---
+  final TextEditingController manifestSearchCtrl = TextEditingController();
+  final RxString manifestSearchQuery = ''.obs;
+
+  // Getter for filtered manifest items
+  List<ShipmentItem> get filteredManifestItems {
+    if (manifestSearchQuery.value.isEmpty) return currentManifestItems;
+    final q = manifestSearchQuery.value.toLowerCase();
+    return currentManifestItems.where((item) {
+      return item.productName.toLowerCase().contains(q) ||
+          item.productModel.toLowerCase().contains(q) ||
+          item.cartonNo.toLowerCase().contains(q);
+    }).toList();
+  }
+
   // CONFIG
   final List<String> carrierList = [
     "RH",
@@ -243,6 +258,8 @@ class ShipmentController extends GetxController {
     shipmentNameCtrl.dispose();
     searchCtrl.dispose();
     globalExchangeRateCtrl.dispose();
+    manifestSearchCtrl.dispose(); // Add this
+
     super.onClose();
   }
 
@@ -465,7 +482,7 @@ class ShipmentController extends GetxController {
         date: newShipment.purchaseDate,
       );
 
-      _resetForm();
+      resetForm();
       Get.back();
       Get.snackbar("Success", "Manifest Created");
     } catch (e) {
@@ -475,7 +492,7 @@ class ShipmentController extends GetxController {
     }
   }
 
-  void _resetForm() {
+  void resetForm() {
     currentManifestItems.clear();
     shipmentNameCtrl.clear();
     totalCartonCtrl.text = '0';
@@ -486,6 +503,8 @@ class ShipmentController extends GetxController {
     selectedVendorId.value = null;
     selectedVendorName.value = null;
     selectedCarrier.value = null;
+    manifestSearchCtrl.clear(); // Add this
+    manifestSearchQuery.value = ''; // Add this
     searchCtrl.clear();
   }
 

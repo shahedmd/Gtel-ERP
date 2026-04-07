@@ -35,10 +35,7 @@ class MyApp extends StatelessWidget {
             textTheme: Typography.englishLike2021.apply(fontSizeFactor: 1.sp),
           ),
           initialBinding: AuthBinding(),
-
           initialRoute: '/',
-          
-
           getPages: [
             GetPage(name: '/', page: () => const LoginPage()),
             GetPage(

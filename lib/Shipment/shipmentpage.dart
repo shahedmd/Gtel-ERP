@@ -554,18 +554,7 @@ class ShipmentPage extends StatelessWidget {
     ProductController prodCtrl,
     VendorController vendorCtrl,
   ) {
-    // Reset Everything
-    ctrl.currentManifestItems.clear();
-    ctrl.shipmentNameCtrl.clear();
-    ctrl.totalCartonCtrl.text = "0";
-    ctrl.totalWeightCtrl.text = "0";
-    ctrl.carrierCostPerCtnCtrl.text = "0";
-    ctrl.totalCarrierCostDisplayCtrl.text = "0";
-    ctrl.globalExchangeRateCtrl.text = "0.0";
-    ctrl.purchaseDateInput.value = DateTime.now();
-    ctrl.selectedVendorId.value = null;
-    ctrl.selectedCarrier.value = null;
-    ctrl.searchCtrl.clear();
+    ctrl.resetForm(); // Reset everything cleanly
     prodCtrl.search('');
 
     Get.to(
@@ -574,7 +563,11 @@ class ShipmentPage extends StatelessWidget {
         appBar: AppBar(
           title: const Text(
             "CREATE MANIFEST",
-            style: TextStyle(color: kDarkSlate, fontWeight: FontWeight.w900),
+            style: TextStyle(
+              color: kDarkSlate,
+              fontWeight: FontWeight.w900,
+              fontSize: 18,
+            ),
           ),
           backgroundColor: Colors.white,
           elevation: 1,
@@ -589,7 +582,10 @@ class ShipmentPage extends StatelessWidget {
                 ),
                 onPressed: ctrl.saveShipmentToFirestore,
                 icon: const Icon(Icons.save, size: 18),
-                label: const Text("SAVE SHIPMENT"),
+                label: const Text(
+                  "SAVE SHIPMENT",
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
               ),
             ),
           ],
@@ -602,27 +598,33 @@ class ShipmentPage extends StatelessWidget {
               flex: 8,
               child: Column(
                 children: [
+                  // COMPACT FORM HEADER
                   _buildExtendedManifestFormHeader(context, ctrl, vendorCtrl),
+
+                  // MANIFEST ITEMS LIST
                   Expanded(
                     child: Container(
                       margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                       decoration: BoxDecoration(
                         color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(8),
                         border: Border.all(color: kBorder),
                       ),
                       child: Column(
                         children: [
+                          // NEW: HEADER WITH LOCAL SEARCH
                           Container(
-                            padding: const EdgeInsets.all(16),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
                             decoration: const BoxDecoration(
                               color: kDarkSlate,
                               borderRadius: BorderRadius.vertical(
-                                top: Radius.circular(11),
+                                top: Radius.circular(7),
                               ),
                             ),
                             child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 const Text(
                                   "MANIFEST ITEMS",
@@ -631,21 +633,65 @@ class ShipmentPage extends StatelessWidget {
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
+                                const SizedBox(width: 20),
+                                // LOCAL SEARCH BAR
+                                Expanded(
+                                  child: Container(
+                                    height: 36,
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: TextField(
+                                      controller: ctrl.manifestSearchCtrl,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 13,
+                                      ),
+                                      decoration: InputDecoration(
+                                        hintText:
+                                            "Search added items (Name, Model, Ctn)...",
+                                        hintStyle: TextStyle(
+                                          color: Colors.white.withOpacity(0.5),
+                                          fontSize: 13,
+                                        ),
+                                        prefixIcon: Icon(
+                                          Icons.search,
+                                          color: Colors.white.withOpacity(0.7),
+                                          size: 18,
+                                        ),
+                                        border: InputBorder.none,
+                                        contentPadding:
+                                            const EdgeInsets.symmetric(
+                                              vertical: 10,
+                                            ),
+                                      ),
+                                      onChanged:
+                                          (val) =>
+                                              ctrl.manifestSearchQuery.value =
+                                                  val,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 20),
                                 Obx(
                                   () => Text(
-                                    "GRAND TOTAL (Est.): ${ctrl.currentManifestTotalDisplay}",
+                                    "EST TOTAL: ${ctrl.currentManifestTotalDisplay}",
                                     style: const TextStyle(
                                       color: Colors.white,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 16,
+                                      fontWeight: FontWeight.w900,
+                                      fontSize: 15,
                                     ),
                                   ),
                                 ),
                               ],
                             ),
                           ),
+                          // LIST VIEW
                           Expanded(
                             child: Obx(() {
+                              final items = ctrl.filteredManifestItems;
+
                               if (ctrl.currentManifestItems.isEmpty) {
                                 return const Center(
                                   child: Text(
@@ -654,13 +700,28 @@ class ShipmentPage extends StatelessWidget {
                                   ),
                                 );
                               }
+
+                              if (items.isEmpty) {
+                                return const Center(
+                                  child: Text(
+                                    "No items match your search.",
+                                    style: TextStyle(color: Colors.grey),
+                                  ),
+                                );
+                              }
+
                               return ListView.separated(
                                 padding: EdgeInsets.zero,
-                                itemCount: ctrl.currentManifestItems.length,
+                                itemCount: items.length,
                                 separatorBuilder:
                                     (_, __) => const Divider(height: 1),
                                 itemBuilder: (ctx, i) {
-                                  final item = ctrl.currentManifestItems[i];
+                                  final item = items[i];
+                                  // Find true index in original list to safely remove
+                                  final originalIndex = ctrl
+                                      .currentManifestItems
+                                      .indexOf(item);
+
                                   return ListTile(
                                     dense: true,
                                     leading: Text(
@@ -696,7 +757,9 @@ class ShipmentPage extends StatelessWidget {
                                             size: 18,
                                           ),
                                           onPressed:
-                                              () => ctrl.removeFromManifest(i),
+                                              () => ctrl.removeFromManifest(
+                                                originalIndex,
+                                              ),
                                         ),
                                       ],
                                     ),
@@ -712,7 +775,8 @@ class ShipmentPage extends StatelessWidget {
                 ],
               ),
             ),
-            // RIGHT: CATALOG
+
+            // RIGHT: CATALOG (Unchanged from your code)
             Expanded(
               flex: 4,
               child: Container(
@@ -762,8 +826,8 @@ class ShipmentPage extends StatelessWidget {
                           TextField(
                             controller: ctrl.searchCtrl,
                             decoration: InputDecoration(
-                              hintText: "Search...",
-                              prefixIcon: const Icon(Icons.search),
+                              hintText: "Search Catalog...",
+                              prefixIcon: const Icon(Icons.search, size: 20),
                               filled: true,
                               fillColor: Colors.grey[100],
                               border: OutlineInputBorder(
@@ -772,7 +836,9 @@ class ShipmentPage extends StatelessWidget {
                               ),
                               contentPadding: const EdgeInsets.symmetric(
                                 horizontal: 12,
+                                vertical: 0,
                               ),
+                              isDense: true,
                             ),
                             onChanged: (val) => prodCtrl.search(val),
                           ),
@@ -825,7 +891,6 @@ class ShipmentPage extends StatelessWidget {
                         );
                       }),
                     ),
-                    // PAGINATION FOOTER FOR CATALOG
                     Obx(
                       () => Container(
                         padding: const EdgeInsets.symmetric(vertical: 8),
@@ -865,20 +930,42 @@ class ShipmentPage extends StatelessWidget {
     );
   }
 
-  // --- NEW MANIFEST FORM HEADER (4 ROWS) ---
+  // --- REFACTORED COMPACT HEADER ---
   Widget _buildExtendedManifestFormHeader(
     BuildContext context,
     ShipmentController ctrl,
     VendorController vendorCtrl,
   ) {
+    // Helper to make text fields smaller and strictly professional
+    InputDecoration denseDeco(
+      String label,
+      IconData icon, {
+      bool readOnly = false,
+    }) {
+      return InputDecoration(
+        labelText: label,
+        labelStyle: const TextStyle(fontSize: 13),
+        prefixIcon: Icon(icon, size: 18),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(
+          vertical: 10,
+          horizontal: 12,
+        ),
+        filled: readOnly,
+        fillColor: readOnly ? Colors.grey[100] : Colors.white,
+      );
+    }
+
     return Container(
       margin: const EdgeInsets.all(16),
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(16), // Reduced padding
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: kBorder),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10),
+          BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 5),
         ],
       ),
       child: Column(
@@ -889,27 +976,26 @@ class ShipmentPage extends StatelessWidget {
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.bold,
-              color: Colors.grey,
-              letterSpacing: 1,
+              color: kDarkSlate,
+              letterSpacing: 0.5,
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
 
-          // ROW 1: ID & DATE
+          // ROW 1: Logistics info (4 items wide)
           Row(
             children: [
               Expanded(
+                flex: 2,
                 child: TextField(
                   controller: ctrl.shipmentNameCtrl,
-                  decoration: const InputDecoration(
-                    labelText: "Shipment ID",
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.tag),
-                  ),
+                  decoration: denseDeco("Shipment ID", Icons.tag),
+                  style: const TextStyle(fontSize: 13),
                 ),
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 12),
               Expanded(
+                flex: 2,
                 child: InkWell(
                   onTap: () async {
                     final d = await showDatePicker(
@@ -921,37 +1007,29 @@ class ShipmentPage extends StatelessWidget {
                     if (d != null) ctrl.purchaseDateInput.value = d;
                   },
                   child: InputDecorator(
-                    decoration: const InputDecoration(
-                      labelText: "Purchase Date",
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.calendar_today),
+                    decoration: denseDeco(
+                      "Purchase Date",
+                      Icons.calendar_today,
                     ),
                     child: Obx(
                       () => Text(
                         DateFormat(
                           'yyyy-MM-dd',
                         ).format(ctrl.purchaseDateInput.value),
+                        style: const TextStyle(fontSize: 13),
                       ),
                     ),
                   ),
                 ),
               ),
-            ],
-          ),
-          const SizedBox(height: 16),
-
-          // ROW 2: VENDOR, CARRIER, GLOBAL RATE
-          Row(
-            children: [
-              // --- FIXED VENDOR DROPDOWN OVERFLOW IN FORM ---
+              const SizedBox(width: 12),
               Expanded(
+                flex: 3,
                 child: Obx(
                   () => DropdownButtonFormField<String>(
                     isExpanded: true,
-                    decoration: const InputDecoration(
-                      labelText: "Vendor",
-                      border: OutlineInputBorder(),
-                    ),
+                    decoration: denseDeco("Vendor", Icons.store),
+                    style: const TextStyle(fontSize: 13, color: Colors.black),
                     value: ctrl.selectedVendorId.value,
                     items:
                         vendorCtrl.vendors
@@ -977,14 +1055,13 @@ class ShipmentPage extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 12),
               Expanded(
+                flex: 2,
                 child: Obx(
                   () => DropdownButtonFormField<String>(
-                    decoration: const InputDecoration(
-                      labelText: "Carrier",
-                      border: OutlineInputBorder(),
-                    ),
+                    decoration: denseDeco("Carrier", Icons.local_shipping),
+                    style: const TextStyle(fontSize: 13, color: Colors.black),
                     value: ctrl.selectedCarrier.value,
                     items:
                         ctrl.carrierList
@@ -996,86 +1073,66 @@ class ShipmentPage extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 16),
+            ],
+          ),
+
+          const SizedBox(height: 12),
+
+          // ROW 2: Financials & Metrics (5 items wide)
+          Row(
+            children: [
               Expanded(
                 child: TextField(
                   controller: ctrl.globalExchangeRateCtrl,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: "Global Rate",
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.currency_exchange),
-                  ),
+                  decoration: denseDeco("Global Rate", Icons.currency_exchange),
+                  style: const TextStyle(fontSize: 13),
                 ),
               ),
-            ],
-          ),
-          const SizedBox(height: 16),
-
-          // ROW 3: CARTONS & CARRIER COSTS
-          Row(
-            children: [
+              const SizedBox(width: 12),
               Expanded(
                 child: TextField(
                   controller: ctrl.totalCartonCtrl,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: "Total Cartons",
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.view_in_ar),
-                  ),
+                  decoration: denseDeco("Total Cartons", Icons.view_in_ar),
+                  style: const TextStyle(fontSize: 13),
                 ),
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 12),
               Expanded(
                 child: TextField(
                   controller: ctrl.carrierCostPerCtnCtrl,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: "Cost Per Carton",
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.price_change),
-                  ),
+                  decoration: denseDeco("Cost / Ctn", Icons.price_change),
+                  style: const TextStyle(fontSize: 13),
                 ),
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 12),
               Expanded(
                 child: TextField(
                   controller: ctrl.totalCarrierCostDisplayCtrl,
-                  readOnly: true, // AUTO GENERATED
-                  decoration: const InputDecoration(
-                    labelText: "Total Carrier Cost",
-                    border: OutlineInputBorder(),
-                    filled: true,
-                    fillColor: Color(0xFFF1F5F9),
-                    prefixIcon: Icon(Icons.attach_money),
+                  readOnly: true,
+                  decoration: denseDeco(
+                    "Total Carrier Cost",
+                    Icons.attach_money,
+                    readOnly: true,
                   ),
                   style: const TextStyle(
                     fontWeight: FontWeight.bold,
                     color: kDarkSlate,
+                    fontSize: 13,
                   ),
                 ),
               ),
-            ],
-          ),
-          const SizedBox(height: 16),
-
-          // ROW 4: WEIGHT
-          Row(
-            children: [
+              const SizedBox(width: 12),
               Expanded(
-                flex: 1,
                 child: TextField(
                   controller: ctrl.totalWeightCtrl,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: "Total Weight (KG)",
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.scale),
-                  ),
+                  decoration: denseDeco("Total Weight (KG)", Icons.scale),
+                  style: const TextStyle(fontSize: 13),
                 ),
               ),
-              const Expanded(flex: 2, child: SizedBox()), // Spacer
             ],
           ),
         ],
