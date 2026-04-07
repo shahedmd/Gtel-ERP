@@ -11,7 +11,7 @@ import 'overviewcontroller.dart'; // Ensure this import points to your controlle
 class DailyOverviewPage extends StatelessWidget {
   DailyOverviewPage({super.key});
 
-  final OverviewController ctrl = Get.find<OverviewController>();
+  final OverviewController ctrl = Get.put(OverviewController());
 
   // --- ERP THEME COLORS ---
   static const Color slateDark = Color(0xFF0F172A);

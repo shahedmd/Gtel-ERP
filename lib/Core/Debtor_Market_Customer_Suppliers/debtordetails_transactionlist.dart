@@ -1220,6 +1220,10 @@ class Debatordetails extends StatelessWidget {
       typeColor = Colors.teal;
       typeIcon = FontAwesomeIcons.gift;
       typeLabel = "EID BONUS";
+    } else if (tx.type == 'discount') {
+      typeColor = Colors.deepPurple;
+      typeIcon = FontAwesomeIcons.tag;
+      typeLabel = "DISCOUNT";
     } else if (tx.type == 'advance_given') {
       typeColor = debitColor;
       typeIcon = FontAwesomeIcons.arrowRightFromBracket;
@@ -1771,6 +1775,8 @@ class _AddTxFormController extends GetxController {
       Map<String, dynamic> pm = {'type': 'cash'};
       if (selectedType.value == 'eid_bonus') {
         pm = {'type': 'eid_bonus'};
+      } else if (selectedType.value == 'discount') {
+        pm = {'type': 'discount'};
       } else if ([
         'debit',
         'loan_payment',
@@ -1904,6 +1910,13 @@ class _AddTransactionDialogUI extends StatelessWidget {
                                 value: 'debit',
                                 child: Text(
                                   "💵  Receive Payment (Credit)",
+                                  style: TextStyle(fontSize: 13),
+                                ),
+                              ),
+                              DropdownMenuItem(
+                                value: 'discount',
+                                child: Text(
+                                  "🏷️  Give Discount (Credit)",
                                   style: TextStyle(fontSize: 13),
                                 ),
                               ),
@@ -2199,6 +2212,8 @@ class _EditTxFormController extends GetxController {
       Map<String, dynamic> pm = {'type': 'cash'};
       if (selectedType.value == 'eid_bonus') {
         pm = {'type': 'eid_bonus'};
+      } else if (selectedType.value == 'discount') {
+        pm = {'type': 'discount'};
       } else if ([
         'debit',
         'loan_payment',
@@ -2330,6 +2345,10 @@ class _EditTransactionDialogUI extends StatelessWidget {
                               DropdownMenuItem(
                                 value: 'debit',
                                 child: Text("PAYMENT"),
+                              ),
+                              DropdownMenuItem(
+                                value: 'discount',
+                                child: Text("DISCOUNT"),
                               ),
                               DropdownMenuItem(
                                 value: 'eid_bonus',
@@ -2706,6 +2725,7 @@ class _EditProfileDialogUI extends StatelessWidget {
 String formatDynamicPayment(Map<String, dynamic> pm) {
   String type = (pm['type'] ?? 'Cash').toString().toUpperCase();
   if (type == 'EID_BONUS') return "Eid Bonus";
+  if (type == 'DISCOUNT') return "Discount";
   if (type == 'BANK') {
     return "BANK: ${pm['bankName'] ?? ''}\nACC: ${pm['accountNo'] ?? ''}";
   }

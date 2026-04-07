@@ -37,6 +37,7 @@ class MyApp extends StatelessWidget {
           initialBinding: AuthBinding(),
 
           initialRoute: '/',
+          
 
           getPages: [
             GetPage(name: '/', page: () => const LoginPage()),
@@ -44,6 +45,7 @@ class MyApp extends StatelessWidget {
               name: '/home',
               page: () => AdminHomepage(),
               binding: HomeBinding(),
+              preventDuplicates: true,
             ),
           ],
         );

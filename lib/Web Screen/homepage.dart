@@ -45,7 +45,7 @@ class AdminHomepage extends StatelessWidget {
               Expanded(
                 child: Navigator(
                   key: Get.nestedKey(NavKey.nestedHome),
-                  initialRoute: Routes.overviewaccount,
+                  initialRoute: Routes.dailysales,
                   onGenerateRoute: (settings) {
 
                     final GetPage? matchedPage = AppPages.nestedPages

@@ -163,7 +163,9 @@ class DebatorController extends GetxController {
 
           if (type == 'previous_due') {
             oldDueTotal += amount;
-          } else if (type == 'loan_payment' || type == 'eid_bonus') {
+          } else if (type == 'loan_payment' ||
+              type == 'eid_bonus' ||
+              type == 'discount') {
             oldDuePaid += amount;
           } else if (type == 'credit' || type == 'advance_given') {
             runningSales += amount;
@@ -212,10 +214,9 @@ class DebatorController extends GetxController {
         // ========================================================
         batch.update(doc.reference, {
           'balance': accurateBalance,
-          'purchaseDue': accuratePayable, // NOW THIS IS FIXED TOO!
+          'purchaseDue': accuratePayable,
         });
 
-        // Add to Market Totals only if positive
         if (accurateBalance > 0) newMarketDue += accurateBalance;
         if (accuratePayable > 0) newMarketPayable += accuratePayable;
 
@@ -332,7 +333,7 @@ class DebatorController extends GetxController {
     addAllSubstrings(name.trim().toLowerCase());
     addAllSubstrings(phone.trim().toLowerCase());
     addAllSubstrings(des.trim().toLowerCase());
-    addAllSubstrings(address.trim().toLowerCase()); // Added address to keywords
+    addAllSubstrings(address.trim().toLowerCase());
     return keywords.toList();
   }
 
@@ -348,7 +349,7 @@ class DebatorController extends GetxController {
             data['name'] ?? '',
             data['phone'] ?? '',
             data['des'] ?? '',
-            data['address'] ?? '', // Added address parameter
+            data['address'] ?? '',
           ),
         });
       }
@@ -384,7 +385,7 @@ class DebatorController extends GetxController {
           name.trim(),
           phone.trim(),
           des.trim(),
-          address.trim(), // Added address parameter
+          address.trim(),
         ),
         "createdAt": Timestamp.now(),
         "lastTransactionDate": Timestamp.now(),
@@ -420,7 +421,7 @@ class DebatorController extends GetxController {
           newName.trim(),
           phone.trim(),
           des.trim(),
-          address.trim(), // Added address parameter
+          address.trim(),
         ),
       };
       if (payments != null) updateData["payments"] = payments;
@@ -594,7 +595,9 @@ class DebatorController extends GetxController {
 
         if (type == 'previous_due') {
           oldDueTotal += amount;
-        } else if (type == 'loan_payment' || type == 'eid_bonus') {
+        } else if (type == 'loan_payment' ||
+            type == 'eid_bonus' ||
+            type == 'discount') {
           oldDuePaid += amount;
         } else if (type == 'credit' || type == 'advance_given') {
           runningSales += amount;
@@ -639,7 +642,9 @@ class DebatorController extends GetxController {
 
             if (type == 'previous_due') {
               oldDueTotal += amount;
-            } else if (type == 'loan_payment' || type == 'eid_bonus') {
+            } else if (type == 'loan_payment' ||
+                type == 'eid_bonus' ||
+                type == 'discount') {
               oldDuePaid += amount;
             } else if (type == 'credit' || type == 'advance_given') {
               runningSales += amount;
@@ -780,7 +785,8 @@ class DebatorController extends GetxController {
       final String debtorName = debtorSnap.data()?['name'] ?? 'Unknown';
 
       double amountForRunningBills = 0.0;
-      if (type.toLowerCase() == 'eid_bonus') {
+      if (type.toLowerCase() == 'eid_bonus' ||
+          type.toLowerCase() == 'discount') {
         Map<String, double> breakdown = await getInstantDebtorBreakdown(
           debtorId,
         );
@@ -810,7 +816,11 @@ class DebatorController extends GetxController {
       });
 
       String parsedMethod = (paymentMethodData['type'] ?? 'cash').toString();
-      if (type.toLowerCase() == 'eid_bonus') parsedMethod = 'eid_bonus';
+      if (type.toLowerCase() == 'eid_bonus') {
+        parsedMethod = 'eid_bonus';
+      } else if (type.toLowerCase() == 'discount') {
+        parsedMethod = 'discount';
+      }
 
       if (parsedMethod.toLowerCase() == 'cash' &&
           paymentMethodData.containsKey('bankName') &&
@@ -865,7 +875,9 @@ class DebatorController extends GetxController {
       ].contains(type.toLowerCase());
       double remainingToAllocate = amount;
 
-      if (type.toLowerCase() == 'eid_bonus' && amountForRunningBills > 0.01) {
+      if ((type.toLowerCase() == 'eid_bonus' ||
+              type.toLowerCase() == 'discount') &&
+          amountForRunningBills > 0.01) {
         isRunningBillPayment = true;
         remainingToAllocate = amountForRunningBills;
       }
@@ -1042,7 +1054,9 @@ class DebatorController extends GetxController {
                         ? note
                         : (type.toLowerCase() == 'eid_bonus'
                             ? "Eid Bonus Applied"
-                            : "Late Due Collection"),
+                            : (type.toLowerCase() == 'discount'
+                                ? "Discount Applied"
+                                : "Late Due Collection")),
                 'timestamp': Timestamp.fromDate(date),
                 'type': pType,
                 'bkashNumber': bNum,
@@ -1114,7 +1128,9 @@ class DebatorController extends GetxController {
         "Success",
         type.toLowerCase() == 'eid_bonus'
             ? "Eid Bonus Recorded Perfectly!"
-            : "Collection Recorded & Bills Updated",
+            : (type.toLowerCase() == 'discount'
+                ? "Discount Recorded Perfectly!"
+                : "Collection Recorded & Bills Updated"),
       );
     } catch (e) {
       Get.snackbar("Error", e.toString());
@@ -1159,7 +1175,8 @@ class DebatorController extends GetxController {
           type == 'debit' ||
           type == 'collection' ||
           type == 'payment' ||
-          type == 'eid_bonus') {
+          type == 'eid_bonus' ||
+          type == 'discount') {
         if (!Get.isRegistered<DailySalesController>()) {
           Get.put(DailySalesController());
         }
@@ -1403,7 +1420,6 @@ class DebatorController extends GetxController {
               .whereType<DebtorModel>()
               .toList();
 
-      // MASSIVE FIX: Removed the `.abs()`. It will now strictly ignore negative (advance) rows!
       final targetDebtors =
           allDebtors.where((d) {
             double val = isPayable ? d.purchaseDue : d.balance;
@@ -1585,6 +1601,7 @@ class DebatorController extends GetxController {
       String type = (pm['type'] ?? 'Cash').toString();
       String lowerType = type.toLowerCase();
       if (lowerType == 'eid_bonus') return "Eid Bonus";
+      if (lowerType == 'discount') return "Discount";
       bool hasBank =
           pm.containsKey('bankName') &&
           pm['bankName'].toString().trim().isNotEmpty;
@@ -1853,7 +1870,9 @@ class DebatorController extends GetxController {
                                 ? "DEBIT"
                                 : (type == 'eid_bonus'
                                     ? "EID BONUS"
-                                    : "CREDIT");
+                                    : (type == 'discount'
+                                        ? "DISCOUNT"
+                                        : "CREDIT"));
                         if (t['note'] != null &&
                             t['note'].toString().trim().isNotEmpty) {
                           desc += "\nNote: ${t['note']}";
