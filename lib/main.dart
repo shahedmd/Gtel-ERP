@@ -1,10 +1,8 @@
 import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Core/Auth/auth_binding.dart';
-import 'package:gtel_erp/Core/Bindings/home_bindings.dart';
+import 'package:gtel_erp/Core/Bindings/home_binding_v2.dart';
 import 'firebase_options.dart';
 import 'Core/Auth/login.dart';
 import 'Web Screen/homepage.dart';
@@ -17,36 +15,35 @@ Future<void> main() async {
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
-
   @override
   Widget build(BuildContext context) {
-    return ScreenUtilInit(
-      designSize: kIsWeb ? const Size(1440, 900) : const Size(360, 690),
-      minTextAdapt: true,
-      splitScreenMode: true,
-      builder: (context, child) {
-        return GetMaterialApp(
-          debugShowCheckedModeBanner: false,
-          title: 'G-Tel ERP',
-          theme: ThemeData(
-            useMaterial3: true,
-            colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
-            brightness: Brightness.light,
-            textTheme: Typography.englishLike2021.apply(fontSizeFactor: 1.sp),
-          ),
-          initialBinding: AuthBinding(),
-          initialRoute: '/',
-          getPages: [
-            GetPage(name: '/', page: () => const LoginPage()),
-            GetPage(
-              name: '/home',
-              page: () => AdminHomepage(),
-              binding: HomeBinding(),
-              preventDuplicates: true,
-            ),
-          ],
-        );
-      },
+    return GetMaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'G-Tel ERP',
+      theme: ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
+        brightness: Brightness.light,
+        textTheme: const TextTheme(
+          bodySmall: TextStyle(fontSize: 12),
+          bodyMedium: TextStyle(fontSize: 14),
+          bodyLarge: TextStyle(fontSize: 16),
+          titleSmall: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+          titleMedium: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+          titleLarge: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+        ),
+      ),
+      initialBinding: AuthBinding(),
+      initialRoute: '/',
+      getPages: [
+        GetPage(name: '/', page: () => const LoginPage()),
+        GetPage(
+          name: '/home',
+          page: () => const AdminHomepage(),
+          binding: HomeBinding(),
+          preventDuplicates: true,
+        ),
+      ],
     );
   }
 }

@@ -1,32 +1,188 @@
+// lib/Core/Auth/auth.dart
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:gtel_erp/Core/Utils/app_logger.dart';
+import 'package:gtel_erp/Core/Core%20Utils/app_logger.dart';
+import '../Permission/permission_controller.dart';
 
 class AuthController extends GetxController {
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  RxBool isLoading = false.obs;
+  final RxBool isLoading = false.obs;
 
   @override
   void onReady() {
     super.onReady();
+    _auth.authStateChanges().listen(_handleAuthStateChange);
+  }
 
-    // 1. CHECK ON APP BOOT (Delayed slightly so the screen exists before routing)
-    Future.delayed(const Duration(milliseconds: 500), () {
-      if (_auth.currentUser != null) {
-        AppLogger.i("Existing session found. Navigating to Home Page.");
-        Get.offAllNamed('/home');
-      }
-    });
-
-    // 2. PASSIVE BACKGROUND LISTENER
-    // (Only used to kick users back to login if their token expires or they are deleted)
-    _auth.authStateChanges().listen((User? user) {
-      if (user == null && Get.currentRoute != '/') {
-        AppLogger.w("Auth state null. Redirecting to Login.");
+  Future<void> _handleAuthStateChange(User? user) async {
+    if (user == null) {
+      if (Get.currentRoute != '/') {
+        AppLogger.w('Auth: Session ended. Redirecting to login.');
+        _clearAllData();
         Get.offAllNamed('/');
       }
-    });
+      return;
+    }
+    if (Get.currentRoute == '/') {
+      AppLogger.i('Auth: Session found for ${user.email}. Navigating home.');
+      await _navigateToHome();
+    }
+  }
+
+  Future<void> _navigateToHome() async {
+    try {
+      Get.offAllNamed('/home');
+      await _waitForPermissionsAndLoad();
+    } catch (e) {
+      AppLogger.e('Auth: Navigation error: $e');
+    }
+  }
+
+  Future<void> _waitForPermissionsAndLoad() async {
+    const maxWait = Duration(seconds: 15);
+    const checkInterval = Duration(milliseconds: 150);
+    var elapsed = Duration.zero;
+
+    await Future.delayed(const Duration(milliseconds: 200));
+
+    while (!Get.isRegistered<PermissionController>()) {
+      if (elapsed >= maxWait) {
+        AppLogger.e('Auth: PermissionController never registered. Giving up.');
+        return;
+      }
+      await Future.delayed(checkInterval);
+      elapsed += checkInterval;
+    }
+
+    final permCtrl = Get.find<PermissionController>();
+
+    if (!permCtrl.isLoading.value && permCtrl.currentUser.value == null) {
+      AppLogger.w('Auth: Stale controller detected. Forcing reload.');
+      await permCtrl.reloadUser();
+    }
+
+   
+    elapsed = Duration.zero;
+    while (permCtrl.isLoading.value) {
+      if (elapsed >= maxWait) {
+        AppLogger.w('Auth: Permission load timed out after 15s. Continuing.');
+        break;
+      }
+      await Future.delayed(checkInterval);
+      elapsed += checkInterval;
+    }
+
+    AppLogger.i(
+      'Auth: Ready — ${permCtrl.userEmail} | ${permCtrl.roleDisplayName}',
+    );
+
+    // ── STEP 6: Disabled account check ─────────────────────────────────────
+    if (permCtrl.currentUser.value?.isActive == false) {
+      AppLogger.w('Auth: Account is disabled.');
+      await _performLogout();
+      _showSnackbar(
+        title: 'Account Disabled',
+        message: 'Your account has been disabled. Contact Super Admin.',
+        isError: true,
+      );
+    }
+  }
+
+  Future<void> login(String email, String password) async {
+    if (isLoading.value) return;
+
+    try {
+      isLoading.value = true;
+
+      await _auth.signInWithEmailAndPassword(
+        email: email.trim(),
+        password: password.trim(),
+      );
+
+      // authStateChanges listener handles navigation automatically.
+      // No manual Get.offAllNamed here — avoids double navigation.
+      _showSnackbar(
+        title: 'Welcome Back',
+        message: 'Successfully logged into G-Tel ERP',
+        isError: false,
+      );
+    } on FirebaseAuthException catch (e) {
+      _showSnackbar(
+        title: 'Login Failed',
+        message: _handleAuthError(e.code),
+        isError: true,
+      );
+    } catch (e) {
+      AppLogger.e('Login error: $e');
+      _showSnackbar(
+        title: 'Error',
+        message: 'Something went wrong. Please try again.',
+        isError: true,
+      );
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+  void logout() {
+    Get.defaultDialog(
+      title: 'Logout',
+      middleText: 'Are you sure you want to log out of G-Tel ERP?',
+      titleStyle: const TextStyle(fontWeight: FontWeight.bold),
+      textConfirm: 'Logout',
+      textCancel: 'Cancel',
+      confirmTextColor: Colors.white,
+      buttonColor: Colors.redAccent,
+      cancelTextColor: Colors.black87,
+      onConfirm: () async {
+        Get.back();
+        await _performLogout();
+        _showSnackbar(
+          title: 'Logged Out',
+          message: 'You have been successfully logged out.',
+          isError: false,
+        );
+      },
+    );
+  }
+
+  Future<void> _performLogout() async {
+    try {
+      isLoading.value = true;
+      _clearAllData(); // delete the controller BEFORE signOut
+      await _auth.signOut();
+      // authStateChanges fires null → _handleAuthStateChange navigates to '/'
+    } catch (e) {
+      AppLogger.e('Logout error: $e');
+      _showSnackbar(
+        title: 'Logout Error',
+        message: 'Failed to log out. Please try again.',
+        isError: true,
+      );
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+  void _clearAllData() {
+    // ── THE CORE FIX ───────────────────────────────────────────────────────
+    // We DELETE the controller entirely instead of just calling clearUser().
+    //
+    // WHY: clearUser() only sets currentUser=null and isLoading=false but
+    // leaves the controller registered in GetX memory. On the next login,
+    // GetX finds it already registered and skips creating a new instance,
+    // meaning onInit() → _loadCurrentUser() is NEVER called again.
+    //
+    // By deleting it here, the home route binding creates a fresh instance
+    // on the next navigation, onInit runs, and _loadCurrentUser() fires. ✓
+    if (Get.isRegistered<PermissionController>()) {
+      Get.delete<PermissionController>(force: true);
+      AppLogger.i(
+        'Auth: PermissionController deleted. Fresh load on next login.',
+      );
+    }
   }
 
   String _handleAuthError(String code) {
@@ -34,7 +190,7 @@ class AuthController extends GetxController {
       case 'invalid-email':
         return 'The email address is not valid.';
       case 'user-disabled':
-        return 'This user account has been disabled.';
+        return 'This account has been disabled. Contact admin.';
       case 'user-not-found':
         return 'No account found with this email.';
       case 'wrong-password':
@@ -45,72 +201,40 @@ class AuthController extends GetxController {
         return 'Network error. Please check your internet connection.';
       case 'too-many-requests':
         return 'Too many attempts. Account temporarily locked. Try again later.';
+      case 'email-already-in-use':
+        return 'This email is already registered.';
+      case 'weak-password':
+        return 'Password is too weak. Use at least 6 characters.';
+      case 'operation-not-allowed':
+        return 'This login method is not enabled. Contact admin.';
       default:
+        AppLogger.e('Unhandled Firebase error code: $code');
         return 'An unexpected error occurred. Please try again.';
     }
   }
 
-  // ==========================================
-  // LOGIN LOGIC
-  // ==========================================
-  Future<void> login(String email, String password) async {
-    try {
-      // This will automatically show the spinner INSIDE your button on the UI
-      isLoading.value = true;
-
-      await _auth.signInWithEmailAndPassword(
-        email: email.trim(),
-        password: password.trim(),
-      );
-
-      // EXPLICIT ROUTING: Guarantees the page changes even if the stream gets cached
-      Get.offAllNamed('/home');
-
-      Get.snackbar(
-        "Welcome Back",
-        "Successfully logged into G-Tel ERP",
-        snackPosition: SnackPosition.TOP,
-        backgroundColor: Colors.green.withValues(alpha: 0.7),
-        colorText: Colors.white,
-        maxWidth: 400,
-      );
-    } on FirebaseAuthException catch (e) {
-      Get.snackbar(
-        "Login Failed",
-        _handleAuthError(e.code),
-        snackPosition: SnackPosition.BOTTOM,
-        backgroundColor: Colors.redAccent,
-        colorText: Colors.white,
-        maxWidth: 400,
-        margin: const EdgeInsets.all(20),
-        icon: const Icon(Icons.error_outline, color: Colors.white),
-      );
-    } catch (e) {
-      Get.snackbar(
-        "Error",
-        "Something went wrong. Please try again.",
-        snackPosition: SnackPosition.BOTTOM,
-      );
-    } finally {
-      // Hides the button spinner
-      isLoading.value = false;
-    }
+  void _showSnackbar({
+    required String title,
+    required String message,
+    required bool isError,
+  }) {
+    Get.snackbar(
+      title,
+      message,
+      snackPosition: isError ? SnackPosition.BOTTOM : SnackPosition.TOP,
+      backgroundColor:
+          isError ? Colors.redAccent : Colors.green.withValues(alpha: 0.85),
+      colorText: Colors.white,
+      maxWidth: 420,
+      margin: const EdgeInsets.all(16),
+      icon: Icon(
+        isError ? Icons.error_outline : Icons.check_circle_outline,
+        color: Colors.white,
+      ),
+      duration: const Duration(seconds: 3),
+    );
   }
 
-  // ==========================================
-  // LOGOUT LOGIC
-  // ==========================================
-  Future<void> logout() async {
-    try {
-      isLoading.value = true;
-      await _auth.signOut();
-
-      // Explicitly route back to login
-      Get.offAllNamed('/');
-    } catch (e) {
-      Get.snackbar("Logout Error", e.toString());
-    } finally {
-      isLoading.value = false;
-    }
-  }
+  User? get currentFirebaseUser => _auth.currentUser;
+  bool get isLoggedIn => _auth.currentUser != null;
 }

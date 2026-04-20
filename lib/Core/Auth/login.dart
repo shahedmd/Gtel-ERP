@@ -1,5 +1,6 @@
+// lib/Core/Auth/login.dart
+
 import 'package:flutter/material.dart';
-import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Core/Auth/auth.dart';
 import 'login_controller.dart';
@@ -9,119 +10,132 @@ class LoginPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final loginController = Get.put(LoginController());
-
-    final authController = Get.find<AuthController>();
+    final LoginController loginCtrl = Get.put(LoginController());
+    final AuthController authCtrl = Get.find<AuthController>();
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF0F2F5), // Light professional grey
+      backgroundColor: const Color(0xFFF0F2F5),
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) {
-            final isDesktop = constraints.maxWidth > 800;
+            final bool isDesktop = constraints.maxWidth > 800;
             return isDesktop
-                ? _buildDesktopLayout(context, loginController, authController)
-                : _buildMobileLayout(context, loginController, authController);
+                ? _DesktopLayout(loginCtrl: loginCtrl, authCtrl: authCtrl)
+                : _MobileLayout(loginCtrl: loginCtrl, authCtrl: authCtrl);
           },
         ),
       ),
     );
   }
+}
 
-  // Layout for wide screens (Desktop / Web / Large Tablet)
-  Widget _buildDesktopLayout(
-    BuildContext context,
-    LoginController loginController,
-    AuthController authController,
-  ) {
+// ─────────────────────────────────────────────────────────────
+// Desktop Layout — দুই কলাম
+// ─────────────────────────────────────────────────────────────
+class _DesktopLayout extends StatelessWidget {
+  final LoginController loginCtrl;
+  final AuthController authCtrl;
+
+  const _DesktopLayout({required this.loginCtrl, required this.authCtrl});
+
+  @override
+  Widget build(BuildContext context) {
     return Row(
       children: [
+        // Left side — branding
         Expanded(
-          flex: 1, // left side
           child: Container(
             color: Colors.blueAccent.shade700,
-            child: Center(
+            child: const Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(
-                    Icons.business_center,
-                    size: 100, // Hardcoded for desktop, ok here
-                    color: Colors.white,
-                  ),
-                  SizedBox(height: 20.h),
+                  Icon(Icons.business_center, size: 100, color: Colors.white),
+                  SizedBox(height: 24),
                   Text(
-                    "G tel ERP System",
+                    'G-Tel ERP System',
                     style: TextStyle(
                       color: Colors.white,
-                      fontSize: 32.sp, // Scaled with ScreenUtil
+                      fontSize: 32,
                       fontWeight: FontWeight.bold,
+                      letterSpacing: 1.2,
                     ),
+                  ),
+                  SizedBox(height: 12),
+                  Text(
+                    'Business Management Platform',
+                    style: TextStyle(color: Colors.white70, fontSize: 16),
                   ),
                 ],
               ),
             ),
           ),
         ),
+        // Right side — form
         Expanded(
-          flex: 1, // right side
           child: Container(
             padding: const EdgeInsets.all(24),
             child: Center(
-              child: _buildLoginForm(context, loginController, authController),
+              child: _LoginForm(loginCtrl: loginCtrl, authCtrl: authCtrl),
             ),
           ),
         ),
       ],
     );
   }
+}
 
-  Widget _buildMobileLayout(
-    BuildContext context,
-    LoginController loginController,
-    AuthController authController,
-  ) {
-    final isMobile = MediaQuery.of(context).size.width < 450;
+// ─────────────────────────────────────────────────────────────
+// Mobile Layout — single column
+// ─────────────────────────────────────────────────────────────
+class _MobileLayout extends StatelessWidget {
+  final LoginController loginCtrl;
+  final AuthController authCtrl;
 
+  const _MobileLayout({required this.loginCtrl, required this.authCtrl});
+
+  @override
+  Widget build(BuildContext context) {
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
       child: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Icon(
               Icons.business_center,
               size: 80,
               color: Colors.blueAccent.shade700,
             ),
-            SizedBox(height: 16.h),
+            const SizedBox(height: 16),
             Text(
-              "G tel ERP",
-              textAlign: TextAlign.center,
+              'G-Tel ERP',
               style: TextStyle(
                 color: Colors.blueAccent.shade700,
-                fontSize: isMobile ? 24 : 28.sp,
+                fontSize: 28,
                 fontWeight: FontWeight.bold,
               ),
             ),
-            SizedBox(height: 40.h),
-
-            _buildLoginForm(context, loginController, authController),
+            const SizedBox(height: 40),
+            _LoginForm(loginCtrl: loginCtrl, authCtrl: authCtrl),
           ],
         ),
       ),
     );
   }
+}
 
-  Widget _buildLoginForm(
-    BuildContext context,
-    LoginController loginController,
-    AuthController authController,
-  ) {
-    final theme = Theme.of(context);
-    final isMobile = MediaQuery.of(context).size.width < 450;
+// ─────────────────────────────────────────────────────────────
+// Login Form — shared between desktop and mobile
+// ─────────────────────────────────────────────────────────────
+class _LoginForm extends StatelessWidget {
+  final LoginController loginCtrl;
+  final AuthController authCtrl;
 
+  const _LoginForm({required this.loginCtrl, required this.authCtrl});
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
       constraints: const BoxConstraints(maxWidth: 400),
@@ -131,122 +145,110 @@ class LoginPage extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
+            color: Colors.black.withValues(alpha: 0.08),
             blurRadius: 20,
-            offset: const Offset(0, 10),
+            offset: const Offset(0, 8),
           ),
         ],
       ),
       child: Form(
-        key: loginController.formKey,
+        key: loginCtrl.formKey,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              "Login",
+            // Title
+            const Text(
+              'Sign In',
               style: TextStyle(
-                fontSize: isMobile ? 20 : 24.sp,
+                fontSize: 24,
                 fontWeight: FontWeight.bold,
-
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.87),
+                color: Color(0xFF1A1A2E),
               ),
             ),
-            SizedBox(height: 8.h),
-            Text(
-              "Enter your credentials to access the ERP",
-              style: TextStyle(
-                fontSize: isMobile ? 12 : 14.sp,
-                color: Colors.grey,
-              ),
+            const SizedBox(height: 8),
+            const Text(
+              'Enter your credentials to access the ERP',
+              style: TextStyle(fontSize: 14, color: Colors.grey),
             ),
-            SizedBox(height: 30.h),
+            const SizedBox(height: 28),
 
+            // Email field
             TextFormField(
-              controller: loginController.emailController,
-              style: TextStyle(
-                color: theme.colorScheme.onSurface,
-                fontSize: isMobile ? 13 : 17.sp,
-              ),
+              controller: loginCtrl.emailController,
               keyboardType: TextInputType.emailAddress,
               textInputAction: TextInputAction.next,
-              decoration: _inputDecoration(
-                "Email",
-                Icons.email_outlined,
-                context,
-              ),
+              style: const TextStyle(fontSize: 14),
+              decoration: _inputDecoration('Email', Icons.email_outlined),
               validator: (v) {
-                if (v!.isEmpty) return "Email required";
-                if (!GetUtils.isEmail(v)) return "Invalid email format";
+                if (v == null || v.isEmpty) return 'Email is required';
+                if (!GetUtils.isEmail(v)) return 'Invalid email format';
                 return null;
               },
             ),
-            SizedBox(height: 20.h),
+            const SizedBox(height: 16),
 
+            // Password field
             Obx(
               () => TextFormField(
-                controller: loginController.passwordController,
-                obscureText: loginController.obscurePassword.value,
-                style: TextStyle(
-                  color: theme.colorScheme.onSurface,
-                  fontSize: isMobile ? 13 : 17.sp,
-                ),
+                controller: loginCtrl.passwordController,
+                obscureText: loginCtrl.obscurePassword.value,
                 textInputAction: TextInputAction.done,
+                style: const TextStyle(fontSize: 14),
                 decoration: _inputDecoration(
-                  "Password",
+                  'Password',
                   Icons.lock_outline,
-                  context,
                 ).copyWith(
                   suffixIcon: IconButton(
                     icon: Icon(
-                      loginController.obscurePassword.value
-                          ? Icons.visibility
-                          : Icons.visibility_off,
+                      loginCtrl.obscurePassword.value
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                      size: 20,
+                      color: Colors.grey,
                     ),
-                    onPressed: () => loginController.toggleObscurePassword(),
+                    onPressed: loginCtrl.toggleObscurePassword,
                   ),
                 ),
-                onFieldSubmitted:
-                    (_) => _handleLogin(loginController, authController),
+                onFieldSubmitted: (_) => _handleLogin(),
                 validator: (v) {
-                  if (v!.isEmpty) return "Password required";
-                  if (v.length < 6) {
-                    return "Password must be at least 6 characters";
-                  }
+                  if (v == null || v.isEmpty) return 'Password is required';
+                  if (v.length < 6) return 'Minimum 6 characters';
                   return null;
                 },
               ),
             ),
-            SizedBox(height: 30.h),
+            const SizedBox(height: 28),
 
+            // Login button
             SizedBox(
               width: double.infinity,
-              height: 50.h,
+              height: 50,
               child: Obx(
                 () => ElevatedButton(
-                  onPressed:
-                      authController.isLoading.value
-                          ? null
-                          : () => _handleLogin(loginController, authController),
+                  onPressed: authCtrl.isLoading.value ? null : _handleLogin,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.blueAccent.shade700,
                     foregroundColor: Colors.white,
+                    disabledBackgroundColor: Colors.blueAccent.shade700
+                        .withValues(alpha: 0.6),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
                     ),
+                    elevation: 0,
                   ),
                   child:
-                      authController.isLoading.value
+                      authCtrl.isLoading.value
                           ? const SizedBox(
-                            height: 20,
-                            width: 20,
+                            height: 22,
+                            width: 22,
                             child: CircularProgressIndicator(
                               color: Colors.white,
-                              strokeWidth: 2,
+                              strokeWidth: 2.5,
                             ),
                           )
                           : const Text(
-                            "Sign In",
+                            'Sign In',
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
                               fontSize: 16,
@@ -261,35 +263,36 @@ class LoginPage extends StatelessWidget {
     );
   }
 
-  void _handleLogin(
-    LoginController loginController,
-    AuthController authController,
-  ) {
-    if (loginController.formKey.currentState!.validate()) {
-      authController.login(
-        loginController.emailController.text,
-        loginController.passwordController.text,
+  void _handleLogin() {
+    if (loginCtrl.formKey.currentState!.validate()) {
+      authCtrl.login(
+        loginCtrl.emailController.text,
+        loginCtrl.passwordController.text,
       );
     }
   }
 
-  InputDecoration _inputDecoration(
-    String label,
-    IconData icon,
-    BuildContext context,
-  ) {
-    final isMobile = MediaQuery.of(context).size.width < 450;
-
+  InputDecoration _inputDecoration(String label, IconData icon) {
     return InputDecoration(
       labelText: label,
-      prefixIcon: Icon(icon, size: 20),
-      labelStyle: TextStyle(
-        color: Colors.grey,
-        fontSize: isMobile ? 12 : 14.sp,
+      prefixIcon: Icon(icon, size: 20, color: Colors.grey),
+      labelStyle: const TextStyle(color: Colors.grey, fontSize: 14),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: Colors.grey),
       ),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
       enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
         borderSide: BorderSide(color: Colors.grey.shade300),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: BorderSide(color: Colors.blueAccent.shade700, width: 1.5),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: Colors.redAccent),
       ),
     );
   }

@@ -10,22 +10,22 @@ import 'package:gtel_erp/Core/Gtel%20Expense/Monthly%20Expense/montlyexpensecont
 import 'package:gtel_erp/Web%20Screen/Sales/controller.dart';
 import 'package:gtel_erp/Web%20Screen/Staff/controller.dart';
 import 'package:gtel_erp/Web%20Screen/overviewcontroller.dart';
-import 'package:gtel_erp/controller.dart';
+import '../Permission/permission_controller.dart';
 
 class HomeBinding extends Bindings {
   @override
   void dependencies() {
-    Get.lazyPut(() => NavigationController());
-    Get.lazyPut(() => MonthlyExpensesController());
-    Get.lazyPut(() => DailySalesController());
-    Get.lazyPut(() => DailyExpensesController());
-    Get.lazyPut(() => DebatorController());
-    Get.lazyPut(() => ProductController());
-    Get.lazyPut(() => CashDrawerController());
-    Get.lazyPut(() => ShipmentController());
-    Get.lazyPut(() => StaffController());
-    Get.lazyPut(() => DebtorPurchaseController());
-    Get.lazyPut(() => OverviewController());
-    Get.lazyPut(()=> RoleController());
+    Get.put(NavigationController(), permanent: true);
+    Get.put(PermissionController(), permanent: true);
+    Get.lazyPut(() => DailySalesController(), fenix: true);
+    Get.lazyPut(() => MonthlyExpensesController(), fenix: true);
+    Get.lazyPut(() => DailyExpensesController(), fenix: true);
+    Get.lazyPut(() => DebatorController(), fenix: true);
+    Get.lazyPut(() => ProductController(), fenix: true);
+    Get.lazyPut(() => CashDrawerController(), fenix: true);
+    Get.lazyPut(() => ShipmentController(), fenix: true);
+    Get.lazyPut(() => StaffController(), fenix: true);
+    Get.lazyPut(() => DebtorPurchaseController(), fenix: true);
+    Get.lazyPut(() => OverviewController(), fenix: true);
   }
 }

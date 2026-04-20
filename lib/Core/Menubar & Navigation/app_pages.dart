@@ -1,10 +1,12 @@
+// lib/Core/Menubar & Navigation/app_pages.dart
+
 import 'package:get/get.dart';
 import 'package:gtel_erp/Account%20Overview/aopage.dart';
 import 'package:gtel_erp/Cash/page.dart';
 import 'package:gtel_erp/Core/Auth/login.dart';
 import 'package:gtel_erp/Customer/cusotmerpage.dart';
 import 'package:gtel_erp/Live%20order/liveorder.dart';
-import 'package:gtel_erp/Profit&loss/page.dart';
+import 'package:gtel_erp/Profit%26loss/page.dart';
 import 'package:gtel_erp/Sale%20Return/salereturnpage.dart';
 import 'package:gtel_erp/Shipment/shipmentpage.dart';
 import 'package:gtel_erp/Staff%20Sale%20Report/ui.dart';
@@ -24,8 +26,9 @@ import 'package:gtel_erp/Web%20Screen/Sales/dailysales.dart';
 import 'package:gtel_erp/Web%20Screen/Staff/Staffpage.dart';
 import 'package:gtel_erp/Web%20Screen/homepage.dart';
 import 'package:gtel_erp/Web%20Screen/overviewpage.dart';
-
-import '../Bindings/home_bindings.dart';
+import '../Bindings/home_binding_v2.dart';
+import '../Permission/permission_guard.dart';
+import '../Super Admin Panel/superadminpage.dart';
 
 abstract class Routes {
   static const String login = '/';
@@ -53,8 +56,15 @@ abstract class Routes {
   static const String purchase = '/purchase';
   static const String orderlist = '/orderlist';
   static const String localpurchase = '/localpurchase';
+  static const String superadmin = '/superadmin';
+
+  // static const String agentportal = '/agent';
 }
 
+// ─────────────────────────────────────────────────────────────
+// AppPages — সব route definition
+// প্রতিটা nested page PermissionGuard দিয়ে wrap করা
+// ─────────────────────────────────────────────────────────────
 abstract class AppPages {
   static final List<GetPage> pages = [
     GetPage(name: Routes.login, page: () => const LoginPage()),
@@ -62,35 +72,165 @@ abstract class AppPages {
       name: Routes.home,
       page: () => AdminHomepage(),
       binding: HomeBinding(),
+      preventDuplicates: true,
     ),
   ];
 
   static final List<GetPage> nestedPages = [
     GetPage(
       name: Routes.overviewaccount,
-      page: () => const FinancialOverviewPage(),
+      page:
+          () => PermissionGuard(
+            route: Routes.overviewaccount,
+            child: const FinancialOverviewPage(),
+          ),
     ),
-    GetPage(name: Routes.dashboard, page: () => DailyOverviewPage()),
-    GetPage(name: Routes.debtor, page: () => Debatorpage()),
-    GetPage(name: Routes.dailyexpenses, page: () => DailyExpensesPage()),
-    GetPage(name: Routes.monthlyexpense, page: () => MonthlyExpensesPage()),
-    GetPage(name: Routes.dailysales, page: () => DailySalesPage()),
-    GetPage(name: Routes.monthlysalespage, page: () => MonthlySalesPage()),
-    GetPage(name: Routes.stock, page: () => ProductScreen()),
-    GetPage(name: Routes.staff, page: () => StaffListPage()),
-    GetPage(name: Routes.liveorder, page: () => LiveOrderSalesPage()),
-    GetPage(name: Routes.profitloss, page: () => ProfitView()),
-    GetPage(name: Routes.cash, page: () => CashDrawerView()),
-    GetPage(name: Routes.service, page: () => ServicePage()),
-    GetPage(name: Routes.salereturn, page: () => SaleReturnPage()),
-    GetPage(name: Routes.shipment, page: () => ShipmentPage()),
-    GetPage(name: Routes.conditionpage, page: () => ConditionSalesPage()),
-    GetPage(name: Routes.vendor, page: () => VendorPage()),
-    GetPage(name: Routes.customeroverview, page: () => CustomerAnalyticsPage()),
-    GetPage(name: Routes.staffsalesreport, page: () => StaffReportScreen()),
-    GetPage(name: Routes.productoverview, page: () => HotSellingProductPage()),
-    GetPage(name: Routes.purchase, page: () => GlobalPurchasePage()),
-    GetPage(name: Routes.orderlist, page: () => OrderHistoryPage()),
-    GetPage(name: Routes.localpurchase, page: () => SmartPurchaseScreen()),
+    GetPage(
+      name: Routes.dashboard,
+      page:
+          () => PermissionGuard(
+            route: Routes.dashboard,
+            child: DailyOverviewPage(),
+          ),
+    ),
+    GetPage(
+      name: Routes.debtor,
+      page: () => PermissionGuard(route: Routes.debtor, child: Debatorpage()),
+    ),
+    GetPage(
+      name: Routes.dailyexpenses,
+      page:
+          () => PermissionGuard(
+            route: Routes.dailyexpenses,
+            child: DailyExpensesPage(),
+          ),
+    ),
+    GetPage(
+      name: Routes.monthlyexpense,
+      page:
+          () => PermissionGuard(
+            route: Routes.monthlyexpense,
+            child: MonthlyExpensesPage(),
+          ),
+    ),
+    GetPage(
+      name: Routes.dailysales,
+      page:
+          () => PermissionGuard(
+            route: Routes.dailysales,
+            child: DailySalesPage(),
+          ),
+    ),
+    GetPage(
+      name: Routes.monthlysalespage,
+      page:
+          () => PermissionGuard(
+            route: Routes.monthlysalespage,
+            child: MonthlySalesPage(),
+          ),
+    ),
+    GetPage(
+      name: Routes.stock,
+      page: () => PermissionGuard(route: Routes.stock, child: ProductScreen()),
+    ),
+    GetPage(
+      name: Routes.staff,
+      page: () => PermissionGuard(route: Routes.staff, child: StaffListPage()),
+    ),
+    GetPage(
+      name: Routes.liveorder,
+      page:
+          () => PermissionGuard(
+            route: Routes.liveorder,
+            child: LiveOrderSalesPage(),
+          ),
+    ),
+    GetPage(
+      name: Routes.profitloss,
+      page:
+          () => PermissionGuard(route: Routes.profitloss, child: ProfitView()),
+    ),
+    GetPage(
+      name: Routes.cash,
+      page: () => PermissionGuard(route: Routes.cash, child: CashDrawerView()),
+    ),
+    GetPage(
+      name: Routes.service,
+      page: () => PermissionGuard(route: Routes.service, child: ServicePage()),
+    ),
+    GetPage(
+      name: Routes.salereturn,
+      page:
+          () => PermissionGuard(
+            route: Routes.salereturn,
+            child: SaleReturnPage(),
+          ),
+    ),
+    GetPage(
+      name: Routes.shipment,
+      page:
+          () => PermissionGuard(route: Routes.shipment, child: ShipmentPage()),
+    ),
+    GetPage(
+      name: Routes.conditionpage,
+      page:
+          () => PermissionGuard(
+            route: Routes.conditionpage,
+            child: ConditionSalesPage(),
+          ),
+    ),
+    GetPage(
+      name: Routes.vendor,
+      page: () => PermissionGuard(route: Routes.vendor, child: VendorPage()),
+    ),
+    GetPage(
+      name: Routes.customeroverview,
+      page:
+          () => PermissionGuard(
+            route: Routes.customeroverview,
+            child: CustomerAnalyticsPage(),
+          ),
+    ),
+    GetPage(
+      name: Routes.staffsalesreport,
+      page:
+          () => PermissionGuard(
+            route: Routes.staffsalesreport,
+            child: StaffReportScreen(),
+          ),
+    ),
+    GetPage(
+      name: Routes.productoverview,
+      page:
+          () => PermissionGuard(
+            route: Routes.productoverview,
+            child: HotSellingProductPage(),
+          ),
+    ),
+    GetPage(
+      name: Routes.purchase,
+      page:
+          () => PermissionGuard(
+            route: Routes.purchase,
+            child: GlobalPurchasePage(),
+          ),
+    ),
+    GetPage(
+      name: Routes.orderlist,
+      page:
+          () => PermissionGuard(
+            route: Routes.orderlist,
+            child: OrderHistoryPage(),
+          ),
+    ),
+    GetPage(
+      name: Routes.localpurchase,
+      page:
+          () => PermissionGuard(
+            route: Routes.localpurchase,
+            child: SmartPurchaseScreen(),
+          ),
+    ),
+    GetPage(name: Routes.superadmin, page: () => const SuperAdminPage()),
   ];
 }
