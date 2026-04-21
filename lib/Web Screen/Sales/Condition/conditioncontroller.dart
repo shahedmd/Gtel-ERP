@@ -4,13 +4,14 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
 import 'package:gtel_erp/Web%20Screen/Sales/Condition/cmodel.dart';
 import 'package:gtel_erp/Web%20Screen/Sales/controller.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+
+import '../../../Core/Stock Management/stock_controller.dart';
 
 class ConditionSalesController extends GetxController {
   final FirebaseFirestore _db = FirebaseFirestore.instance;

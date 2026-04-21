@@ -1,11 +1,12 @@
 // ignore_for_file: deprecated_member_use, avoid_print
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
 import 'package:gtel_erp/Shipment/controller.dart';
 import 'package:gtel_erp/Shipment/shipmodel.dart';
 import 'package:gtel_erp/Shipment/shipmentdialog.dart';
 import 'package:intl/intl.dart';
+
+import '../Core/Stock Management/stock_controller.dart';
 
 // --- ERP THEME COLORS ---
 const Color kHeaderColor = Color(0xFF1E293B); // Slate 900

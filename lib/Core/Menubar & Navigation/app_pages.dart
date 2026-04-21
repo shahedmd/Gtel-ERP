@@ -11,7 +11,7 @@ import 'package:gtel_erp/Sale%20Return/salereturnpage.dart';
 import 'package:gtel_erp/Shipment/shipmentpage.dart';
 import 'package:gtel_erp/Staff%20Sale%20Report/ui.dart';
 import 'package:gtel_erp/Core/Stock%20Management/stockdamange_servicepage.dart';
-import 'package:gtel_erp/Core/Stock%20Management/chinaorderlist.dart';
+import 'package:gtel_erp/Core/Stock%20Management/china_order_list.dart';
 import 'package:gtel_erp/Core/Stock%20Management/localpurchaseapage.dart';
 import 'package:gtel_erp/Core/Stock%20Management/stockpage.dart';
 import 'package:gtel_erp/Vendor/vendorpage.dart';

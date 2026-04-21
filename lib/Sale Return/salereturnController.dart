@@ -3,7 +3,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import '../Core/Stock Management/stockcontroller.dart'; // Ensure correct path to ProductController
+
+import '../Core/Stock Management/stock_controller.dart';
 
 class SaleReturnController extends GetxController {
   final FirebaseFirestore _db = FirebaseFirestore.instance;

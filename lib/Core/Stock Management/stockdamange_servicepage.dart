@@ -5,7 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-import 'stockcontroller.dart';
+import 'stock_controller.dart';
 import 'stockproductmodel.dart'; 
 
 const Color darkSlate = Color(0xFF0F172A);

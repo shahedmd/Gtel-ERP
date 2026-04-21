@@ -8,8 +8,9 @@ import '../../Core Utils/activity_logger.dart';
 import '../../Menubar & Navigation/app_pages.dart';
 import '../../Permission/permission_button.dart';
 import '../../Permission/permission_controller.dart';
+import '../stock_controller.dart';
 import '../stock_helper_dialogs.dart';
-import '../stockcontroller.dart';
+
 class StockScrollBehavior extends MaterialScrollBehavior {
   @override
   Set<PointerDeviceKind> get dragDevices => {

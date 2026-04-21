@@ -5,11 +5,12 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Core/Core%20Utils/app_logger.dart';
 import 'package:http/http.dart' as http;
-import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/Debtor%20Purchase/purchasecontroller.dart';
 import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/gteldebtorcontroller.dart';
 import 'package:gtel_erp/Core/Stock%20Management/stockproductmodel.dart';
 import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/debtordartmodel.dart';
+
+import 'stock_controller.dart';
 
 // --- Professional ERP Theme Colors ---
 const Color darkSlate = Color(0xFF0F172A);

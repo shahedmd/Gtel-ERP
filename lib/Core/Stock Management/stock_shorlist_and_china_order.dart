@@ -1,27 +1,18 @@
-
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-
 import 'package:gtel_erp/Shipment/controller.dart';
+import 'Shortlist Widgets/order_cart_dialog.dart';
+import 'Shortlist Widgets/shortlist_appbar.dart';
+import 'Shortlist Widgets/shortlist_table.dart';
+import 'stock_controller.dart';
 
-import 'China Orderlist Widgets/order_cart_dialog.dart';
-import 'China Orderlist Widgets/shortlist_appbar.dart';
-import 'China Orderlist Widgets/shortlist_table.dart';
-import 'stockcontroller.dart';
-
-// ─────────────────────────────────────────────────────────────
-// OrderCartItem — cart-এর single item
-// ─────────────────────────────────────────────────────────────
 class OrderCartItem {
   final dynamic product;
   int qty;
   OrderCartItem({required this.product, required this.qty});
 }
 
-// ─────────────────────────────────────────────────────────────
-// OrderCartController — cart state
-// ─────────────────────────────────────────────────────────────
 class OrderCartController extends GetxController {
   final cartItems = <OrderCartItem>[].obs;
   final companyName = ''.obs;
@@ -61,9 +52,6 @@ class OrderCartController extends GetxController {
   }
 }
 
-// ─────────────────────────────────────────────────────────────
-// ScrollBehavior — mouse + touch
-// ─────────────────────────────────────────────────────────────
 class ShortlistScrollBehavior extends MaterialScrollBehavior {
   @override
   Set<PointerDeviceKind> get dragDevices => {
@@ -72,9 +60,6 @@ class ShortlistScrollBehavior extends MaterialScrollBehavior {
   };
 }
 
-// ─────────────────────────────────────────────────────────────
-// ShortlistPage — main page
-// ─────────────────────────────────────────────────────────────
 class ShortlistPage extends StatefulWidget {
   const ShortlistPage({super.key});
 
@@ -119,53 +104,58 @@ class _ShortlistPageState extends State<ShortlistPage> {
       ),
       body: ScrollConfiguration(
         behavior: ShortlistScrollBehavior(),
-        child: Column(
-          children: [
-            // Stats
-            _StatsSection(isMobile: isMobile, ctrl: _ctrl),
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Stats
+              _StatsSection(isMobile: isMobile, ctrl: _ctrl),
 
-            // Search bar
-            _SearchBar(
-              isMobile: isMobile,
-              searchCtrl: _searchCtrl,
-              ctrl: _ctrl,
-            ),
+              // Search bar
+              _SearchBar(
+                isMobile: isMobile,
+                searchCtrl: _searchCtrl,
+                ctrl: _ctrl,
+              ),
 
-            // Table
-            Expanded(
-              child: Container(
+              // Table card
+              // clipBehavior: Clip.hardEdge ensures the horizontally-scrollable
+              // ShortlistTable doesn't overflow the card's rounded corners and
+              // prevents the RenderFlex overflow error on the header Row.
+              Container(
                 margin: EdgeInsets.fromLTRB(
                   isMobile ? 12 : 20,
                   0,
                   isMobile ? 12 : 20,
-                  20,
+                  24,
                 ),
+                clipBehavior: Clip.hardEdge, // ← KEY FIX
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: const Color(0xFFE2E8F0)),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.03),
-                      blurRadius: 10,
+                      color: Colors.black.withValues(alpha: 0.04),
+                      blurRadius: 12,
                       offset: const Offset(0, 4),
                     ),
                   ],
                 ),
                 child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Header + refresh
+                    // Header + refresh — constrained to viewport, never overflows
                     _TableHeader(ctrl: _ctrl),
                     const Divider(height: 1, color: Color(0xFFE2E8F0)),
 
-                    // Data
-                    Expanded(
-                      child: ShortlistTable(
-                        isMobile: isMobile,
-                        ctrl: _ctrl,
-                        shipCtrl: _shipCtrl,
-                        cartCtrl: _cartCtrl,
-                      ),
+                    // Data — horizontally scrollable inside
+                    ShortlistTable(
+                      isMobile: isMobile,
+                      ctrl: _ctrl,
+                      shipCtrl: _shipCtrl,
+                      cartCtrl: _cartCtrl,
                     ),
 
                     const Divider(height: 1, color: Color(0xFFE2E8F0)),
@@ -175,8 +165,8 @@ class _ShortlistPageState extends State<ShortlistPage> {
                   ],
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -187,9 +177,6 @@ class _ShortlistPageState extends State<ShortlistPage> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────
-// Stats Section
-// ─────────────────────────────────────────────────────────────
 class _StatsSection extends StatelessWidget {
   final bool isMobile;
   final ProductController ctrl;
@@ -376,16 +363,21 @@ class _TableHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
       child: Row(
+        // mainAxisSize.min + spaceBetween won't overflow — each child
+        // takes only what it needs within the card's viewport width.
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          const Text(
-            'Low Stock Inventory',
-            style: TextStyle(
-              fontWeight: FontWeight.w800,
-              fontSize: 16,
-              color: Color(0xFF0F172A),
+          const Flexible(
+            child: Text(
+              'Low Stock Inventory',
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 16,
+                color: Color(0xFF0F172A),
+              ),
             ),
           ),
           IconButton(
@@ -427,18 +419,21 @@ class _PaginationFooter extends StatelessWidget {
       return Container(
         padding: EdgeInsets.symmetric(
           horizontal: isMobile ? 12 : 24,
-          vertical: 12,
+          vertical: 14,
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             if (!isMobile)
-              Text(
-                'Showing $start–$end of $total alerts',
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF64748B),
+              Flexible(
+                child: Text(
+                  'Showing $start–$end of $total alerts',
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF64748B),
+                  ),
                 ),
               )
             else
@@ -448,15 +443,16 @@ class _PaginationFooter extends StatelessWidget {
               ),
             Row(
               children: [
-                IconButton(
-                  icon: const Icon(Icons.chevron_left),
+                _PageButton(
+                  icon: Icons.chevron_left,
                   onPressed:
                       current > 1 ? () => ctrl.prevShortlistPage() : null,
                 ),
+                const SizedBox(width: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 6,
+                    horizontal: 16,
+                    vertical: 7,
                   ),
                   decoration: BoxDecoration(
                     color: const Color(0xFFF1F5F9),
@@ -471,8 +467,9 @@ class _PaginationFooter extends StatelessWidget {
                     ),
                   ),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.chevron_right),
+                const SizedBox(width: 8),
+                _PageButton(
+                  icon: Icons.chevron_right,
                   onPressed:
                       current < totalPages
                           ? () => ctrl.nextShortlistPage()
@@ -484,5 +481,40 @@ class _PaginationFooter extends StatelessWidget {
         ),
       );
     });
+  }
+}
+
+class _PageButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback? onPressed;
+
+  const _PageButton({required this.icon, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color:
+          onPressed != null ? const Color(0xFFF1F5F9) : const Color(0xFFF8FAFC),
+      borderRadius: BorderRadius.circular(6),
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+          ),
+          child: Icon(
+            icon,
+            color:
+                onPressed != null
+                    ? const Color(0xFF374151)
+                    : const Color(0xFFCBD5E1),
+            size: 20,
+          ),
+        ),
+      ),
+    );
   }
 }

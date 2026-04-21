@@ -1,10 +1,11 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
 import 'package:intl/intl.dart';
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/Debtor%20Purchase/dialog.dart';
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/Debtor%20Purchase/purchasecontroller.dart';
+
+import '../../../Core/Stock Management/stock_controller.dart';
 
 class DebtorPurchasePage extends StatelessWidget {
   final String debtorId;

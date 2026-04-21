@@ -1,13 +1,13 @@
-// ignore_for_file: deprecated_member_use, avoid_print
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
 import 'package:gtel_erp/Shipment/controller.dart';
 import 'package:gtel_erp/Shipment/details.dart';
 import 'package:gtel_erp/Shipment/onhold.dart';
 import 'package:gtel_erp/Shipment/shipmentdialog.dart';
 import 'package:gtel_erp/Vendor/vendorcontroller.dart';
 import 'package:intl/intl.dart';
+
+import '../Core/Stock Management/stock_controller.dart';
 
 // --- THEME CONSTANTS ---
 const Color kDarkSlate = Color(0xFF1E293B);
@@ -348,7 +348,7 @@ class ShipmentPage extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
+          color: color.withValues(alpha:  0.1),
           borderRadius: BorderRadius.circular(6),
         ),
         child: Row(
@@ -501,7 +501,7 @@ class ShipmentPage extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: done ? kSuccess.withOpacity(0.1) : kWarning.withOpacity(0.1),
+        color: done ? kSuccess.withValues(alpha:  0.1) : kWarning.withValues(alpha:  0.1),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: done ? kSuccess : kWarning),
       ),
@@ -639,7 +639,7 @@ class ShipmentPage extends StatelessWidget {
                                   child: Container(
                                     height: 36,
                                     decoration: BoxDecoration(
-                                      color: Colors.white.withOpacity(0.1),
+                                      color: Colors.white.withValues(alpha:  0.1),
                                       borderRadius: BorderRadius.circular(6),
                                     ),
                                     child: TextField(
@@ -652,12 +652,12 @@ class ShipmentPage extends StatelessWidget {
                                         hintText:
                                             "Search added items (Name, Model, Ctn)...",
                                         hintStyle: TextStyle(
-                                          color: Colors.white.withOpacity(0.5),
+                                          color: Colors.white.withValues(alpha:  0.5),
                                           fontSize: 13,
                                         ),
                                         prefixIcon: Icon(
                                           Icons.search,
-                                          color: Colors.white.withOpacity(0.7),
+                                          color: Colors.white.withValues(alpha:  0.7),
                                           size: 18,
                                         ),
                                         border: InputBorder.none,
@@ -965,7 +965,7 @@ class ShipmentPage extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: kBorder),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 5),
+          BoxShadow(color: Colors.black.withValues(alpha:  0.02), blurRadius: 5),
         ],
       ),
       child: Column(
@@ -1166,7 +1166,7 @@ class _MetricTile extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
+              color: color.withValues( alpha: 0.1),
               shape: BoxShape.circle,
             ),
             child: Icon(icon, color: color, size: 28),

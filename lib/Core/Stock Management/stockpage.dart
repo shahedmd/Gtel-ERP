@@ -1,21 +1,42 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Core/Stock%20Management/stock_helper_dialogs.dart';
-import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
 import 'package:gtel_erp/Shipment/controller.dart';
-
+import 'stock_controller.dart';
 import 'widgets/stock_appbar.dart';
 import 'widgets/stock_stats.dart';
 import 'widgets/stock_table.dart';
 
-class ProductScreen extends StatelessWidget {
-  ProductScreen({super.key});
+class ProductScreen extends StatefulWidget {
+  const ProductScreen({super.key});
 
-  final ProductController controller = Get.find<ProductController>();
-  final ShipmentController shipmentController = Get.find<ShipmentController>();
-  final TextEditingController currencyInput = TextEditingController();
-  final ScrollController _verticalScroll = ScrollController();
-  final ScrollController _horizontalScroll = ScrollController();
+  @override
+  State<ProductScreen> createState() => _ProductScreenState();
+}
+
+class _ProductScreenState extends State<ProductScreen> {
+  late final ProductController controller;
+  late final ShipmentController shipmentController;
+
+  // ── Controllers that MUST be disposed ───────────────────────
+  final TextEditingController _currencyInput = TextEditingController();
+  final ScrollController _verticalScroll    = ScrollController();
+  final ScrollController _horizontalScroll  = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    controller        = Get.find<ProductController>();
+    shipmentController = Get.find<ShipmentController>();
+  }
+
+  @override
+  void dispose() {
+    _currencyInput.dispose();
+    _verticalScroll.dispose();
+    _horizontalScroll.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -24,16 +45,31 @@ class ProductScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: StockAppBar(isMobile: isMobile, controller: controller),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => showCreateProductDialog(controller),
+        backgroundColor: const Color(0xFF2563EB),
+        elevation: 4,
+        label: Text(
+          'Add Product',
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            color: Colors.white,
+            fontSize: isMobile ? 13 : 15,
+          ),
+        ),
+        icon: Icon(Icons.add, color: Colors.white, size: isMobile ? 20 : 24),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
       body: Column(
         children: [
           // Stats + currency updater
           StockStatsSection(
             isMobile: isMobile,
             controller: controller,
-            currencyInput: currencyInput,
+            currencyInput: _currencyInput,
           ),
 
-          // Main table
+          // Main table card
           Expanded(
             child: Container(
               margin: EdgeInsets.fromLTRB(
@@ -56,7 +92,7 @@ class ProductScreen extends StatelessWidget {
               child: Column(
                 children: [
                   // Search + sort toolbar
-                  _buildToolbar(isMobile),
+                  _ToolbarSection(isMobile: isMobile, controller: controller),
                   const Divider(height: 1, color: Color(0xFFE5E7EB)),
 
                   // Table
@@ -73,34 +109,36 @@ class ProductScreen extends StatelessWidget {
                   const Divider(height: 1, color: Color(0xFFE5E7EB)),
 
                   // Pagination
-                  _buildPagination(isMobile),
+                  _PaginationSection(
+                    isMobile: isMobile,
+                    controller: controller,
+                  ),
                 ],
               ),
             ),
           ),
         ],
       ),
-floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
-      // Add product button
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => showCreateProductDialog(controller),
-        backgroundColor: const Color(0xFF2563EB),
-        elevation: 4,
-        label: Text(
-          'Add Product',
-          style: TextStyle(
-            fontWeight: FontWeight.w600,
-            color: Colors.white,
-            fontSize: isMobile ? 13 : 15,
-          ),
-        ),
-        icon: Icon(Icons.add, color: Colors.white, size: isMobile ? 20 : 24),
-      ),
     );
   }
+}
 
-  // ── Search + Sort Toolbar ────────────────────────────────
-  Widget _buildToolbar(bool isMobile) {
+// ─────────────────────────────────────────────────────────────
+// Extracted widgets — keeps build() readable and avoids
+// rebuilding the entire tree when only search state changes.
+// ─────────────────────────────────────────────────────────────
+
+class _ToolbarSection extends StatelessWidget {
+  final bool isMobile;
+  final ProductController controller;
+
+  const _ToolbarSection({
+    required this.isMobile,
+    required this.controller,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     return Padding(
       padding: EdgeInsets.all(isMobile ? 12 : 16),
       child: Row(
@@ -110,10 +148,9 @@ floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
               style: const TextStyle(fontSize: 13),
               onChanged: controller.search,
               decoration: InputDecoration(
-                hintText:
-                    isMobile
-                        ? 'Search...'
-                        : 'Search by model, name or brand...',
+                hintText: isMobile
+                    ? 'Search...'
+                    : 'Search by model, name or brand...',
                 hintStyle: const TextStyle(fontSize: 13, color: Colors.grey),
                 prefixIcon: const Icon(Icons.search, color: Colors.grey),
                 filled: true,
@@ -132,7 +169,7 @@ floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
           ),
           const SizedBox(width: 12),
 
-          // Sort by loss toggle
+          // Sort by loss toggle — only this rebuilds on state change
           Obx(() {
             final isActive = controller.sortByLoss.value;
             return InkWell(
@@ -144,24 +181,23 @@ floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
                   vertical: 12,
                 ),
                 decoration: BoxDecoration(
-                  color:
-                      isActive
-                          ? const Color(0xFFFEF2F2)
-                          : const Color(0xFFF8FAFC),
+                  color: isActive
+                      ? const Color(0xFFFEF2F2)
+                      : const Color(0xFFF8FAFC),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
-                    color:
-                        isActive
-                            ? const Color(0xFFDC2626)
-                            : const Color(0xFFE2E8F0),
+                    color: isActive
+                        ? const Color(0xFFDC2626)
+                        : const Color(0xFFE2E8F0),
                   ),
                 ),
                 child: Row(
                   children: [
                     Icon(
                       isActive ? Icons.trending_down : Icons.sort,
-                      color:
-                          isActive ? const Color(0xFFDC2626) : Colors.grey[700],
+                      color: isActive
+                          ? const Color(0xFFDC2626)
+                          : Colors.grey[700],
                       size: 20,
                     ),
                     if (!isMobile) ...[
@@ -170,10 +206,9 @@ floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
                         'Loss First',
                         style: TextStyle(
                           fontWeight: FontWeight.w600,
-                          color:
-                              isActive
-                                  ? const Color(0xFFDC2626)
-                                  : Colors.grey[700],
+                          color: isActive
+                              ? const Color(0xFFDC2626)
+                              : Colors.grey[700],
                         ),
                       ),
                     ],
@@ -186,16 +221,26 @@ floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
       ),
     );
   }
+}
 
-  // ── Pagination ────────────────────────────────────────────
-  Widget _buildPagination(bool isMobile) {
+class _PaginationSection extends StatelessWidget {
+  final bool isMobile;
+  final ProductController controller;
+
+  const _PaginationSection({
+    required this.isMobile,
+    required this.controller,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     return Obx(() {
-      final total = controller.totalProducts.value;
-      final current = controller.currentPage.value;
-      final size = controller.pageSize.value;
-      final totalPages = (total / size).ceil();
-      final start = total == 0 ? 0 : ((current - 1) * size) + 1;
-      final end = (current * size) > total ? total : (current * size);
+      final total      = controller.totalProducts.value;
+      final current    = controller.currentPage.value;
+      final size       = controller.pageSize.value;
+      final totalPages = size > 0 ? (total / size).ceil() : 0;
+      final start      = total == 0 ? 0 : ((current - 1) * size) + 1;
+      final end        = (current * size) > total ? total : current * size;
 
       return Container(
         padding: EdgeInsets.symmetric(
@@ -219,7 +264,8 @@ floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
               children: [
                 IconButton(
                   icon: const Icon(Icons.chevron_left),
-                  onPressed: current > 1 ? controller.previousPage : null,
+                  onPressed:
+                      current > 1 ? controller.previousPage : null,
                 ),
                 Container(
                   padding: const EdgeInsets.symmetric(
@@ -240,7 +286,8 @@ floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
                 ),
                 IconButton(
                   icon: const Icon(Icons.chevron_right),
-                  onPressed: current < totalPages ? controller.nextPage : null,
+                  onPressed:
+                      current < totalPages ? controller.nextPage : null,
                 ),
               ],
             ),

@@ -2,7 +2,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
+
+import '../stock_controller.dart';
 
 class StockStatsSection extends StatelessWidget {
   final bool isMobile;

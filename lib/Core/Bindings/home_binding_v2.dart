@@ -1,6 +1,5 @@
 import 'package:get/get.dart';
 import 'package:gtel_erp/Cash/controller.dart';
-import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
 import 'package:gtel_erp/Shipment/controller.dart';
 import 'package:gtel_erp/Core/Menubar%20&%20Navigation/sidemenubar.dart';
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/Debtor%20Purchase/purchasecontroller.dart';
@@ -11,6 +10,7 @@ import 'package:gtel_erp/Web%20Screen/Sales/controller.dart';
 import 'package:gtel_erp/Web%20Screen/Staff/controller.dart';
 import 'package:gtel_erp/Web%20Screen/overviewcontroller.dart';
 import '../Permission/permission_controller.dart';
+import '../Stock Management/stock_controller.dart';
 
 class HomeBinding extends Bindings {
   @override

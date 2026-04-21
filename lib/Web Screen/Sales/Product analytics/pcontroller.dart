@@ -1,7 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:get/get.dart';
-import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
 import 'package:gtel_erp/Core/Stock%20Management/stockproductmodel.dart';
+
+import '../../../Core/Stock Management/stock_controller.dart';
 
 class HotSalesData {
   final Product product;
