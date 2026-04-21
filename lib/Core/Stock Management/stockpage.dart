@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Core/Stock%20Management/stock_helper_dialogs.dart';
 import 'package:gtel_erp/Shipment/controller.dart';
+import 'Stock Widgets/stock_appbar.dart';
+import 'Stock Widgets/stock_stats.dart';
+import 'Stock Widgets/stock_table.dart';
 import 'stock_controller.dart';
-import 'widgets/stock_appbar.dart';
-import 'widgets/stock_stats.dart';
-import 'widgets/stock_table.dart';
+
 
 class ProductScreen extends StatefulWidget {
   const ProductScreen({super.key});

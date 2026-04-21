@@ -2,9 +2,9 @@
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:gtel_erp/Core/Stock%20Management/stockdamange_servicepage.dart';
 import 'package:gtel_erp/Core/Stock%20Management/ongoining_shipment_page.dart';
 
+import '../Stock Service & Damage/View/service_page.dart';
 import '../stock_controller.dart';
 import '../stock_shorlist_and_china_order.dart';
 

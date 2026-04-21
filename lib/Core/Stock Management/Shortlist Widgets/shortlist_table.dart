@@ -3,11 +3,11 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Core/Menubar%20&%20Navigation/app_pages.dart';
-import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
 import 'package:gtel_erp/Core/Stock%20Management/stockproductmodel.dart';
 import 'package:gtel_erp/Shipment/controller.dart';
 import '../../Core Utils/activity_logger.dart';
 import '../../Permission/permission_button.dart';
+import '../stock_controller.dart';
 import '../stock_shorlist_and_china_order.dart';
 
 class ShortlistTable extends StatelessWidget {

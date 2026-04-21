@@ -1,12 +1,14 @@
-// ignore_for_file: deprecated_member_use, empty_catches
-
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
+import 'package:gtel_erp/Core/Menubar%20&%20Navigation/app_pages.dart';
 import 'package:gtel_erp/Shipment/controller.dart';
 
-class TableScrollBehavior extends MaterialScrollBehavior {
+import '../Core Utils/activity_logger.dart';
+import '../Permission/permission_button.dart';
+
+class _ShipmentScrollBehavior extends MaterialScrollBehavior {
   @override
   Set<PointerDeviceKind> get dragDevices => {
     PointerDeviceKind.touch,
@@ -14,94 +16,70 @@ class TableScrollBehavior extends MaterialScrollBehavior {
   };
 }
 
-class OnGoingShipmentsPage extends StatefulWidget {
-  const OnGoingShipmentsPage({super.key});
+class OnGoingShipmentsPage extends StatelessWidget {
+  OnGoingShipmentsPage({super.key});
 
-  @override
-  State<OnGoingShipmentsPage> createState() => _OnGoingShipmentsPageState();
-}
+  final ShipmentController _ctrl = Get.find<ShipmentController>();
 
-class _OnGoingShipmentsPageState extends State<OnGoingShipmentsPage> {
-  final ShipmentController controller = Get.find<ShipmentController>();
+  // Local state — page-level only, no StatefulWidget needed
+  final RxInt _currentPage = 1.obs;
+  final RxString _searchQuery = ''.obs;
+  static const int _pageSize = 15;
 
-  // Changed to GetX Rx variables!
-  final RxInt currentPage = 1.obs;
-  final int itemsPerPage = 15;
-  final RxString searchQuery = ''.obs;
-
-  final ScrollController _verticalScrollController = ScrollController();
-  final ScrollController _horizontalScrollController = ScrollController();
-
-  @override
-  void dispose() {
-    _verticalScrollController.dispose();
-    _horizontalScrollController.dispose();
-    super.dispose();
-  }
-
-  void _nextPage(int totalPages) {
-    if (currentPage.value < totalPages) currentPage.value++;
-  }
-
-  void _prevPage() {
-    if (currentPage.value > 1) currentPage.value--;
-  }
+  final ScrollController _vScroll = ScrollController();
+  final ScrollController _hScroll = ScrollController();
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final bool isMobile = screenWidth < 768;
+    final bool isMobile = MediaQuery.of(context).size.width < 768;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
-      appBar: _buildAppBar(),
-      floatingActionButton: _buildProfessionalPDFButton(),
+      appBar: _ShipmentAppBar(),
+      floatingActionButton: _ExportPdfButton(ctrl: _ctrl),
       body: Obx(() {
-        if (controller.isLoading.value) {
+        if (_ctrl.isLoading.value) {
           return const Center(child: CircularProgressIndicator(strokeWidth: 3));
         }
 
-        if (controller.aggregatedList.isEmpty) {
-          return _buildEmptyState();
-        }
-        // --- SEARCH FILTER LOGIC ---
-        final filteredList =
-            searchQuery.value.isEmpty
-                ? controller.aggregatedList
-                : controller.aggregatedList
-                    .where(
-                      (p) =>
-                          p.model.toLowerCase().contains(
-                            searchQuery.value.toLowerCase(),
-                          ) ||
-                          p.name.toLowerCase().contains(
-                            searchQuery.value.toLowerCase(),
-                          ),
-                    )
-                    .toList();
-
-        // --- PAGINATION LOGIC ---
-        final totalItems = filteredList.length;
-        final totalPages = (totalItems / itemsPerPage).ceil();
-        if (currentPage.value > totalPages && totalPages > 0) {
-          currentPage.value = totalPages;
+        if (_ctrl.aggregatedList.isEmpty) {
+          return const _EmptyState();
         }
 
-        final startIndex = (currentPage.value - 1) * itemsPerPage;
-        final endIndex =
-            (startIndex + itemsPerPage > totalItems)
-                ? totalItems
-                : startIndex + itemsPerPage;
+        // Search filter
+        final filtered =
+            _searchQuery.value.isEmpty
+                ? _ctrl.aggregatedList
+                : _ctrl.aggregatedList.where((p) {
+                  final q = _searchQuery.value.toLowerCase();
+                  return p.model.toLowerCase().contains(q) ||
+                      p.name.toLowerCase().contains(q);
+                }).toList();
 
-        // Prevent range errors if list is empty after search
-        final paginatedList =
-            filteredList.isEmpty
-                ? []
-                : filteredList.sublist(startIndex, endIndex);
+        // Pagination
+        final total = filtered.length;
+        final totalPages = (total / _pageSize).ceil().clamp(1, 999);
+
+        if (_currentPage.value > totalPages) {
+          _currentPage.value = totalPages;
+        }
+
+        final start = (_currentPage.value - 1) * _pageSize;
+        final end = (start + _pageSize).clamp(0, total);
+        final paged = filtered.isEmpty ? [] : filtered.sublist(start, end);
 
         return Column(
           children: [
-            _buildSearchBar(isMobile), // Added Search Bar
+            // Search bar
+            _SearchBar(
+              isMobile: isMobile,
+              onChanged: (v) {
+                _searchQuery.value = v;
+                _currentPage.value = 1;
+              },
+            ),
+
+            // Table / Cards
             Expanded(
               child: Container(
                 margin: EdgeInsets.all(isMobile ? 12 : 20),
@@ -118,37 +96,57 @@ class _OnGoingShipmentsPageState extends State<OnGoingShipmentsPage> {
                   ],
                 ),
                 child:
-                    paginatedList.isEmpty
-                        ? _buildNoSearchResults()
+                    paged.isEmpty
+                        ? _NoSearchResults(query: _searchQuery.value)
                         : isMobile
-                        ? _buildMobileCardLayout(paginatedList)
-                        : _buildDesktopOptimizedTable(paginatedList),
+                        ? _MobileCards(products: paged)
+                        : _DesktopTable(
+                          products: paged,
+                          vScroll: _vScroll,
+                          hScroll: _hScroll,
+                        ),
               ),
             ),
-            _buildPaginationFooter(
-              totalItems,
-              startIndex,
-              endIndex,
-              totalPages,
-              isMobile,
-            ),
+
+            // Pagination
+            if (total > 0)
+              _PaginationFooter(
+                isMobile: isMobile,
+                total: total,
+                start: start,
+                end: end,
+                currentPage: _currentPage,
+                totalPages: totalPages,
+                onPrev: () {
+                  if (_currentPage.value > 1) _currentPage.value--;
+                },
+                onNext: () {
+                  if (_currentPage.value < totalPages) _currentPage.value++;
+                },
+              ),
           ],
         );
       }),
     );
   }
+}
 
-  // ==========================================
-  // APP BAR & SEARCH
-  // ==========================================
-  PreferredSizeWidget _buildAppBar() {
+// ─────────────────────────────────────────────────────────────
+// AppBar
+// ─────────────────────────────────────────────────────────────
+class _ShipmentAppBar extends StatelessWidget implements PreferredSizeWidget {
+  @override
+  Size get preferredSize => const Size.fromHeight(kToolbarHeight + 1);
+
+  @override
+  Widget build(BuildContext context) {
     return AppBar(
       title: const Row(
         children: [
           Icon(Icons.inventory_rounded, color: Color(0xFF0F172A), size: 24),
           SizedBox(width: 10),
           Text(
-            "Incoming Inventory",
+            'Incoming Inventory',
             style: TextStyle(
               fontWeight: FontWeight.w800,
               color: Color(0xFF0F172A),
@@ -166,8 +164,57 @@ class _OnGoingShipmentsPageState extends State<OnGoingShipmentsPage> {
       ),
     );
   }
+}
 
-  Widget _buildSearchBar(bool isMobile) {
+// ─────────────────────────────────────────────────────────────
+// Export PDF Button — canView permission লাগবে
+// ─────────────────────────────────────────────────────────────
+class _ExportPdfButton extends StatelessWidget {
+  final ShipmentController ctrl;
+
+  const _ExportPdfButton({required this.ctrl});
+
+  @override
+  Widget build(BuildContext context) {
+    return PermissionButton(
+      route: Routes.shipment,
+      type: PermissionType.canView,
+      child: FloatingActionButton.extended(
+        onPressed: () async {
+          await ctrl.generateAggregatedOnWayPdf();
+          await ActivityLogger.log(
+            action: 'EXPORT_SHIPMENT_PDF',
+            module: 'Shipment',
+            details: 'Exported incoming inventory PDF',
+          );
+        },
+        icon: const Icon(Icons.picture_as_pdf, size: 22, color: Colors.white),
+        label: const Text(
+          'Export PDF',
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 14,
+            color: Colors.white,
+          ),
+        ),
+        backgroundColor: const Color(0xFFDC2626),
+        elevation: 4,
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Search Bar
+// ─────────────────────────────────────────────────────────────
+class _SearchBar extends StatelessWidget {
+  final bool isMobile;
+  final ValueChanged<String> onChanged;
+
+  const _SearchBar({required this.isMobile, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
     return Padding(
       padding: EdgeInsets.fromLTRB(
         isMobile ? 12 : 20,
@@ -176,10 +223,7 @@ class _OnGoingShipmentsPageState extends State<OnGoingShipmentsPage> {
         0,
       ),
       child: TextField(
-        onChanged: (v) {
-          searchQuery.value = v;
-          currentPage.value = 1; // Always reset to page 1 when searching
-        },
+        onChanged: onChanged,
         style: const TextStyle(fontSize: 16, color: Colors.black),
         decoration: InputDecoration(
           hintText: 'Search by model or product name...',
@@ -204,233 +248,79 @@ class _OnGoingShipmentsPageState extends State<OnGoingShipmentsPage> {
       ),
     );
   }
+}
 
-  Widget _buildProfessionalPDFButton() {
-    return FloatingActionButton.extended(
-      onPressed: () => controller.generateAggregatedOnWayPdf(),
-      icon: const Icon(Icons.picture_as_pdf, size: 22, color: Colors.white),
-      label: const Text(
-        "Export PDF",
-        style: TextStyle(
-          fontWeight: FontWeight.bold,
-          fontSize: 14,
-          color: Colors.white,
-        ),
-      ),
-      backgroundColor: const Color(0xFFDC2626),
-      elevation: 4,
-    );
-  }
+// ─────────────────────────────────────────────────────────────
+// Desktop Table
+// ─────────────────────────────────────────────────────────────
+class _DesktopTable extends StatelessWidget {
+  final List products;
+  final ScrollController vScroll;
+  final ScrollController hScroll;
 
-  // ==========================================
-  // MOBILE VIEW (CARDS)
-  // ==========================================
-  Widget _buildMobileCardLayout(List dynamicList) {
-    return ListView.separated(
-      padding: const EdgeInsets.all(12),
-      itemCount: dynamicList.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 12),
-      itemBuilder: (context, index) {
-        final product = dynamicList[index];
-        return Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: const Color(0xFFE2E8F0)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: const BoxDecoration(
-                  color: Color(0xFFF8FAFC),
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(10)),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      product.model,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 15,
-                        color: Color(0xFF0F172A),
-                      ),
-                    ),
-                    _buildTotalQtyBadge(product.totalQty),
-                  ],
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      product.name,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: Color(0xFF475569),
-                      ),
-                    ),
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 10),
-                      child: Divider(height: 1, color: Color(0xFFE2E8F0)),
-                    ),
-                    const Text(
-                      "SHIPMENT BREAKDOWN",
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF94A3B8),
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    _buildBreakdownList(product.incomingDetails),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
+  const _DesktopTable({
+    required this.products,
+    required this.vScroll,
+    required this.hScroll,
+  });
 
-  // ==========================================
-  // DESKTOP VIEW (FULL SCREEN WIDTH)
-  // ==========================================
-  Widget _buildDesktopOptimizedTable(List dynamicList) {
+  @override
+  Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        // FULL SCREEN FIX: It takes the full screen width, but gracefully stops shrinking at 960px.
         final tableWidth =
             constraints.maxWidth > 960 ? constraints.maxWidth : 960.0;
 
         return ScrollConfiguration(
-          behavior: TableScrollBehavior(),
+          behavior: _ShipmentScrollBehavior(),
           child: Scrollbar(
-            controller: _verticalScrollController,
+            controller: vScroll,
             thumbVisibility: true,
-            trackVisibility: true,
             child: SingleChildScrollView(
-              controller: _verticalScrollController,
-              scrollDirection: Axis.vertical,
+              controller: vScroll,
               child: Scrollbar(
-                controller: _horizontalScrollController,
+                controller: hScroll,
                 thumbVisibility: true,
-                trackVisibility: true,
                 child: SingleChildScrollView(
-                  controller: _horizontalScrollController,
+                  controller: hScroll,
                   scrollDirection: Axis.horizontal,
                   child: SizedBox(
-                    width: tableWidth, // Dynamic full width!
+                    width: tableWidth,
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // TABLE HEADER
+                        // Header
                         Container(
                           color: const Color(0xFFF1F5F9),
                           padding: const EdgeInsets.symmetric(
                             vertical: 14,
                             horizontal: 20,
                           ),
-                          child: Row(
+                          child: const Row(
                             children: [
-                              // Uses Expanded (Flex values) to stretch evenly across ANY screen size
-                              Expanded(flex: 2, child: _headerText("MODEL")),
+                              Expanded(flex: 2, child: _HeaderText('MODEL')),
                               Expanded(
                                 flex: 4,
-                                child: _headerText("PRODUCT NAME"),
+                                child: _HeaderText('PRODUCT NAME'),
                               ),
                               Expanded(
                                 flex: 2,
-                                child: _headerText("TOTAL QTY"),
+                                child: _HeaderText('TOTAL QTY'),
                               ),
                               Expanded(
                                 flex: 4,
-                                child: _headerText("SHIPMENT BREAKDOWN"),
+                                child: _HeaderText('SHIPMENT BREAKDOWN'),
                               ),
                             ],
                           ),
                         ),
-                        // TABLE BODY
+                        // Rows
                         ListView.builder(
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
-                          itemCount: dynamicList.length,
+                          itemCount: products.length,
                           itemBuilder: (context, index) {
-                            final product = dynamicList[index];
-                            return Container(
-                              decoration: const BoxDecoration(
-                                border: Border(
-                                  bottom: BorderSide(color: Color(0xFFE2E8F0)),
-                                ),
-                              ),
-                              padding: const EdgeInsets.symmetric(
-                                vertical: 12,
-                                horizontal: 20,
-                              ),
-                              child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Expanded(
-                                    flex: 2,
-                                    child: Align(
-                                      alignment: Alignment.topLeft,
-                                      child: Text(
-                                        product.model,
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.w700,
-                                          color: Color(0xFF0F172A),
-                                          fontSize: 13,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  Expanded(
-                                    flex: 4,
-                                    child: Align(
-                                      alignment: Alignment.topLeft,
-                                      child: Padding(
-                                        padding: const EdgeInsets.only(
-                                          right: 16,
-                                        ),
-                                        child: Text(
-                                          product.name,
-                                          style: const TextStyle(
-                                            color: Color(0xFF475569),
-                                            fontSize: 13,
-                                          ),
-                                          overflow: TextOverflow.ellipsis,
-                                          maxLines: 2,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  Expanded(
-                                    flex: 2,
-                                    child: Align(
-                                      alignment: Alignment.topLeft,
-                                      child: _buildTotalQtyBadge(
-                                        product.totalQty,
-                                      ),
-                                    ),
-                                  ),
-                                  Expanded(
-                                    flex: 4,
-                                    child: Align(
-                                      alignment: Alignment.topLeft,
-                                      child: _buildBreakdownList(
-                                        product.incomingDetails,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            );
+                            final p = products[index];
+                            return _DesktopRow(product: p);
                           },
                         ),
                       ],
@@ -444,8 +334,238 @@ class _OnGoingShipmentsPageState extends State<OnGoingShipmentsPage> {
       },
     );
   }
+}
 
-  Widget _headerText(String text) {
+class _DesktopRow extends StatelessWidget {
+  final dynamic product;
+
+  const _DesktopRow({required this.product});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+      ),
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 20),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            flex: 2,
+            child: Text(
+              product.model,
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF0F172A),
+                fontSize: 13,
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 4,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: Text(
+                product.name,
+                style: const TextStyle(color: Color(0xFF475569), fontSize: 13),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 2,
+              ),
+            ),
+          ),
+          Expanded(flex: 2, child: _TotalQtyBadge(qty: product.totalQty)),
+          Expanded(
+            flex: 4,
+            child: _BreakdownList(details: product.incomingDetails),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Mobile Cards
+// ─────────────────────────────────────────────────────────────
+class _MobileCards extends StatelessWidget {
+  final List products;
+
+  const _MobileCards({required this.products});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.separated(
+      padding: const EdgeInsets.all(12),
+      itemCount: products.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 12),
+      itemBuilder: (context, index) {
+        final p = products[index];
+        return _MobileCard(product: p);
+      },
+    );
+  }
+}
+
+class _MobileCard extends StatelessWidget {
+  final dynamic product;
+
+  const _MobileCard({required this.product});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Card header
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: const BoxDecoration(
+              color: Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(10)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  product.model,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                    color: Color(0xFF0F172A),
+                  ),
+                ),
+                _TotalQtyBadge(qty: product.totalQty),
+              ],
+            ),
+          ),
+          // Card body
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  product.name,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: Color(0xFF475569),
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 10),
+                  child: Divider(height: 1, color: Color(0xFFE2E8F0)),
+                ),
+                const Text(
+                  'SHIPMENT BREAKDOWN',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF94A3B8),
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                _BreakdownList(details: product.incomingDetails),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Pagination Footer
+// ─────────────────────────────────────────────────────────────
+class _PaginationFooter extends StatelessWidget {
+  final bool isMobile;
+  final int total;
+  final int start;
+  final int end;
+  final RxInt currentPage;
+  final int totalPages;
+  final VoidCallback onPrev;
+  final VoidCallback onNext;
+
+  const _PaginationFooter({
+    required this.isMobile,
+    required this.total,
+    required this.start,
+    required this.end,
+    required this.currentPage,
+    required this.totalPages,
+    required this.onPrev,
+    required this.onNext,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Obx(
+      () => Container(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+        child: Row(
+          children: [
+            if (!isMobile)
+              Text(
+                'Showing ${start + 1} to $end of $total shipments',
+                style: const TextStyle(fontSize: 13, color: Colors.grey),
+              ),
+            Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.chevron_left),
+                  onPressed: currentPage.value > 1 ? onPrev : null,
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: Text(
+                    'Page ${currentPage.value} of $totalPages',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                      color: Color(0xFF0F172A),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.chevron_right),
+                  onPressed: currentPage.value < totalPages ? onNext : null,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Shared small widgets — const করা
+// ─────────────────────────────────────────────────────────────
+class _HeaderText extends StatelessWidget {
+  final String text;
+
+  const _HeaderText(this.text);
+
+  @override
+  Widget build(BuildContext context) {
     return Text(
       text,
       style: const TextStyle(
@@ -456,11 +576,15 @@ class _OnGoingShipmentsPageState extends State<OnGoingShipmentsPage> {
       ),
     );
   }
+}
 
-  // ==========================================
-  // SHARED WIDGETS
-  // ==========================================
-  Widget _buildTotalQtyBadge(int qty) {
+class _TotalQtyBadge extends StatelessWidget {
+  final int qty;
+
+  const _TotalQtyBadge({required this.qty});
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
@@ -469,7 +593,7 @@ class _OnGoingShipmentsPageState extends State<OnGoingShipmentsPage> {
         border: Border.all(color: const Color(0xFFBFDBFE)),
       ),
       child: Text(
-        "$qty",
+        '$qty',
         style: const TextStyle(
           fontWeight: FontWeight.bold,
           color: Color(0xFF2563EB),
@@ -478,10 +602,17 @@ class _OnGoingShipmentsPageState extends State<OnGoingShipmentsPage> {
       ),
     );
   }
+}
 
-  Widget _buildBreakdownList(List details) {
+class _BreakdownList extends StatelessWidget {
+  final List details;
+
+  const _BreakdownList({required this.details});
+
+  @override
+  Widget build(BuildContext context) {
     if (details.isEmpty) {
-      return const Text("-", style: TextStyle(color: Colors.grey));
+      return const Text('-', style: TextStyle(color: Colors.grey));
     }
 
     return Column(
@@ -511,7 +642,7 @@ class _OnGoingShipmentsPageState extends State<OnGoingShipmentsPage> {
                     margin: const EdgeInsets.symmetric(horizontal: 8),
                     height: 12,
                     width: 1,
-                    color: Colors.grey[300],
+                    color: const Color(0xFFCBD5E1),
                   ),
                   Text(
                     DateFormat('MMM dd').format(detail.date),
@@ -524,10 +655,10 @@ class _OnGoingShipmentsPageState extends State<OnGoingShipmentsPage> {
                     margin: const EdgeInsets.symmetric(horizontal: 8),
                     height: 12,
                     width: 1,
-                    color: Colors.grey[300],
+                    color: const Color(0xFFCBD5E1),
                   ),
                   Text(
-                    "${detail.qty} pcs",
+                    '${detail.qty} pcs',
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 12,
@@ -540,69 +671,16 @@ class _OnGoingShipmentsPageState extends State<OnGoingShipmentsPage> {
           }).toList(),
     );
   }
+}
 
-  Widget _buildPaginationFooter(
-    int totalItems,
-    int start,
-    int end,
-    int totalPages,
-    bool isMobile,
-  ) {
-    if (totalItems == 0) {
-      return const SizedBox.shrink(); // Hide footer if search is empty
-    }
+// ─────────────────────────────────────────────────────────────
+// Empty / No Results states
+// ─────────────────────────────────────────────────────────────
+class _EmptyState extends StatelessWidget {
+  const _EmptyState();
 
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-      child: Row(
-        children: [
-          if (!isMobile)
-            Text(
-              "Showing ${start + 1} to $end of $totalItems shipments",
-              style: const TextStyle(fontSize: 13, color: Colors.grey),
-            ),
-          Row(
-            children: [
-              IconButton(
-                icon: const Icon(Icons.chevron_left),
-                tooltip: "Previous",
-                onPressed: currentPage > 1 ? _prevPage : null,
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: const Color(0xFFE2E8F0)),
-                ),
-                child: Text(
-                  "Page ${currentPage.value} of $totalPages", // Added .value
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13,
-                    color: Color(0xFF0F172A),
-                  ),
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.chevron_right),
-                tooltip: "Next",
-                onPressed:
-                    currentPage.value < totalPages
-                        ? () => _nextPage(totalPages)
-                        : null,
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildEmptyState() {
+  @override
+  Widget build(BuildContext context) {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -622,7 +700,7 @@ class _OnGoingShipmentsPageState extends State<OnGoingShipmentsPage> {
           ),
           const SizedBox(height: 16),
           const Text(
-            "No Active Shipments",
+            'No Active Shipments',
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w700,
@@ -631,15 +709,22 @@ class _OnGoingShipmentsPageState extends State<OnGoingShipmentsPage> {
           ),
           const SizedBox(height: 8),
           const Text(
-            "All incoming inventory has been received.",
+            'All incoming inventory has been received.',
             style: TextStyle(color: Color(0xFF94A3B8)),
           ),
         ],
       ),
     );
   }
+}
 
-  Widget _buildNoSearchResults() {
+class _NoSearchResults extends StatelessWidget {
+  final String query;
+
+  const _NoSearchResults({required this.query});
+
+  @override
+  Widget build(BuildContext context) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(40),
@@ -649,7 +734,7 @@ class _OnGoingShipmentsPageState extends State<OnGoingShipmentsPage> {
             Icon(Icons.search_off, size: 48, color: Colors.grey[400]),
             const SizedBox(height: 16),
             Text(
-              'No shipments match "${searchQuery.value}"', // Added .value
+              'No shipments match "$query"',
               style: TextStyle(fontSize: 16, color: Colors.grey[600]),
             ),
           ],
