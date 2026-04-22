@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart'; // Added for date formatting
 // IMPORTANT: Update this import path
-import 'package:gtel_erp/Web%20Screen/Debator%20Finance/Debtor%20Purchase/purchasecontroller.dart';
+import 'package:gtel_erp/Core/Stock%20Management/Local%20Purchase/purchase_controller.dart';
 
 void showPurchaseDialog(BuildContext context, String debtorId) {
   final controller =

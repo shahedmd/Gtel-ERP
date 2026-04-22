@@ -2,7 +2,7 @@ import 'package:get/get.dart';
 import 'package:gtel_erp/Cash/controller.dart';
 import 'package:gtel_erp/Shipment/controller.dart';
 import 'package:gtel_erp/Core/Menubar%20&%20Navigation/sidemenubar.dart';
-import 'package:gtel_erp/Web%20Screen/Debator%20Finance/Debtor%20Purchase/purchasecontroller.dart';
+import 'package:gtel_erp/Core/Stock%20Management/Local%20Purchase/purchase_controller.dart';
 import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/gteldebtorcontroller.dart';
 import 'package:gtel_erp/Core/Gtel%20Expense/Daily%20Expense/dailyexpensecontroller.dart';
 import 'package:gtel_erp/Core/Gtel%20Expense/Monthly%20Expense/montlyexpensecontroller.dart';

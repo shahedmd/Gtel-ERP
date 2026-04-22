@@ -1,4 +1,3 @@
-
 import 'package:get/get.dart';
 import 'package:gtel_erp/Account%20Overview/aopage.dart';
 import 'package:gtel_erp/Cash/page.dart';
@@ -10,11 +9,10 @@ import 'package:gtel_erp/Sale%20Return/salereturnpage.dart';
 import 'package:gtel_erp/Shipment/shipmentpage.dart';
 import 'package:gtel_erp/Staff%20Sale%20Report/ui.dart';
 import 'package:gtel_erp/Core/Stock%20Management/china_order_list.dart';
-import 'package:gtel_erp/Core/Stock%20Management/localpurchaseapage.dart';
+import 'package:gtel_erp/Core/Stock%20Management/Local%20Purchase/local_purchase_page.dart';
 import 'package:gtel_erp/Core/Stock%20Management/stockpage.dart';
 import 'package:gtel_erp/Vendor/vendorpage.dart';
 import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/debtorlistuipage.dart';
-import 'package:gtel_erp/Web%20Screen/Debator%20Finance/purchasehistorypage.dart';
 import 'package:gtel_erp/Core/Gtel%20Expense/Daily%20Expense/dailyexpenseuipage.dart';
 import 'package:gtel_erp/Core/Gtel%20Expense/Monthly%20Expense/monthlyexpenseuipage.dart';
 import 'package:gtel_erp/Web%20Screen/Sales/Condition/conditionpage.dart';
@@ -26,6 +24,7 @@ import 'package:gtel_erp/Web%20Screen/homepage.dart';
 import 'package:gtel_erp/Web%20Screen/overviewpage.dart';
 import '../Bindings/home_binding_v2.dart';
 import '../Permission/permission_guard.dart';
+import '../Stock Management/Purchase History/Views/purchase_history.dart';
 import '../Stock Management/Stock Service & Damage/View/service_page.dart';
 import '../Super Admin Panel/superadminpage.dart';
 
