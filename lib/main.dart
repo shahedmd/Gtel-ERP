@@ -7,7 +7,7 @@ import 'firebase_options.dart';
 import 'Core/Auth/login.dart';
 import 'Web Screen/homepage.dart';
 
-Future<void> main() async {
+Future<void> main() async { 
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   runApp(const MyApp());

@@ -1,4 +1,4 @@
-// file: shipmodel.dart
+// ignore_for_file: avoid_print
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class ShipmentItem {
@@ -19,7 +19,7 @@ class ShipmentItem {
   final double airPriceSnapshot;
   final bool ignoreMissing;
 
-  ShipmentItem({
+  const ShipmentItem({
     required this.productId,
     required this.productName,
     required this.productModel,
@@ -36,7 +36,9 @@ class ShipmentItem {
     this.ignoreMissing = false,
   });
 
-  int get lossQty => (seaQty + airQty) - (receivedSeaQty + receivedAirQty);
+  int get orderedQty => seaQty + airQty;
+  int get receivedQty => receivedSeaQty + receivedAirQty;
+  int get lossQty => orderedQty - receivedQty;
 
   // Cost based on ORDERED (Billable)
   double get totalItemCost =>
@@ -46,43 +48,49 @@ class ShipmentItem {
   double get receivedItemValue =>
       (receivedSeaQty * seaPriceSnapshot) + (receivedAirQty * airPriceSnapshot);
 
-  Map<String, dynamic> toMap() {
-    return {
-      'productId': productId,
-      'productName': productName,
-      'productModel': productModel,
-      'productBrand': productBrand,
-      'productCategory': productCategory,
-      'unitWeightSnapshot': unitWeightSnapshot,
-      'seaQty': seaQty,
-      'airQty': airQty,
-      'receivedSeaQty': receivedSeaQty,
-      'receivedAirQty': receivedAirQty,
-      'cartonNo': cartonNo,
-      'seaPriceSnapshot': seaPriceSnapshot,
-      'airPriceSnapshot': airPriceSnapshot,
-      'ignoreMissing': ignoreMissing,
-    };
+  /// Returns the effective per-unit landing cost including carrier distribution.
+  /// [carrierPerUnit] = shipment.totalCarrierFee / total_shipment_received_qty
+  double effectiveUnitCost(double carrierPerUnit) {
+    int qty = receivedQty;
+    if (qty <= 0) return seaPriceSnapshot + carrierPerUnit;
+    double seaCost = seaPriceSnapshot + carrierPerUnit;
+    double airCost = airPriceSnapshot + carrierPerUnit;
+    return (receivedSeaQty * seaCost + receivedAirQty * airCost) / qty;
   }
 
-  factory ShipmentItem.fromMap(Map<String, dynamic> map) {
-    return ShipmentItem(
-      productId: map['productId'] ?? 0,
-      productName: map['productName'] ?? '',
-      productModel: map['productModel'] ?? '',
-      productBrand: map['productBrand'] ?? '',
-      productCategory: map['productCategory'] ?? '',
-      unitWeightSnapshot: (map['unitWeightSnapshot'] ?? 0.0).toDouble(),
-      seaQty: map['seaQty'] ?? 0,
-      airQty: map['airQty'] ?? 0,
-      receivedSeaQty: map['receivedSeaQty'] ?? map['seaQty'] ?? 0,
-      receivedAirQty: map['receivedAirQty'] ?? map['airQty'] ?? 0,
-      cartonNo: map['cartonNo'] ?? '',
-      seaPriceSnapshot: (map['seaPriceSnapshot'] ?? 0.0).toDouble(),
-      airPriceSnapshot: (map['airPriceSnapshot'] ?? 0.0).toDouble(),
-      ignoreMissing: map['ignoreMissing'] ?? false,
-    );
-  }
+  Map<String, dynamic> toMap() => {
+    'productId': productId,
+    'productName': productName,
+    'productModel': productModel,
+    'productBrand': productBrand,
+    'productCategory': productCategory,
+    'unitWeightSnapshot': unitWeightSnapshot,
+    'seaQty': seaQty,
+    'airQty': airQty,
+    'receivedSeaQty': receivedSeaQty,
+    'receivedAirQty': receivedAirQty,
+    'cartonNo': cartonNo,
+    'seaPriceSnapshot': seaPriceSnapshot,
+    'airPriceSnapshot': airPriceSnapshot,
+    'ignoreMissing': ignoreMissing,
+  };
+
+  factory ShipmentItem.fromMap(Map<String, dynamic> map) => ShipmentItem(
+    productId: map['productId'] ?? 0,
+    productName: map['productName'] ?? '',
+    productModel: map['productModel'] ?? '',
+    productBrand: map['productBrand'] ?? '',
+    productCategory: map['productCategory'] ?? '',
+    unitWeightSnapshot: (map['unitWeightSnapshot'] ?? 0.0).toDouble(),
+    seaQty: map['seaQty'] ?? 0,
+    airQty: map['airQty'] ?? 0,
+    receivedSeaQty: map['receivedSeaQty'] ?? map['seaQty'] ?? 0,
+    receivedAirQty: map['receivedAirQty'] ?? map['airQty'] ?? 0,
+    cartonNo: map['cartonNo'] ?? '',
+    seaPriceSnapshot: (map['seaPriceSnapshot'] ?? 0.0).toDouble(),
+    airPriceSnapshot: (map['airPriceSnapshot'] ?? 0.0).toDouble(),
+    ignoreMissing: map['ignoreMissing'] ?? false,
+  );
 }
 
 class ShipmentModel {
@@ -121,38 +129,47 @@ class ShipmentModel {
     this.carrierReport,
     required this.totalCartons,
     required this.totalWeight,
-    this.carrierCostPerCarton = 0.0, // NEW
-    this.totalCarrierFee = 0.0, // NEW
+    this.carrierCostPerCarton = 0.0,
+    this.totalCarrierFee = 0.0,
     required this.totalAmount,
     this.isReceived = false,
     this.vendorLossAmount = 0.0,
     required this.items,
   });
 
-  // Helper to get Grand Total (Product Cost + Carrier Fee)
   double get grandTotal => totalAmount + totalCarrierFee;
 
-  Map<String, dynamic> toMap() {
-    return {
-      'shipmentName': shipmentName,
-      'purchaseDate': Timestamp.fromDate(purchaseDate),
-      'arrivalDate':
-          arrivalDate != null ? Timestamp.fromDate(arrivalDate!) : null,
-      'vendorId': vendorId,
-      'vendorName': vendorName,
-      'carrier': carrier,
-      'exchangeRate': exchangeRate,
-      'carrierReport': carrierReport,
-      'totalCartons': totalCartons,
-      'totalWeight': totalWeight,
-      'carrierCostPerCarton': carrierCostPerCarton, // NEW
-      'totalCarrierFee': totalCarrierFee, // NEW
-      'totalAmount': totalAmount,
-      'isReceived': isReceived,
-      'vendorLossAmount': vendorLossAmount,
-      'items': items.map((e) => e.toMap()).toList(),
-    };
+  /// Carrier cost per ordered unit across entire shipment.
+  double get carrierCostPerOrderedUnit {
+    int total = items.fold(0, (s, i) => s + i.orderedQty);
+    return total > 0 ? totalCarrierFee / total : 0;
   }
+
+  /// Carrier cost per received unit across entire shipment.
+  double get carrierCostPerReceivedUnit {
+    int total = items.fold(0, (s, i) => s + i.receivedQty);
+    return total > 0 ? totalCarrierFee / total : 0;
+  }
+
+  Map<String, dynamic> toMap() => {
+    'shipmentName': shipmentName,
+    'purchaseDate': Timestamp.fromDate(purchaseDate),
+    'arrivalDate':
+        arrivalDate != null ? Timestamp.fromDate(arrivalDate!) : null,
+    'vendorId': vendorId,
+    'vendorName': vendorName,
+    'carrier': carrier,
+    'exchangeRate': exchangeRate,
+    'carrierReport': carrierReport,
+    'totalCartons': totalCartons,
+    'totalWeight': totalWeight,
+    'carrierCostPerCarton': carrierCostPerCarton,
+    'totalCarrierFee': totalCarrierFee,
+    'totalAmount': totalAmount,
+    'isReceived': isReceived,
+    'vendorLossAmount': vendorLossAmount,
+    'items': items.map((e) => e.toMap()).toList(),
+  };
 
   factory ShipmentModel.fromSnapshot(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
@@ -174,9 +191,8 @@ class ShipmentModel {
       carrierReport: data['carrierReport'],
       totalCartons: data['totalCartons'] ?? 0,
       totalWeight: (data['totalWeight'] ?? 0.0).toDouble(),
-      carrierCostPerCarton:
-          (data['carrierCostPerCarton'] ?? 0.0).toDouble(), // NEW
-      totalCarrierFee: (data['totalCarrierFee'] ?? 0.0).toDouble(), // NEW
+      carrierCostPerCarton: (data['carrierCostPerCarton'] ?? 0.0).toDouble(),
+      totalCarrierFee: (data['totalCarrierFee'] ?? 0.0).toDouble(),
       totalAmount: (data['totalAmount'] ?? 0.0).toDouble(),
       isReceived: data['isReceived'] ?? false,
       vendorLossAmount: (data['vendorLossAmount'] ?? 0.0).toDouble(),

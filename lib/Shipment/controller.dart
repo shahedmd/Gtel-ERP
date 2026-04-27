@@ -11,7 +11,14 @@ import 'package:printing/printing.dart';
 import '../Core/Stock Management/stock_controller.dart';
 import 'shipmodel.dart';
 
-// --- INTERNAL MODELS ---
+// ─── Helper model for avg price snapshots ───────────────────────────────────
+class _PriceSnapshot {
+  final int qty;
+  final double avg;
+  const _PriceSnapshot({required this.qty, required this.avg});
+}
+
+// ─── Supporting models ───────────────────────────────────────────────────────
 class IncomingDetail {
   final String shipmentName;
   final DateTime date;
@@ -34,7 +41,7 @@ class AggregatedOnWayProduct {
     required this.name,
     required this.incomingDetails,
   });
-  int get totalQty => incomingDetails.fold(0, (sumv, item) => sumv + item.qty);
+  int get totalQty => incomingDetails.fold(0, (s, item) => s + item.qty);
 }
 
 class OnHoldItem {
@@ -73,40 +80,32 @@ class OnHoldItem {
   }
 }
 
-// --- CONTROLLER ---
-
+// ─── CONTROLLER ─────────────────────────────────────────────────────────────
 class ShipmentController extends GetxController {
   final ProductController productController = Get.find<ProductController>();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final VendorController vendorController = Get.put(VendorController());
 
-  // --- STATE ---
+  // ── STATE ──────────────────────────────────────────────────────────────────
   final RxList<ShipmentModel> allShipments = <ShipmentModel>[].obs;
   final RxList<ShipmentModel> filteredShipments = <ShipmentModel>[].obs;
-
-  // PAGINATION
-  final RxInt shipmentPage = 1.obs;
-  final RxInt shipmentPageSize = 20.obs;
-
   final RxList<AggregatedOnWayProduct> aggregatedList =
       <AggregatedOnWayProduct>[].obs;
   final RxList<OnHoldItem> onHoldItems = <OnHoldItem>[].obs;
   final RxList<OnHoldItem> filteredOnHoldItems = <OnHoldItem>[].obs;
 
-  // --- MANIFEST LOCAL SEARCH ---
+  // PAGINATION
+  final RxInt shipmentPage = 1.obs;
+  final RxInt shipmentPageSize = 20.obs;
+
+  // FILTERS
+  final RxString filterCarrier = ''.obs;
+  final RxString filterVendor = ''.obs;
+  final RxString filterOnHoldCarrier = ''.obs;
+
+  // MANIFEST LOCAL SEARCH
   final TextEditingController manifestSearchCtrl = TextEditingController();
   final RxString manifestSearchQuery = ''.obs;
-
-  // Getter for filtered manifest items
-  List<ShipmentItem> get filteredManifestItems {
-    if (manifestSearchQuery.value.isEmpty) return currentManifestItems;
-    final q = manifestSearchQuery.value.toLowerCase();
-    return currentManifestItems.where((item) {
-      return item.productName.toLowerCase().contains(q) ||
-          item.productModel.toLowerCase().contains(q) ||
-          item.cartonNo.toLowerCase().contains(q);
-    }).toList();
-  }
 
   // CONFIG
   final List<String> carrierList = [
@@ -117,9 +116,6 @@ class ShipmentController extends GetxController {
     "RS",
     "Other",
   ];
-  final RxString filterCarrier = ''.obs;
-  final RxString filterVendor = ''.obs;
-  final RxString filterOnHoldCarrier = ''.obs;
 
   // MANIFEST INPUTS
   final RxList<ShipmentItem> currentManifestItems = <ShipmentItem>[].obs;
@@ -128,20 +124,18 @@ class ShipmentController extends GetxController {
   final Rxn<String> selectedVendorName = Rxn<String>();
   final Rxn<String> selectedCarrier = Rxn<String>();
 
+  // TEXT CONTROLLERS
   final TextEditingController totalCartonCtrl = TextEditingController(
     text: '0',
   );
   final TextEditingController totalWeightCtrl = TextEditingController(
     text: '0',
   );
-
-  // Carrier Cost
   final TextEditingController carrierCostPerCtnCtrl = TextEditingController(
     text: '0',
   );
   final TextEditingController totalCarrierCostDisplayCtrl =
       TextEditingController(text: '0');
-
   final TextEditingController shipmentNameCtrl = TextEditingController();
   final TextEditingController searchCtrl = TextEditingController();
   final TextEditingController globalExchangeRateCtrl = TextEditingController(
@@ -154,79 +148,102 @@ class ShipmentController extends GetxController {
   StreamSubscription? _shipmentSubscription;
   StreamSubscription? _onHoldSubscription;
 
-  // --- CURRENCY FORMATTERS ---
+  // ── FORMATTERS ─────────────────────────────────────────────────────────────
   final NumberFormat _currencyFormatter = NumberFormat('#,##0.00', 'en_US');
+  final NumberFormat _rmbFormatter = NumberFormat('#,##0.00', 'en_US');
+
   String formatMoney(double amount) =>
       "BDT ${_currencyFormatter.format(amount)}";
-
-  final NumberFormat _rmbFormatter = NumberFormat('#,##0.00', 'en_US');
   String formatRMB(double amount) => "¥ ${_rmbFormatter.format(amount)}";
 
-  // --- GETTERS ---
+  // ── COMPUTED GETTERS ───────────────────────────────────────────────────────
+  int get currentManifestTotalQty =>
+      currentManifestItems.fold(0, (s, i) => s + i.orderedQty);
+
   double get calculatedTotalWeight => currentManifestItems.fold(
     0.0,
-    (sumv, item) =>
-        sumv + (item.unitWeightSnapshot * (item.seaQty + item.airQty)),
+    (s, i) => s + (i.unitWeightSnapshot * i.orderedQty),
   );
-  double get totalOnWayValue => allShipments
-      .where((s) => !s.isReceived)
-      .fold(0.0, (sumv, item) => sumv + item.grandTotal);
-  double get totalCompletedValue => allShipments
-      .where((s) => s.isReceived)
-      .fold(0.0, (sumv, item) => sumv + item.grandTotal);
+
   double get currentManifestProductCost =>
-      currentManifestItems.fold(0.0, (sumv, item) => sumv + item.totalItemCost);
+      currentManifestItems.fold(0.0, (s, i) => s + i.totalItemCost);
 
   double get liveTotalCarrierCost {
-    int cartons = int.tryParse(totalCartonCtrl.text) ?? 0;
-    double costPerCtn = double.tryParse(carrierCostPerCtnCtrl.text) ?? 0.0;
+    final cartons = int.tryParse(totalCartonCtrl.text) ?? 0;
+    final costPerCtn = double.tryParse(carrierCostPerCtnCtrl.text) ?? 0.0;
     return cartons * costPerCtn;
   }
 
   double get liveGrandTotal =>
       currentManifestProductCost + liveTotalCarrierCost;
 
-  // --- NEW RMB GETTERS ---
-  double get currentManifestProductCostRMB {
-    double rate = double.tryParse(globalExchangeRateCtrl.text) ?? 0.0;
-    return rate > 0 ? currentManifestProductCost / rate : 0.0;
+  /// Carrier cost per unit across the ENTIRE current manifest.
+  double get liveCarrierCostPerUnit {
+    final qty = currentManifestTotalQty;
+    return qty > 0 ? liveTotalCarrierCost / qty : 0;
   }
 
-  double get liveTotalCarrierCostRMB {
-    double rate = double.tryParse(globalExchangeRateCtrl.text) ?? 0.0;
-    return rate > 0 ? liveTotalCarrierCost / rate : 0.0;
-  }
+  // RMB equivalents
+  double get _globalRate => double.tryParse(globalExchangeRateCtrl.text) ?? 0.0;
 
-  double get liveGrandTotalRMB {
-    double rate = double.tryParse(globalExchangeRateCtrl.text) ?? 0.0;
-    return rate > 0 ? liveGrandTotal / rate : 0.0;
-  }
+  double get currentManifestProductCostRMB =>
+      _globalRate > 0 ? currentManifestProductCost / _globalRate : 0.0;
+
+  double get liveTotalCarrierCostRMB =>
+      _globalRate > 0 ? liveTotalCarrierCost / _globalRate : 0.0;
+
+  double get liveGrandTotalRMB =>
+      _globalRate > 0 ? liveGrandTotal / _globalRate : 0.0;
+
+  // Value displays
+  double get totalOnWayValue => allShipments
+      .where((s) => !s.isReceived)
+      .fold(0.0, (s, item) => s + item.grandTotal);
+
+  double get totalCompletedValue => allShipments
+      .where((s) => s.isReceived)
+      .fold(0.0, (s, item) => s + item.grandTotal);
 
   String get totalOnWayDisplay => formatMoney(totalOnWayValue);
   String get totalCompletedDisplay => formatMoney(totalCompletedValue);
   String get currentManifestTotalDisplay => formatMoney(liveGrandTotal);
 
+  // Filtered manifest items
+  List<ShipmentItem> get filteredManifestItems {
+    if (manifestSearchQuery.value.isEmpty) return currentManifestItems;
+    final q = manifestSearchQuery.value.toLowerCase();
+    return currentManifestItems.where((item) {
+      return item.productName.toLowerCase().contains(q) ||
+          item.productModel.toLowerCase().contains(q) ||
+          item.cartonNo.toLowerCase().contains(q);
+    }).toList();
+  }
+
+  // Pagination
   List<ShipmentModel> get paginatedShipments {
-    int start = (shipmentPage.value - 1) * shipmentPageSize.value;
-    int end = start + shipmentPageSize.value;
+    final start = (shipmentPage.value - 1) * shipmentPageSize.value;
+    final end = (start + shipmentPageSize.value).clamp(
+      0,
+      filteredShipments.length,
+    );
     if (start >= filteredShipments.length) return [];
-    if (end > filteredShipments.length) end = filteredShipments.length;
     return filteredShipments.sublist(start, end);
   }
 
-  int get totalPages {
-    if (filteredShipments.isEmpty) return 1;
-    return (filteredShipments.length / shipmentPageSize.value).ceil();
-  }
+  int get totalPages =>
+      filteredShipments.isEmpty
+          ? 1
+          : (filteredShipments.length / shipmentPageSize.value).ceil();
 
+  // ── LIFECYCLE ──────────────────────────────────────────────────────────────
   @override
   void onInit() {
     super.onInit();
-    bindFirestoreStream();
-    bindOnHoldStream();
+    _bindFirestoreStream();
+    _bindOnHoldStream();
 
-    totalCartonCtrl.addListener(_updateCarrierCost);
-    carrierCostPerCtnCtrl.addListener(_updateCarrierCost);
+    totalCartonCtrl.addListener(_updateCarrierCostDisplay);
+    carrierCostPerCtnCtrl.addListener(_updateCarrierCostDisplay);
 
     ever(filterCarrier, (_) {
       shipmentPage.value = 1;
@@ -237,14 +254,6 @@ class ShipmentController extends GetxController {
       _applyFilters();
     });
     ever(filterOnHoldCarrier, (_) => _applyOnHoldFilters());
-  }
-
-  void _updateCarrierCost() {
-    int cartons = int.tryParse(totalCartonCtrl.text) ?? 0;
-    double costPerCtn = double.tryParse(carrierCostPerCtnCtrl.text) ?? 0.0;
-    double total = cartons * costPerCtn;
-    totalCarrierCostDisplayCtrl.text = total.toStringAsFixed(2);
-    currentManifestItems.refresh();
   }
 
   @override
@@ -258,26 +267,26 @@ class ShipmentController extends GetxController {
     shipmentNameCtrl.dispose();
     searchCtrl.dispose();
     globalExchangeRateCtrl.dispose();
-    manifestSearchCtrl.dispose(); // Add this
-
+    manifestSearchCtrl.dispose();
     super.onClose();
   }
 
-  void onSearchChanged(String val) => productController.search(val);
-  void nextPage() {
-    if (shipmentPage.value < totalPages) shipmentPage.value++;
+  void _updateCarrierCostDisplay() {
+    final cartons = int.tryParse(totalCartonCtrl.text) ?? 0;
+    final costPerCtn = double.tryParse(carrierCostPerCtnCtrl.text) ?? 0.0;
+    final total = cartons * costPerCtn;
+    totalCarrierCostDisplayCtrl.text = total.toStringAsFixed(2);
+    // Refresh manifest items to re-trigger carrier share calculations
+    currentManifestItems.refresh();
   }
 
-  void prevPage() {
-    if (shipmentPage.value > 1) shipmentPage.value--;
-  }
-
-  // --- FIRESTORE LISTENERS ---
-  void bindFirestoreStream() {
+  // ── FIRESTORE STREAMS (Optimized) ─────────────────────────────────────────
+  void _bindFirestoreStream() {
+    _shipmentSubscription?.cancel();
     _shipmentSubscription = _firestore
         .collection('shipments')
         .orderBy('purchaseDate', descending: true)
-        .limit(500)
+        .limit(300) // Reduced from 500 for performance
         .snapshots()
         .listen((event) {
           final loaded =
@@ -286,10 +295,11 @@ class ShipmentController extends GetxController {
           _applyFilters();
           _calculateOnWayTotals(loaded);
           _aggregateOnWayData(loaded);
-        }, onError: (e) => print("Firestore Error: $e"));
+        }, onError: (e) => print("Shipment stream error: $e"));
   }
 
-  void bindOnHoldStream() {
+  void _bindOnHoldStream() {
+    _onHoldSubscription?.cancel();
     _onHoldSubscription = _firestore
         .collection('on_hold_items')
         .orderBy('purchaseDate', descending: true)
@@ -298,11 +308,16 @@ class ShipmentController extends GetxController {
           onHoldItems.value =
               event.docs.map((e) => OnHoldItem.fromSnapshot(e)).toList();
           _applyOnHoldFilters();
-        });
+        }, onError: (e) => print("OnHold stream error: $e"));
   }
 
+  // Public alias for external refresh calls
+  void bindFirestoreStream() => _bindFirestoreStream();
+  void bindOnHoldStream() => _bindOnHoldStream();
+
+  // ── FILTER HELPERS ─────────────────────────────────────────────────────────
   void _applyFilters() {
-    List<ShipmentModel> temp = List.from(allShipments);
+    var temp = List<ShipmentModel>.from(allShipments);
     if (filterCarrier.value.isNotEmpty) {
       temp = temp.where((s) => s.carrier == filterCarrier.value).toList();
     }
@@ -323,34 +338,32 @@ class ShipmentController extends GetxController {
   }
 
   void _calculateOnWayTotals(List<ShipmentModel> list) {
-    final Map<int, int> tempMap = {};
-    for (var shipment in list) {
-      if (!shipment.isReceived) {
-        for (var item in shipment.items) {
-          tempMap[item.productId] =
-              (tempMap[item.productId] ?? 0) + (item.seaQty + item.airQty);
-        }
+    final map = <int, int>{};
+    for (final shipment in list) {
+      if (shipment.isReceived) continue;
+      for (final item in shipment.items) {
+        map[item.productId] = (map[item.productId] ?? 0) + item.orderedQty;
       }
     }
-    onWayStockMap.assignAll(tempMap);
+    onWayStockMap.assignAll(map);
   }
 
   void _aggregateOnWayData(List<ShipmentModel> list) {
-    Map<int, AggregatedOnWayProduct> tempMap = {};
-    for (var shipment in list) {
+    final map = <int, AggregatedOnWayProduct>{};
+    for (final shipment in list) {
       if (shipment.isReceived) continue;
-      for (var item in shipment.items) {
-        int qty = item.seaQty + item.airQty;
+      for (final item in shipment.items) {
+        final qty = item.orderedQty;
         if (qty <= 0) continue;
         final detail = IncomingDetail(
           shipmentName: shipment.shipmentName,
           date: shipment.purchaseDate,
           qty: qty,
         );
-        if (tempMap.containsKey(item.productId)) {
-          tempMap[item.productId]!.incomingDetails.add(detail);
+        if (map.containsKey(item.productId)) {
+          map[item.productId]!.incomingDetails.add(detail);
         } else {
-          tempMap[item.productId] = AggregatedOnWayProduct(
+          map[item.productId] = AggregatedOnWayProduct(
             productId: item.productId,
             model: item.productModel,
             name: item.productName,
@@ -359,12 +372,23 @@ class ShipmentController extends GetxController {
         }
       }
     }
-    aggregatedList.assignAll(tempMap.values.toList());
+    aggregatedList.assignAll(map.values.toList());
+  }
+
+  // ── NAVIGATION HELPERS ────────────────────────────────────────────────────
+  void onSearchChanged(String val) => productController.search(val);
+  void nextPage() {
+    if (shipmentPage.value < totalPages) shipmentPage.value++;
+  }
+
+  void prevPage() {
+    if (shipmentPage.value > 1) shipmentPage.value--;
   }
 
   int getOnWayQty(int productId) => onWayStockMap[productId] ?? 0;
 
-  // --- ACTIONS ---
+  // ── ACTIONS ───────────────────────────────────────────────────────────────
+
   Future<void> addToManifestAndVerify({
     required int? productId,
     required Map<String, dynamic> productData,
@@ -383,15 +407,16 @@ class ShipmentController extends GetxController {
           'air_stock_qty': 0,
           'local_qty': 0,
         };
-        int? newId = await productController.createProductReturnId(createBody);
-        if (newId != 0) {
-          finalProductId = newId!;
+        final newId = await productController.createProductReturnId(createBody);
+        if (newId != null && newId != 0) {
+          finalProductId = newId;
         } else {
           throw "Product ID Missing";
         }
       } else {
         await productController.updateProduct(finalProductId, productData);
       }
+
       final item = ShipmentItem(
         productId: finalProductId,
         productName: productData['name'],
@@ -407,14 +432,16 @@ class ShipmentController extends GetxController {
         seaPriceSnapshot: (productData['sea'] as num).toDouble(),
         airPriceSnapshot: (productData['air'] as num).toDouble(),
       );
+
       currentManifestItems.add(item);
       totalWeightCtrl.text = calculatedTotalWeight.toStringAsFixed(2);
       Get.back();
       Get.snackbar(
-        "Success",
-        "Added to Manifest",
+        "Added",
+        "${item.productModel} added to manifest",
         backgroundColor: Colors.green,
         colorText: Colors.white,
+        duration: const Duration(seconds: 2),
       );
     } catch (e) {
       Get.snackbar(
@@ -431,24 +458,33 @@ class ShipmentController extends GetxController {
   void removeFromManifest(int index) {
     currentManifestItems.removeAt(index);
     totalWeightCtrl.text = calculatedTotalWeight.toStringAsFixed(2);
+    currentManifestItems.refresh(); // triggers carrier share recalc in dialog
   }
 
   Future<void> saveShipmentToFirestore() async {
-    if (currentManifestItems.isEmpty) return;
-    if (selectedVendorId.value == null || selectedCarrier.value == null) return;
+    if (currentManifestItems.isEmpty) {
+      Get.snackbar("Warning", "Add at least one item to the manifest.");
+      return;
+    }
+    if (selectedVendorId.value == null || selectedCarrier.value == null) {
+      Get.snackbar("Warning", "Select a vendor and carrier.");
+      return;
+    }
     isLoading.value = true;
     try {
-      double carrierCostPerCtn =
+      final carrierCostPerCtn =
           double.tryParse(carrierCostPerCtnCtrl.text) ?? 0.0;
-      int cartons = int.tryParse(totalCartonCtrl.text) ?? 0;
-      double totalCarrierFee = carrierCostPerCtn * cartons;
-      double exchangeRate = double.tryParse(globalExchangeRateCtrl.text) ?? 0.0;
+      final cartons = int.tryParse(totalCartonCtrl.text) ?? 0;
+      final totalCarrierFee = carrierCostPerCtn * cartons;
+      final exchangeRate = double.tryParse(globalExchangeRateCtrl.text) ?? 0.0;
+
+      final shipmentName =
+          shipmentNameCtrl.text.isEmpty
+              ? "Shipment ${DateFormat('MM/dd').format(purchaseDateInput.value)}"
+              : shipmentNameCtrl.text;
 
       final newShipment = ShipmentModel(
-        shipmentName:
-            shipmentNameCtrl.text.isEmpty
-                ? "Shipment ${DateFormat('MM/dd').format(purchaseDateInput.value)}"
-                : shipmentNameCtrl.text,
+        shipmentName: shipmentName,
         purchaseDate: purchaseDateInput.value,
         vendorId: selectedVendorId.value,
         vendorName: selectedVendorName.value ?? 'Unknown',
@@ -463,18 +499,18 @@ class ShipmentController extends GetxController {
         isReceived: false,
       );
 
-      final newShipmentMap = newShipment.toMap();
+      final shipmentMap = newShipment.toMap();
 
-      // Ensure initial RMB values are injected directly into Firestore Map
+      // Add RMB values
       if (exchangeRate > 0) {
-        newShipmentMap['totalAmountRMB'] =
+        shipmentMap['totalAmountRMB'] =
             currentManifestProductCost / exchangeRate;
-        newShipmentMap['totalCarrierFeeRMB'] = totalCarrierFee / exchangeRate;
-        newShipmentMap['grandTotalRMB'] =
+        shipmentMap['totalCarrierFeeRMB'] = totalCarrierFee / exchangeRate;
+        shipmentMap['grandTotalRMB'] =
             (currentManifestProductCost + totalCarrierFee) / exchangeRate;
       }
 
-      await _firestore.collection('shipments').add(newShipmentMap);
+      await _firestore.collection('shipments').add(shipmentMap);
       await vendorController.addAutomatedShipmentCredit(
         vendorId: newShipment.vendorId!,
         amount: newShipment.totalAmount,
@@ -484,7 +520,12 @@ class ShipmentController extends GetxController {
 
       resetForm();
       Get.back();
-      Get.snackbar("Success", "Manifest Created");
+      Get.snackbar(
+        "Shipment Created",
+        shipmentName,
+        backgroundColor: Colors.green,
+        colorText: Colors.white,
+      );
     } catch (e) {
       Get.snackbar("Error", "$e");
     } finally {
@@ -503,12 +544,12 @@ class ShipmentController extends GetxController {
     selectedVendorId.value = null;
     selectedVendorName.value = null;
     selectedCarrier.value = null;
-    manifestSearchCtrl.clear(); // Add this
-    manifestSearchQuery.value = ''; // Add this
+    manifestSearchCtrl.clear();
+    manifestSearchQuery.value = '';
     searchCtrl.clear();
   }
 
-  // --- NEW: EDIT & RECALCULATE MANIFEST ---
+  // ── EDIT MANIFEST ─────────────────────────────────────────────────────────
   Future<void> saveEditedManifest({
     required String docId,
     required List<ShipmentItem> newItems,
@@ -518,44 +559,37 @@ class ShipmentController extends GetxController {
   }) async {
     isLoading.value = true;
     try {
-      // 1. Recalculate Totals based on Edited Items
-      double newTotalProductCost = newItems.fold(
+      final newTotalProductCost = newItems.fold(
         0.0,
-        (sumv, item) => sumv + item.totalItemCost,
+        (s, i) => s + i.totalItemCost,
       );
-      double newTotalWeight = newItems.fold(
+      final newTotalWeight = newItems.fold(
         0.0,
-        (sumv, item) =>
-            sumv + (item.unitWeightSnapshot * (item.seaQty + item.airQty)),
+        (s, i) => s + (i.unitWeightSnapshot * i.orderedQty),
       );
-      double newTotalCarrierFee = newCartonCount * newCarrierRate;
-      double newGrandTotal = newTotalProductCost + newTotalCarrierFee;
+      final newTotalCarrierFee = newCartonCount * newCarrierRate;
+      final newGrandTotal = newTotalProductCost + newTotalCarrierFee;
 
-      // Fetch the existing exchange rate to recalculate RMB
+      // Fetch exchange rate to keep RMB values accurate
       double currentExchangeRate = 0.0;
       try {
-        var doc = await _firestore.collection('shipments').doc(docId).get();
-        if (doc.exists &&
-            doc.data() != null &&
-            doc.data()!.containsKey('exchangeRate')) {
-          currentExchangeRate = (doc.data()!['exchangeRate'] ?? 0.0).toDouble();
+        final doc = await _firestore.collection('shipments').doc(docId).get();
+        if (doc.exists) {
+          currentExchangeRate = (doc.data()?['exchangeRate'] ?? 0.0).toDouble();
         }
-      } catch (e) {
-        // Proceed safely if fetch fails
-      }
+      } catch (_) {}
 
-      Map<String, dynamic> updateData = {
+      final updateData = <String, dynamic>{
         'items': newItems.map((e) => e.toMap()).toList(),
         'totalCartons': newCartonCount,
         'carrierCostPerCarton': newCarrierRate,
         'totalCarrierFee': newTotalCarrierFee,
         'totalAmount': newTotalProductCost,
-        'grandTotal': newGrandTotal, // Add grandTotal safely
+        'grandTotal': newGrandTotal,
         'totalWeight': newTotalWeight,
         'carrierReport': report,
       };
 
-      // 2. Add RMB Calculation based on fetched Exchange Rate
       if (currentExchangeRate > 0) {
         updateData['totalAmountRMB'] =
             newTotalProductCost / currentExchangeRate;
@@ -564,12 +598,11 @@ class ShipmentController extends GetxController {
         updateData['grandTotalRMB'] = newGrandTotal / currentExchangeRate;
       }
 
-      // 3. Update Firestore
       await _firestore.collection('shipments').doc(docId).update(updateData);
 
       Get.snackbar(
-        "Success",
-        "Manifest Updated & Recalculated",
+        "Updated",
+        "Manifest recalculated successfully",
         backgroundColor: Colors.green,
         colorText: Colors.white,
       );
@@ -580,7 +613,6 @@ class ShipmentController extends GetxController {
     }
   }
 
-  // OLD Update method updated to ensure Yuan calculation is preserved
   Future<void> updateShipmentDetails(
     ShipmentModel shipment,
     List<ShipmentItem> updatedItems,
@@ -589,12 +621,12 @@ class ShipmentController extends GetxController {
     if (shipment.docId == null) return;
     isLoading.value = true;
     try {
-      double newTotalProductCost = updatedItems.fold(
+      final newTotalProductCost = updatedItems.fold(
         0.0,
-        (sumv, item) => sumv + item.totalItemCost,
+        (s, i) => s + i.totalItemCost,
       );
 
-      Map<String, dynamic> updateMap = {
+      final updateMap = <String, dynamic>{
         'items': updatedItems.map((e) => e.toMap()).toList(),
         'carrierReport': report,
         'totalAmount': newTotalProductCost,
@@ -614,8 +646,8 @@ class ShipmentController extends GetxController {
           .update(updateMap);
 
       Get.snackbar(
-        "Success",
-        "Updated",
+        "Saved",
+        "Shipment details updated",
         backgroundColor: Colors.green,
         colorText: Colors.white,
       );
@@ -626,6 +658,7 @@ class ShipmentController extends GetxController {
     }
   }
 
+  // ── RECEIVE SHIPMENT ───────────────────────────────────────────────────────
   Future<void> receiveShipmentFast(
     ShipmentModel shipment,
     DateTime arrivalDate,
@@ -633,30 +666,54 @@ class ShipmentController extends GetxController {
     if (isLoading.value) return;
     isLoading.value = true;
     try {
-      // 1. Stock
-      List<Map<String, dynamic>> bulkItems =
-          shipment.items.map((item) {
-            return {
-              'id': item.productId,
-              'sea_qty': item.receivedSeaQty,
-              'air_qty': item.receivedAirQty,
-              'local_qty': 0,
-              'local_price': 0.0,
-              'shipmentdate': DateFormat('yyyy-MM-dd').format(arrivalDate),
-            };
-          }).toList();
+      // ── STEP 0: Snapshot current product data BEFORE stock changes ──────
+      // This is critical for accurate weighted-average calculation.
+      final priceSnapshots = <int, _PriceSnapshot>{};
+      for (final item in shipment.items) {
+        try {
+          final p = productController.allProducts.firstWhere(
+            (x) => x.id == item.productId,
+          );
+          priceSnapshots[item.productId] = _PriceSnapshot(
+            qty: p.stockQty,
+            // avgPurchasePrice is the `avg_purchase_price` field in Firestore.
+            // Ensure your Product model maps this field correctly.
+            avg: (p.avgPurchasePrice as num?)?.toDouble() ?? 0.0,
+          );
+        } catch (_) {
+          // Product not found in local cache – skip (avg will use new cost)
+        }
+      }
+
+      // ── STEP 1: Add stock to inventory ──────────────────────────────────
+      final bulkItems =
+          shipment.items
+              .map(
+                (item) => {
+                  'id': item.productId,
+                  'sea_qty': item.receivedSeaQty,
+                  'air_qty': item.receivedAirQty,
+                  'local_qty': 0,
+                  'local_price': 0.0,
+                  'shipmentdate': DateFormat('yyyy-MM-dd').format(arrivalDate),
+                },
+              )
+              .toList();
       await productController.bulkAddStockMixed(bulkItems);
 
-      // 2. Loss
-      WriteBatch batch = _firestore.batch();
+      // ── STEP 2: Update avg_purchase_price using WEIGHTED AVERAGE ─────────
+      // Formula: new_avg = (oldQty * oldAvg + newQty * newCost) / (oldQty + newQty)
+      // Cost includes carrier distribution per unit.
+      await _updateAvgPurchasePrices(shipment, priceSnapshots);
+
+      // ── STEP 3: Log on-hold (missing) items ─────────────────────────────
+      final batch = _firestore.batch();
       bool hasLoss = false;
-      for (var item in shipment.items) {
-        int missing =
-            (item.seaQty + item.airQty) -
-            (item.receivedSeaQty + item.receivedAirQty);
+      for (final item in shipment.items) {
+        final missing = item.lossQty;
         if (missing > 0 && !item.ignoreMissing) {
           hasLoss = true;
-          DocumentReference ref = _firestore.collection('on_hold_items').doc();
+          final ref = _firestore.collection('on_hold_items').doc();
           batch.set(ref, {
             'shipmentName': shipment.shipmentName,
             'carrier': shipment.carrier,
@@ -671,25 +728,26 @@ class ShipmentController extends GetxController {
       }
       if (hasLoss) await batch.commit();
 
-      // 3. Update Status
-      double totalRecVal = shipment.items.fold(
+      // ── STEP 4: Mark shipment as received ────────────────────────────────
+      final totalRecVal = shipment.items.fold(
         0.0,
-        (sumv, i) => sumv + i.receivedItemValue,
+        (s, i) => s + i.receivedItemValue,
       );
-      double diff = shipment.totalAmount - totalRecVal;
-      double diffRmb =
+      final diff = shipment.totalAmount - totalRecVal;
+      final diffRmb =
           shipment.exchangeRate > 0 ? diff / shipment.exchangeRate : 0.0;
 
       await _firestore.collection('shipments').doc(shipment.docId).update({
         'isReceived': true,
         'arrivalDate': Timestamp.fromDate(arrivalDate),
-        'vendorLossAmount': (diff > 0) ? diff : 0.0,
-        'vendorLossAmountRMB': (diff > 0) ? diffRmb : 0.0,
+        'vendorLossAmount': diff > 0 ? diff : 0.0,
+        'vendorLossAmountRMB': diff > 0 ? diffRmb : 0.0,
       });
+
       Get.back();
       Get.snackbar(
-        "Success",
         "Received",
+        "Shipment received & avg prices updated",
         backgroundColor: Colors.green,
         colorText: Colors.white,
       );
@@ -700,6 +758,102 @@ class ShipmentController extends GetxController {
     }
   }
 
+  // ── HELPER: Parse carton range string → number of cartons ────────────────
+  // Handles formats: "1-1" → 1, "1-3" → 3, "2-5" → 4, "3" → 1, "" → 1
+  int _parseCartonCount(String cartonNo) {
+    final trimmed = cartonNo.trim();
+    if (trimmed.isEmpty) return 1;
+    final parts = trimmed.split('-');
+    if (parts.length == 2) {
+      final start = int.tryParse(parts[0].trim()) ?? 1;
+      final end = int.tryParse(parts[1].trim()) ?? 1;
+      return (end - start + 1).clamp(1, 9999);
+    }
+    // Single carton number like "3" → 1 carton
+    return 1;
+  }
+
+  // ── PRIVATE: Weighted avg_purchase_price refinement at RECEIVE time ────────
+  // The dialog already sets avg_purchase_price using ORDERED qty when the product
+  // is added to the manifest. At receive time we REFINE it using ACTUAL received
+  // qty, which corrects any discrepancy caused by missing/shorted items.
+  //
+  // Carrier cost is CARTON-BASED per item:
+  //   item_carrier_cost = parseCartonCount(item.cartonNo) × carrierCostPerCarton
+  //   carrier_per_unit  = item_carrier_cost / item.receivedQty
+  // Weighted average:
+  //   new_avg = (prevQty × prevAvg + newQty × newEffCost) / (prevQty + newQty)
+  Future<void> _updateAvgPurchasePrices(
+    ShipmentModel shipment,
+    Map<int, _PriceSnapshot> snapshots,
+  ) async {
+    final futures = <Future<void>>[];
+
+    for (final item in shipment.items) {
+      final recvQty = item.receivedQty;
+      if (recvQty <= 0) continue;
+
+      // ── Carton-based carrier cost for THIS item ──────────────────────────
+      final itemCartons = _parseCartonCount(item.cartonNo);
+      final itemCarrierCost = itemCartons * shipment.carrierCostPerCarton;
+      final carrierPerUnit = itemCarrierCost / recvQty;
+
+      // ── Effective cost per unit (base price + carrier share) ─────────────
+      final seaCost = item.seaPriceSnapshot + carrierPerUnit;
+      final airCost = item.airPriceSnapshot + carrierPerUnit;
+
+      final double newUnitCost;
+      if (item.receivedSeaQty > 0 && item.receivedAirQty > 0) {
+        // Mixed sea + air: weighted blend
+        newUnitCost =
+            (item.receivedSeaQty * seaCost + item.receivedAirQty * airCost) /
+            recvQty;
+      } else if (item.receivedSeaQty > 0) {
+        newUnitCost = seaCost;
+      } else {
+        newUnitCost = airCost;
+      }
+
+      // ── Weighted average with EXISTING stock ─────────────────────────────
+      final snap = snapshots[item.productId];
+      final prevQty = snap?.qty ?? 0;
+      final prevAvg = snap?.avg ?? 0.0;
+
+      final double newAvg;
+      if (prevQty > 0 && prevAvg > 0) {
+        // Merge old stock avg with new cost
+        newAvg =
+            ((prevQty * prevAvg) + (recvQty * newUnitCost)) /
+            (prevQty + recvQty);
+      } else {
+        // No existing stock (or avg was 0) → use new cost directly
+        newAvg = newUnitCost;
+      }
+
+      // Only update the avg_purchase_price field — never touch other fields
+      // Use direct Firestore update (not productController.updateProduct)
+      // to guarantee only this single field is written, protecting all
+      // other product fields from accidental overwrite.
+      futures.add(
+        _firestore
+            .collection('products')
+            .where('id', isEqualTo: item.productId)
+            .limit(1)
+            .get()
+            .then((snap) {
+              if (snap.docs.isNotEmpty) {
+                return snap.docs.first.reference.update({
+                  'avg_purchase_price': double.parse(newAvg.toStringAsFixed(4)),
+                });
+              }
+            }),
+      );
+    }
+
+    await Future.wait(futures, eagerError: false);
+  }
+
+  // ── ON-HOLD RESOLVE ───────────────────────────────────────────────────────
   Future<void> resolveOnHoldItem(OnHoldItem item) async {
     isLoading.value = true;
     try {
@@ -709,8 +863,8 @@ class ShipmentController extends GetxController {
       );
       await _firestore.collection('on_hold_items').doc(item.docId).delete();
       Get.snackbar(
-        "Success",
         "Resolved",
+        "Item added to stock",
         backgroundColor: Colors.green,
         colorText: Colors.white,
       );
@@ -721,36 +875,25 @@ class ShipmentController extends GetxController {
     }
   }
 
-  // --- UPDATED GENERATE PDF (With RMB Values) ---
+  // ── PDF GENERATION ────────────────────────────────────────────────────────
   Future<void> generatePdf(ShipmentModel shipment) async {
     final doc = pw.Document();
     final font = await PdfGoogleFonts.robotoRegular();
     final fontBold = await PdfGoogleFonts.robotoBold();
 
-    // 1. Calculations for PDF
-    double totalReceivedVal = shipment.items.fold(
+    final totalReceivedVal = shipment.items.fold(
       0.0,
-      (sumv, e) => sumv + e.receivedItemValue,
+      (s, e) => s + e.receivedItemValue,
     );
-
-    // Total Weight of what was actually received
-    double totalRecWeight = shipment.items.fold(0.0, (sumv, e) {
-      int receivedQty = e.receivedSeaQty + e.receivedAirQty;
-      return sumv + (receivedQty * e.unitWeightSnapshot);
+    final totalRecWeight = shipment.items.fold(0.0, (s, e) {
+      return s + (e.receivedQty * e.unitWeightSnapshot);
     });
+    final valDiff = shipment.totalAmount - totalReceivedVal;
+    final weightDiff = shipment.totalWeight - totalRecWeight;
+    final exRate = shipment.exchangeRate;
+    final carrierPerUnit = shipment.carrierCostPerOrderedUnit;
 
-    // Differences
-    double valDiff = shipment.totalAmount - totalReceivedVal;
-    double weightDiff = shipment.totalWeight - totalRecWeight;
-
-    // RMB Conversions for the PDF
-    double exRate = shipment.exchangeRate;
-    double productTotalRMB = exRate > 0 ? shipment.totalAmount / exRate : 0.0;
-    double carrierTotalRMB =
-        exRate > 0 ? shipment.totalCarrierFee / exRate : 0.0;
-    double grandTotalRMB = exRate > 0 ? shipment.grandTotal / exRate : 0.0;
-    double recValRMB = exRate > 0 ? totalReceivedVal / exRate : 0.0;
-    double valDiffRMB = exRate > 0 ? valDiff / exRate : 0.0;
+    double toRmb(double v) => exRate > 0 ? v / exRate : 0;
 
     doc.addPage(
       pw.MultiPage(
@@ -791,6 +934,9 @@ class ShipmentController extends GetxController {
                       pw.Text("Carrier: ${shipment.carrier}"),
                       pw.Text("Rate: ${shipment.exchangeRate} BDT/RMB"),
                       pw.Text(
+                        "Carrier/Unit: BDT ${carrierPerUnit.toStringAsFixed(2)}",
+                      ),
+                      pw.Text(
                         shipment.isReceived
                             ? "Status: RECEIVED"
                             : "Status: ON WAY",
@@ -814,72 +960,71 @@ class ShipmentController extends GetxController {
                   'Ctn',
                   'Model',
                   'Name',
-                  'Qty (Ord)',
-                  'Qty (Rec)',
-                  'Cost',
+                  'Ord',
+                  'Rec',
+                  'Base Cost',
+                  'Eff. Cost',
                   'Total',
                 ],
                 data:
                     shipment.items.map((e) {
-                      double itemCost =
-                          e.seaPriceSnapshot > 0
+                      final baseCost =
+                          e.seaQty > 0
                               ? e.seaPriceSnapshot
                               : e.airPriceSnapshot;
+                      final effCost = baseCost + carrierPerUnit;
 
-                      String costStr = formatMoney(itemCost);
-                      String totalStr = formatMoney(e.totalItemCost);
-
-                      if (exRate > 0) {
-                        costStr += "\n${formatRMB(itemCost / exRate)}";
-                        totalStr += "\n${formatRMB(e.totalItemCost / exRate)}";
-                      }
+                      String fmt(double v) =>
+                          "BDT ${v.toStringAsFixed(2)}"
+                          "${exRate > 0 ? '\n¥${toRmb(v).toStringAsFixed(2)}' : ''}";
 
                       return [
                         e.cartonNo,
                         e.productModel,
                         e.productName,
-                        "${e.seaQty + e.airQty}",
-                        "${e.receivedSeaQty + e.receivedAirQty}",
-                        costStr,
-                        totalStr,
+                        "${e.orderedQty}",
+                        "${e.receivedQty}",
+                        fmt(baseCost),
+                        fmt(effCost),
+                        fmt(e.totalItemCost),
                       ];
                     }).toList(),
                 headerStyle: pw.TextStyle(
                   fontWeight: pw.FontWeight.bold,
                   color: PdfColors.white,
-                  fontSize: 10,
+                  fontSize: 9,
                 ),
                 headerDecoration: const pw.BoxDecoration(
                   color: PdfColors.blueGrey800,
                 ),
-                cellStyle: const pw.TextStyle(fontSize: 9),
+                cellStyle: const pw.TextStyle(fontSize: 8),
                 cellAlignments: {
                   0: pw.Alignment.center,
                   3: pw.Alignment.center,
                   4: pw.Alignment.center,
                   5: pw.Alignment.centerRight,
                   6: pw.Alignment.centerRight,
+                  7: pw.Alignment.centerRight,
                 },
                 columnWidths: {
-                  0: const pw.FlexColumnWidth(0.8),
-                  1: const pw.FlexColumnWidth(1.5),
-                  2: const pw.FlexColumnWidth(2.5),
-                  3: const pw.FlexColumnWidth(1),
-                  4: const pw.FlexColumnWidth(1),
-                  5: const pw.FlexColumnWidth(1.5),
-                  6: const pw.FlexColumnWidth(
-                    1.8,
-                  ), // Slightly widened for RMB addition
+                  0: const pw.FlexColumnWidth(0.7),
+                  1: const pw.FlexColumnWidth(1.4),
+                  2: const pw.FlexColumnWidth(2.2),
+                  3: const pw.FlexColumnWidth(0.7),
+                  4: const pw.FlexColumnWidth(0.7),
+                  5: const pw.FlexColumnWidth(1.4),
+                  6: const pw.FlexColumnWidth(1.4),
+                  7: const pw.FlexColumnWidth(1.5),
                 },
               ),
               pw.SizedBox(height: 20),
               pw.Divider(),
 
-              // SUMMARY SECTION (WEIGHT & FINANCIALS)
+              // SUMMARY
               pw.Row(
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
-                  // LEFT: WEIGHT ANALYSIS
+                  // Weight
                   pw.Expanded(
                     child: pw.Container(
                       padding: const pw.EdgeInsets.all(10),
@@ -915,7 +1060,7 @@ class ShipmentController extends GetxController {
                               ),
                             ],
                           ),
-                          pw.SizedBox(height: 5),
+                          pw.SizedBox(height: 4),
                           pw.Row(
                             mainAxisAlignment:
                                 pw.MainAxisAlignment.spaceBetween,
@@ -933,9 +1078,7 @@ class ShipmentController extends GetxController {
                                   color:
                                       weightDiff > 0.1
                                           ? PdfColors.red
-                                          : (weightDiff < -0.1
-                                              ? PdfColors.green
-                                              : PdfColors.black),
+                                          : PdfColors.black,
                                 ),
                               ),
                             ],
@@ -946,61 +1089,40 @@ class ShipmentController extends GetxController {
                   ),
                   pw.SizedBox(width: 20),
 
-                  // RIGHT: FINANCIAL ANALYSIS
+                  // Financial
                   pw.Expanded(
                     child: pw.Column(
                       crossAxisAlignment: pw.CrossAxisAlignment.end,
                       children: [
                         pw.Text(
-                          "Product Total: ${formatMoney(shipment.totalAmount)}${exRate > 0 ? '  |  ${formatRMB(productTotalRMB)}' : ''}",
+                          "Product Total: ${formatMoney(shipment.totalAmount)}${exRate > 0 ? '  |  ${formatRMB(toRmb(shipment.totalAmount))}' : ''}",
                         ),
                         pw.Text(
-                          "Carrier Fee: ${formatMoney(shipment.totalCarrierFee)}${exRate > 0 ? '  |  ${formatRMB(carrierTotalRMB)}' : ''}",
+                          "Carrier Fee: ${formatMoney(shipment.totalCarrierFee)}${exRate > 0 ? '  |  ${formatRMB(toRmb(shipment.totalCarrierFee))}' : ''}",
                         ),
                         pw.Text(
-                          "GRAND TOTAL: ${formatMoney(shipment.grandTotal)}${exRate > 0 ? '  |  ${formatRMB(grandTotalRMB)}' : ''}",
+                          "GRAND TOTAL: ${formatMoney(shipment.grandTotal)}${exRate > 0 ? '  |  ${formatRMB(toRmb(shipment.grandTotal))}' : ''}",
                           style: pw.TextStyle(
                             fontWeight: pw.FontWeight.bold,
                             fontSize: 13,
                           ),
                         ),
-                        pw.SizedBox(height: 10),
-
-                        // Financial Discrepancy Display
-                        pw.Container(
-                          padding: const pw.EdgeInsets.symmetric(
-                            vertical: 4,
-                            horizontal: 8,
-                          ),
-                          color:
-                              valDiff.abs() > 1
-                                  ? (valDiff > 0
-                                      ? PdfColors.red50
-                                      : PdfColors.green50)
-                                  : PdfColors.white,
-                          child: pw.Column(
-                            crossAxisAlignment: pw.CrossAxisAlignment.end,
-                            children: [
-                              pw.Text(
-                                "Recv. Value: ${formatMoney(totalReceivedVal)}${exRate > 0 ? '  |  ${formatRMB(recValRMB)}' : ''}",
-                                style: const pw.TextStyle(fontSize: 10),
-                              ),
-                              if (valDiff.abs() > 1)
-                                pw.Text(
-                                  valDiff > 0
-                                      ? "SHORTAGE: ${formatMoney(valDiff)}${exRate > 0 ? '  |  ${formatRMB(valDiffRMB)}' : ''}"
-                                      : "SURPLUS: ${formatMoney(valDiff.abs())}${exRate > 0 ? '  |  ${formatRMB(valDiffRMB.abs())}' : ''}",
-                                  style: pw.TextStyle(
-                                    color:
-                                        valDiff > 0
-                                            ? PdfColors.red
-                                            : PdfColors.green,
-                                    fontWeight: pw.FontWeight.bold,
-                                  ),
-                                ),
-                            ],
-                          ),
+                        pw.SizedBox(height: 8),
+                        pw.Text(
+                          "Received Value: ${formatMoney(totalReceivedVal)}${exRate > 0 ? '  |  ${formatRMB(toRmb(totalReceivedVal))}' : ''}",
+                          style: const pw.TextStyle(fontSize: 10),
                         ),
+                        if (valDiff.abs() > 1)
+                          pw.Text(
+                            valDiff > 0
+                                ? "SHORTAGE: ${formatMoney(valDiff)}${exRate > 0 ? '  |  ${formatRMB(toRmb(valDiff))}' : ''}"
+                                : "SURPLUS: ${formatMoney(valDiff.abs())}",
+                            style: pw.TextStyle(
+                              color:
+                                  valDiff > 0 ? PdfColors.red : PdfColors.green,
+                              fontWeight: pw.FontWeight.bold,
+                            ),
+                          ),
                       ],
                     ),
                   ),
@@ -1036,54 +1158,47 @@ class ShipmentController extends GetxController {
             ],
       ),
     );
+
     await Printing.layoutPdf(
-      onLayout: (format) => doc.save(),
+      onLayout: (f) => doc.save(),
       name: 'Manifest_${shipment.shipmentName}.pdf',
     );
   }
 
   Future<void> generateAggregatedOnWayPdf() async {
     if (aggregatedList.isEmpty) {
-      Get.snackbar("Notice", "No shipments to download.");
+      Get.snackbar("Notice", "No on-way shipments to export.");
       return;
     }
-
     final pdf = pw.Document();
-
-    // Prepare table headers
     final headers = [
       'Model',
       'Product Name',
       'Total Qty',
       'Shipment Breakdown',
     ];
-
-    // Convert aggregated list to purely text arrays
     final data =
         aggregatedList.map((product) {
-          // Create a clean, multiline string for the breakdown
-          final breakdownStr = product.incomingDetails
-              .map((d) {
-                final dateStr = DateFormat('MMM dd').format(d.date);
-                return '${d.shipmentName} | $dateStr | ${d.qty} pcs';
-              })
+          final breakdown = product.incomingDetails
+              .map(
+                (d) =>
+                    '${d.shipmentName} | ${DateFormat('MMM dd').format(d.date)} | ${d.qty} pcs',
+              )
               .join('\n');
-
           return [
             product.model,
             product.name,
             product.totalQty.toString(),
-            breakdownStr,
+            breakdown,
           ];
         }).toList();
 
     pdf.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.all(32), // Professional margins
+        margin: const pw.EdgeInsets.all(32),
         build:
             (context) => [
-              // Professional Header
               pw.Header(
                 level: 0,
                 child: pw.Row(
@@ -1108,8 +1223,6 @@ class ShipmentController extends GetxController {
                 ),
               ),
               pw.SizedBox(height: 10),
-
-              // High-Density PDF Table
               pw.TableHelper.fromTextArray(
                 headers: headers,
                 data: data,
@@ -1117,8 +1230,6 @@ class ShipmentController extends GetxController {
                   color: PdfColors.grey400,
                   width: 0.5,
                 ),
-
-                // Header Styling
                 headerStyle: pw.TextStyle(
                   fontSize: 9,
                   fontWeight: pw.FontWeight.bold,
@@ -1127,21 +1238,16 @@ class ShipmentController extends GetxController {
                 headerDecoration: const pw.BoxDecoration(
                   color: PdfColors.blue800,
                 ),
-
-                // Body Cell Styling (Small font = 30+ items per page!)
                 cellStyle: const pw.TextStyle(fontSize: 8),
                 cellPadding: const pw.EdgeInsets.symmetric(
                   vertical: 4,
                   horizontal: 6,
                 ),
-                cellAlignment: pw.Alignment.centerLeft,
-
-                // Custom Column Widths prevents awkward line breaks
                 columnWidths: {
-                  0: const pw.FlexColumnWidth(1.5), // Model
-                  1: const pw.FlexColumnWidth(2.5), // Name
-                  2: const pw.FlexColumnWidth(1.0), // Total Qty
-                  3: const pw.FlexColumnWidth(3.5), // Breakdown
+                  0: const pw.FlexColumnWidth(1.5),
+                  1: const pw.FlexColumnWidth(2.5),
+                  2: const pw.FlexColumnWidth(1.0),
+                  3: const pw.FlexColumnWidth(3.5),
                 },
               ),
             ],
@@ -1149,9 +1255,8 @@ class ShipmentController extends GetxController {
     );
 
     await Printing.layoutPdf(
-      onLayout: (PdfPageFormat format) async => pdf.save(),
-      name:
-          'Incoming_Shipments_Report_${DateFormat('MMM_dd').format(DateTime.now())}.pdf',
+      onLayout: (f) async => pdf.save(),
+      name: 'Incoming_${DateFormat('MMM_dd').format(DateTime.now())}.pdf',
     );
   }
 }
