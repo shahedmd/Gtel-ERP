@@ -17,7 +17,7 @@ class VendorController extends GetxController {
   final RxBool isLoading = false.obs;
   final RxString searchQuery = ''.obs;
 
-  final int _itemsPerPage = 10;
+  final int _itemsPerPage = 40;
   final RxInt currentVendorPage = 1.obs;
   final RxBool hasMoreVendors = false.obs;
   final RxList<VendorTransaction> currentTransactions =
