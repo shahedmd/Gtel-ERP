@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
-import '../superadmincontroller.dart';
+
+import '../super_admin_controller.dart';
 
 class ActivityLogTab extends StatelessWidget {
   const ActivityLogTab({super.key});

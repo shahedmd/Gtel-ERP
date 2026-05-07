@@ -1,13 +1,10 @@
-// lib/Core/SuperAdmin/superadmin_page.dart
-
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-
 import '../Permission/permission_controller.dart';
-import 'superadmincontroller.dart';
-import 'tabs/activity_logs.dart';
-import 'tabs/permission_mattrix.dart';
-import 'tabs/user_management.dart';
+import 'Super Admin panel Tabs/activity_logs.dart';
+import 'Super Admin panel Tabs/user_management.dart';
+import 'permission_mattrix.dart';
+import 'super_admin_controller.dart';
 
 
 class SuperAdminPage extends StatelessWidget {
@@ -15,7 +12,6 @@ class SuperAdminPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // SuperAdmin ছাড়া কেউ এই page দেখতে পাবে না
     final permCtrl = Get.find<PermissionController>();
     if (!permCtrl.isSuperAdmin) {
       return const Center(

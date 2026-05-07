@@ -1,14 +1,11 @@
-// lib/Core/Stock Management/widgets/order_history_table.dart
-// ignore_for_file: deprecated_member_use
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
-import 'package:gtel_erp/Core/Menubar%20&%20Navigation/app_pages.dart';
+import '../../../Menubar and Navigation/app_pages.dart';
+import '../../../Permission/permission_button.dart';
+import '../../../Permission/permission_controller.dart';
 import '../../Core Utils/activity_logger.dart';
-import '../../Permission/permission_button.dart';
-import '../../Permission/permission_controller.dart';
 import '../china_order_list.dart';
 import 'order_history_dialog.dart';
 

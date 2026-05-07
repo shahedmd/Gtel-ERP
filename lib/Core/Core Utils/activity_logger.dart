@@ -1,7 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Core/Core%20Utils/app_logger.dart';
-import '../Permission/permission_controller.dart';
+
+import '../../Permission/permission_controller.dart';
 
 class ActivityLogger {
   static final FirebaseFirestore _db = FirebaseFirestore.instance;

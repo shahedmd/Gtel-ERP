@@ -1,19 +1,14 @@
-// lib/Core/Stock Management/widgets/order_detail_dialog.dart
-
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:gtel_erp/Core/Menubar%20&%20Navigation/app_pages.dart';
+import '../../../Menubar and Navigation/app_pages.dart';
+import '../../../Permission/permission_button.dart';
 import '../../Core Utils/activity_logger.dart';
-import '../../Permission/permission_button.dart';
 import '../china_order_list.dart';
 import '../stock_controller.dart';
 import 'order_history_pdf.dart';
 
-// ─────────────────────────────────────────────────────────────
-// Entry point
-// ─────────────────────────────────────────────────────────────
 void showOrderDetailDialog({
   required BuildContext context,
   required String docId,

@@ -1,10 +1,7 @@
-// lib/Core/SuperAdmin/tabs/user_management_tab.dart
-
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-
 import '../../Permission/permission_model.dart';
-import '../superadmincontroller.dart';
+import '../super_admin_controller.dart';
 
 
 class UserManagementTab extends StatelessWidget {

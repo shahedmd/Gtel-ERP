@@ -3,11 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Core/Stock%20Management/stockproductmodel.dart';
 import 'package:intl/intl.dart';
+import '../../../Menubar and Navigation/app_pages.dart';
+import '../../../Permission/permission_button.dart';
+import '../../../Permission/permission_controller.dart';
 import '../../../Shipment/controller.dart';
 import '../../Core Utils/activity_logger.dart';
-import '../../Menubar & Navigation/app_pages.dart';
-import '../../Permission/permission_button.dart';
-import '../../Permission/permission_controller.dart';
 import '../stock_controller.dart';
 import '../stock_helper_dialogs.dart';
 
