@@ -113,6 +113,9 @@ class SuperAdminController extends GetxController {
     return AppRouteRegistry.actionLabelsForRoute(route);
   }
 
+
+
+
   Future<void> toggleUserStatus(UserModel user) async {
     if (user.isSuperAdmin) {
       _showError('Super Admin status cannot be changed');

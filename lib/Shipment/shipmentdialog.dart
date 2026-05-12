@@ -2,8 +2,8 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Shipment/controller.dart';
-import 'package:gtel_erp/Core/Stock%20Management/stockproductmodel.dart';
-import '../Core/Stock Management/stock_controller.dart';
+import '../Stock Management/stock_controller.dart';
+import '../Stock Management/stock_model.dart';
 import 'shipmodel.dart';
 
 /// Shows the shipment entry dialog for adding/editing a product in the manifest.

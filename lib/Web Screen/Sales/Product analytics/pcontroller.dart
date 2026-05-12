@@ -1,8 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:get/get.dart';
-import 'package:gtel_erp/Core/Stock%20Management/stockproductmodel.dart';
+import '../../../Stock Management/stock_controller.dart';
+import '../../../Stock Management/stock_model.dart';
 
-import '../../../Core/Stock Management/stock_controller.dart';
 
 class HotSalesData {
   final Product product;
@@ -158,7 +158,6 @@ class HotSalesController extends GetxController {
         if (realProduct != null) {
           tempList.add(HotSalesData(realProduct, qty, revMap[groupKey] ?? 0.0));
         } else {
-          // Product was deleted from inventory completely (Virtual Product)
           Product virtualProduct = Product(
             id: backupIdMap[groupKey] ?? 0,
             name: backupNameMap[groupKey] ?? 'Deleted Product',
@@ -178,7 +177,7 @@ class HotSalesController extends GetxController {
             avgPurchasePrice: 0,
             seaStockQty: 0,
             airStockQty: 0,
-            localQty: 0,
+            localQty: 0, shipmentTaxAir: 0, shipmentDate: null, alertQty: 0,
           );
           tempList.add(
             HotSalesData(virtualProduct, qty, revMap[groupKey] ?? 0.0),

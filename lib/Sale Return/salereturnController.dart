@@ -1,10 +1,8 @@
-// ignore_for_file: deprecated_member_use, avoid_print, empty_catches, file_names
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-import '../Core/Stock Management/stock_controller.dart';
+import '../Stock Management/stock_controller.dart';
 
 class SaleReturnController extends GetxController {
   final FirebaseFirestore _db = FirebaseFirestore.instance;

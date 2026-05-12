@@ -7,7 +7,7 @@ import 'package:gtel_erp/Shipment/shipmentdialog.dart';
 import 'package:gtel_erp/Vendor/vendorcontroller.dart';
 import 'package:intl/intl.dart';
 
-import '../Core/Stock Management/stock_controller.dart';
+import '../Stock Management/stock_controller.dart';
 
 // --- THEME CONSTANTS ---
 const Color kDarkSlate = Color(0xFF1E293B);

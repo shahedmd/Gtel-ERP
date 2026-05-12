@@ -24,11 +24,8 @@ class GtelErpApp extends StatelessWidget {
     return GetMaterialApp(
       title: 'G-Tel ERP',
       debugShowCheckedModeBanner: false,
-
       initialBinding: AppBinding(),
-
       smartManagement: SmartManagement.full,
-
       initialRoute: AppRoutes.login,
       unknownRoute: GetPage(
         name: AppRoutes.login,
@@ -51,8 +48,6 @@ class GtelErpApp extends StatelessWidget {
       transitionDuration: const Duration(milliseconds: 180),
       popGesture: true,
       enableLog: false,
-
-      // Theme
       themeMode: ThemeMode.light,
       theme: ThemeData(
         useMaterial3: true,

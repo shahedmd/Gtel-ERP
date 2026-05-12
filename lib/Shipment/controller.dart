@@ -8,7 +8,7 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-import '../Core/Stock Management/stock_controller.dart';
+import '../Stock Management/stock_controller.dart';
 import 'shipmodel.dart';
 
 // ─── Helper model for avg price snapshots ───────────────────────────────────

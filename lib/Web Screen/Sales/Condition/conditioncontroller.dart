@@ -10,8 +10,7 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-
-import '../../../Core/Stock Management/stock_controller.dart';
+import '../../../Stock Management/stock_controller.dart';
 
 class ConditionSalesController extends GetxController {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
