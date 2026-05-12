@@ -89,6 +89,15 @@ class _ShortlistPageState extends State<ShortlistPage> {
   final ScrollController _verticalScrollController = ScrollController();
   final ScrollController _horizontalScrollController = ScrollController();
 
+  // ─── DEDUPLICATION: tracks every product ID we have ever rendered
+  //     across all pages in this session. Cleared on search/refresh.
+  final Set<int> _seenProductIds = {};
+
+  // ─── PERSISTED QUANTITIES: survives page navigation.
+  //     Key = product.id, Value = qty the user typed.
+  //     Cleared only on search change or full refresh.
+  final Map<int, int> _savedQties = {};
+
   @override
   void initState() {
     super.initState();
@@ -97,7 +106,7 @@ class _ShortlistPageState extends State<ShortlistPage> {
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (controller.shortlistSearchText.value.isEmpty) {
-        controller.fetchShortList(page: 1);
+        _resetAndFetch(page: 1);
       }
     });
   }
@@ -108,6 +117,27 @@ class _ShortlistPageState extends State<ShortlistPage> {
     _verticalScrollController.dispose();
     _horizontalScrollController.dispose();
     super.dispose();
+  }
+
+  // ─── Clears the seen-IDs set and fetches fresh data ──────────────────────
+  void _resetAndFetch({required int page}) {
+    setState(() {
+      _seenProductIds.clear();
+      _savedQties.clear();
+    });
+    controller.fetchShortList(page: page);
+  }
+
+  // ─── Returns the current page's products after removing any duplicates ───
+  List<Product> get _deduplicatedProducts {
+    final List<Product> result = [];
+    for (final p in controller.shortListProducts) {
+      if (!_seenProductIds.contains(p.id as int)) {
+        _seenProductIds.add(p.id as int);
+        result.add(p);
+      }
+    }
+    return result;
   }
 
   @override
@@ -214,8 +244,8 @@ class _ShortlistPageState extends State<ShortlistPage> {
                           color: Colors.red,
                         ),
                         title: Text(
-                          "Cart (${cartController.cartItems.length}, )",
-                          style: TextStyle(fontSize: 13),
+                          "Cart (${cartController.cartItems.length})",
+                          style: const TextStyle(fontSize: 13),
                         ),
                         contentPadding: EdgeInsets.zero,
                       ),
@@ -360,7 +390,13 @@ class _ShortlistPageState extends State<ShortlistPage> {
       ).copyWith(bottom: 16),
       child: TextField(
         controller: _searchCtrl,
-        onChanged: (val) => controller.searchShortlist(val),
+        onChanged: (val) {
+          setState(() {
+            _seenProductIds.clear();
+            _savedQties.clear();
+          });
+          controller.searchShortlist(val);
+        },
         style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
         decoration: InputDecoration(
           hintText: "Search short list by model or product name...",
@@ -372,6 +408,10 @@ class _ShortlistPageState extends State<ShortlistPage> {
             icon: const Icon(Icons.clear, color: Color(0xFF64748B)),
             onPressed: () {
               _searchCtrl.clear();
+              setState(() {
+                _seenProductIds.clear();
+                _savedQties.clear();
+              });
               controller.searchShortlist('');
             },
           ),
@@ -405,7 +445,7 @@ class _ShortlistPageState extends State<ShortlistPage> {
           ),
           IconButton(
             icon: const Icon(Icons.refresh, color: Color(0xFF64748B)),
-            onPressed: () => controller.fetchShortList(page: 1),
+            onPressed: () => _resetAndFetch(page: 1),
             tooltip: "Refresh",
             style: IconButton.styleFrom(
               backgroundColor: const Color(0xFFF1F5F9),
@@ -428,31 +468,41 @@ class _ShortlistPageState extends State<ShortlistPage> {
           controller.shortListProducts.isEmpty) {
         return const Center(child: CircularProgressIndicator());
       }
-      if (controller.shortListProducts.isEmpty) {
+
+      // Deduplicate each time the observable list changes
+      final products = _deduplicatedProducts;
+
+      if (products.isEmpty) {
         return _buildEmptyState();
       }
 
-      return isMobile ? _buildMobileCards() : _buildDesktopTable();
+      return isMobile
+          ? _buildMobileCards(products)
+          : _buildDesktopTable(products);
     });
   }
 
-  Widget _buildMobileCards() {
+  Widget _buildMobileCards(List<Product> products) {
     return ListView.separated(
       padding: const EdgeInsets.all(12),
-      itemCount: controller.shortListProducts.length,
+      itemCount: products.length,
       separatorBuilder: (_, __) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
+        final product = products[index];
         return _MobileCard(
-          product: controller.shortListProducts[index],
+          // ── FIX 1: ValueKey ensures state is NEVER shared between products ──
+          key: ValueKey(product.id),
+          product: product,
           shipmentCtrl: shipmentCtrl,
           cartController: cartController,
+          savedQty: _savedQties[product.id as int] ?? 1,
+          onQtyChanged: (qty) => _savedQties[product.id as int] = qty,
         );
       },
     );
   }
 
-  // CENTERED DESKTOP TABLE FIX
-  Widget _buildDesktopTable() {
+  Widget _buildDesktopTable(List<Product> products) {
     return LayoutBuilder(
       builder: (context, constraints) {
         return Scrollbar(
@@ -469,17 +519,15 @@ class _ShortlistPageState extends State<ShortlistPage> {
               child: SingleChildScrollView(
                 controller: _horizontalScrollController,
                 scrollDirection: Axis.horizontal,
-                // WRAPPING IN CONSTRAINED BOX + CENTER TO FORCE CENTER ALIGNMENT ON WIDE SCREENS
                 child: ConstrainedBox(
                   constraints: BoxConstraints(minWidth: constraints.maxWidth),
                   child: Center(
                     child: SizedBox(
-                      width:
-                          1050, // Fixed width locks the column spacing perfectly
+                      width: 1050,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // TABLE HEADER
+                          // TABLE HEADER ROW
                           Container(
                             color: const Color(0xFFF1F5F9),
                             padding: const EdgeInsets.symmetric(
@@ -500,16 +548,24 @@ class _ShortlistPageState extends State<ShortlistPage> {
                               ],
                             ),
                           ),
-                          // TABLE ROWS (Memory safe, isolated states)
+                          // TABLE ROWS
                           ListView.builder(
                             shrinkWrap: true,
                             physics: const NeverScrollableScrollPhysics(),
-                            itemCount: controller.shortListProducts.length,
+                            itemCount: products.length,
                             itemBuilder: (context, index) {
+                              final product = products[index];
                               return _DesktopRow(
-                                product: controller.shortListProducts[index],
+                                // ── FIX 1: ValueKey binds State to the product,
+                                //    not to its list position ──────────────────
+                                key: ValueKey(product.id),
+                                product: product,
                                 shipmentCtrl: shipmentCtrl,
                                 cartController: cartController,
+                                savedQty: _savedQties[product.id as int] ?? 1,
+                                onQtyChanged:
+                                    (qty) =>
+                                        _savedQties[product.id as int] = qty,
                               );
                             },
                           ),
@@ -572,7 +628,14 @@ class _ShortlistPageState extends State<ShortlistPage> {
                 IconButton(
                   icon: const Icon(Icons.chevron_left),
                   onPressed:
-                      current > 1 ? () => controller.prevShortlistPage() : null,
+                      current > 1
+                          ? () {
+                            // ── FIX 2: clear seen IDs before going to previous
+                            //    page so deduplication re-evaluates cleanly ──
+                            setState(() => _seenProductIds.clear());
+                            controller.prevShortlistPage();
+                          }
+                          : null,
                 ),
                 Container(
                   padding: const EdgeInsets.symmetric(
@@ -596,7 +659,11 @@ class _ShortlistPageState extends State<ShortlistPage> {
                   icon: const Icon(Icons.chevron_right),
                   onPressed:
                       current < totalPages
-                          ? () => controller.nextShortlistPage()
+                          ? () {
+                            // ── FIX 2: clear seen IDs before loading next page ──
+                            setState(() => _seenProductIds.clear());
+                            controller.nextShortlistPage();
+                          }
                           : null,
                 ),
               ],
@@ -699,8 +766,10 @@ class _ShortlistPageState extends State<ShortlistPage> {
                     itemCount: cartController.cartItems.length,
                     separatorBuilder: (_, __) => const Divider(height: 1),
                     itemBuilder: (context, index) {
+                      final item = cartController.cartItems[index];
                       return _CartItemRow(
-                        item: cartController.cartItems[index],
+                        key: ValueKey(item.product.id),
+                        item: item,
                         cartController: cartController,
                       );
                     },
@@ -927,7 +996,11 @@ class _CartItemRow extends StatefulWidget {
   final OrderCartItem item;
   final OrderCartController cartController;
 
-  const _CartItemRow({required this.item, required this.cartController});
+  const _CartItemRow({
+    super.key,
+    required this.item,
+    required this.cartController,
+  });
 
   @override
   State<_CartItemRow> createState() => _CartItemRowState();
@@ -945,7 +1018,6 @@ class _CartItemRowState extends State<_CartItemRow> {
   @override
   void didUpdateWidget(covariant _CartItemRow oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // If external state updates qty (like clearCart or +/- buttons), update the field
     if (widget.item.qty.toString() != _qtyCtrl.text) {
       _qtyCtrl.text = widget.item.qty.toString();
     }
@@ -1048,11 +1120,16 @@ class _DesktopRow extends StatefulWidget {
   final Product product;
   final ShipmentController shipmentCtrl;
   final OrderCartController cartController;
+  final int savedQty;
+  final ValueChanged<int> onQtyChanged;
 
   const _DesktopRow({
+    super.key,
     required this.product,
     required this.shipmentCtrl,
     required this.cartController,
+    required this.savedQty,
+    required this.onQtyChanged,
   });
 
   @override
@@ -1065,7 +1142,8 @@ class _DesktopRowState extends State<_DesktopRow> {
   @override
   void initState() {
     super.initState();
-    qtyCtrl = TextEditingController(text: "1");
+    // Restore the qty the user last typed for this product (default 1)
+    qtyCtrl = TextEditingController(text: widget.savedQty.toString());
   }
 
   @override
@@ -1190,6 +1268,10 @@ class _DesktopRowState extends State<_DesktopRow> {
                     contentPadding: EdgeInsets.zero,
                     border: OutlineInputBorder(),
                   ),
+                  onChanged: (val) {
+                    final q = int.tryParse(val) ?? 1;
+                    if (q > 0) widget.onQtyChanged(q);
+                  },
                 ),
               ),
             ),
@@ -1214,6 +1296,7 @@ class _DesktopRowState extends State<_DesktopRow> {
                     duration: const Duration(seconds: 2),
                   );
                   qtyCtrl.text = "1";
+                  widget.onQtyChanged(1); // reset persisted qty to 1
                 }
               },
             ),
@@ -1267,11 +1350,16 @@ class _MobileCard extends StatefulWidget {
   final Product product;
   final ShipmentController shipmentCtrl;
   final OrderCartController cartController;
+  final int savedQty;
+  final ValueChanged<int> onQtyChanged;
 
   const _MobileCard({
+    super.key,
     required this.product,
     required this.shipmentCtrl,
     required this.cartController,
+    required this.savedQty,
+    required this.onQtyChanged,
   });
 
   @override
@@ -1284,7 +1372,8 @@ class _MobileCardState extends State<_MobileCard> {
   @override
   void initState() {
     super.initState();
-    qtyCtrl = TextEditingController(text: "1");
+    // Restore the qty the user last typed for this product (default 1)
+    qtyCtrl = TextEditingController(text: widget.savedQty.toString());
   }
 
   @override
@@ -1406,7 +1495,7 @@ class _MobileCardState extends State<_MobileCard> {
                     Expanded(
                       child: TextField(
                         controller: qtyCtrl,
-                        style: TextStyle(fontSize: 13),
+                        style: const TextStyle(fontSize: 13),
                         keyboardType: TextInputType.number,
                         decoration: const InputDecoration(
                           labelText: "Order Qty",
@@ -1414,6 +1503,10 @@ class _MobileCardState extends State<_MobileCard> {
                           border: OutlineInputBorder(),
                           isDense: true,
                         ),
+                        onChanged: (val) {
+                          final q = int.tryParse(val) ?? 1;
+                          if (q > 0) widget.onQtyChanged(q);
+                        },
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -1439,6 +1532,7 @@ class _MobileCardState extends State<_MobileCard> {
                             colorText: Colors.white,
                           );
                           qtyCtrl.text = "1";
+                          widget.onQtyChanged(1); // reset persisted qty to 1
                         }
                       },
                     ),
@@ -1464,19 +1558,13 @@ class OrderPdfGenerator {
   ) async {
     final pdf = pw.Document();
 
-    double grandTotal = 0;
-    for (var item in items) {
-      double price =
-          delivery.toLowerCase() == 'air' ? item.product.air : item.product.sea;
-      grandTotal += (price * item.qty);
-    }
-
     pdf.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(32),
         build: (context) {
           return [
+            // ── Header ─────────────────────────────────────────────────────
             pw.Row(
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
               children: [
@@ -1499,6 +1587,7 @@ class OrderPdfGenerator {
             ),
             pw.SizedBox(height: 15),
 
+            // ── Supplier info box ───────────────────────────────────────────
             pw.Container(
               padding: const pw.EdgeInsets.all(12),
               decoration: pw.BoxDecoration(
@@ -1541,6 +1630,7 @@ class OrderPdfGenerator {
             ),
             pw.SizedBox(height: 20),
 
+            // ── Table: No. | Model | Product Name | Order Qty ──────────────
             pw.TableHelper.fromTextArray(
               border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.5),
               headerStyle: pw.TextStyle(
@@ -1556,33 +1646,27 @@ class OrderPdfGenerator {
                 vertical: 6,
                 horizontal: 8,
               ),
-              headers: [
-                'No.',
-                'Model',
-                'Product Name',
-                'Unit Price ($delivery)',
-                'Order Qty',
-                'Total Price',
-              ],
+              cellAlignment: pw.Alignment.centerLeft,
+              columnWidths: {
+                0: const pw.FlexColumnWidth(1),
+                1: const pw.FlexColumnWidth(3),
+                2: const pw.FlexColumnWidth(5),
+                3: const pw.FlexColumnWidth(2),
+              },
+              headers: ['No.', 'Model', 'Product Name', 'Order Qty'],
               data: List<List<String>>.generate(items.length, (index) {
                 final item = items[index];
-                double unitPrice =
-                    delivery.toLowerCase() == 'air'
-                        ? item.product.air
-                        : item.product.sea;
-                double totalLine = unitPrice * item.qty;
                 return [
                   (index + 1).toString(),
                   item.product.model,
                   item.product.name,
-                  "¥${unitPrice.toStringAsFixed(2)}",
                   item.qty.toString(),
-                  "¥${totalLine.toStringAsFixed(2)}",
                 ];
               }),
             ),
             pw.SizedBox(height: 15),
 
+            // ── Total items summary ─────────────────────────────────────────
             pw.Row(
               mainAxisAlignment: pw.MainAxisAlignment.end,
               children: [
@@ -1592,32 +1676,21 @@ class OrderPdfGenerator {
                     color: PdfColors.blue50,
                     border: pw.Border.all(color: PdfColors.blue200),
                   ),
-                  child: pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.end,
-                    children: [
-                      pw.Text(
-                        "Total Items: ${items.length}",
-                        style: pw.TextStyle(
-                          fontSize: 10,
-                          fontWeight: pw.FontWeight.bold,
-                        ),
-                      ),
-                      pw.SizedBox(height: 4),
-                      pw.Text(
-                        "Grand Total: ¥${grandTotal.toStringAsFixed(2)}",
-                        style: pw.TextStyle(
-                          fontSize: 12,
-                          fontWeight: pw.FontWeight.bold,
-                          color: PdfColors.blue900,
-                        ),
-                      ),
-                    ],
+                  child: pw.Text(
+                    "Total Ordered Items: ${items.length}",
+                    style: pw.TextStyle(
+                      fontSize: 11,
+                      fontWeight: pw.FontWeight.bold,
+                      color: PdfColors.blue900,
+                    ),
                   ),
                 ),
               ],
             ),
 
             pw.Spacer(),
+
+            // ── Signature line ──────────────────────────────────────────────
             pw.Row(
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
               children: [
