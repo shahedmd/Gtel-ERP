@@ -30,7 +30,6 @@ class SalesCartItem {
   bool get isLoss => priceAtSale < product.avgPurchasePrice;
 }
 
-// --- LIVE SALES CONTROLLER ---
 class LiveSalesController extends GetxController {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
@@ -55,7 +54,7 @@ class LiveSalesController extends GetxController {
   final RxList<Map<String, dynamic>> filteredRegularCustomers =
       <Map<String, dynamic>>[].obs;
 
-  // --- NEW: LOCAL CACHE FOR REGULAR CUSTOMERS (Makes search blazing fast and flexible) ---
+  // --- LOCAL CACHE FOR REGULAR + CONDITION CUSTOMERS ---
   final RxList<Map<String, dynamic>> allRegularCustomersCache =
       <Map<String, dynamic>>[].obs;
 
@@ -77,17 +76,16 @@ class LiveSalesController extends GetxController {
   ];
 
   final List<String> packagerList = [
-    'Noyon',
-    'Riad',
-    'Foysal',
+    'Ashraf Noyon',
+    'Md. Riyad',
+    'Foysal Ahmed',
     'Mahim Mal',
-    'Alif',
-    'Raihan',
-    'Hossain',
+    'Md. Alif',
+    'Md. Yeamin',
+    'Md. Siyam',
   ];
   final RxnString selectedPackager = RxnString();
 
-  // ** DEBTOR BALANCES **
   final RxDouble debtorOldDue = 0.0.obs;
   final RxDouble debtorRunningDue = 0.0.obs;
   double get totalPreviousDue => debtorOldDue.value + debtorRunningDue.value;
@@ -126,7 +124,7 @@ class LiveSalesController extends GetxController {
   void onInit() {
     super.onInit();
 
-    // NEW: Fetch all non-agent customers into local cache when controller initializes
+    // Fetch all non-agent customers + condition customers into local cache
     _fetchAllRegularCustomers();
 
     cashC.addListener(updatePaymentCalculations);
@@ -193,17 +191,50 @@ class LiveSalesController extends GetxController {
     });
   }
 
-  // --- NEW: FETCH REGULAR CUSTOMERS IN BACKGROUND ---
+  // ---------------------------------------------------------------------------
+  // FETCH ALL REGULAR + CONDITION CUSTOMERS INTO LOCAL CACHE
+  // Now merges both 'customers' and 'condition_customers' collections.
+  // Condition customers get type = 'CONDITION' so they are never filtered out.
+  // Deduplication is done by phone number — condition entry wins on conflict.
+  // ---------------------------------------------------------------------------
   Future<void> _fetchAllRegularCustomers() async {
     try {
-      var snap = await _db.collection('customers').get();
-      allRegularCustomersCache.value =
-          snap.docs
+      // 1. Fetch regular customers (WHOLESALE / VIP)
+      var regularSnap = await _db.collection('customers').get();
+      var regularList =
+          regularSnap.docs
               .map((doc) => {'id': doc.id, ...doc.data()})
               .where((c) => c['type'] != 'AGENT')
               .toList();
+
+      // 2. Fetch condition customers
+      var conditionSnap = await _db.collection('condition_customers').get();
+      var conditionList =
+          conditionSnap.docs
+              .map(
+                (doc) => <String, dynamic>{
+                  'id': doc.id,
+                  'type': 'CONDITION',
+                  ...doc.data(),
+                },
+              )
+              .toList();
+
+      // 3. Merge — keyed by phone; condition entry overwrites on duplicate phone
+      final Map<String, Map<String, dynamic>> merged = {};
+
+      for (var c in regularList) {
+        final key = (c['phone'] ?? c['id']).toString();
+        merged[key] = c;
+      }
+      for (var c in conditionList) {
+        final key = (c['phone'] ?? c['id']).toString();
+        merged[key] = c;
+      }
+
+      allRegularCustomersCache.value = merged.values.toList();
     } catch (e) {
-      AppLogger.i("Error fetching regular customers: $e");
+      AppLogger.i("Error fetching regular/condition customers: $e");
     }
   }
 
@@ -278,7 +309,12 @@ class LiveSalesController extends GetxController {
     }
   }
 
-  // --- NEW: FLEXIBLE SEARCH REGULAR CUSTOMER (WHOLESALE/VIP) ---
+  // ---------------------------------------------------------------------------
+  // SEARCH REGULAR + CONDITION CUSTOMERS
+  // Local cache search covers both collections instantly.
+  // Firestore fallback queries BOTH 'customers' and 'condition_customers'.
+  // AGENT entries are always excluded from results.
+  // ---------------------------------------------------------------------------
   Future<void> _searchRegularCustomer(String queryText) async {
     try {
       String q = queryText.trim();
@@ -287,7 +323,10 @@ class LiveSalesController extends GetxController {
 
       Map<String, Map<String, dynamic>> results = {};
 
-      // 1. PERFECT LOCAL SEARCH: Matches ANY part of the name or phone, completely case-insensitive
+      // ------------------------------------------------------------------
+      // 1. LOCAL CACHE SEARCH (covers both regular + condition customers)
+      //    Matches any part of name or phone, case-insensitive.
+      // ------------------------------------------------------------------
       var localMatches =
           allRegularCustomersCache.where((c) {
             String name = (c['name'] ?? '').toString().toLowerCase();
@@ -296,10 +335,13 @@ class LiveSalesController extends GetxController {
           }).toList();
 
       for (var m in localMatches) {
-        results[m['id']] = m;
+        results[m['id'].toString()] = m;
       }
 
-      // 2. FIRESTORE FALLBACK (Runs just in case the cache is still loading)
+      // ------------------------------------------------------------------
+      // 2. FIRESTORE FALLBACK — 'customers' collection
+      //    Runs in case the cache is still loading.
+      // ------------------------------------------------------------------
       var phoneSnap =
           await _db
               .collection('customers')
@@ -341,11 +383,47 @@ class LiveSalesController extends GetxController {
         results[doc.id] = {'id': doc.id, ...doc.data()};
       }
 
-      // Exclude AGENTS to prevent duplication and limit to 15 results
+      // ------------------------------------------------------------------
+      // 3. FIRESTORE FALLBACK — 'condition_customers' collection
+      //    Ensures condition customers appear even if cache hasn't loaded.
+      // ------------------------------------------------------------------
+      var condPhoneSnap =
+          await _db
+              .collection('condition_customers')
+              .where('phone', isGreaterThanOrEqualTo: q)
+              .where('phone', isLessThan: '$q\uf8ff')
+              .limit(5)
+              .get();
+      var condNameCapSnap =
+          await _db
+              .collection('condition_customers')
+              .where('name', isGreaterThanOrEqualTo: qCap)
+              .where('name', isLessThan: '$qCap\uf8ff')
+              .limit(5)
+              .get();
+      var condNameLowerSnap =
+          await _db
+              .collection('condition_customers')
+              .where('name', isGreaterThanOrEqualTo: qLower)
+              .where('name', isLessThan: '$qLower\uf8ff')
+              .limit(5)
+              .get();
+
+      for (var doc in condPhoneSnap.docs) {
+        results[doc.id] = {'id': doc.id, 'type': 'CONDITION', ...doc.data()};
+      }
+      for (var doc in condNameCapSnap.docs) {
+        results[doc.id] = {'id': doc.id, 'type': 'CONDITION', ...doc.data()};
+      }
+      for (var doc in condNameLowerSnap.docs) {
+        results[doc.id] = {'id': doc.id, 'type': 'CONDITION', ...doc.data()};
+      }
+
+      // Exclude AGENTS only; limit to 15 results
       filteredRegularCustomers.value =
           results.values.where((c) => c['type'] != 'AGENT').take(15).toList();
     } catch (e) {
-      AppLogger.i("Regular Customer Search Error: $e");
+      AppLogger.i("Regular/Condition Customer Search Error: $e");
     }
   }
 
@@ -380,10 +458,10 @@ class LiveSalesController extends GetxController {
 
   void _handleTypeChange() {
     selectedDebtor.value = null;
-    selectedRegularCustomer.value = null; // Clear regular customer state
+    selectedRegularCustomer.value = null;
     debtorPhoneSearch.clear();
     filteredDebtors.clear();
-    filteredRegularCustomers.clear(); // Clear regular customer search
+    filteredRegularCustomers.clear();
     debtorOldDue.value = 0.0;
     debtorRunningDue.value = 0.0;
 
@@ -692,7 +770,7 @@ class LiveSalesController extends GetxController {
     addRecord('nagad', n, {'nagadNumber': payMap['nagadNumber'] ?? ''});
     addRecord('bank', bankAmt, {
       'bankName': payMap['bankName'] ?? '',
-      'accountNo': payMap['accountNumber'] ?? '', // EXACT MATCH for accountNo
+      'accountNo': payMap['accountNumber'] ?? '',
     });
   }
 
@@ -718,7 +796,7 @@ class LiveSalesController extends GetxController {
         runningDueSnap = debtorRunningDue.value;
 
     // ==============================================================================
-    // NEW PRIORITY LOGIC: CURRENT INVOICE -> OLD DUE -> PREV RUNNING DUE
+    // PRIORITY LOGIC: CURRENT INVOICE -> OLD DUE -> PREV RUNNING DUE
     // ==============================================================================
     double remaining = totalPaidInputVal;
 
@@ -803,7 +881,7 @@ class LiveSalesController extends GetxController {
         totalPaidInputVal,
       );
 
-      // --- EXACT SALES_ORDER SCHEMA ---
+      // --- SALES_ORDER SCHEMA ---
       batch.set(orderRef, {
         "invoiceId": invNo,
         "timestamp": FieldValue.serverTimestamp(),
@@ -883,13 +961,10 @@ class LiveSalesController extends GetxController {
           "type": customerType.value,
           "lastInv": invNo,
           "lastShopDate": FieldValue.serverTimestamp(),
-          "searchKeywords": _generateSearchKeywords(
-            fName,
-            fPhone,
-          ), // <-- Added Keyword Generation
+          "searchKeywords": _generateSearchKeywords(fName, fPhone),
         }, SetOptions(merge: true));
 
-        // --- NEW: Update Local Customer Cache Immediately ---
+        // Update Local Customer Cache Immediately
         _updateCustomerCache(
           fPhone,
           fName,
@@ -998,6 +1073,10 @@ class LiveSalesController extends GetxController {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // UPDATE CUSTOMER CACHE IMMEDIATELY AFTER A SALE
+  // Accepts WHOLESALE, VIP, and CONDITION types. AGENT is excluded.
+  // ---------------------------------------------------------------------------
   void _updateCustomerCache(
     String phone,
     String name,
@@ -1020,9 +1099,9 @@ class LiveSalesController extends GetxController {
     };
 
     if (existingIndex >= 0) {
-      allRegularCustomersCache[existingIndex] = updatedCust; // Update existing
+      allRegularCustomersCache[existingIndex] = updatedCust;
     } else {
-      allRegularCustomersCache.add(updatedCust); // Add new
+      allRegularCustomersCache.add(updatedCust);
     }
   }
 
@@ -1054,6 +1133,9 @@ class LiveSalesController extends GetxController {
       "lastUpdated": FieldValue.serverTimestamp(),
       "totalCourierDue": FieldValue.increment(invoiceDueAmount),
     }, SetOptions(merge: true));
+
+    // Also update the local cache so they appear in future searches immediately
+    _updateCustomerCache(fPhone, fName, shopC.text, addressC.text, 'CONDITION');
 
     DocumentReference condTxRef = condCustRef.collection('orders').doc(invNo);
     batch.set(condTxRef, {
@@ -1661,11 +1743,9 @@ class LiveSalesController extends GetxController {
     selectedCourier.value = null;
     calculatedCourierDue.value = 0.0;
 
-    // Clear Agent Search
     selectedDebtor.value = null;
     filteredDebtors.clear();
 
-    // Clear Regular Customer Search
     selectedRegularCustomer.value = null;
     filteredRegularCustomers.clear();
 
