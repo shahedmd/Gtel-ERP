@@ -18,8 +18,7 @@ class DailyExpensesController extends GetxController {
 
   // --- STATE ---
   final RxList<ExpenseModel> dailyList = <ExpenseModel>[].obs;
-  final RxDouble dailyTotal =
-      0.0.obs; // Upgraded to double for financial accuracy
+  final RxDouble dailyTotal = 0.0.obs;
   final RxBool isLoading = false.obs;
 
   final Rx<DateTime> selectedDate =
@@ -34,6 +33,31 @@ class DailyExpensesController extends GetxController {
   // Document Key Format (e.g., "2026-03-27")
   String get selectedKey => DateFormat('yyyy-MM-dd').format(selectedDate.value);
   final NumberFormat _currencyFormat = NumberFormat('#,##0.00');
+
+  // --- PAYMENT METHOD OPTIONS ---
+  // Used by the UI to populate the method selector
+  static const List<Map<String, dynamic>> paymentMethods = [
+    {
+      'label': 'Cash',
+      'icon': Icons.money_rounded,
+      'color': Color(0xFF2E7D32), // Green
+    },
+    {
+      'label': 'Bank',
+      'icon': Icons.account_balance_rounded,
+      'color': Color(0xFF1565C0), // Blue
+    },
+    {
+      'label': 'Bkash',
+      'icon': Icons.phone_android_rounded,
+      'color': Color(0xFFDF146E), // bKash Pink
+    },
+    {
+      'label': 'Nagad',
+      'icon': Icons.account_balance_wallet_rounded,
+      'color': Color(0xFFF7931E), // Nagad Orange
+    },
+  ];
 
   @override
   void onInit() {
@@ -90,13 +114,14 @@ class DailyExpensesController extends GetxController {
   }
 
   // ==========================================
-  // 2. ADD EXPENSE (WITH TRANSACTION SAFETY)
+  // 2. ADD EXPENSE (WITH METHOD SUPPORT)
   // ==========================================
   Future<void> addDailyExpense(
     String name,
     double amount, {
     String note = '',
     DateTime? date,
+    String method = 'Cash', // NEW: 'Cash' | 'Bank' | 'Bkash' | 'Nagad'
   }) async {
     try {
       isLoading.value = true;
@@ -122,7 +147,7 @@ class DailyExpensesController extends GetxController {
 
       // 2. Create the Model
       final newExpense = ExpenseModel(
-        id: '', // Firestore will auto-generate this
+        id: '',
         name: name,
         amount: amount,
         note: note,
@@ -131,29 +156,32 @@ class DailyExpensesController extends GetxController {
 
       final docKey = DateFormat('yyyy-MM-dd').format(expenseDate);
       final parentRef = _db.collection('daily_expenses').doc(docKey);
-      final itemRef = parentRef.collection('items').doc(); // Auto-generates ID
+      final itemRef = parentRef.collection('items').doc();
 
-      // 3. SECURE WRITE BATCH (Ensures all operations succeed or fail together)
+      // 3. Build Firestore data with method field included
+      final Map<String, dynamic> firestoreData = newExpense.toFirestore(
+        isNewEntry: true,
+      );
+      firestoreData['method'] =
+          method; // Persists 'Cash', 'Bank', 'Bkash', 'Nagad'
+
+      // 4. SECURE WRITE BATCH
       WriteBatch batch = _db.batch();
-
       batch.set(parentRef, {
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
-      batch.set(
-        itemRef,
-        newExpense.toFirestore(isNewEntry: true),
-      ); // Uses safe server time logic from model
+      batch.set(itemRef, firestoreData);
 
       await batch.commit();
 
-      // 4. Update Monthly Controller
+      // 5. Update Monthly Controller
       await monthlyController.addToMonthly(amount: amount, date: expenseDate);
 
       if (Get.isDialogOpen ?? false) Get.back();
 
       Get.snackbar(
         "Success",
-        "Expense added securely.",
+        "Expense added via $method.",
         backgroundColor: Colors.green,
         colorText: Colors.white,
         snackPosition: SnackPosition.BOTTOM,
@@ -215,7 +243,7 @@ class DailyExpensesController extends GetxController {
   }
 
   // ==========================================
-  // 4. ENTERPRISE PDF GENERATOR
+  // 4. ENTERPRISE PDF GENERATOR (WITH METHOD COLUMN)
   // ==========================================
   Future<void> generateDailyPDF() async {
     if (dailyList.isEmpty) {
@@ -231,7 +259,6 @@ class DailyExpensesController extends GetxController {
     final pdf = pw.Document();
     final formattedDate = DateFormat('dd MMMM yyyy').format(selectedDate.value);
 
-    // Load Professional Fonts
     final fontReg = await PdfGoogleFonts.nunitoRegular();
     final fontBold = await PdfGoogleFonts.nunitoBold();
 
@@ -267,7 +294,7 @@ class DailyExpensesController extends GetxController {
               pw.Divider(color: PdfColors.grey300, thickness: 1),
               pw.SizedBox(height: 15),
 
-              // --- TABLE ---
+              // --- TABLE (now includes Payment Method column) ---
               pw.TableHelper.fromTextArray(
                 border: pw.TableBorder.all(
                   color: PdfColors.grey400,
@@ -290,19 +317,22 @@ class DailyExpensesController extends GetxController {
                   'Time',
                   'Expense Description',
                   'Notes / Details',
+                  'Method', // NEW COLUMN
                   'Amount (BDT)',
                 ],
                 columnWidths: {
                   0: const pw.FlexColumnWidth(1.5),
                   1: const pw.FlexColumnWidth(3),
-                  2: const pw.FlexColumnWidth(3.5),
-                  3: const pw.FlexColumnWidth(2),
+                  2: const pw.FlexColumnWidth(2.5),
+                  3: const pw.FlexColumnWidth(1.5), // Method
+                  4: const pw.FlexColumnWidth(2),
                 },
                 cellAlignments: {
                   0: pw.Alignment.centerLeft,
                   1: pw.Alignment.centerLeft,
                   2: pw.Alignment.centerLeft,
-                  3: pw.Alignment.centerRight,
+                  3: pw.Alignment.center,
+                  4: pw.Alignment.centerRight,
                 },
                 data:
                     dailyList
@@ -311,6 +341,8 @@ class DailyExpensesController extends GetxController {
                             DateFormat('hh:mm a').format(e.time),
                             e.name,
                             e.note.isEmpty ? "-" : e.note,
+                            // Read method from model; fallback gracefully
+                            (e as dynamic).method ?? 'Cash',
                             _currencyFormat.format(e.amount),
                           ],
                         )

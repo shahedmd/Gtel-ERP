@@ -145,7 +145,7 @@ class CashDrawerController extends GetxController {
   }
 
   // ========================================================================
-  // CORE FETCH LOGIC (UPDATED FOR MULTI-PAYMENT)
+  // CORE FETCH LOGIC (UPDATED FOR MULTI-PAYMENT + EXPENSE METHOD SUPPORT)
   // ========================================================================
   Future<void> fetchData() async {
     isLoading.value = true;
@@ -253,7 +253,6 @@ class CashDrawerController extends GetxController {
             var pm = data['paymentMethod'];
 
             if (pm is Map) {
-              // 1. Try exact values first (The new standard)
               c = double.tryParse(pm['cash'].toString()) ?? 0;
               b = double.tryParse(pm['bank'].toString()) ?? 0;
               bk = double.tryParse(pm['bkash'].toString()) ?? 0;
@@ -261,14 +260,12 @@ class CashDrawerController extends GetxController {
 
               displayBankDetails = pm['bankName'];
 
-              // 2. Legacy Fallback: If map exists but all amounts are 0 (Old data)
-              // We infer from account numbers or labels
+              // Legacy Fallback
               if ((c + b + bk + n) == 0) {
                 String valBank = (pm['bankName'] ?? '').toString();
                 String valBkash = (pm['bkashNumber'] ?? '').toString();
                 String valNagad = (pm['nagadNumber'] ?? '').toString();
 
-                // Fallback: Assign WHOLE amount to one method
                 if (valBank.isNotEmpty) {
                   b = actualReceived;
                 } else if (valBkash.isNotEmpty) {
@@ -280,7 +277,6 @@ class CashDrawerController extends GetxController {
                 }
               }
             } else {
-              // 3. String Fallback (Very old data)
               String s = pm.toString().toLowerCase();
               if (s.contains('bank'))
                 b = actualReceived;
@@ -292,7 +288,6 @@ class CashDrawerController extends GetxController {
                 c = actualReceived;
             }
 
-            // Determine Display Label
             List<String> activeMethods = [];
             if (c > 0) activeMethods.add("Cash");
             if (b > 0) activeMethods.add("Bank");
@@ -305,7 +300,6 @@ class CashDrawerController extends GetxController {
               displayMethod = activeMethods.first;
             }
 
-            // Update Global Accumulators
             tCash += c;
             tBank += b;
             tBkash += bk;
@@ -314,7 +308,6 @@ class CashDrawerController extends GetxController {
             if (isInPeriod) {
               periodSales += actualReceived;
 
-              // Helper to show breakdown in description if multi
               String desc = "Sale: ${data['name'] ?? 'NA'}";
               if (displayMethod == "Multi") {
                 desc +=
@@ -347,7 +340,6 @@ class CashDrawerController extends GetxController {
             String from = (data['fromMethod'] ?? 'Cash').toString();
             String to = (data['toMethod'] ?? 'Cash').toString();
 
-            // Deduct
             if (from == 'Bank')
               tBank -= amt;
             else if (from == 'Bkash')
@@ -357,7 +349,6 @@ class CashDrawerController extends GetxController {
             else
               tCash -= amt;
 
-            // Add
             if (to == 'Bank')
               tBank += amt;
             else if (to == 'Bkash')
@@ -379,7 +370,6 @@ class CashDrawerController extends GetxController {
               );
             }
           } else {
-            // Deposit / Withdraw / Cashout
             String methodStr = (data['method'] ?? 'Cash').toString();
             bool isBank = methodStr.toLowerCase().contains('bank');
             bool isBkash = methodStr.toLowerCase().contains('bkash');
@@ -396,7 +386,6 @@ class CashDrawerController extends GetxController {
               else
                 tCash += amt;
             } else {
-              // Treated as withdrawal/expense
               if (isInPeriod) periodExpenses += amt;
               if (isBank)
                 tBank -= amt;
@@ -421,45 +410,49 @@ class CashDrawerController extends GetxController {
             }
           }
         }
-        // --- EXPENSE PROCESSING ---
+        // --- EXPENSE PROCESSING (FIXED: Uses saved method field) ---
         else if (item['type'] == 'expense') {
           DrawerTransaction ex = item['data'];
           if (isInPeriod) periodExpenses += ex.amount;
 
-          double rem = ex.amount;
-          if (tCash >= rem) {
-            tCash -= rem;
-            rem = 0;
-          } else {
-            rem -= tCash;
-            tCash = 0;
-          }
+          String method = ex.method.toLowerCase();
 
-          if (rem > 0) {
-            if (tBank >= rem) {
-              tBank -= rem;
+          if (method.contains('bank')) {
+            // Deduct directly from Bank
+            tBank -= ex.amount;
+          } else if (method.contains('bkash')) {
+            // Deduct directly from Bkash
+            tBkash -= ex.amount;
+          } else if (method.contains('nagad')) {
+            // Deduct directly from Nagad
+            tNagad -= ex.amount;
+          } else {
+            // 'Cash' or legacy 'Auto' records → waterfall from Cash first
+            double rem = ex.amount;
+
+            if (tCash >= rem) {
+              tCash -= rem;
               rem = 0;
             } else {
-              rem -= tBank;
-              tBank = 0;
+              rem -= tCash;
+              tCash = 0;
             }
-          }
-          if (rem > 0) {
-            if (tBkash >= rem) {
-              tBkash -= rem;
-              rem = 0;
-            } else {
-              rem -= tBkash;
-              tBkash = 0;
+
+            if (rem > 0) {
+              double deduct = rem.clamp(0, tBank);
+              tBank -= deduct;
+              rem -= deduct;
             }
-          }
-          if (rem > 0) {
-            if (tNagad >= rem) {
-              tNagad -= rem;
-              rem = 0;
-            } else {
-              rem -= tNagad;
-              tNagad = 0;
+
+            if (rem > 0) {
+              double deduct = rem.clamp(0, tBkash);
+              tBkash -= deduct;
+              rem -= deduct;
+            }
+
+            if (rem > 0) {
+              double deduct = rem.clamp(0, tNagad);
+              tNagad -= deduct;
             }
           }
 
@@ -489,7 +482,7 @@ class CashDrawerController extends GetxController {
     }
   }
 
-  // --- HELPER: Fetch Expenses ---
+  // --- HELPER: Fetch Expenses (FIXED: reads 'method' field from Firestore) ---
   Future<List<DrawerTransaction>> _fetchExpensesList(
     DateTime start,
     DateTime end,
@@ -511,13 +504,19 @@ class CashDrawerController extends GetxController {
             d['time'] is Timestamp
                 ? (d['time'] as Timestamp).toDate()
                 : DateTime.now();
+
+        // Read the saved method; fallback to 'Cash' for legacy records
+        // that were saved before method tracking was added
+        String method = (d['method'] ?? 'Cash').toString();
+        if (method == 'Auto') method = 'Cash'; // Normalize old 'Auto' values
+
         list.add(
           DrawerTransaction(
             date: time,
             description: d['name'] ?? 'Expense',
             amount: amt,
             type: 'expense',
-            method: 'Auto',
+            method: method, // Now correctly tracks Cash/Bank/Bkash/Nagad
           ),
         );
       }
@@ -570,7 +569,7 @@ class CashDrawerController extends GetxController {
     Get.back();
   }
 
-  // --- NEW: WITHDRAW / CASHOUT ---
+  // --- WITHDRAW / CASHOUT ---
   Future<void> withdrawFund({
     required double amount,
     required String method,
@@ -588,12 +587,12 @@ class CashDrawerController extends GetxController {
         'bankName': (bankName == null || bankName.isEmpty) ? null : bankName,
         'accountNo':
             (accountNo == null || accountNo.isEmpty) ? null : accountNo,
-        'timestamp': Timestamp.fromDate(date), // Custom date properly saved
+        'timestamp': Timestamp.fromDate(date),
         'source': 'manual_withdraw',
       });
 
-      fetchData(); // Refresh records & balances
-      Get.back(); // Dismiss dialog if used
+      fetchData();
+      Get.back();
 
       Get.snackbar(
         'Success',
@@ -619,11 +618,9 @@ class CashDrawerController extends GetxController {
   Future<void> downloadPdf() async {
     final doc = pw.Document();
 
-    // Load Professional Fonts
     final fontReg = await PdfGoogleFonts.openSansRegular();
     final fontBold = await PdfGoogleFonts.openSansBold();
 
-    // Format Data
     String generatedDate = DateFormat(
       'dd MMM yyyy, hh:mm a',
     ).format(DateTime.now());
@@ -636,7 +633,6 @@ class CashDrawerController extends GetxController {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
-              // --- 1. CORPORATE HEADER ---
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 crossAxisAlignment: pw.CrossAxisAlignment.end,
@@ -693,7 +689,6 @@ class CashDrawerController extends GetxController {
               pw.Divider(color: PdfColors.grey300, thickness: 1.5),
               pw.SizedBox(height: 30),
 
-              // --- 2. HERO METRIC: GRAND TOTAL ---
               pw.Container(
                 width: double.infinity,
                 padding: const pw.EdgeInsets.symmetric(
@@ -701,7 +696,7 @@ class CashDrawerController extends GetxController {
                   horizontal: 20,
                 ),
                 decoration: pw.BoxDecoration(
-                  color: PdfColors.blue900, // Deep corporate blue
+                  color: PdfColors.blue900,
                   borderRadius: pw.BorderRadius.circular(8),
                 ),
                 child: pw.Column(
@@ -731,7 +726,6 @@ class CashDrawerController extends GetxController {
 
               pw.SizedBox(height: 40),
 
-              // --- 3. BREAKDOWN HEADER ---
               pw.Text(
                 "ASSET BREAKDOWN",
                 style: pw.TextStyle(
@@ -743,7 +737,6 @@ class CashDrawerController extends GetxController {
               ),
               pw.SizedBox(height: 15),
 
-              // --- 4. THE 2x2 GRID (CASH, BANK, BKASH, NAGAD) ---
               pw.Row(
                 children: [
                   pw.Expanded(
@@ -776,9 +769,7 @@ class CashDrawerController extends GetxController {
                     child: _buildBalanceCard(
                       title: "bKash BALANCE",
                       amount: netBkash.value,
-                      primaryColor: const PdfColor.fromInt(
-                        0xFFDF146E,
-                      ), // Official bKash Pink
+                      primaryColor: const PdfColor.fromInt(0xFFDF146E),
                       bgColor: const PdfColor.fromInt(0xFFFDE8F0),
                       fontReg: fontReg,
                       fontBold: fontBold,
@@ -789,9 +780,7 @@ class CashDrawerController extends GetxController {
                     child: _buildBalanceCard(
                       title: "NAGAD BALANCE",
                       amount: netNagad.value,
-                      primaryColor: const PdfColor.fromInt(
-                        0xFFF7931E,
-                      ), // Official Nagad Orange
+                      primaryColor: const PdfColor.fromInt(0xFFF7931E),
                       bgColor: const PdfColor.fromInt(0xFFFEF4E8),
                       fontReg: fontReg,
                       fontBold: fontBold,
@@ -800,10 +789,8 @@ class CashDrawerController extends GetxController {
                 ],
               ),
 
-              // Pushes the signature block and footer to the very bottom of the page
               pw.Spacer(),
 
-              // --- 5. SIGNATURE BLOCK ---
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
@@ -848,16 +835,14 @@ class CashDrawerController extends GetxController {
                 ],
               ),
 
-              pw.SizedBox(
-                height: 30,
-              ), 
+              pw.SizedBox(height: 30),
               pw.Divider(color: PdfColors.grey300, thickness: 1),
               pw.SizedBox(height: 10),
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
                   pw.Text(
-                    "System Generated Report - Internal Use Only", // Disclaimer updated!
+                    "System Generated Report - Internal Use Only",
                     style: pw.TextStyle(
                       font: fontReg,
                       fontSize: 9,
@@ -880,7 +865,6 @@ class CashDrawerController extends GetxController {
       ),
     );
 
-    // Save & Print
     await Printing.layoutPdf(
       onLayout: (f) => doc.save(),
       name:
@@ -929,5 +913,4 @@ class CashDrawerController extends GetxController {
       ),
     );
   }
-
 }
