@@ -216,7 +216,7 @@ class DailyExpensesPage extends StatelessWidget {
               child: OutlinedButton.icon(
                 onPressed: () => _selectDate(context),
                 icon: const Icon(Icons.calendar_month, size: 16),
-                label: const Text("Date", style: TextStyle(fontSize: 13),),
+                label: const Text("Date", style: TextStyle(fontSize: 13)),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: darkSlate,
                   padding: const EdgeInsets.symmetric(vertical: 12),
@@ -257,8 +257,6 @@ class DailyExpensesPage extends StatelessWidget {
   }
 
   void _openAddExpenseDialog(BuildContext context) {
-    // We use GetBuilder to instantly initialize and inject the form controller
-    // It automatically calls .dispose() on the controller when the dialog closes.
     Get.dialog(
       GetBuilder<AddExpenseFormController>(
         init: AddExpenseFormController(controller),
@@ -285,7 +283,7 @@ class DailyExpensesPage extends StatelessWidget {
     if (picked != null) controller.changeDate(picked);
   }
 
-  // --- SUMMARY BAR ---
+  // --- SUMMARY BAR (unchanged) ---
   Widget _buildSummaryBar(bool isMobile) {
     return Container(
       margin: EdgeInsets.fromLTRB(
@@ -355,6 +353,7 @@ class DailyExpensesPage extends StatelessWidget {
   }
 
   // --- TABLE HEADER (Desktop Only) ---
+  // CHANGED: Added "METHOD" column between NOTE and AMOUNT
   Widget _buildTableHead() {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 24),
@@ -369,6 +368,7 @@ class DailyExpensesPage extends StatelessWidget {
           Expanded(flex: 1, child: _headText("TIME")),
           Expanded(flex: 3, child: _headText("EXPENSE DESCRIPTION")),
           Expanded(flex: 3, child: _headText("NOTE / REMARKS")),
+          Expanded(flex: 2, child: _headText("METHOD")), // NEW
           Expanded(
             flex: 2,
             child: Align(
@@ -426,19 +426,92 @@ class DailyExpensesPage extends StatelessWidget {
 }
 
 // ==================================================
-// DESKTOP TABLE ROW (100% GetX - No setState)
+// HELPER: resolve color/icon for each payment method
+// ==================================================
+class _MethodStyle {
+  final Color color;
+  final Color bg;
+  final IconData icon;
+  const _MethodStyle({
+    required this.color,
+    required this.bg,
+    required this.icon,
+  });
+}
+
+_MethodStyle _resolveMethodStyle(String method) {
+  switch (method.toLowerCase()) {
+    case 'bank':
+      return _MethodStyle(
+        color: const Color(0xFF1565C0),
+        bg: const Color(0xFFE3F2FD),
+        icon: Icons.account_balance_rounded,
+      );
+    case 'bkash':
+      return _MethodStyle(
+        color: const Color(0xFFDF146E),
+        bg: const Color(0xFFFDE8F0),
+        icon: Icons.phone_android_rounded,
+      );
+    case 'nagad':
+      return _MethodStyle(
+        color: const Color(0xFFF7931E),
+        bg: const Color(0xFFFEF4E8),
+        icon: Icons.account_balance_wallet_rounded,
+      );
+    default: // Cash or any legacy value
+      return _MethodStyle(
+        color: const Color(0xFF2E7D32),
+        bg: const Color(0xFFE8F5E9),
+        icon: Icons.money_rounded,
+      );
+  }
+}
+
+// Reusable colored badge shown in rows and cards
+Widget _buildMethodBadge(String method) {
+  final s = _resolveMethodStyle(method);
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    decoration: BoxDecoration(
+      color: s.bg,
+      borderRadius: BorderRadius.circular(6),
+      border: Border.all(color: s.color.withOpacity(0.2)),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(s.icon, size: 11, color: s.color),
+        const SizedBox(width: 4),
+        Text(
+          method,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            color: s.color,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+// ==================================================
+// DESKTOP TABLE ROW
+// CHANGED: Added method badge column; reads expense.method
 // ==================================================
 class _DesktopExpenseRow extends StatelessWidget {
   final ExpenseModel expense;
   final DailyExpensesController controller;
 
-  // Local Rx variable for hover effect
   final RxBool isHovered = false.obs;
 
   _DesktopExpenseRow({required this.expense, required this.controller});
 
   @override
   Widget build(BuildContext context) {
+    final String method = expense.method.isEmpty ? 'Cash' : expense.method;
+
     return MouseRegion(
       onEnter: (_) => isHovered.value = true,
       onExit: (_) => isHovered.value = false,
@@ -482,6 +555,8 @@ class _DesktopExpenseRow extends StatelessWidget {
                   ),
                 ),
               ),
+              // NEW: method badge
+              Expanded(flex: 2, child: _buildMethodBadge(method)),
               Expanded(
                 flex: 2,
                 child: Text(
@@ -519,7 +594,8 @@ class _DesktopExpenseRow extends StatelessWidget {
 }
 
 // ==================================================
-// MOBILE CARD (Stateless)
+// MOBILE CARD
+// CHANGED: Added method badge next to time
 // ==================================================
 class _MobileExpenseCard extends StatelessWidget {
   final ExpenseModel expense;
@@ -529,6 +605,8 @@ class _MobileExpenseCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final String method = expense.method.isEmpty ? 'Cash' : expense.method;
+
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -578,13 +656,20 @@ class _MobileExpenseCard extends StatelessWidget {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      DateFormat('hh:mm a').format(expense.time),
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: DailyExpensesPage.textMuted,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    // CHANGED: time + method badge together
+                    Row(
+                      children: [
+                        Text(
+                          DateFormat('hh:mm a').format(expense.time),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: DailyExpensesPage.textMuted,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        _buildMethodBadge(method),
+                      ],
                     ),
                     Text(
                       "৳ ${expense.amount.toStringAsFixed(2)}",
@@ -626,7 +711,7 @@ class _MobileExpenseCard extends StatelessWidget {
   }
 }
 
-// --- SHARED DELETE HANDLER ---
+// --- SHARED DELETE HANDLER (unchanged) ---
 void _handleDelete(ExpenseModel expense, DailyExpensesController controller) {
   Get.dialog(
     Dialog(
@@ -740,7 +825,9 @@ void _handleDelete(ExpenseModel expense, DailyExpensesController controller) {
 }
 
 // ==================================================
-// 100% GETX DIALOG CONTROLLER (Memory Safe)
+// FORM CONTROLLER
+// CHANGED: Added selectedMethod RxString
+//          saveExpense() now passes method to addDailyExpense
 // ==================================================
 class AddExpenseFormController extends GetxController {
   final DailyExpensesController mainCtrl;
@@ -751,6 +838,10 @@ class AddExpenseFormController extends GetxController {
   final noteC = TextEditingController();
 
   late final Rx<DateTime> addDate;
+
+  // NEW: selected payment method, default Cash
+  final RxString selectedMethod = 'Cash'.obs;
+
   final RxBool isSaving = false.obs;
 
   @override
@@ -761,7 +852,6 @@ class AddExpenseFormController extends GetxController {
 
   @override
   void onClose() {
-    // Guaranteed to fire and clear RAM when dialog is closed
     nameC.dispose();
     amountC.dispose();
     noteC.dispose();
@@ -797,14 +887,16 @@ class AddExpenseFormController extends GetxController {
       parsedAmount,
       note: noteC.text.trim(),
       date: addDate.value,
+      method: selectedMethod.value, // NEW: pass method to controller
     );
 
-    Get.back(); // Closes dialog, which triggers onClose() above
+    Get.back();
   }
 }
 
 // ==================================================
-// DIALOG UI (Stateless + Obx)
+// DIALOG UI
+// CHANGED: Added _DialogMethodSelector between note and buttons
 // ==================================================
 class _AddExpenseDialog extends StatelessWidget {
   final AddExpenseFormController formCtrl;
@@ -865,6 +957,7 @@ class _AddExpenseDialog extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 24),
+
               _buildField(
                 formCtrl.nameC,
                 "What was the expense for?",
@@ -901,6 +994,21 @@ class _AddExpenseDialog extends StatelessWidget {
                     Expanded(child: _buildDateSelector(context)),
                   ],
                 ),
+
+              const SizedBox(height: 16),
+
+              // NEW: Payment method section
+              const Text(
+                "PAYMENT METHOD",
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: DailyExpensesPage.textMuted,
+                  letterSpacing: 0.8,
+                ),
+              ),
+              const SizedBox(height: 8),
+              _DialogMethodSelector(formCtrl: formCtrl),
 
               const SizedBox(height: 16),
               _buildField(formCtrl.noteC, "Note (Optional)", Icons.notes),
@@ -987,13 +1095,117 @@ class _AddExpenseDialog extends StatelessWidget {
       },
       icon: const Icon(Icons.calendar_today, size: 16),
       label: Obx(
-        () => Text(DateFormat('dd MMM yyyy').format(formCtrl.addDate.value), style: TextStyle(fontSize: 13),),
+        () => Text(
+          DateFormat('dd MMM yyyy').format(formCtrl.addDate.value),
+          style: const TextStyle(fontSize: 13),
+        ),
       ),
       style: OutlinedButton.styleFrom(
         foregroundColor: DailyExpensesPage.darkSlate,
         padding: const EdgeInsets.symmetric(vertical: 18),
         side: const BorderSide(color: Colors.black12),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
+    );
+  }
+}
+
+// ==================================================
+// NEW: 4-card method selector inside the dialog
+// Fully reactive with Obx — no setState anywhere
+// ==================================================
+class _DialogMethodSelector extends StatelessWidget {
+  final AddExpenseFormController formCtrl;
+
+  const _DialogMethodSelector({required this.formCtrl});
+
+  static const List<Map<String, dynamic>> _methods = [
+    {
+      'label': 'Cash',
+      'icon': Icons.money_rounded,
+      'color': Color(0xFF2E7D32),
+      'bg': Color(0xFFE8F5E9),
+    },
+    {
+      'label': 'Bank',
+      'icon': Icons.account_balance_rounded,
+      'color': Color(0xFF1565C0),
+      'bg': Color(0xFFE3F2FD),
+    },
+    {
+      'label': 'Bkash',
+      'icon': Icons.phone_android_rounded,
+      'color': Color(0xFFDF146E),
+      'bg': Color(0xFFFDE8F0),
+    },
+    {
+      'label': 'Nagad',
+      'icon': Icons.account_balance_wallet_rounded,
+      'color': Color(0xFFF7931E),
+      'bg': Color(0xFFFEF4E8),
+    },
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Obx(
+      () => Row(
+        children:
+            _methods.map((m) {
+              final label = m['label'] as String;
+              final icon = m['icon'] as IconData;
+              final color = m['color'] as Color;
+              final bg = m['bg'] as Color;
+              final isSelected = formCtrl.selectedMethod.value == label;
+
+              return Expanded(
+                child: GestureDetector(
+                  onTap: () => formCtrl.selectedMethod.value = label,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 160),
+                    margin: const EdgeInsets.only(right: 8),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                      color: isSelected ? color : bg,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: isSelected ? color : color.withOpacity(0.25),
+                        width: isSelected ? 2 : 1,
+                      ),
+                      boxShadow:
+                          isSelected
+                              ? [
+                                BoxShadow(
+                                  color: color.withOpacity(0.25),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 3),
+                                ),
+                              ]
+                              : [],
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          icon,
+                          size: 20,
+                          color: isSelected ? Colors.white : color,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          label,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: isSelected ? Colors.white : color,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
       ),
     );
   }

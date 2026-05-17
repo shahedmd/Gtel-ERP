@@ -3,9 +3,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 class ExpenseModel {
   final String id;
   final String name;
-  final double amount; // Upgraded to double for financial accuracy
+  final double amount;
   final String note;
   final DateTime time;
+  final String method; // NEW: 'Cash' | 'Bank' | 'Bkash' | 'Nagad'
 
   ExpenseModel({
     required this.id,
@@ -13,10 +14,11 @@ class ExpenseModel {
     required this.amount,
     required this.note,
     required this.time,
+    this.method = 'Cash', // Defaults to Cash for backward compatibility
   });
 
   // ==========================================
-  // 1. SAFE DATA PARSING (Prevents Firestore Crashes)
+  // 1. SAFE DATA PARSING
   // ==========================================
   static double _parseDouble(dynamic value) {
     if (value == null) return 0.0;
@@ -26,8 +28,17 @@ class ExpenseModel {
     return 0.0;
   }
 
+  // Validates that the method string is one of the four known values.
+  // Falls back to 'Cash' for any legacy records that pre-date this field.
+  static const _validMethods = {'Cash', 'Bank', 'Bkash', 'Nagad'};
+
+  static String _parseMethod(dynamic value) {
+    final s = value?.toString().trim() ?? '';
+    return _validMethods.contains(s) ? s : 'Cash';
+  }
+
   // ==========================================
-  // 2. FROM FIRESTORE FACTORY
+  // 2. FROM FIRESTORE
   // ==========================================
   factory ExpenseModel.fromFirestore(String id, Map<String, dynamic> data) {
     return ExpenseModel(
@@ -39,28 +50,34 @@ class ExpenseModel {
           data['time'] is Timestamp
               ? (data['time'] as Timestamp).toDate()
               : DateTime.now(),
+      method: _parseMethod(data['method']), // NEW
     );
   }
 
- 
+  // ==========================================
+  // 3. TO FIRESTORE
+  // ==========================================
   Map<String, dynamic> toFirestore({bool isNewEntry = false}) {
     return {
       'name': name,
       'amount': amount,
       'note': note,
-      // ERP Security Fix: If it's a new entry, force Firebase to stamp it with the exact Server Time.
-      // If we are just updating an old entry, keep the original time.
+      'method': method, // NEW — now part of the model, not patched externally
       'time':
           isNewEntry ? FieldValue.serverTimestamp() : Timestamp.fromDate(time),
     };
   }
 
+  // ==========================================
+  // 4. COPY WITH
+  // ==========================================
   ExpenseModel copyWith({
     String? id,
     String? name,
     double? amount,
     String? note,
     DateTime? time,
+    String? method, // NEW
   }) {
     return ExpenseModel(
       id: id ?? this.id,
@@ -68,9 +85,9 @@ class ExpenseModel {
       amount: amount ?? this.amount,
       note: note ?? this.note,
       time: time ?? this.time,
+      method: method ?? this.method, // NEW
     );
   }
-
 
   @override
   bool operator ==(Object other) {
