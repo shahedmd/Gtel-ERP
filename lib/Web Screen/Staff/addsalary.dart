@@ -4,15 +4,35 @@ import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
-import 'controller.dart'; // Imports StaffController & Enums
+import 'controller.dart';
 
-// Consistent Professional Theme
+// ── Theme Constants ───────────────────────────────────────────────────────────
 const Color darkSlate = Color(0xFF111827);
 const Color activeAccent = Color(0xFF3B82F6);
 const Color bgGrey = Color(0xFFF3F4F6);
-const Color creditGreen = Color(0xFF10B981); // For Repayments
-const Color debtRed = Color(0xFFEF4444); // For Advances
-const Color bonusGold = Color(0xFFF59E0B); // For Bonuses
+const Color creditGreen = Color(0xFF10B981);
+const Color debtRed = Color(0xFFEF4444);
+const Color bonusGold = Color(0xFFF59E0B);
+
+// ── Payment Method Config ─────────────────────────────────────────────────────
+// Each method has its own icon and color used in the pill selector
+const _methods = ['Cash', 'Bank', 'Bkash', 'Nagad'];
+
+const Map<String, IconData> _methodIcons = {
+  'Cash': FontAwesomeIcons.moneyBill1Wave,
+  'Bank': FontAwesomeIcons.buildingColumns,
+  'Bkash': FontAwesomeIcons.mobileScreenButton,
+  'Nagad': FontAwesomeIcons.wallet,
+};
+
+const Map<String, Color> _methodColors = {
+  'Cash': Color(0xFF10B981), // green
+  'Bank': Color(0xFF3B82F6), // blue
+  'Bkash': Color(0xFFDF146E), // bkash pink
+  'Nagad': Color(0xFFF7931E), // nagad orange
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 void addSalaryDialog(
   StaffController controller,
@@ -22,24 +42,20 @@ void addSalaryDialog(
   final amountC = TextEditingController();
   final noteC = TextEditingController();
   final monthC = TextEditingController(
-    text: DateFormat(
-      'MMMM yyyy',
-    ).format(DateTime.now()), // Auto-fill current month
+    text: DateFormat('MMMM yyyy').format(DateTime.now()),
   );
 
   final Rx<DateTime?> selectedDate = Rx<DateTime?>(DateTime.now());
-
-  // State for Transaction Type (Salary, Advance, Repayment, Bonus)
   final Rx<StaffTransactionType> selectedType = StaffTransactionType.SALARY.obs;
 
-  // State for Payment Method (Only used for Repayment Cash Ledger Entry)
+  // Payment method is now always visible, defaults to Cash
   final RxString selectedPaymentMethod = "Cash".obs;
 
   Get.dialog(
     Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Container(
-        width: 500, // Professional Desktop Width
+        width: 500,
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
@@ -47,39 +63,43 @@ void addSalaryDialog(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // --- HEADER ---
+            // ── Header ────────────────────────────────────────────────────────
             Obx(() => _buildHeader(staffName, selectedType.value)),
 
-            // --- FORM CONTENT ---
+            // ── Form ──────────────────────────────────────────────────────────
             Flexible(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(24),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // 1. Transaction Type Selector
+                    // 1. Transaction Type
                     _sectionLabel("Transaction Type"),
                     _buildTypeSelector(selectedType),
                     const SizedBox(height: 20),
 
-                    // 1.5. Payment Method (Dynamically visible ONLY for Repayments)
-                    Obx(
-                      () =>
-                          selectedType.value == StaffTransactionType.REPAYMENT
-                              ? Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  _sectionLabel(
-                                    "Receiving Method (Cash Ledger)",
-                                  ),
-                                  _buildMethodSelector(selectedPaymentMethod),
-                                  const SizedBox(height: 20),
-                                ],
-                              )
-                              : const SizedBox.shrink(),
-                    ),
+                    // 2. Payment Method — now shown for ALL types
+                    //    Label changes contextually:
+                    //    Salary/Advance/Bonus → "Paid Via (Deducted From)"
+                    //    Repayment           → "Received Via (Added To)"
+                    Obx(() {
+                      bool isRepayment =
+                          selectedType.value == StaffTransactionType.REPAYMENT;
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _sectionLabel(
+                            isRepayment
+                                ? "Received Via (Added to Balance)"
+                                : "Paid Via (Deducted from Balance)",
+                          ),
+                          _buildMethodSelector(selectedPaymentMethod),
+                          const SizedBox(height: 20),
+                        ],
+                      );
+                    }),
 
-                    // 2. Payment Details
+                    // 3. Payment Details
                     _sectionLabel("Payment Details"),
                     Row(
                       children: [
@@ -111,19 +131,29 @@ void addSalaryDialog(
                     ),
                     const SizedBox(height: 24),
 
-                    // 3. Date Selection
+                    // 4. Date
                     _sectionLabel("Transaction Date"),
                     _buildDatePicker(selectedDate),
+
+                    // 5. Info banner — shows what will happen to the balance
+                    const SizedBox(height: 16),
+                    Obx(
+                      () => _buildInfoBanner(
+                        selectedType.value,
+                        selectedPaymentMethod.value,
+                      ),
+                    ),
                   ],
                 ),
               ),
             ),
 
-            // --- FOOTER ACTIONS ---
+            // ── Footer ────────────────────────────────────────────────────────
             Obx(
               () => _buildFooter(
                 onCancel: () => Get.back(),
                 type: selectedType.value,
+                method: selectedPaymentMethod.value,
                 onSave:
                     () => _handleTransaction(
                       controller,
@@ -146,10 +176,11 @@ void addSalaryDialog(
   );
 }
 
-// --- UI COMPONENTS ---
+// ─────────────────────────────────────────────────────────────────────────────
+// UI COMPONENTS
+// ─────────────────────────────────────────────────────────────────────────────
 
 Widget _buildHeader(String name, StaffTransactionType type) {
-  // Dynamic Title based on selection
   String title = "Disburse Salary";
   Color color = darkSlate;
   IconData icon = FontAwesomeIcons.fileInvoiceDollar;
@@ -212,7 +243,6 @@ Widget _buildHeader(String name, StaffTransactionType type) {
   );
 }
 
-// Segmented Control for Transaction Type
 Widget _buildTypeSelector(Rx<StaffTransactionType> selectedType) {
   return Obx(
     () => Container(
@@ -245,7 +275,6 @@ Widget _typeButton(
 ) {
   final isSelected = current.value == type;
   Color activeColor = activeAccent;
-
   if (type == StaffTransactionType.ADVANCE) activeColor = debtRed;
   if (type == StaffTransactionType.REPAYMENT) activeColor = creditGreen;
   if (type == StaffTransactionType.BONUS) activeColor = bonusGold;
@@ -275,7 +304,7 @@ Widget _typeButton(
           style: TextStyle(
             fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
             color: isSelected ? activeColor : Colors.grey[600],
-            fontSize: 12, // slightly smaller to fit 4 buttons nicely
+            fontSize: 12,
           ),
         ),
       ),
@@ -283,38 +312,93 @@ Widget _typeButton(
   );
 }
 
-// Payment Method Dropdown
+/// Pill-style payment method selector — replaces the old dropdown.
+/// Shows icon + label for each method with color highlight on selection.
 Widget _buildMethodSelector(RxString selectedMethod) {
-  final methods = ['Cash', 'Bank', 'Bkash', 'Nagad'];
-
   return Obx(
-    () => Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      decoration: BoxDecoration(
-        color: bgGrey,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.black12),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: selectedMethod.value,
-          isExpanded: true,
-          icon: const Icon(Icons.keyboard_arrow_down, color: Colors.blueGrey),
-          items:
-              methods.map((String val) {
-                return DropdownMenuItem<String>(
-                  value: val,
-                  child: Text(
-                    val,
-                    style: const TextStyle(fontSize: 14, color: darkSlate),
+    () => Row(
+      children:
+          _methods.map((method) {
+            final isSelected = selectedMethod.value == method;
+            final color = _methodColors[method]!;
+            final icon = _methodIcons[method]!;
+
+            return Expanded(
+              child: GestureDetector(
+                onTap: () => selectedMethod.value = method,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  margin: const EdgeInsets.only(right: 8),
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 10,
+                    horizontal: 4,
                   ),
-                );
-              }).toList(),
-          onChanged: (val) {
-            if (val != null) selectedMethod.value = val;
-          },
+                  decoration: BoxDecoration(
+                    color: isSelected ? color.withOpacity(0.12) : bgGrey,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: isSelected ? color : Colors.black12,
+                      width: isSelected ? 1.8 : 1,
+                    ),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        icon,
+                        size: 16,
+                        color: isSelected ? color : Colors.grey[500],
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        method,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight:
+                              isSelected ? FontWeight.bold : FontWeight.w500,
+                          color: isSelected ? color : Colors.grey[600],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+    ),
+  );
+}
+
+/// Small contextual banner telling the user which balance will be affected
+Widget _buildInfoBanner(StaffTransactionType type, String method) {
+  final color = _methodColors[method] ?? activeAccent;
+  final isRepayment = type == StaffTransactionType.REPAYMENT;
+
+  String action = isRepayment ? "added to" : "deducted from";
+  String icon = isRepayment ? "↑" : "↓";
+
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+    decoration: BoxDecoration(
+      color: color.withOpacity(0.08),
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: color.withOpacity(0.3)),
+    ),
+    child: Row(
+      children: [
+        Text(icon, style: TextStyle(fontSize: 16, color: color)),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            "Amount will be $action your $method balance in the Cash Drawer.",
+            style: TextStyle(
+              fontSize: 12,
+              color: color.withOpacity(0.85),
+              fontWeight: FontWeight.w500,
+            ),
+          ),
         ),
-      ),
+      ],
     ),
   );
 }
@@ -368,18 +452,19 @@ Widget _buildFooter({
   required VoidCallback onCancel,
   required VoidCallback onSave,
   required StaffTransactionType type,
+  required String method,
 }) {
-  String btnLabel = "Process Payment";
-  Color btnColor = activeAccent;
+  String btnLabel = "Pay via $method";
+  Color btnColor = _methodColors[method] ?? activeAccent;
 
   if (type == StaffTransactionType.ADVANCE) {
-    btnLabel = "Record Advance";
+    btnLabel = "Record Advance via $method";
     btnColor = debtRed;
   } else if (type == StaffTransactionType.REPAYMENT) {
-    btnLabel = "Confirm Repayment";
+    btnLabel = "Confirm Repayment via $method";
     btnColor = creditGreen;
   } else if (type == StaffTransactionType.BONUS) {
-    btnLabel = "Process Bonus";
+    btnLabel = "Pay Bonus via $method";
     btnColor = bonusGold;
   }
 
@@ -400,7 +485,7 @@ Widget _buildFooter({
           onPressed: onSave,
           style: ElevatedButton.styleFrom(
             backgroundColor: btnColor,
-            padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 18),
+            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 18),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(8),
             ),
@@ -410,6 +495,7 @@ Widget _buildFooter({
             style: const TextStyle(
               color: Colors.white,
               fontWeight: FontWeight.bold,
+              fontSize: 13,
             ),
           ),
         ),
@@ -418,7 +504,9 @@ Widget _buildFooter({
   );
 }
 
-// --- TRANSACTION LOGIC ---
+// ─────────────────────────────────────────────────────────────────────────────
+// TRANSACTION HANDLER
+// ─────────────────────────────────────────────────────────────────────────────
 
 Future<void> _handleTransaction(
   StaffController staffCtrl,
@@ -431,7 +519,6 @@ Future<void> _handleTransaction(
   StaffTransactionType type,
   String paymentMethod,
 ) async {
-  // 1. Validation
   if (amountC.text.isEmpty || date.value == null) {
     Get.snackbar(
       "Missing Info",
@@ -448,7 +535,6 @@ Future<void> _handleTransaction(
     return;
   }
 
-  // 2. Determine Note
   String finalNote = noteC.text;
   if (finalNote.isEmpty) {
     if (type == StaffTransactionType.SALARY) {
@@ -470,11 +556,13 @@ Future<void> _handleTransaction(
     date: date.value!,
     type: type,
     month: monthC.text,
-    paymentMethod: paymentMethod, // Passed for Cash Ledger
+    paymentMethod: paymentMethod, // ← always passed now
   );
 }
 
-// --- HELPER COMPONENTS ---
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
 
 Widget _sectionLabel(String label) {
   return Padding(

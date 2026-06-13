@@ -1,5 +1,3 @@
-// ignore_for_file: deprecated_member_use, empty_catches
-
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -9,7 +7,6 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-
 import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
 import 'package:gtel_erp/Shipment/controller.dart';
 import 'package:gtel_erp/Core/Stock%20Management/stockproductmodel.dart';
@@ -132,8 +129,8 @@ class _ShortlistPageState extends State<ShortlistPage> {
   List<Product> get _deduplicatedProducts {
     final List<Product> result = [];
     for (final p in controller.shortListProducts) {
-      if (!_seenProductIds.contains(p.id as int)) {
-        _seenProductIds.add(p.id as int);
+      if (!_seenProductIds.contains(p.id)) {
+        _seenProductIds.add(p.id);
         result.add(p);
       }
     }
@@ -495,8 +492,8 @@ class _ShortlistPageState extends State<ShortlistPage> {
           product: product,
           shipmentCtrl: shipmentCtrl,
           cartController: cartController,
-          savedQty: _savedQties[product.id as int] ?? 1,
-          onQtyChanged: (qty) => _savedQties[product.id as int] = qty,
+          savedQty: _savedQties[product.id] ?? 1,
+          onQtyChanged: (qty) => _savedQties[product.id] = qty,
         );
       },
     );
@@ -562,10 +559,10 @@ class _ShortlistPageState extends State<ShortlistPage> {
                                 product: product,
                                 shipmentCtrl: shipmentCtrl,
                                 cartController: cartController,
-                                savedQty: _savedQties[product.id as int] ?? 1,
+                                savedQty: _savedQties[product.id] ?? 1,
                                 onQtyChanged:
                                     (qty) =>
-                                        _savedQties[product.id as int] = qty,
+                                        _savedQties[product.id] = qty,
                               );
                             },
                           ),

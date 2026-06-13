@@ -5,7 +5,6 @@ import 'package:gtel_erp/Shipment/controller.dart';
 import 'package:gtel_erp/Core/Menubar%20&%20Navigation/sidemenubar.dart';
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/Debtor%20Purchase/purchasecontroller.dart';
 import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/gteldebtorcontroller.dart';
-import 'package:gtel_erp/Core/Gtel%20Expense/Daily%20Expense/dailyexpensecontroller.dart';
 import 'package:gtel_erp/Core/Gtel%20Expense/Monthly%20Expense/montlyexpensecontroller.dart';
 import 'package:gtel_erp/Web%20Screen/Sales/controller.dart';
 import 'package:gtel_erp/Web%20Screen/Staff/controller.dart';
@@ -18,7 +17,6 @@ class HomeBinding extends Bindings {
     Get.lazyPut(() => NavigationController());
     Get.lazyPut(() => MonthlyExpensesController());
     Get.lazyPut(() => DailySalesController());
-    Get.lazyPut(() => DailyExpensesController());
     Get.lazyPut(() => DebatorController());
     Get.lazyPut(() => ProductController());
     Get.lazyPut(() => CashDrawerController());
