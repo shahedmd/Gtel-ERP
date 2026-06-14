@@ -2,7 +2,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Core/Utils/app_logger.dart';
-
 import '../../ActivityLogger/activity_logger.dart';
 import '../Services/session_controller.dart';
 
@@ -14,8 +13,14 @@ class AuthController extends GetxController {
   void onReady() {
     super.onReady();
 
-    Future.delayed(const Duration(milliseconds: 500), () {
-      if (_auth.currentUser != null) {
+    Future.delayed(const Duration(milliseconds: 500), () async {
+      final firebaseUser = _auth.currentUser;
+
+      if (firebaseUser != null) {
+        // ── নতুন: Refresh এ session reload করো ──────────────────────────
+        final session = Get.find<SessionController>();
+        await session.loadSession(firebaseUser.uid);
+
         AppLogger.i("Existing session found. Navigating to Home Page.");
         Get.offAllNamed('/home');
       }

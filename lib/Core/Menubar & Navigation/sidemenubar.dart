@@ -5,10 +5,12 @@ import 'package:gtel_erp/Core/Menubar%20&%20Navigation/app_pages.dart';
 import 'package:gtel_erp/Core/Utils/navigation_key.dart';
 import 'package:gtel_erp/controller.dart';
 
+import '../Auth/auth.dart';
+
 class MenuItem {
   final String title;
   final IconData icon;
-  final String id; // Unique ID for routing/tracking
+  final String id;
   final List<MenuItem>? subItems;
 
   MenuItem({
@@ -23,10 +25,7 @@ class NavigationController extends GetxController {
   var activeId = Routes.dailysales.obs;
 
   void changePage(String routeName) {
-    if (activeId.value == routeName) {
-      return; // Don't reload if already on the page
-    }
-
+    if (activeId.value == routeName) return;
     activeId.value = routeName;
     Get.toNamed(routeName, id: NavKey.nestedHome);
   }
@@ -165,8 +164,7 @@ class _NavTile extends StatelessWidget {
 
 class SidebarMenu extends StatelessWidget {
   final NavigationController navCtrl = Get.find<NavigationController>();
-  final RoleController rolecontroller =
-      Get.find<RoleController>(); // Added this!
+  final RoleController rolecontroller = Get.find<RoleController>();
 
   static const Color sidebarBg = Color(0xFF111827);
   static const Color activeAccent = Color(0xFF3B82F6);
@@ -183,12 +181,9 @@ class SidebarMenu extends StatelessWidget {
       child: Column(
         children: [
           _buildHeader(),
-
           Expanded(
-            // Wrapped the ListView in Obx to react to the logged-in user's role
             child: Obx(() {
-              final isSuperAdmin =
-                  rolecontroller.isSuperAdmin; // Checking the role
+              final isSuperAdmin = rolecontroller.isSuperAdmin;
 
               return ListView(
                 padding: const EdgeInsets.symmetric(vertical: 10),
@@ -198,7 +193,6 @@ class SidebarMenu extends StatelessWidget {
                     id: Routes.liveorder,
                     title: "NEW ORDER",
                     icon: FontAwesomeIcons.moneyBill,
-                    isSubItem: false,
                   ),
                   if (isSuperAdmin)
                     _NavTile(
@@ -207,30 +201,23 @@ class SidebarMenu extends StatelessWidget {
                       icon: FontAwesomeIcons.user,
                       isSubItem: true,
                     ),
-
-                  // Hidden from normal Admin
                   _NavTile(
                     id: Routes.debtor,
                     title: "DEBTOR/AGENT ACCOUNT",
                     icon: FontAwesomeIcons.userCheck,
                     isSubItem: true,
                   ),
-
                   _NavTile(
                     id: Routes.localpurchase,
                     title: "LOCAL PURCHASE",
                     icon: FontAwesomeIcons.productHunt,
-                    isSubItem: false,
                   ),
-
                   _NavTile(
                     id: Routes.purchase,
                     title: "LOCAL PURCHASE HISTORY",
                     icon: FontAwesomeIcons.productHunt,
                     isSubItem: true,
                   ),
-
-                  // Hidden from normal Admin
                   if (isSuperAdmin)
                     _NavTile(
                       id: Routes.profitloss,
@@ -238,31 +225,24 @@ class SidebarMenu extends StatelessWidget {
                       icon: FontAwesomeIcons.chartLine,
                       isSubItem: true,
                     ),
-
-                  // Hidden from normal Admin
                   if (isSuperAdmin)
                     _NavTile(
                       id: Routes.overviewaccount,
                       icon: FontAwesomeIcons.chartPie,
                       title: "OVERVIEW DASHBOARD",
                     ),
-
                   if (isSuperAdmin)
                     _NavTile(
-                      id: Routes.dashboard, // regular nested route
+                      id: Routes.dashboard,
                       icon: FontAwesomeIcons.bookOpen,
                       title: "DAILY LEDGER",
                     ),
-
-                  // Hidden from normal Admin
                   if (isSuperAdmin)
                     _NavTile(
                       id: Routes.cash,
                       icon: FontAwesomeIcons.cashRegister,
                       title: "CASH DRAWER",
                     ),
-
-                  // Hidden from normal Admin
                   if (isSuperAdmin)
                     _NavTile(
                       id: Routes.vendor,
@@ -270,7 +250,6 @@ class SidebarMenu extends StatelessWidget {
                       icon: FontAwesomeIcons.userTie,
                       isSubItem: true,
                     ),
-
                   _NavGroup(
                     title: "Expenses",
                     icon: FontAwesomeIcons.wallet,
@@ -280,7 +259,6 @@ class SidebarMenu extends StatelessWidget {
                         title: "Daily Expenses",
                         isSubItem: true,
                       ),
-                      // Hidden from normal Admin
                       if (isSuperAdmin)
                         _NavTile(
                           id: Routes.monthlyexpense,
@@ -289,8 +267,6 @@ class SidebarMenu extends StatelessWidget {
                         ),
                     ],
                   ),
-
-                  // SALES GROUP (Routes.DAILY_SALES, Routes.MONTHLY_SALES... etc.)
                   _NavGroup(
                     title: "Sales",
                     icon: FontAwesomeIcons.receipt,
@@ -300,7 +276,6 @@ class SidebarMenu extends StatelessWidget {
                         title: "Daily Sales",
                         isSubItem: true,
                       ),
-                      // Hidden from normal Admin
                       if (isSuperAdmin)
                         _NavTile(
                           id: Routes.monthlysalespage,
@@ -317,15 +292,12 @@ class SidebarMenu extends StatelessWidget {
                         title: "Sale Return",
                         isSubItem: true,
                       ),
-
-                      // Hidden from normal Admin
                       if (isSuperAdmin)
                         _NavTile(
                           id: Routes.staffsalesreport,
                           title: "Staff Overview",
                           isSubItem: true,
                         ),
-                      // Hidden from normal Admin
                       if (isSuperAdmin)
                         _NavTile(
                           id: Routes.productoverview,
@@ -334,8 +306,6 @@ class SidebarMenu extends StatelessWidget {
                         ),
                     ],
                   ),
-
-                  // PRODUCTS & STOCK GROUP (Routes.STOCK, SERVICE, Routes.SHIPMENT... etc.)
                   _NavGroup(
                     title: "Products & Stock",
                     icon: FontAwesomeIcons.boxesStacked,
@@ -350,14 +320,12 @@ class SidebarMenu extends StatelessWidget {
                         title: "Service Product",
                         isSubItem: true,
                       ),
-                      // Hidden from normal Admin
                       if (isSuperAdmin)
                         _NavTile(
                           id: Routes.shipment,
                           title: "Shipment Details",
                           isSubItem: true,
                         ),
-                      // Hidden from normal Admin
                       if (isSuperAdmin)
                         _NavTile(
                           id: Routes.orderlist,
@@ -367,7 +335,7 @@ class SidebarMenu extends StatelessWidget {
                     ],
                   ),
 
-                  // Hidden from normal Admin
+                  // ── Staff & Admin Section ───────────────────────────────
                   if (isSuperAdmin) ...[
                     const Padding(
                       padding: EdgeInsets.symmetric(
@@ -376,18 +344,22 @@ class SidebarMenu extends StatelessWidget {
                       ),
                       child: Divider(color: Colors.white10, thickness: 1),
                     ),
-                    // --- STAFF ---
                     _NavTile(
                       id: Routes.staff,
                       icon: FontAwesomeIcons.userTie,
                       title: "Staff Members",
+                    ),
+                    // ── নতুন: Super Admin Panel ─────────────────────────
+                    _NavTile(
+                      id: Routes.superadmin,
+                      icon: FontAwesomeIcons.userShield,
+                      title: "Super Admin Panel",
                     ),
                   ],
                 ],
               );
             }),
           ),
-
           _buildFooter(),
         ],
       ),
@@ -426,43 +398,114 @@ class SidebarMenu extends StatelessWidget {
     );
   }
 
-  // Updated footer to reactively show if the user is a Super Admin or Admin
   Widget _buildFooter() {
     return Obx(() {
       final isSuperAdmin = rolecontroller.isSuperAdmin;
+      final name = rolecontroller.currentUserName;
+      final role = rolecontroller.currentUserRole.toUpperCase();
 
       return Container(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(16),
         decoration: const BoxDecoration(
           color: Colors.black12,
           border: Border(top: BorderSide(color: Colors.white10)),
         ),
-        child: Row(
+        child: Column(
           children: [
-            CircleAvatar(
-              radius: 18,
-              // Different color for Super Admin vs Admin
-              backgroundColor: isSuperAdmin ? Colors.redAccent : activeAccent,
-              child: const Icon(Icons.person, color: Colors.white, size: 20),
-            ),
-            const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            // ── User Info ─────────────────────────────────────────────
+            Row(
               children: [
-                Text(
-                  // Dynamically changes name based on role
-                  isSuperAdmin ? "Super Admin" : "Admin Account",
-                  style: const TextStyle(
+                CircleAvatar(
+                  radius: 18,
+                  backgroundColor:
+                      isSuperAdmin ? Colors.redAccent : activeAccent,
+                  child: const Icon(
+                    Icons.person,
                     color: Colors.white,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        name,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        role,
+                        style: const TextStyle(
+                          color: textSecondary,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 12),
+
+            // ── নতুন: Logout Button ───────────────────────────────────
+            SizedBox(
+              width: double.infinity,
+              child: TextButton.icon(
+                onPressed: () {
+                  Get.dialog(
+                    AlertDialog(
+                      title: const Text('Logout'),
+                      content: const Text('Are you sure you want to logout?'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Get.back(),
+                          child: const Text('Cancel'),
+                        ),
+                        ElevatedButton(
+                          onPressed: () {
+                            Get.back();
+                            Get.find<AuthController>().logout();
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.redAccent,
+                          ),
+                          child: const Text(
+                            'Logout',
+                            style: TextStyle(color: Colors.white),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+                icon: const Icon(
+                  Icons.logout,
+                  size: 16,
+                  color: Colors.redAccent,
+                ),
+                label: const Text(
+                  'Logout',
+                  style: TextStyle(
+                    color: Colors.redAccent,
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                const Text(
-                  "v22.3.26",
-                  style: TextStyle(color: textSecondary, fontSize: 11),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    side: const BorderSide(color: Colors.redAccent, width: 1),
+                  ),
                 ),
-              ],
+              ),
             ),
           ],
         ),

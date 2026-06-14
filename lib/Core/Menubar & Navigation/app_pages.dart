@@ -24,7 +24,6 @@ import 'package:gtel_erp/Web%20Screen/Sales/dailysales.dart';
 import 'package:gtel_erp/Web%20Screen/Staff/Staffpage.dart';
 import 'package:gtel_erp/Web%20Screen/homepage.dart';
 import 'package:gtel_erp/Web%20Screen/overviewpage.dart';
-
 import '../Bindings/home_bindings.dart';
 
 abstract class Routes {
@@ -53,6 +52,7 @@ abstract class Routes {
   static const String purchase = '/purchase';
   static const String orderlist = '/orderlist';
   static const String localpurchase = '/localpurchase';
+  static const String superadmin = '/superadmin'; // ← নতুন
 }
 
 abstract class AppPages {
@@ -92,5 +92,6 @@ abstract class AppPages {
     GetPage(name: Routes.purchase, page: () => GlobalPurchasePage()),
     GetPage(name: Routes.orderlist, page: () => OrderHistoryPage()),
     GetPage(name: Routes.localpurchase, page: () => SmartPurchaseScreen()),
+    // GetPage(name: Routes.superadmin, page: () => SuperAdminPage()), // ← নতুন
   ];
 }
