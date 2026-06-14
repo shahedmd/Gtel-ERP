@@ -60,113 +60,145 @@ void addSalaryDialog(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+        // ── Stack দিয়ে loading overlay যোগ করো ────────────────────────────
+        child: Stack(
           children: [
-            // ── Header ────────────────────────────────────────────────────────
-            Obx(() => _buildHeader(staffName, selectedType.value)),
-
-            // ── Form ──────────────────────────────────────────────────────────
-            Flexible(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // 1. Transaction Type
-                    _sectionLabel("Transaction Type"),
-                    _buildTypeSelector(selectedType),
-                    const SizedBox(height: 20),
-
-                    // 2. Payment Method — now shown for ALL types
-                    //    Label changes contextually:
-                    //    Salary/Advance/Bonus → "Paid Via (Deducted From)"
-                    //    Repayment           → "Received Via (Added To)"
-                    Obx(() {
-                      bool isRepayment =
-                          selectedType.value == StaffTransactionType.REPAYMENT;
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _sectionLabel(
-                            isRepayment
-                                ? "Received Via (Added to Balance)"
-                                : "Paid Via (Deducted from Balance)",
-                          ),
-                          _buildMethodSelector(selectedPaymentMethod),
-                          const SizedBox(height: 20),
-                        ],
-                      );
-                    }),
-
-                    // 3. Payment Details
-                    _sectionLabel("Payment Details"),
-                    Row(
+            // ── Existing dialog content ──────────────────────────────────
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Obx(() => _buildHeader(staffName, selectedType.value)),
+                Flexible(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Expanded(
-                          flex: 2,
-                          child: _buildField(
-                            amountC,
-                            "Amount (Tk)",
-                            FontAwesomeIcons.coins,
-                            type: TextInputType.number,
-                          ),
+                        _sectionLabel("Transaction Type"),
+                        _buildTypeSelector(selectedType),
+                        const SizedBox(height: 20),
+                        Obx(() {
+                          bool isRepayment =
+                              selectedType.value ==
+                              StaffTransactionType.REPAYMENT;
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _sectionLabel(
+                                isRepayment
+                                    ? "Received Via (Added to Balance)"
+                                    : "Paid Via (Deducted from Balance)",
+                              ),
+                              _buildMethodSelector(selectedPaymentMethod),
+                              const SizedBox(height: 20),
+                            ],
+                          );
+                        }),
+                        _sectionLabel("Payment Details"),
+                        Row(
+                          children: [
+                            Expanded(
+                              flex: 2,
+                              child: _buildField(
+                                amountC,
+                                "Amount (Tk)",
+                                FontAwesomeIcons.coins,
+                                type: TextInputType.number,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              flex: 3,
+                              child: _buildField(
+                                monthC,
+                                "Month / Ref",
+                                FontAwesomeIcons.calendarDay,
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          flex: 3,
-                          child: _buildField(
-                            monthC,
-                            "Month / Ref",
-                            FontAwesomeIcons.calendarDay,
+                        const SizedBox(height: 16),
+                        _buildField(
+                          noteC,
+                          "Transaction Note (Optional)",
+                          FontAwesomeIcons.stickyNote,
+                        ),
+                        const SizedBox(height: 24),
+                        _sectionLabel("Transaction Date"),
+                        _buildDatePicker(selectedDate),
+                        const SizedBox(height: 16),
+                        Obx(
+                          () => _buildInfoBanner(
+                            selectedType.value,
+                            selectedPaymentMethod.value,
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 16),
-                    _buildField(
-                      noteC,
-                      "Transaction Note (Optional)",
-                      FontAwesomeIcons.stickyNote,
-                    ),
-                    const SizedBox(height: 24),
-
-                    // 4. Date
-                    _sectionLabel("Transaction Date"),
-                    _buildDatePicker(selectedDate),
-
-                    // 5. Info banner — shows what will happen to the balance
-                    const SizedBox(height: 16),
-                    Obx(
-                      () => _buildInfoBanner(
-                        selectedType.value,
-                        selectedPaymentMethod.value,
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
+                Obx(
+                  () => _buildFooter(
+                    onCancel: () => Get.back(),
+                    type: selectedType.value,
+                    method: selectedPaymentMethod.value,
+                    isLoading: controller.isTransacting.value, // ← নতুন param
+                    onSave:
+                        () => _handleTransaction(
+                          controller,
+                          staffId,
+                          staffName,
+                          amountC,
+                          monthC,
+                          noteC,
+                          selectedDate,
+                          selectedType.value,
+                          selectedPaymentMethod.value,
+                        ),
+                  ),
+                ),
+              ],
             ),
 
-            // ── Footer ────────────────────────────────────────────────────────
+            // ── Loading Overlay ──────────────────────────────────────────
             Obx(
-              () => _buildFooter(
-                onCancel: () => Get.back(),
-                type: selectedType.value,
-                method: selectedPaymentMethod.value,
-                onSave:
-                    () => _handleTransaction(
-                      controller,
-                      staffId,
-                      staffName,
-                      amountC,
-                      monthC,
-                      noteC,
-                      selectedDate,
-                      selectedType.value,
-                      selectedPaymentMethod.value,
-                    ),
-              ),
+              () =>
+                  controller.isTransacting.value
+                      ? Positioned.fill(
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.55),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: const Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 3,
+                              ),
+                              SizedBox(height: 16),
+                              Text(
+                                'Processing Transaction...',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 15,
+                                ),
+                              ),
+                              SizedBox(height: 6),
+                              Text(
+                                'Please wait',
+                                style: TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                      : const SizedBox.shrink(),
             ),
           ],
         ),
@@ -453,6 +485,7 @@ Widget _buildFooter({
   required VoidCallback onSave,
   required StaffTransactionType type,
   required String method,
+  bool isLoading = false, // ← নতুন
 }) {
   String btnLabel = "Pay via $method";
   Color btnColor = _methodColors[method] ?? activeAccent;
@@ -477,36 +510,44 @@ Widget _buildFooter({
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
         TextButton(
-          onPressed: onCancel,
+          onPressed:
+              isLoading ? null : onCancel, // ← loading-এ cancel-ও disable
           child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
         ),
         const SizedBox(width: 12),
         ElevatedButton(
-          onPressed: onSave,
+          onPressed:
+              isLoading ? null : onSave, // ← null = automatically disabled
           style: ElevatedButton.styleFrom(
-            backgroundColor: btnColor,
+            backgroundColor: isLoading ? Colors.grey.shade400 : btnColor,
             padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 18),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(8),
             ),
           ),
-          child: Text(
-            btnLabel,
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: 13,
-            ),
-          ),
+          child:
+              isLoading
+                  ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      color: Colors.white,
+                      strokeWidth: 2,
+                    ),
+                  )
+                  : Text(
+                    btnLabel,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                  ),
         ),
       ],
     ),
   );
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TRANSACTION HANDLER
-// ─────────────────────────────────────────────────────────────────────────────
 
 Future<void> _handleTransaction(
   StaffController staffCtrl,

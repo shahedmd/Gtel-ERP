@@ -156,12 +156,20 @@ class _Header extends StatelessWidget {
     );
   }
 
+  // ── আগের code (replace করো) ──
   Widget _reportBtn(BuildContext context, {required bool isBonus}) {
     final color = isBonus ? kBonusGold : Colors.redAccent;
     final icon = isBonus ? FontAwesomeIcons.gift : FontAwesomeIcons.filePdf;
     final label = isBonus ? 'Bonus Report' : 'Payroll Report';
     return OutlinedButton.icon(
-      onPressed: () => _pickMonthAndDownload(context, isBonus),
+      onPressed:
+          () =>
+              isBonus
+                  ? _showBonusPickerDialog(context) // ← bonus-এর নতুন flow
+                  : _pickMonthAndDownload(
+                    context,
+                    false,
+                  ), // ← payroll আগের মতোই
       icon: FaIcon(icon, size: 14, color: color),
       label: Text(label, style: TextStyle(color: color, fontSize: 12)),
       style: OutlinedButton.styleFrom(
@@ -263,6 +271,223 @@ class _Header extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+
+  void _showBonusPickerDialog(BuildContext context) async {
+    // ── Loading দেখাও ──────────────────────────────────────────────────────
+    Get.dialog(
+      const Center(
+        child: Material(
+          color: Colors.transparent,
+          child: CircularProgressIndicator(color: kBonusGold),
+        ),
+      ),
+      barrierDismissible: false,
+    );
+
+    final List<Map<String, dynamic>> months =
+        await controller.fetchBonusMonthsSummary();
+    Get.back(); // loading বন্ধ
+
+    if (months.isEmpty) {
+      Get.snackbar(
+        'কোনো Bonus নেই',
+        '${DateTime.now().year} সালে কোনো bonus record পাওয়া যায়নি',
+        backgroundColor: Colors.orange,
+        colorText: Colors.white,
+      );
+      return;
+    }
+
+    final double yearTotal = months.fold(
+      0.0,
+      (sum, m) => sum + (m['total'] as double),
+    );
+
+    // ── Month selection dialog ─────────────────────────────────────────────
+    Get.dialog(
+      Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // ─── Header ───────────────────────────────────────────────────
+              Container(
+                padding: const EdgeInsets.fromLTRB(20, 20, 12, 20),
+                decoration: const BoxDecoration(
+                  color: kBonusGold,
+                  borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(16),
+                    topRight: Radius.circular(16),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    const FaIcon(
+                      FontAwesomeIcons.gift,
+                      color: Colors.white,
+                      size: 18,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Bonus Reports',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Text(
+                            '${DateTime.now().year}  ·  Year Total: Tk ${NumberFormat.decimalPattern().format(yearTotal)}',
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.85),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Get.back(),
+                      icon: const Icon(Icons.close, color: Colors.white70),
+                    ),
+                  ],
+                ),
+              ),
+
+              // ─── Subtitle ─────────────────────────────────────────────────
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 14, 20, 6),
+                child: Row(
+                  children: [
+                    Icon(Icons.touch_app_outlined, size: 14, color: kTextMuted),
+                    SizedBox(width: 6),
+                    Text(
+                      'যে মাসের রিপোর্ট চান সেটায় tap করুন',
+                      style: TextStyle(color: kTextMuted, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+
+              // ─── Month List ───────────────────────────────────────────────
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 340),
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
+                  itemCount: months.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 6),
+                  itemBuilder: (_, i) {
+                    final Map<String, dynamic> m = months[i];
+                    return Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(10),
+                        onTap: () {
+                          Get.back();
+                          controller.downloadMonthlyBonusReport(
+                            m['month'] as String,
+                          );
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 12,
+                          ),
+                          decoration: BoxDecoration(
+                            color: kBgGrey,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: Colors.black12),
+                          ),
+                          child: Row(
+                            children: [
+                              // ── Icon ────────────────────────────────────
+                              Container(
+                                width: 40,
+                                height: 40,
+                                decoration: BoxDecoration(
+                                  color: kBonusGold.withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Center(
+                                  child: FaIcon(
+                                    FontAwesomeIcons.gift,
+                                    size: 16,
+                                    color: kBonusGold,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              // ── Month Name ───────────────────────────────
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      m['month'] as String,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 14,
+                                        color: kDarkSlate,
+                                      ),
+                                    ),
+                                    const Text(
+                                      'PDF download করতে tap করুন',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: kTextMuted,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              // ── Amount ───────────────────────────────────
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  Text(
+                                    'Tk ${NumberFormat.decimalPattern().format(m['total'])}',
+                                    style: const TextStyle(
+                                      color: kGreen,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                  const Text(
+                                    'মোট bonus',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: kTextMuted,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(width: 8),
+                              const Icon(
+                                Icons.download_rounded,
+                                color: kBonusGold,
+                                size: 20,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

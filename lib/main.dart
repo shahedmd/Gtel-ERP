@@ -5,14 +5,20 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Core/Auth/auth_binding.dart';
 import 'package:gtel_erp/Core/Bindings/home_bindings.dart';
+import 'ActivityLogger/activity_logger.dart';
+import 'Core/Services/session_controller.dart';
 import 'firebase_options.dart';
 import 'Core/Auth/login.dart';
 import 'Web Screen/homepage.dart';
 
 Future<void> main() async {
+
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  await Get.putAsync(() async => SessionController());
+  await Get.putAsync(() async => ActivityLogger());
   runApp(const MyApp());
+  
 }
 
 class MyApp extends StatelessWidget {

@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Core/Utils/app_logger.dart';
 
+import '../../ActivityLogger/activity_logger.dart';
+import '../Services/session_controller.dart';
+
 class AuthController extends GetxController {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   RxBool isLoading = false.obs;
@@ -11,7 +14,6 @@ class AuthController extends GetxController {
   void onReady() {
     super.onReady();
 
-    // 1. CHECK ON APP BOOT (Delayed slightly so the screen exists before routing)
     Future.delayed(const Duration(milliseconds: 500), () {
       if (_auth.currentUser != null) {
         AppLogger.i("Existing session found. Navigating to Home Page.");
@@ -19,8 +21,6 @@ class AuthController extends GetxController {
       }
     });
 
-    // 2. PASSIVE BACKGROUND LISTENER
-    // (Only used to kick users back to login if their token expires or they are deleted)
     _auth.authStateChanges().listen((User? user) {
       if (user == null && Get.currentRoute != '/') {
         AppLogger.w("Auth state null. Redirecting to Login.");
@@ -50,22 +50,33 @@ class AuthController extends GetxController {
     }
   }
 
-  // ==========================================
-  // LOGIN LOGIC
-  // ==========================================
   Future<void> login(String email, String password) async {
     try {
-      // This will automatically show the spinner INSIDE your button on the UI
       isLoading.value = true;
-
-      await _auth.signInWithEmailAndPassword(
+      final result = await _auth.signInWithEmailAndPassword(
         email: email.trim(),
         password: password.trim(),
       );
 
-      // EXPLICIT ROUTING: Guarantees the page changes even if the stream gets cached
-      Get.offAllNamed('/home');
+      // ── নতুন: Session load করো ───────────────────────────────────────────
+      final session = Get.find<SessionController>();
+      final allowed = await session.loadSession(result.user!.uid);
 
+      if (!allowed) {
+        await _auth.signOut();
+        Get.snackbar(
+          "Access Denied",
+          "Your account has been deactivated. Contact admin.",
+          backgroundColor: Colors.redAccent,
+          colorText: Colors.white,
+        );
+        return;
+      }
+
+      // ── নতুন: Login log করো ─────────────────────────────────────────────
+      Get.find<ActivityLogger>().logLogin(session.userName);
+
+      Get.offAllNamed('/home');
       Get.snackbar(
         "Welcome Back",
         "Successfully logged into G-Tel ERP",
@@ -92,20 +103,20 @@ class AuthController extends GetxController {
         snackPosition: SnackPosition.BOTTOM,
       );
     } finally {
-      // Hides the button spinner
       isLoading.value = false;
     }
   }
 
-  // ==========================================
-  // LOGOUT LOGIC
-  // ==========================================
   Future<void> logout() async {
     try {
       isLoading.value = true;
-      await _auth.signOut();
 
-      // Explicitly route back to login
+      // ── নতুন: Logout log + session clear ────────────────────────────────
+      final session = Get.find<SessionController>();
+      await Get.find<ActivityLogger>().logLogout(session.userName);
+      session.clearSession();
+
+      await _auth.signOut();
       Get.offAllNamed('/');
     } catch (e) {
       Get.snackbar("Logout Error", e.toString());

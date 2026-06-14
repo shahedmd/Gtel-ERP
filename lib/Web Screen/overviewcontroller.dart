@@ -2,6 +2,7 @@
 
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
@@ -73,18 +74,26 @@ class OverviewController extends GetxController {
   @override
   void onInit() {
     super.onInit();
-    _syncDateToSubControllers();
-    _fetchPreviousBalance();
-    _listenToExternalLedger();
+
+    // ✅ FIX: synchronous side-effects (jegula onInit-er moddhe
+    // somoy-e .obs value change kore felchhilo, build-er ongshe
+    // crash hochhilo) - ekhon ek frame por e cholbe.
+    WidgetsBindingCompat.runAfterBuild(() {
+      _syncDateToSubControllers();
+      _fetchPreviousBalance();
+      _listenToExternalLedger();
+    });
 
     ever(salesCtrl.salesList, (_) => _processLedgerData());
     ever(expenseCtrl.dailyList, (_) => _processLedgerData());
     ever(externalLedgerData, (_) => _processLedgerData());
 
     ever(selectedDate, (_) {
-      _syncDateToSubControllers();
-      _fetchPreviousBalance();
-      _listenToExternalLedger();
+      WidgetsBindingCompat.runAfterBuild(() {
+        _syncDateToSubControllers();
+        _fetchPreviousBalance();
+        _listenToExternalLedger();
+      });
     });
   }
 
@@ -111,7 +120,7 @@ class OverviewController extends GetxController {
     expenseCtrl.changeDate(selectedDate.value);
   }
 
- // ==========================================================
+  // ==========================================================
   // 1. CALCULATE PREVIOUS BALANCE (EXACT CHRONOLOGICAL MATCH)
   // ==========================================================
   Future<void> _fetchPreviousBalance() async {
@@ -122,26 +131,38 @@ class OverviewController extends GetxController {
         selectedDate.value.year,
         selectedDate.value.month,
         selectedDate.value.day,
-        0, 0, 0
+        0,
+        0,
+        0,
       );
 
       // Fetch all three collections
-      var salesFuture = _db.collection('daily_sales')
-          .where('timestamp', isGreaterThanOrEqualTo: absoluteStart)
-          .where('timestamp', isLessThan: startOfDay)
-          .get();
+      var salesFuture =
+          _db
+              .collection('daily_sales')
+              .where('timestamp', isGreaterThanOrEqualTo: absoluteStart)
+              .where('timestamp', isLessThan: startOfDay)
+              .get();
 
-      var ledgerFuture = _db.collection('cash_ledger')
-          .where('timestamp', isGreaterThanOrEqualTo: absoluteStart)
-          .where('timestamp', isLessThan: startOfDay)
-          .get();
+      var ledgerFuture =
+          _db
+              .collection('cash_ledger')
+              .where('timestamp', isGreaterThanOrEqualTo: absoluteStart)
+              .where('timestamp', isLessThan: startOfDay)
+              .get();
 
-      var expensesFuture = _db.collectionGroup('items')
-          .where('time', isGreaterThanOrEqualTo: absoluteStart)
-          .where('time', isLessThan: startOfDay)
-          .get();
+      var expensesFuture =
+          _db
+              .collectionGroup('items')
+              .where('time', isGreaterThanOrEqualTo: absoluteStart)
+              .where('time', isLessThan: startOfDay)
+              .get();
 
-      var results = await Future.wait([salesFuture, ledgerFuture, expensesFuture]);
+      var results = await Future.wait([
+        salesFuture,
+        ledgerFuture,
+        expensesFuture,
+      ]);
 
       // 1. COMBINE ALL RECORDS INTO A SINGLE TIMELINE
       List<Map<String, dynamic>> allRawItems = [];
@@ -164,16 +185,17 @@ class OverviewController extends GetxController {
 
       for (var doc in (results[2] as QuerySnapshot).docs) {
         var d = doc.data() as Map<String, dynamic>;
-        DateTime time = d['time'] is Timestamp ? (d['time'] as Timestamp).toDate() : DateTime.now();
-        allRawItems.add({
-          'type': 'expense',
-          'data': d,
-          'time': time,
-        });
+        DateTime time =
+            d['time'] is Timestamp
+                ? (d['time'] as Timestamp).toDate()
+                : DateTime.now();
+        allRawItems.add({'type': 'expense', 'data': d, 'time': time});
       }
 
       // 2. SORT CHRONOLOGICALLY (THIS FIXES THE 13,000 TK GAP)
-      allRawItems.sort((a, b) => (a['time'] as DateTime).compareTo(b['time'] as DateTime));
+      allRawItems.sort(
+        (a, b) => (a['time'] as DateTime).compareTo(b['time'] as DateTime),
+      );
 
       double tCash = 0, tBank = 0, tBkash = 0, tNagad = 0;
 
@@ -182,7 +204,8 @@ class OverviewController extends GetxController {
         if (item['type'] == 'sale') {
           var data = item['data'];
           double totalPaid = double.tryParse(data['paid'].toString()) ?? 0;
-          double ledgerPaid = double.tryParse(data['ledgerPaid']?.toString() ?? '0') ?? 0;
+          double ledgerPaid =
+              double.tryParse(data['ledgerPaid']?.toString() ?? '0') ?? 0;
           double actualReceived = totalPaid - ledgerPaid;
 
           if (actualReceived > 0.01) {
@@ -200,23 +223,33 @@ class OverviewController extends GetxController {
                 String valBkash = (pm['bkashNumber'] ?? '').toString();
                 String valNagad = (pm['nagadNumber'] ?? '').toString();
 
-                if (valBank.isNotEmpty) b = actualReceived;
-                else if (valBkash.isNotEmpty) bk = actualReceived;
-                else if (valNagad.isNotEmpty) n = actualReceived;
-                else c = actualReceived;
+                if (valBank.isNotEmpty)
+                  b = actualReceived;
+                else if (valBkash.isNotEmpty)
+                  bk = actualReceived;
+                else if (valNagad.isNotEmpty)
+                  n = actualReceived;
+                else
+                  c = actualReceived;
               }
             } else {
               String s = pm.toString().toLowerCase();
-              if (s.contains('bank')) b = actualReceived;
-              else if (s.contains('bkash')) bk = actualReceived;
-              else if (s.contains('nagad')) n = actualReceived;
-              else c = actualReceived;
+              if (s.contains('bank'))
+                b = actualReceived;
+              else if (s.contains('bkash'))
+                bk = actualReceived;
+              else if (s.contains('nagad'))
+                n = actualReceived;
+              else
+                c = actualReceived;
             }
 
-            tCash += c; tBank += b; tBkash += bk; tNagad += n;
+            tCash += c;
+            tBank += b;
+            tBkash += bk;
+            tNagad += n;
           }
-        } 
-        else if (item['type'] == 'ledger') {
+        } else if (item['type'] == 'ledger') {
           var data = item['data'];
           if (data['source'] == 'pos_sale') continue;
 
@@ -227,42 +260,88 @@ class OverviewController extends GetxController {
             String from = (data['fromMethod'] ?? 'Cash').toString();
             String to = (data['toMethod'] ?? 'Cash').toString();
 
-            if (from == 'Bank') tBank -= amt;
-            else if (from == 'Bkash') tBkash -= amt;
-            else if (from == 'Nagad') tNagad -= amt;
-            else tCash -= amt;
+            if (from == 'Bank')
+              tBank -= amt;
+            else if (from == 'Bkash')
+              tBkash -= amt;
+            else if (from == 'Nagad')
+              tNagad -= amt;
+            else
+              tCash -= amt;
 
-            if (to == 'Bank') tBank += amt;
-            else if (to == 'Bkash') tBkash += amt;
-            else if (to == 'Nagad') tNagad += amt;
-            else tCash += amt;
+            if (to == 'Bank')
+              tBank += amt;
+            else if (to == 'Bkash')
+              tBkash += amt;
+            else if (to == 'Nagad')
+              tNagad += amt;
+            else
+              tCash += amt;
           } else {
-            String methodStr = (data['method'] ?? 'Cash').toString().toLowerCase();
+            String methodStr =
+                (data['method'] ?? 'Cash').toString().toLowerCase();
             bool isBank = methodStr.contains('bank');
             bool isBkash = methodStr.contains('bkash');
             bool isNagad = methodStr.contains('nagad');
 
             if (type == 'deposit') {
-              if (isBank) tBank += amt;
-              else if (isBkash) tBkash += amt;
-              else if (isNagad) tNagad += amt;
-              else tCash += amt;
-            } else { 
-              if (isBank) tBank -= amt;
-              else if (isBkash) tBkash -= amt;
-              else if (isNagad) tNagad -= amt;
-              else tCash -= amt;
+              if (isBank)
+                tBank += amt;
+              else if (isBkash)
+                tBkash += amt;
+              else if (isNagad)
+                tNagad += amt;
+              else
+                tCash += amt;
+            } else {
+              if (isBank)
+                tBank -= amt;
+              else if (isBkash)
+                tBkash -= amt;
+              else if (isNagad)
+                tNagad -= amt;
+              else
+                tCash -= amt;
             }
           }
-        } 
-        else if (item['type'] == 'expense') {
+        } else if (item['type'] == 'expense') {
           double amt = double.tryParse(item['data']['amount'].toString()) ?? 0;
           double rem = amt;
 
-          if (tCash >= rem) { tCash -= rem; rem = 0; } else { rem -= tCash; tCash = 0; }
-          if (rem > 0) { if (tBank >= rem) { tBank -= rem; rem = 0; } else { rem -= tBank; tBank = 0; } }
-          if (rem > 0) { if (tBkash >= rem) { tBkash -= rem; rem = 0; } else { rem -= tBkash; tBkash = 0; } }
-          if (rem > 0) { if (tNagad >= rem) { tNagad -= rem; rem = 0; } else { rem -= tNagad; tNagad = 0; } }
+          if (tCash >= rem) {
+            tCash -= rem;
+            rem = 0;
+          } else {
+            rem -= tCash;
+            tCash = 0;
+          }
+          if (rem > 0) {
+            if (tBank >= rem) {
+              tBank -= rem;
+              rem = 0;
+            } else {
+              rem -= tBank;
+              tBank = 0;
+            }
+          }
+          if (rem > 0) {
+            if (tBkash >= rem) {
+              tBkash -= rem;
+              rem = 0;
+            } else {
+              rem -= tBkash;
+              tBkash = 0;
+            }
+          }
+          if (rem > 0) {
+            if (tNagad >= rem) {
+              tNagad -= rem;
+              rem = 0;
+            } else {
+              rem -= tNagad;
+              tNagad = 0;
+            }
+          }
         }
       }
 
@@ -768,5 +847,11 @@ class OverviewController extends GetxController {
         ),
       ],
     );
+  }
+}
+
+class WidgetsBindingCompat {
+  static void runAfterBuild(VoidCallback callback) {
+    Future.microtask(callback);
   }
 }

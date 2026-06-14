@@ -8,23 +8,19 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import '../../ActivityLogger/activity_logger.dart';
 import 'model.dart';
 
 enum StaffTransactionType { SALARY, ADVANCE, REPAYMENT, BONUS }
 
 class StaffController extends GetxController {
   final FirebaseFirestore db = FirebaseFirestore.instance;
-
-  // ── Observables ────────────────────────────────────────────────────────────
   var isLoading = false.obs;
   var staffList = <StaffModel>[].obs;
   var filteredStaffList = <StaffModel>[].obs;
   var searchQuery = ''.obs;
-
-  // Filter tab: 'all', 'active', 'resigned', 'suspended'
   var statusFilter = 'all'.obs;
-
-  // ── Styling ─────────────────────────────────────────────────────────────────
+  var isTransacting = false.obs;
   static const Color primaryBlue = Color(0xFF3B82F6);
   static const Color darkSlate = Color(0xFF111827);
 
@@ -119,6 +115,11 @@ class StaffController extends GetxController {
             backgroundColor: Colors.green,
             colorText: Colors.white,
           );
+
+          Get.find<ActivityLogger>().logCreate(
+            LogModule.staff,
+            'New staff added: $name',
+          );
         },
         loadingWidget: const Center(
           child: CircularProgressIndicator(color: primaryBlue),
@@ -150,6 +151,12 @@ class StaffController extends GetxController {
       });
       await loadStaff();
       Get.back();
+      Get.find<ActivityLogger>().logUpdate(
+        LogModule.staff,
+        'Staff updated: $name',
+        targetId: id,
+      );
+
       Get.snackbar(
         'Updated',
         'Staff details updated successfully',
@@ -168,6 +175,12 @@ class StaffController extends GetxController {
     try {
       isLoading.value = true;
       await db.collection('staff').doc(staffId).delete();
+      Get.find<ActivityLogger>().logDelete(
+        LogModule.staff,
+        'Staff removed: $name',
+        targetId: staffId,
+      );
+
       staffList.removeWhere((s) => s.id == staffId);
       filterStaff();
       Get.back();
@@ -199,6 +212,11 @@ class StaffController extends GetxController {
         'resignReason': reason,
       });
       await loadStaff();
+      Get.find<ActivityLogger>().logUpdate(
+        LogModule.staff,
+        'Staff resigned: $name',
+        targetId: staffId,
+      );
       Get.back();
       Get.snackbar(
         'Resigned',
@@ -254,6 +272,11 @@ class StaffController extends GetxController {
       await db.collection('staff').doc(staffId).update({'status': 'suspended'});
       await loadStaff();
       Get.back();
+      Get.find<ActivityLogger>().logUpdate(
+        LogModule.staff,
+        '$staffName suspended for $days day(s)',
+        targetId: staffId,
+      );
       Get.snackbar(
         'Suspended',
         '$staffName suspended for $days day(s) in $month',
@@ -271,6 +294,11 @@ class StaffController extends GetxController {
     try {
       await db.collection('staff').doc(staffId).update({'status': 'active'});
       await loadStaff();
+      Get.find<ActivityLogger>().logUpdate(
+        LogModule.staff,
+        'Suspension lifted for $name',
+        targetId: staffId,
+      );
       Get.snackbar(
         'Lifted',
         'Suspension lifted for $name',
@@ -312,27 +340,6 @@ class StaffController extends GetxController {
     return SuspensionModel.fromFirestore(snap.docs.first);
   }
 
-  // ── 7. ADD TRANSACTION — FULLY ATOMIC ───────────────────────────────────
-  //
-  // ROOT CAUSE OF THE OLD BUG:
-  //   The old code ran 3 separate awaits in sequence:
-  //     1. db.runTransaction(...)        ← salary doc + debt update
-  //     2. db.collection('cash_ledger').add(...)  ← cash drawer entry
-  //     3. dailyCtrl.addDailyExpense(...)          ← expense entry
-  //   If step 2 or 3 threw (network hiccup, controller not ready, Firestore
-  //   rule reject, etc.) step 1 had already committed — leaving orphaned
-  //   salary records with no matching expense or cash ledger entry.
-  //
-  // THE FIX — single WriteBatch:
-  //   All 3 Firestore writes (salary doc, staff debt update, cash_ledger doc,
-  //   expense doc) are bundled into ONE WriteBatch. Firestore either commits
-  //   ALL of them or NONE of them. There is no partial state possible.
-  //
-  //   Note: WriteBatch cannot do conditional reads (unlike runTransaction),
-  //   so we read the current debt first, compute the new value, then batch
-  //   everything together. This is safe because salary entry is a single-user
-  //   admin action — concurrent debt edits are not a real-world concern here.
-  //
   Future<void> addTransaction({
     required String staffId,
     required String staffName,
@@ -344,17 +351,15 @@ class StaffController extends GetxController {
     String paymentMethod = 'Cash',
   }) async {
     try {
-      isLoading.value = true;
+      isTransacting.value = true; // ← isLoading নয়, isTransacting
 
       final String finalMonth = month ?? DateFormat('MMMM yyyy').format(date);
       final staffRef = db.collection('staff').doc(staffId);
 
-      // ── Step 1: Read current debt (outside the batch — read-then-write) ───
-      final staffSnap = await staffRef.get();
-      if (!staffSnap.exists) throw 'Staff record not found!';
-
-      final double currentDebt =
-          (staffSnap.data() as Map)['currentDebt']?.toDouble() ?? 0.0;
+      // ── Step 1: Local থেকে currentDebt পড়ো (Firestore read বাদ) ────────────
+      final localStaff = staffList.firstWhereOrNull((s) => s.id == staffId);
+      if (localStaff == null) throw 'Staff record not found!';
+      final double currentDebt = localStaff.currentDebt;
 
       double newDebt = currentDebt;
       if (type == StaffTransactionType.ADVANCE) {
@@ -363,7 +368,7 @@ class StaffController extends GetxController {
         newDebt = (currentDebt - amount).clamp(0.0, double.infinity);
       }
 
-      // ── Step 2: Build description strings ────────────────────────────────
+      // ── Step 2: Description strings ──────────────────────────────────────────
       String description = '';
       switch (type) {
         case StaffTransactionType.SALARY:
@@ -380,29 +385,21 @@ class StaffController extends GetxController {
           break;
       }
 
-      // ── Step 3: Prepare all document refs ────────────────────────────────
+      // ── Step 3: Document refs ────────────────────────────────────────────────
       final salaryDocRef = staffRef.collection('salaries').doc();
       final cashLedgerRef = db.collection('cash_ledger').doc();
-
-      // For Salary/Advance/Bonus we also need an expense doc ref
-      // We use the collectionGroup path: expenses/{autoId}/items/{autoId}
-      // But DailyExpensesController writes to its own collection path.
-      // We write directly here so the batch stays intact.
-      // Adjust the collection path below to match your daily expenses collection.
       final expenseGroupRef =
           db
-              .collection('expenses') // ← your top-level expense collection
-              .doc(DateFormat('yyyy-MM-dd').format(date)) // daily doc key
+              .collection('daily_expenses')
+              .doc(DateFormat('yyyy-MM-dd').format(date))
               .collection('items')
               .doc();
 
-      // ── Step 4: Build the atomic WriteBatch ───────────────────────────────
+      // ── Step 4: Atomic batch ─────────────────────────────────────────────────
       final batch = db.batch();
 
-      // 4a. Update staff debt
       batch.update(staffRef, {'currentDebt': newDebt});
 
-      // 4b. Write salary/advance/bonus/repayment record (full audit trail)
       batch.set(salaryDocRef, {
         'amount': amount,
         'note': note,
@@ -413,9 +410,7 @@ class StaffController extends GetxController {
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      // 4c. Write cash_ledger entry (drives CashDrawerController balances)
       if (type == StaffTransactionType.REPAYMENT) {
-        // Money coming IN → deposit
         batch.set(cashLedgerRef, {
           'type': 'deposit',
           'amount': amount,
@@ -425,19 +420,6 @@ class StaffController extends GetxController {
           'source': 'staff_repayment',
         });
       } else {
-        // Salary / Advance / Bonus → money going OUT → withdraw
-        batch.set(cashLedgerRef, {
-          'type': 'withdraw',
-          'amount': amount,
-          'method': paymentMethod,
-          'description': description,
-          'timestamp': Timestamp.fromDate(date),
-          'source': 'staff_payment',
-        });
-
-        // 4d. Write expense entry for P&L tracking (same batch)
-        //     This is the doc that DailyExpensesController used to write —
-        //     we write it directly so it's part of the same atomic commit.
         batch.set(expenseGroupRef, {
           'name': description,
           'amount': amount,
@@ -449,15 +431,18 @@ class StaffController extends GetxController {
         });
       }
 
-      // ── Step 5: Commit — ALL writes succeed or ALL fail. No partial state. ─
+      // ── Step 5: Commit ───────────────────────────────────────────────────────
       await batch.commit();
 
-      // ── Step 6: Refresh UI (after confirmed commit) ───────────────────────
-      if (Get.isRegistered<CashDrawerController>()) {
-        Get.find<CashDrawerController>().fetchData();
-      }
+      Get.find<ActivityLogger>().log(
+        module: LogModule.staff,
+        action: LogAction.payment,
+        description: '$description via $paymentMethod',
+        targetId: staffId,
+      );
 
-      await loadStaff();
+      // ── Step 6: Dialog অবিলম্বে বন্ধ করো ─────────────────────────────────────
+      isTransacting.value = false;
       if (Get.isDialogOpen ?? false) Get.back();
 
       Get.snackbar(
@@ -467,8 +452,13 @@ class StaffController extends GetxController {
         colorText: Colors.white,
         snackPosition: SnackPosition.BOTTOM,
       );
+
+      // ── Step 7: Background refresh — dialog block করে না ─────────────────────
+      if (Get.isRegistered<CashDrawerController>()) {
+        Get.find<CashDrawerController>().fetchData();
+      }
+      loadStaff(); // ← await নেই, background-এ চলবে
     } catch (e) {
-      // Nothing was written to Firestore if we're here — fully safe to retry.
       Get.snackbar(
         'Transaction Failed',
         'Nothing was saved. Please try again.\n\nDetail: $e',
@@ -478,7 +468,7 @@ class StaffController extends GetxController {
         snackPosition: SnackPosition.BOTTOM,
       );
     } finally {
-      isLoading.value = false;
+      isTransacting.value = false; // safety net
     }
   }
 
@@ -517,7 +507,6 @@ class StaffController extends GetxController {
                 .get();
 
         double paidAmount = 0.0;
-        // ④ Collect per-method breakdown for the report
         Map<String, double> methodBreakdown = {
           'Cash': 0,
           'Bank': 0,
@@ -526,9 +515,11 @@ class StaffController extends GetxController {
         };
 
         for (var doc in salarySnap.docs) {
-          double amt = (doc['amount'] as num).toDouble();
+          // ── FIX: safely read paymentMethod via data() map ─────────────────
+          final data = doc.data() as Map<String, dynamic>;
+          double amt = (data['amount'] as num).toDouble();
           paidAmount += amt;
-          String m = (doc['paymentMethod'] ?? 'Cash').toString();
+          String m = (data['paymentMethod'] as String?) ?? 'Cash';
           methodBreakdown[m] = (methodBreakdown[m] ?? 0) + amt;
         }
 
@@ -556,7 +547,6 @@ class StaffController extends GetxController {
                   ? 'PARTIAL'
                   : 'UNPAID';
 
-          // Build method summary string e.g. "Cash:5000 Bkash:3000"
           String methodSummary = methodBreakdown.entries
               .where((e) => e.value > 0)
               .map((e) => '${e.key}:${e.value.toStringAsFixed(0)}')
@@ -570,7 +560,7 @@ class StaffController extends GetxController {
             deduction > 0 ? '(-${deduction.toStringAsFixed(0)})' : '-',
             effectiveSalary.toStringAsFixed(0),
             paidAmount.toStringAsFixed(0),
-            methodSummary, // ← NEW column
+            methodSummary,
             due.toStringAsFixed(0),
             status,
           ]);
@@ -579,7 +569,7 @@ class StaffController extends GetxController {
 
       pdf.addPage(
         pw.MultiPage(
-          pageFormat: PdfPageFormat.a4.landscape, // landscape for extra column
+          pageFormat: PdfPageFormat.a4.landscape,
           margin: const pw.EdgeInsets.all(30),
           build:
               (context) => [
@@ -658,7 +648,7 @@ class StaffController extends GetxController {
                     'Suspension (-)',
                     'Payable',
                     'Paid',
-                    'Paid Via', // ← NEW column header
+                    'Paid Via',
                     'Due',
                     'Status',
                   ],
@@ -697,6 +687,10 @@ class StaffController extends GetxController {
       await Printing.layoutPdf(
         onLayout: (PdfPageFormat format) async => bytes,
         name: 'Payroll_$month.pdf',
+      );
+      Get.find<ActivityLogger>().logExport(
+        LogModule.staff,
+        'Payroll report exported: $month',
       );
       Get.snackbar(
         'Success',
@@ -844,7 +838,6 @@ class StaffController extends GetxController {
                 ),
               ),
               pw.SizedBox(height: 20),
-              // ⑤ Updated table now shows Payment Method column
               pw.Table.fromTextArray(
                 headers: ['Date', 'Type', 'Month/Ref', 'Note', 'Via', 'Amount'],
                 headerStyle: pw.TextStyle(
@@ -871,7 +864,7 @@ class StaffController extends GetxController {
                             s.type ?? 'SALARY',
                             s.month,
                             s.note,
-                            s.paymentMethod, // ← NEW column
+                            s.paymentMethod,
                             s.amount.toStringAsFixed(0),
                           ],
                         )
@@ -984,7 +977,7 @@ class StaffController extends GetxController {
     String month,
     String note,
     DateTime date, {
-    String paymentMethod = 'Cash', // ← NEW optional param
+    String paymentMethod = 'Cash',
   }) async {
     try {
       final pdf = pw.Document();
@@ -1042,7 +1035,7 @@ class StaffController extends GetxController {
                               'Date: ${DateFormat('dd MMM yyyy').format(date)}',
                             ),
                             pw.Text('Period: $month'),
-                            pw.Text('Paid Via: $paymentMethod'), // ← NEW
+                            pw.Text('Paid Via: $paymentMethod'),
                           ],
                         ),
                       ],
@@ -1107,6 +1100,60 @@ class StaffController extends GetxController {
     }
   }
 
+  // ── 11. FETCH BONUS MONTHS SUMMARY FOR YEAR ───────────────────────────────
+  //
+  //  এই method current year-এর সব bonus transactions scan করে
+  //  এবং প্রতিটা month-এর total amount একটা list হিসেবে return করে।
+  //  _showBonusPickerDialog() এটা call করে dialog-এ month list দেখায়।
+  //
+  Future<List<Map<String, dynamic>>> fetchBonusMonthsSummary({
+    int? year,
+  }) async {
+    final int targetYear = year ?? DateTime.now().year;
+    final Map<String, double> monthTotals = {};
+
+    for (final staff in staffList) {
+      final snap =
+          await db
+              .collection('staff')
+              .doc(staff.id)
+              .collection('salaries')
+              .where('type', isEqualTo: 'BONUS')
+              .get();
+
+      for (final doc in snap.docs) {
+        // ── FIX: safely read date & paymentMethod via data() map ──────────
+        final data = doc.data();
+        final dynamic rawDate = data['date'];
+        if (rawDate == null) continue;
+        final DateTime date = (rawDate as Timestamp).toDate();
+        if (date.year != targetYear) continue;
+        final String month = DateFormat('MMMM yyyy').format(date);
+        final double amt = (data['amount'] as num).toDouble();
+        monthTotals[month] = (monthTotals[month] ?? 0) + amt;
+      }
+    }
+
+    final List<Map<String, dynamic>> result =
+        monthTotals.entries
+            .map((e) => <String, dynamic>{'month': e.key, 'total': e.value})
+            .toList();
+
+    // January → December অনুযায়ী sort
+    result.sort((a, b) {
+      final DateTime aDate = DateFormat(
+        'MMMM yyyy',
+      ).parse(a['month'] as String);
+      final DateTime bDate = DateFormat(
+        'MMMM yyyy',
+      ).parse(b['month'] as String);
+      return aDate.compareTo(bDate);
+    });
+
+    return result;
+  }
+
+  // ── 12. MONTHLY BONUS REPORT PDF ──────────────────────────────────────────
   Future<void> downloadMonthlyBonusReport(String month) async {
     isLoading.value = true;
     try {
@@ -1129,11 +1176,16 @@ class StaffController extends GetxController {
         Map<String, double> methodBreakdown = {};
 
         for (var doc in bonusSnap.docs) {
-          double amt = (doc['amount'] as num).toDouble();
+          // ── FIX: safely read all fields via data() map ────────────────────
+          final data = doc.data() as Map<String, dynamic>;
+          double amt = (data['amount'] as num).toDouble();
           staffTotalBonus += amt;
-          final n = doc['note']?.toString() ?? '';
-          if (n.isNotEmpty) notes += notes.isEmpty ? n : ', $n';
-          String m = (doc['paymentMethod'] ?? 'Cash').toString();
+          final n = data['note']?.toString() ?? '';
+          if (n.isNotEmpty) {
+            notes += notes.isEmpty ? n : ', $n';
+          }
+          // paymentMethod field নাও থাকতে পারে (পুরনো documents)
+          String m = (data['paymentMethod'] as String?) ?? 'Cash';
           methodBreakdown[m] = (methodBreakdown[m] ?? 0) + amt;
         }
 
@@ -1149,7 +1201,7 @@ class StaffController extends GetxController {
             staff.des,
             staff.phone,
             notes.isEmpty ? 'Bonus/Festival' : notes,
-            methodSummary.isEmpty ? 'Cash' : methodSummary, // ← NEW
+            methodSummary.isEmpty ? 'Cash' : methodSummary,
             staffTotalBonus.toStringAsFixed(0),
           ]);
         }
@@ -1241,7 +1293,7 @@ class StaffController extends GetxController {
                     'Designation',
                     'Phone',
                     'Note',
-                    'Paid Via', // ← NEW
+                    'Paid Via',
                     'Amount Paid',
                   ],
                   data: reportData,
@@ -1276,6 +1328,10 @@ class StaffController extends GetxController {
       await Printing.layoutPdf(
         onLayout: (PdfPageFormat format) async => bytes,
         name: 'BonusReport_$month.pdf',
+      );
+      Get.find<ActivityLogger>().logExport(
+        LogModule.staff,
+        'Bonus report exported: $month',
       );
       Get.snackbar(
         'Success',

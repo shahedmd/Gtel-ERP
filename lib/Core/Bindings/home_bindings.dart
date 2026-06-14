@@ -10,6 +10,7 @@ import 'package:gtel_erp/Web%20Screen/Sales/controller.dart';
 import 'package:gtel_erp/Web%20Screen/Staff/controller.dart';
 import 'package:gtel_erp/Web%20Screen/overviewcontroller.dart';
 import 'package:gtel_erp/controller.dart';
+import '../Gtel Expense/Daily Expense/dailyexpensecontroller.dart';
 
 class HomeBinding extends Bindings {
   @override
@@ -24,6 +25,7 @@ class HomeBinding extends Bindings {
     Get.lazyPut(() => StaffController());
     Get.lazyPut(() => DebtorPurchaseController());
     Get.lazyPut(() => OverviewController());
-    Get.lazyPut(()=> RoleController());
+    Get.lazyPut(() => RoleController());
+    Get.lazyPut(() => DailyExpensesController());
   }
 }

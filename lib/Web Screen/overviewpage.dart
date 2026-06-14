@@ -5,13 +5,15 @@ import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
-
 import 'overviewcontroller.dart'; // Ensure this import points to your controller file
 
 class DailyOverviewPage extends StatelessWidget {
   DailyOverviewPage({super.key});
 
-  final OverviewController ctrl = Get.put(OverviewController());
+  final OverviewController ctrl = Get.put(
+    OverviewController(),
+    permanent: true,
+  );
 
   // --- ERP THEME COLORS ---
   static const Color slateDark = Color(0xFF0F172A);
