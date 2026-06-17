@@ -12,13 +12,11 @@ import 'Core/Auth/login.dart';
 import 'Web Screen/homepage.dart';
 
 Future<void> main() async {
-
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   await Get.putAsync(() async => SessionController());
   await Get.putAsync(() async => ActivityLogger());
   runApp(const MyApp());
-  
 }
 
 class MyApp extends StatelessWidget {

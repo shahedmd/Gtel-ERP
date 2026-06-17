@@ -4,7 +4,7 @@ import 'package:get/get.dart';
 import 'package:gtel_erp/Core/Menubar%20&%20Navigation/app_pages.dart';
 import 'package:gtel_erp/Core/Utils/navigation_key.dart';
 import 'package:gtel_erp/controller.dart';
-
+import '../../Permission/permission_controller.dart';
 import '../Auth/auth.dart';
 
 class MenuItem {
@@ -185,158 +185,193 @@ class SidebarMenu extends StatelessWidget {
             child: Obx(() {
               final isSuperAdmin = rolecontroller.isSuperAdmin;
 
+              // ── Permission controller (live listens user permissions) ──
+              final permCtrl =
+                  Get.isRegistered<PermissionController>()
+                      ? Get.find<PermissionController>()
+                      : Get.put(PermissionController(), permanent: true);
+
+              // Super Admin হলে সব true, অন্য রোলে permissions থেকে চেক
+              bool canView(String moduleKey) =>
+                  isSuperAdmin || permCtrl.can(moduleKey, 'view');
+
+              // ── Expenses group এর sub-items ──────────────────────────
+              final expenseChildren = <Widget>[
+                if (canView('daily_expenses'))
+                  _NavTile(
+                    id: Routes.dailyexpenses,
+                    title: "Daily Expenses",
+                    isSubItem: true,
+                  ),
+                if (canView('monthly_expenses'))
+                  _NavTile(
+                    id: Routes.monthlyexpense,
+                    title: "Monthly Expenses",
+                    isSubItem: true,
+                  ),
+              ];
+
+              // ── Sales group এর sub-items ─────────────────────────────
+              final salesChildren = <Widget>[
+                if (canView('daily_sales'))
+                  _NavTile(
+                    id: Routes.dailysales,
+                    title: "Daily Sales",
+                    isSubItem: true,
+                  ),
+                if (canView('monthly_sales'))
+                  _NavTile(
+                    id: Routes.monthlysalespage,
+                    title: "Monthly Sales",
+                    isSubItem: true,
+                  ),
+                if (canView('condition_sale'))
+                  _NavTile(
+                    id: Routes.conditionpage,
+                    title: "Condition Sale",
+                    isSubItem: true,
+                  ),
+                if (canView('sale_return'))
+                  _NavTile(
+                    id: Routes.salereturn,
+                    title: "Sale Return",
+                    isSubItem: true,
+                  ),
+                if (canView('staff_overview'))
+                  _NavTile(
+                    id: Routes.staffsalesreport,
+                    title: "Staff Overview",
+                    isSubItem: true,
+                  ),
+                if (canView('product_overview'))
+                  _NavTile(
+                    id: Routes.productoverview,
+                    title: "Product Overview",
+                    isSubItem: true,
+                  ),
+              ];
+
+              // ── Products & Stock group এর sub-items ─────────────────
+              final stockChildren = <Widget>[
+                if (canView('stock'))
+                  _NavTile(
+                    id: Routes.stock,
+                    title: "Stock Management",
+                    isSubItem: true,
+                  ),
+                if (canView('service'))
+                  _NavTile(
+                    id: Routes.service,
+                    title: "Service Product",
+                    isSubItem: true,
+                  ),
+                if (canView('shipment'))
+                  _NavTile(
+                    id: Routes.shipment,
+                    title: "Shipment Details",
+                    isSubItem: true,
+                  ),
+                if (canView('order_list'))
+                  _NavTile(
+                    id: Routes.orderlist,
+                    title: "China Order List",
+                    isSubItem: true,
+                  ),
+              ];
+
               return ListView(
                 padding: const EdgeInsets.symmetric(vertical: 10),
                 physics: const BouncingScrollPhysics(),
                 children: [
-                  _NavTile(
-                    id: Routes.liveorder,
-                    title: "NEW ORDER",
-                    icon: FontAwesomeIcons.moneyBill,
-                  ),
-                  if (isSuperAdmin)
+                  if (canView('new_order'))
+                    _NavTile(
+                      id: Routes.liveorder,
+                      title: "NEW ORDER",
+                      icon: FontAwesomeIcons.moneyBill,
+                    ),
+                  if (canView('customer'))
                     _NavTile(
                       id: Routes.customeroverview,
                       title: "G TEL CUSTOMER",
                       icon: FontAwesomeIcons.user,
                       isSubItem: true,
                     ),
-                  _NavTile(
-                    id: Routes.debtor,
-                    title: "DEBTOR/AGENT ACCOUNT",
-                    icon: FontAwesomeIcons.userCheck,
-                    isSubItem: true,
-                  ),
-                  _NavTile(
-                    id: Routes.localpurchase,
-                    title: "LOCAL PURCHASE",
-                    icon: FontAwesomeIcons.productHunt,
-                  ),
-                  _NavTile(
-                    id: Routes.purchase,
-                    title: "LOCAL PURCHASE HISTORY",
-                    icon: FontAwesomeIcons.productHunt,
-                    isSubItem: true,
-                  ),
-                  if (isSuperAdmin)
+                  if (canView('debtor'))
+                    _NavTile(
+                      id: Routes.debtor,
+                      title: "DEBTOR/AGENT ACCOUNT",
+                      icon: FontAwesomeIcons.userCheck,
+                      isSubItem: true,
+                    ),
+                  if (canView('local_purchase'))
+                    _NavTile(
+                      id: Routes.localpurchase,
+                      title: "LOCAL PURCHASE",
+                      icon: FontAwesomeIcons.productHunt,
+                    ),
+                  if (canView('purchase_history'))
+                    _NavTile(
+                      id: Routes.purchase,
+                      title: "LOCAL PURCHASE HISTORY",
+                      icon: FontAwesomeIcons.productHunt,
+                      isSubItem: true,
+                    ),
+                  if (canView('profit_loss'))
                     _NavTile(
                       id: Routes.profitloss,
                       title: "SALE PROFIT & LOSS",
                       icon: FontAwesomeIcons.chartLine,
                       isSubItem: true,
                     ),
-                  if (isSuperAdmin)
+                  if (canView('overview'))
                     _NavTile(
                       id: Routes.overviewaccount,
                       icon: FontAwesomeIcons.chartPie,
                       title: "OVERVIEW DASHBOARD",
                     ),
-                  if (isSuperAdmin)
+                  if (canView('daily_ledger'))
                     _NavTile(
                       id: Routes.dashboard,
                       icon: FontAwesomeIcons.bookOpen,
                       title: "DAILY LEDGER",
                     ),
-                  if (isSuperAdmin)
+                  if (canView('cash'))
                     _NavTile(
                       id: Routes.cash,
                       icon: FontAwesomeIcons.cashRegister,
                       title: "CASH DRAWER",
                     ),
-                  if (isSuperAdmin)
+                  if (canView('vendor'))
                     _NavTile(
                       id: Routes.vendor,
                       title: "G TEL VENDOR",
                       icon: FontAwesomeIcons.userTie,
                       isSubItem: true,
                     ),
-                  _NavGroup(
-                    title: "Expenses",
-                    icon: FontAwesomeIcons.wallet,
-                    children: [
-                      _NavTile(
-                        id: Routes.dailyexpenses,
-                        title: "Daily Expenses",
-                        isSubItem: true,
-                      ),
-                      if (isSuperAdmin)
-                        _NavTile(
-                          id: Routes.monthlyexpense,
-                          title: "Monthly Expenses",
-                          isSubItem: true,
-                        ),
-                    ],
-                  ),
-                  _NavGroup(
-                    title: "Sales",
-                    icon: FontAwesomeIcons.receipt,
-                    children: [
-                      _NavTile(
-                        id: Routes.dailysales,
-                        title: "Daily Sales",
-                        isSubItem: true,
-                      ),
-                      if (isSuperAdmin)
-                        _NavTile(
-                          id: Routes.monthlysalespage,
-                          title: "Monthly Sales",
-                          isSubItem: true,
-                        ),
-                      _NavTile(
-                        id: Routes.conditionpage,
-                        title: "Condition Sale",
-                        isSubItem: true,
-                      ),
-                      _NavTile(
-                        id: Routes.salereturn,
-                        title: "Sale Return",
-                        isSubItem: true,
-                      ),
-                      if (isSuperAdmin)
-                        _NavTile(
-                          id: Routes.staffsalesreport,
-                          title: "Staff Overview",
-                          isSubItem: true,
-                        ),
-                      if (isSuperAdmin)
-                        _NavTile(
-                          id: Routes.productoverview,
-                          title: "Product Overview",
-                          isSubItem: true,
-                        ),
-                    ],
-                  ),
-                  _NavGroup(
-                    title: "Products & Stock",
-                    icon: FontAwesomeIcons.boxesStacked,
-                    children: [
-                      _NavTile(
-                        id: Routes.stock,
-                        title: "Stock Management",
-                        isSubItem: true,
-                      ),
-                      _NavTile(
-                        id: Routes.service,
-                        title: "Service Product",
-                        isSubItem: true,
-                      ),
-                      if (isSuperAdmin)
-                        _NavTile(
-                          id: Routes.shipment,
-                          title: "Shipment Details",
-                          isSubItem: true,
-                        ),
-                      if (isSuperAdmin)
-                        _NavTile(
-                          id: Routes.orderlist,
-                          title: "China Order List",
-                          isSubItem: true,
-                        ),
-                    ],
-                  ),
 
-                  // ── Staff & Admin Section ───────────────────────────────
-                  if (isSuperAdmin) ...[
+                  if (expenseChildren.isNotEmpty)
+                    _NavGroup(
+                      title: "Expenses",
+                      icon: FontAwesomeIcons.wallet,
+                      children: expenseChildren,
+                    ),
+
+                  if (salesChildren.isNotEmpty)
+                    _NavGroup(
+                      title: "Sales",
+                      icon: FontAwesomeIcons.receipt,
+                      children: salesChildren,
+                    ),
+
+                  if (stockChildren.isNotEmpty)
+                    _NavGroup(
+                      title: "Products & Stock",
+                      icon: FontAwesomeIcons.boxesStacked,
+                      children: stockChildren,
+                    ),
+
+                  // ── Staff & Admin Section ─────────────────────────────
+                  if (isSuperAdmin || canView('staff')) ...[
                     const Padding(
                       padding: EdgeInsets.symmetric(
                         horizontal: 24,
@@ -344,17 +379,19 @@ class SidebarMenu extends StatelessWidget {
                       ),
                       child: Divider(color: Colors.white10, thickness: 1),
                     ),
-                    _NavTile(
-                      id: Routes.staff,
-                      icon: FontAwesomeIcons.userTie,
-                      title: "Staff Members",
-                    ),
-                    // ── নতুন: Super Admin Panel ─────────────────────────
-                    _NavTile(
-                      id: Routes.superadmin,
-                      icon: FontAwesomeIcons.userShield,
-                      title: "Super Admin Panel",
-                    ),
+                    if (canView('staff'))
+                      _NavTile(
+                        id: Routes.staff,
+                        icon: FontAwesomeIcons.userTie,
+                        title: "Staff Members",
+                      ),
+                    // ── Super Admin Panel শুধুমাত্র super admin দেখবে ──
+                    if (isSuperAdmin)
+                      _NavTile(
+                        id: Routes.superadmin,
+                        icon: FontAwesomeIcons.userShield,
+                        title: "Super Admin Panel",
+                      ),
                   ],
                 ],
               );
@@ -454,7 +491,7 @@ class SidebarMenu extends StatelessWidget {
 
             const SizedBox(height: 12),
 
-            // ── নতুন: Logout Button ───────────────────────────────────
+            // ── Logout Button ─────────────────────────────────────────
             SizedBox(
               width: double.infinity,
               child: TextButton.icon(

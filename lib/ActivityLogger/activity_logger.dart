@@ -2,7 +2,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Core/Services/session_controller.dart';
 
-// ── Action Constants ──────────────────────────────────────────────────────────
 class LogAction {
   static const String create = 'CREATE';
   static const String update = 'UPDATE';
