@@ -36,7 +36,7 @@ class MonthlySalesPage extends StatelessWidget {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => controller.generateMonthlyReportPDF(),
         backgroundColor: darkSlate,
-        icon: const Icon(FontAwesomeIcons.filePdf, color: Colors.white),
+        icon: const FaIcon(FontAwesomeIcons.filePdf, color: Colors.white),
         label: const Text(
           "Download Report",
           style: TextStyle(color: Colors.white),
@@ -140,34 +140,38 @@ class MonthlySalesPage extends StatelessWidget {
     );
   }
 
-  // --- 3. DASHBOARD SUMMARY ---
   Widget _buildSummaryOverview() {
     return Obx(
       () => Container(
         margin: const EdgeInsets.all(24),
-        child: Row(
-          children: [
-            _buildSummaryCard(
-              "TOTAL SALES",
-              controller.totalMonthlySales.value,
-              FontAwesomeIcons.fileInvoiceDollar,
-              activeAccent,
-            ),
-            const SizedBox(width: 16),
-            _buildSummaryCard(
-              "COLLECTED",
-              controller.totalMonthlyCollection.value,
-              FontAwesomeIcons.handHoldingDollar,
-              successGreen,
-            ),
-            const SizedBox(width: 16),
-            _buildSummaryCard(
-              "BALANCE DUE",
-              controller.totalMonthlyDue.value,
-              FontAwesomeIcons.scaleUnbalanced,
-              controller.totalMonthlyDue.value > 0 ? warningOrange : textMuted,
-            ),
-          ],
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              _buildSummaryCard(
+                "TOTAL SALES",
+                controller.totalMonthlySales.value,
+                FontAwesomeIcons.fileInvoiceDollar,
+                activeAccent,
+              ),
+              const SizedBox(width: 16),
+              _buildSummaryCard(
+                "COLLECTED",
+                controller.totalMonthlyCollection.value,
+                FontAwesomeIcons.handHoldingDollar,
+                successGreen,
+              ),
+              const SizedBox(width: 16),
+              _buildSummaryCard(
+                "BALANCE DUE",
+                controller.totalMonthlyDue.value,
+                FontAwesomeIcons.scaleUnbalanced,
+                controller.totalMonthlyDue.value > 0
+                    ? warningOrange
+                    : textMuted,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -176,54 +180,53 @@ class MonthlySalesPage extends StatelessWidget {
   Widget _buildSummaryCard(
     String title,
     double amount,
-    IconData icon,
+    final dynamic icon,
     Color color,
   ) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.03),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
-          border: Border(left: BorderSide(color: color, width: 4)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    color: textMuted,
-                  ),
+    return Container(
+      width: 150, // optional fixed width, or use constraints
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+        border: Border(left: BorderSide(color: color, width: 4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: textMuted,
                 ),
-                Icon(icon, size: 16, color: color.withOpacity(0.5)),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              NumberFormat('#,##0').format(amount),
-              style: TextStyle(
-                fontSize:
-                    18, // Responsive sizing might be needed for small screens
-                fontWeight: FontWeight.bold,
-                color: color,
               ),
-              overflow: TextOverflow.ellipsis,
+              FaIcon(icon, size: 16, color: color.withOpacity(0.5)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            NumberFormat('#,##0').format(amount),
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: color,
             ),
-          ],
-        ),
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
+          ),
+        ],
       ),
     );
   }
@@ -304,7 +307,11 @@ class MonthlySalesPage extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: const [
-              Icon(FontAwesomeIcons.calendarXmark, size: 40, color: textMuted),
+              FaIcon(
+                FontAwesomeIcons.calendarXmark,
+                size: 40,
+                color: textMuted,
+              ),
               SizedBox(height: 16),
               Text(
                 "No transactions found for this month",
@@ -327,7 +334,7 @@ class MonthlySalesPage extends StatelessWidget {
         ), // Bottom padding for FAB
         itemCount: dailyList.length,
         separatorBuilder:
-            (_, __) => const Divider(height: 1, color: Color(0xFFE5E7EB)),
+            (_, _) => const Divider(height: 1, color: Color(0xFFE5E7EB)),
         itemBuilder: (context, index) {
           final stat = dailyList[index].value;
           final isNegative =

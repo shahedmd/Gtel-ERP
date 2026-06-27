@@ -517,7 +517,7 @@ class _ProductScreenState extends State<ProductScreen> {
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.symmetric(horizontal: 6),
                   itemCount: controller.warehouses.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 4),
+                  separatorBuilder: (_, _) => const SizedBox(width: 4),
                   itemBuilder: (_, i) {
                     final w = controller.warehouses[i];
                     final selected =
@@ -2362,7 +2362,7 @@ class _ProductScreenState extends State<ProductScreen> {
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Active', style: TextStyle(fontSize: 14)),
                 value: isActive.value,
-                activeColor: _kBlue,
+                activeThumbColor: _kBlue,
                 onChanged: (v) => isActive.value = v,
               ),
             ),

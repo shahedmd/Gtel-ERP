@@ -7,7 +7,6 @@ import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/createdebtordialo
 import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/debtordetails_transactionlist.dart';
 import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/gteldebtorcontroller.dart';
 import 'package:intl/intl.dart';
-
 import '../../Permission/permission_button.dart';
 import '../../Permission/permission_controller.dart';
 import '../../controller.dart';
@@ -330,7 +329,7 @@ class Debatorpage extends StatelessWidget {
   Widget _buildKPICard({
     required String title,
     required double value,
-    required IconData icon,
+    final dynamic icon,
     required Color color,
     required bool isMobile,
   }) {
@@ -356,7 +355,11 @@ class Debatorpage extends StatelessWidget {
               color: color.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: FaIcon(icon, color: color, size: isMobile ? 18 : 20),
+            // এখানে চেক করা হচ্ছে আইকনটি ফ্লাটারের নাকি ফন্ট অসামের
+            child:
+                icon is IconData
+                    ? Icon(icon, color: color, size: isMobile ? 18 : 20)
+                    : FaIcon(icon, color: color, size: isMobile ? 18 : 20),
           ),
           SizedBox(width: isMobile ? 10 : 15),
           Expanded(
@@ -389,7 +392,7 @@ class Debatorpage extends StatelessWidget {
   }
 
   Widget _buildReportButton({
-    required IconData icon,
+    final dynamic icon,
     required String label,
     required VoidCallback onTap,
     required Color color,
@@ -406,7 +409,10 @@ class Debatorpage extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(icon, size: 16, color: color),
+            // আইকন রেন্ডারিং লজিক আপডেট করা হয়েছে
+            icon is IconData
+                ? Icon(icon, size: 16, color: color)
+                : FaIcon(icon, size: 16, color: color),
             const SizedBox(width: 8),
             Text(
               label,
@@ -435,7 +441,7 @@ class Debatorpage extends StatelessWidget {
         return ListView.separated(
           padding: const EdgeInsets.all(12),
           itemCount: controller.filteredBodies.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 12),
+          separatorBuilder: (_, _) => const SizedBox(height: 12),
           itemBuilder:
               (context, index) =>
                   _buildMobileCard(controller.filteredBodies[index]),
@@ -536,7 +542,6 @@ class Debatorpage extends StatelessWidget {
   }
 
   Widget _buildDesktopRow(dynamic debtor) {
-    // MEMORY SAFE: Read directly from static model instead of StreamBuilder!
     double bal = debtor.balance;
     bool isDue = bal > 0;
 
@@ -683,7 +688,6 @@ class Debatorpage extends StatelessWidget {
                   final canDelete =
                       roleCtrl.isSuperAdmin || permCtrl.can('debtor', 'delete');
 
-                  // কোনো permission নেই তাহলে button hide করো
                   if (!canView && !canDelete) return const SizedBox.shrink();
 
                   return PopupMenuButton<String>(
@@ -749,7 +753,6 @@ class Debatorpage extends StatelessWidget {
   }
 
   Widget _buildMobileCard(dynamic debtor) {
-    // MEMORY SAFE: Read directly from static model instead of StreamBuilder!
     double bal = debtor.balance;
     bool isDue = bal > 0;
 
@@ -999,7 +1002,7 @@ class Debatorpage extends StatelessWidget {
               color: Colors.grey.shade100,
               shape: BoxShape.circle,
             ),
-            child: Icon(
+            child: FaIcon(
               FontAwesomeIcons.magnifyingGlass,
               size: 40,
               color: textLight.withValues(alpha: 0.5),
@@ -1090,9 +1093,6 @@ class Debatorpage extends StatelessWidget {
     });
   }
 
-  // ==========================================
-  // DIALOGS
-  // ==========================================
   void _confirmSyncDialog() {
     Get.defaultDialog(
       title: "Synchronize Balances",

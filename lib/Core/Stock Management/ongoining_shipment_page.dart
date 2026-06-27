@@ -229,7 +229,7 @@ class _OnGoingShipmentsPageState extends State<OnGoingShipmentsPage> {
     return ListView.separated(
       padding: const EdgeInsets.all(12),
       itemCount: dynamicList.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 12),
+      separatorBuilder: (_, _) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
         final product = dynamicList[index];
         return Container(

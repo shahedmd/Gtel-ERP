@@ -52,7 +52,7 @@ void addStaffDialog(StaffController controller) {
                     ),
                     child: Row(
                       children: [
-                        const Icon(
+                        const FaIcon(
                           FontAwesomeIcons.userPlus,
                           color: Colors.white,
                           size: 16,
@@ -296,7 +296,7 @@ Widget _sectionLabel(String label) {
 Widget _buildField(
   TextEditingController c,
   String hint,
-  IconData icon, {
+  final dynamic icon, {
   TextInputType type = TextInputType.text,
 }) {
   return TextField(

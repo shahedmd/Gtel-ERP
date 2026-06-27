@@ -451,7 +451,7 @@ class OrderHistoryPage extends StatelessWidget {
       () => ListView.separated(
         padding: const EdgeInsets.all(12),
         itemCount: ctrl.orders.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 12),
+        separatorBuilder: (_, _) => const SizedBox(height: 12),
         itemBuilder: (context, index) {
           final doc = ctrl.orders[index];
           final data = doc.data() as Map<String, dynamic>;
@@ -1043,7 +1043,7 @@ class OrderHistoryPage extends StatelessWidget {
                               child: ListView.separated(
                                 itemCount: items.length,
                                 separatorBuilder:
-                                    (_, __) => const Divider(height: 1),
+                                    (_, _) => const Divider(height: 1),
                                 itemBuilder: (context, index) {
                                   final item = items[index];
                                   return ListTile(
@@ -1389,7 +1389,7 @@ class _AddProductToOrderDialog extends StatelessWidget {
                         )
                         : ListView.separated(
                           itemCount: searchResults.length,
-                          separatorBuilder: (_, __) => const Divider(height: 1),
+                          separatorBuilder: (_, _) => const Divider(height: 1),
                           itemBuilder: (context, index) {
                             final productMap = searchResults[index];
                             return ListTile(

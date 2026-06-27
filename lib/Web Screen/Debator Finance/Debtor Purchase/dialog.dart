@@ -292,7 +292,7 @@ void showPurchaseDialog(BuildContext context, String debtorId) {
                     return ListView.separated(
                       padding: const EdgeInsets.all(8),
                       itemCount: controller.cartItems.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      separatorBuilder: (_, _) => const Divider(height: 1),
                       itemBuilder: (ctx, i) {
                         final item = controller.cartItems[i];
                         return ListTile(

@@ -492,7 +492,7 @@ class ConditionSalesPage extends StatelessWidget {
                       ctrl.filteredOrders.length +
                       (ctrl.isMoreLoading.value ? 1 : 0),
                   separatorBuilder:
-                      (_, __) => const Divider(height: 1, thickness: 0.5),
+                      (_, _) => const Divider(height: 1, thickness: 0.5),
                   itemBuilder: (context, index) {
                     // Show Loading Indicator at bottom
                     if (index == ctrl.filteredOrders.length) {

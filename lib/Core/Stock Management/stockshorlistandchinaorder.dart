@@ -483,7 +483,7 @@ class _ShortlistPageState extends State<ShortlistPage> {
     return ListView.separated(
       padding: const EdgeInsets.all(12),
       itemCount: products.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 12),
+      separatorBuilder: (_, _) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
         final product = products[index];
         return _MobileCard(
@@ -761,7 +761,7 @@ class _ShortlistPageState extends State<ShortlistPage> {
                   return ListView.separated(
                     shrinkWrap: true,
                     itemCount: cartController.cartItems.length,
-                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    separatorBuilder: (_, _) => const Divider(height: 1),
                     itemBuilder: (context, index) {
                       final item = cartController.cartItems[index];
                       return _CartItemRow(
@@ -850,7 +850,7 @@ class _ShortlistPageState extends State<ShortlistPage> {
   Widget _buildCartDropdown() {
     return Obx(
       () => DropdownButtonFormField<String>(
-        value: cartController.deliveryMethod.value,
+        initialValue: cartController.deliveryMethod.value,
         decoration: const InputDecoration(
           labelText: "Delivery Via",
           border: OutlineInputBorder(),

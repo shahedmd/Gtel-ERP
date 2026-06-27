@@ -534,7 +534,7 @@ class StaffDetailsPage extends StatelessWidget {
                 physics: const NeverScrollableScrollPhysics(),
                 itemCount: snapshot.data!.length,
                 separatorBuilder:
-                    (_, __) =>
+                    (_, _) =>
                         const Divider(height: 1, color: Color(0xFFF3F4F6)),
                 itemBuilder: (context, index) {
                   final t = snapshot.data![index];
@@ -1004,7 +1004,7 @@ class _MobileTransactionCard extends StatelessWidget {
 class _StatData {
   final String label;
   final String value;
-  final IconData icon;
+  final dynamic icon;
   final Color color;
   const _StatData(this.label, this.value, this.icon, this.color);
 }

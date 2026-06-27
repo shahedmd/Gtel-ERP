@@ -781,7 +781,7 @@ class VendorDetailPage extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16),
         itemCount: controller.currentTransactions.length,
         separatorBuilder:
-            (_, __) => const Divider(height: 1, color: AppTheme.border),
+            (_, _) => const Divider(height: 1, color: AppTheme.border),
         itemBuilder: (context, index) {
           final tx = controller.currentTransactions[index];
           bool isCredit = tx.type == 'CREDIT';

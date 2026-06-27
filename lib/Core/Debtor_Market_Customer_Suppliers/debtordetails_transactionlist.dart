@@ -202,6 +202,18 @@ class Debatordetails extends StatelessWidget {
   final ScrollController _hScroll = ScrollController();
   final ScrollController _vScroll = ScrollController();
 
+  Widget _buildIcon(
+    dynamic iconData, {
+    double size = 14,
+    Color color = Colors.black,
+  }) {
+    if (iconData is FaIconData) {
+      return FaIcon(iconData, size: size, color: color);
+    } else {
+      return Icon(iconData as IconData, size: size, color: color);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final pageCtrl = Get.put(DebtorDetailsController(id), tag: id);
@@ -340,7 +352,7 @@ class Debatordetails extends StatelessWidget {
                     value: 'purchases',
                     child: Row(
                       children: [
-                        Icon(
+                        FaIcon(
                           FontAwesomeIcons.bagShopping,
                           size: 16,
                           color: darkSlate,
@@ -364,7 +376,7 @@ class Debatordetails extends StatelessWidget {
                     value: 'pdf',
                     child: Row(
                       children: [
-                        Icon(
+                        FaIcon(
                           FontAwesomeIcons.filePdf,
                           size: 16,
                           color: debitColor,
@@ -378,7 +390,7 @@ class Debatordetails extends StatelessWidget {
           )
         else ...[
           IconButton(
-            icon: const Icon(
+            icon: const FaIcon(
               FontAwesomeIcons.bagShopping,
               size: 18,
               color: darkSlate,
@@ -404,7 +416,7 @@ class Debatordetails extends StatelessWidget {
           TextButton.icon(
             onPressed:
                 () => _openPdfDownloadDialog(id, name, pageCtrl.mainController),
-            icon: const Icon(
+            icon: const FaIcon(
               FontAwesomeIcons.filePdf,
               size: 14,
               color: debitColor,
@@ -477,7 +489,7 @@ class Debatordetails extends StatelessWidget {
                   color: Colors.white12,
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(
+                child: const FaIcon(
                   FontAwesomeIcons.sackDollar,
                   color: Colors.white,
                   size: 24,
@@ -525,7 +537,12 @@ class Debatordetails extends StatelessWidget {
     );
   }
 
-  Widget _balanceCard(IconData icon, String title, double amount, Color color) {
+  Widget _balanceCard(
+    final dynamic icon,
+    String title,
+    double amount,
+    Color color,
+  ) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -538,7 +555,7 @@ class Debatordetails extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(icon, size: 14, color: color),
+              _buildIcon(icon, size: 14, color: color),
               const SizedBox(width: 8),
               Text(
                 title,
@@ -715,7 +732,7 @@ class Debatordetails extends StatelessWidget {
                 physics: const NeverScrollableScrollPhysics(),
                 itemCount: txList.length,
                 separatorBuilder:
-                    (_, __) =>
+                    (_, _) =>
                         const Divider(height: 1, color: Color(0xFFF1F5F9)),
                 itemBuilder:
                     (context, index) => _buildMobileCard(
@@ -905,7 +922,7 @@ class Debatordetails extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Icon(tInfo['icon'], size: 10, color: tInfo['color']),
+                    _buildIcon(tInfo['icon'], size: 10, color: tInfo['color']),
                     const SizedBox(width: 4),
                     Text(
                       tInfo['label'],
@@ -1058,7 +1075,7 @@ class Debatordetails extends StatelessWidget {
               ),
               Row(
                 children: [
-                  Icon(tInfo['icon'], size: 10, color: tInfo['color']),
+                  _buildIcon(tInfo['icon'], size: 10, color: tInfo['color']),
                   const SizedBox(width: 4),
                   Text(
                     tInfo['label'],
@@ -1201,7 +1218,8 @@ class Debatordetails extends StatelessWidget {
 
   Map<String, dynamic> _getTxInfo(DisplayTx tx) {
     Color typeColor = Colors.grey;
-    IconData typeIcon = Icons.circle;
+    // IconData এর বদলে dynamic ব্যবহার করা হয়েছে কারণ FontAwesomeIcons এখন আর IconData নয়
+    dynamic typeIcon = Icons.circle;
     String typeLabel = tx.type;
 
     if (tx.type == 'credit') {
@@ -1242,21 +1260,7 @@ class Debatordetails extends StatelessWidget {
       typeLabel = "LOAN COLLECT";
     }
 
-    String? invId;
-    if (tx.id.startsWith('GTEL')) {
-      invId = tx.id.replaceAll('_pay', '');
-    } else if (tx.note.contains('GTEL-')) {
-      RegExp reg = RegExp(r'GTEL-\d+-\d+');
-      var match = reg.firstMatch(tx.note);
-      if (match != null) invId = match.group(0);
-    }
-
-    return {
-      'color': typeColor,
-      'icon': typeIcon,
-      'label': typeLabel,
-      'invId': invId,
-    };
+    return {"color": typeColor, "icon": typeIcon, "label": typeLabel};
   }
 
   Widget _iconBtn(IconData icon, Color color, VoidCallback onTap) => InkWell(
@@ -1488,7 +1492,7 @@ class Debatordetails extends StatelessWidget {
               ),
               title: const Row(
                 children: [
-                  Icon(FontAwesomeIcons.filePdf, color: debitColor, size: 20),
+                  FaIcon(FontAwesomeIcons.filePdf, color: debitColor, size: 20),
                   SizedBox(width: 10),
                   Text(
                     "Export Statement",

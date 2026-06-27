@@ -104,7 +104,8 @@ class AddDebtorFormController extends GetxController {
           }
           finalPayments.add({"type": type, "number": p.numC.text.trim()});
         } else if (type == "bank") {
-          if (p.bankNameC.text.trim().isEmpty || p.bankAccC.text.trim().isEmpty) {
+          if (p.bankNameC.text.trim().isEmpty ||
+              p.bankAccC.text.trim().isEmpty) {
             throw "Bank Name and Account Number are required.";
           }
           finalPayments.add({
@@ -224,7 +225,7 @@ class _AddDebtorDialogUI extends StatelessWidget {
               ),
               child: Row(
                 children: [
-                  const Icon(
+                  const FaIcon(
                     FontAwesomeIcons.userPlus,
                     color: Colors.white,
                     size: 18,
@@ -408,7 +409,10 @@ class _AddDebtorDialogUI extends StatelessWidget {
                               )
                               : const Text(
                                 "Confirm & Save",
-                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                ),
                               ),
                     ),
                   ),
@@ -480,7 +484,7 @@ class _AddDebtorDialogUI extends StatelessWidget {
                   child: const Row(
                     children: [
                       Icon(Icons.check_circle, color: successGreen, size: 16),
-                       SizedBox(width: 8),
+                      SizedBox(width: 8),
                       Flexible(
                         child: Text(
                           "Cash on Delivery / Spot Payment enabled",

@@ -77,7 +77,7 @@ class _SuperAdminPageState extends State<SuperAdminPage>
               color: _blue.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Icon(
+            child: const FaIcon(
               FontAwesomeIcons.userShield,
               color: _blue,
               size: 20,
@@ -142,11 +142,11 @@ class _SuperAdminPageState extends State<SuperAdminPage>
         indicatorWeight: 3,
         tabs: const [
           Tab(
-            icon: Icon(FontAwesomeIcons.users, size: 14),
+            icon: FaIcon(FontAwesomeIcons.users, size: 14),
             text: 'User Management',
           ),
           Tab(
-            icon: Icon(FontAwesomeIcons.clockRotateLeft, size: 14),
+            icon: FaIcon(FontAwesomeIcons.clockRotateLeft, size: 14),
             text: 'Activity Log',
           ),
         ],
@@ -195,7 +195,7 @@ class _SuperAdminPageState extends State<SuperAdminPage>
                 ),
                 child: Row(
                   children: [
-                    const Icon(
+                    const FaIcon(
                       FontAwesomeIcons.userPlus,
                       color: Colors.white,
                       size: 16,
@@ -257,7 +257,7 @@ class _SuperAdminPageState extends State<SuperAdminPage>
                             fontSize: 14,
                             color: _textGrey,
                           ),
-                          prefixIcon: const Icon(
+                          prefixIcon: const FaIcon(
                             FontAwesomeIcons.lock,
                             size: 14,
                             color: Colors.blueGrey,
@@ -340,7 +340,7 @@ class _SuperAdminPageState extends State<SuperAdminPage>
                                     ),
                                     child: Column(
                                       children: [
-                                        Icon(
+                                        FaIcon(
                                           FontAwesomeIcons.userShield,
                                           size: 14,
                                           color: isSelected ? color : _textGrey,
@@ -447,7 +447,7 @@ class _SuperAdminPageState extends State<SuperAdminPage>
   Widget _dialogField({
     required TextEditingController controller,
     required String hint,
-    required IconData icon,
+    final dynamic icon,
     TextInputType type = TextInputType.text,
   }) {
     return TextField(
@@ -585,7 +585,7 @@ class _StatCard extends StatelessWidget {
               color: color.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(
+            child: FaIcon(
               label == 'Total Users'
                   ? FontAwesomeIcons.users
                   : label == 'Active'
@@ -921,7 +921,7 @@ class _ActivityLogTabState extends State<_ActivityLogTab> {
           color: _white,
           child: Row(
             children: [
-              const Icon(FontAwesomeIcons.filter, size: 14, color: _textGrey),
+              const FaIcon(FontAwesomeIcons.filter, size: 14, color: _textGrey),
               const SizedBox(width: 12),
               Expanded(
                 child: _buildDropdown(
@@ -993,7 +993,7 @@ class _ActivityLogTabState extends State<_ActivityLogTab> {
               return ListView.separated(
                 padding: const EdgeInsets.all(24),
                 itemCount: logs.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                separatorBuilder: (_, _) => const SizedBox(height: 8),
                 itemBuilder: (_, i) => _LogTile(doc: logs[i]),
               );
             },
@@ -1010,7 +1010,7 @@ class _ActivityLogTabState extends State<_ActivityLogTab> {
     required ValueChanged<String?> onChanged,
   }) {
     return DropdownButtonFormField<String>(
-      value: value,
+      initialValue: value,
       dropdownColor: _white,
       style: const TextStyle(color: _dark, fontSize: 13),
       decoration: InputDecoration(
@@ -1259,7 +1259,7 @@ class _PermissionMatrixDialogState extends State<_PermissionMatrixDialog> {
               ),
               child: Row(
                 children: [
-                  const Icon(
+                  const FaIcon(
                     FontAwesomeIcons.tableColumns,
                     color: Colors.white,
                     size: 16,

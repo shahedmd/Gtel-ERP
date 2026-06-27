@@ -18,7 +18,8 @@ const Color bonusGold = Color(0xFFF59E0B);
 // Each method has its own icon and color used in the pill selector
 const _methods = ['Cash', 'Bank', 'Bkash', 'Nagad'];
 
-const Map<String, IconData> _methodIcons = {
+// IconData এর বদলে dynamic ব্যবহার করুন
+const Map<String, dynamic> _methodIcons = {
   'Cash': FontAwesomeIcons.moneyBill1Wave,
   'Bank': FontAwesomeIcons.buildingColumns,
   'Bkash': FontAwesomeIcons.mobileScreenButton,
@@ -208,14 +209,11 @@ void addSalaryDialog(
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// UI COMPONENTS
-// ─────────────────────────────────────────────────────────────────────────────
-
 Widget _buildHeader(String name, StaffTransactionType type) {
   String title = "Disburse Salary";
   Color color = darkSlate;
-  IconData icon = FontAwesomeIcons.fileInvoiceDollar;
+  // IconData-এর বদলে dynamic ব্যবহার করা হয়েছে
+  dynamic icon = FontAwesomeIcons.fileInvoiceDollar;
 
   if (type == StaffTransactionType.ADVANCE) {
     title = "Give Advance (Loan)";
@@ -242,7 +240,8 @@ Widget _buildHeader(String name, StaffTransactionType type) {
     ),
     child: Row(
       children: [
-        Icon(icon, color: Colors.white, size: 18),
+        // এখানে Icon-এর বদলে FaIcon ব্যবহার করা হয়েছে
+        FaIcon(icon, color: Colors.white, size: 18),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
@@ -259,6 +258,7 @@ Widget _buildHeader(String name, StaffTransactionType type) {
               Text(
                 "Staff: $name",
                 style: TextStyle(
+                  // .withOpacity লেটেস্ট ভার্সনেও কাজ করবে, তবে চাইলে .withValues(alpha: 0.8) ব্যবহার করতে পারেন
                   color: Colors.white.withOpacity(0.8),
                   fontSize: 12,
                 ),
@@ -268,6 +268,7 @@ Widget _buildHeader(String name, StaffTransactionType type) {
         ),
         IconButton(
           onPressed: () => Get.back(),
+          // এখানে Icons.close একটি সাধারণ Material Icon, তাই এটি Icon উইজেটে সমস্যা করবে না
           icon: const Icon(Icons.close, color: Colors.white54),
         ),
       ],
@@ -456,7 +457,7 @@ Widget _buildDatePicker(Rx<DateTime?> selectedDate) {
         ),
         child: Row(
           children: [
-            const Icon(
+            const FaIcon(
               FontAwesomeIcons.calendarCheck,
               size: 16,
               color: activeAccent,
@@ -623,7 +624,7 @@ Widget _sectionLabel(String label) {
 Widget _buildField(
   TextEditingController c,
   String hint,
-  IconData icon, {
+  final dynamic icon, {
   TextInputType type = TextInputType.text,
 }) {
   return TextField(

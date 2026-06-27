@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:gtel_erp/Core/Gtel%20Expense/Monthly%20Expense/montlyexpensecontroller.dart';
 import 'package:intl/intl.dart';
+
 class MonthlyExpensesPage extends StatelessWidget {
   MonthlyExpensesPage({super.key});
 
@@ -133,7 +134,7 @@ class MonthlyExpensesPage extends StatelessWidget {
               color: activeAccent.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Icon(
+            child: FaIcon(
               FontAwesomeIcons.chartLine,
               color: activeAccent,
               size: isMobile ? 20 : 24,
@@ -569,7 +570,7 @@ class MonthlyExpensesPage extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(FontAwesomeIcons.boxOpen, size: 50, color: Colors.black12),
+          FaIcon(FontAwesomeIcons.boxOpen, size: 50, color: Colors.black12),
           SizedBox(height: 16),
           Text(
             "No expense history found.",

@@ -9,25 +9,15 @@ import 'package:gtel_erp/Shipment/controller.dart';
 import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/gteldebtorcontroller.dart';
 import 'package:gtel_erp/Web%20Screen/Staff/controller.dart';
 import 'package:intl/intl.dart';
-
-// PDF & PRINTING
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-
-// EXTERNAL CONTROLLERS
 import 'package:gtel_erp/Cash/controller.dart';
 import 'package:gtel_erp/Vendor/vendorcontroller.dart';
-
 
 class FinancialController extends GetxController {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  // =========================================================
-  // 1. STATE VARIABLES
-  // =========================================================
-
-  // Local Lists
   RxList<FixedAssetModel> fixedAssets = <FixedAssetModel>[].obs;
   RxList<RecurringExpenseModel> recurringExpenses =
       <RecurringExpenseModel>[].obs;

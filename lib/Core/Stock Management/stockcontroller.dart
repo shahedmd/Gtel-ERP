@@ -5,9 +5,6 @@ import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 import 'stockproductmodel.dart';
 
-// ─── Safe parsing helpers (top-level, reused across all model classes) ────
-
-/// Handles bool fields that may arrive as real bool, int (1/0), or String ("true"/"1").
 bool parseBool(dynamic v) {
   if (v == null) return false;
   if (v is bool) return v;

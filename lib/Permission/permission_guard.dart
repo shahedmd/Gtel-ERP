@@ -62,10 +62,10 @@ class _AccessDeniedPage extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
-                color: const Color(0xFFEF4444).withValues( alpha: 0.1),
+                color: const Color(0xFFEF4444).withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(
+              child: const FaIcon(
                 FontAwesomeIcons.lock,
                 size: 48,
                 color: Color(0xFFEF4444),

@@ -58,7 +58,7 @@ class MonthlySalesDetailPage extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
             child: Row(
               children: const [
-                Icon(FontAwesomeIcons.listCheck, size: 14, color: textMuted),
+                FaIcon(FontAwesomeIcons.listCheck, size: 14, color: textMuted),
                 SizedBox(width: 8),
                 Text(
                   "INVOICE LIST",
@@ -126,7 +126,12 @@ class MonthlySalesDetailPage extends StatelessWidget {
     );
   }
 
-  Widget _summaryItem(String label, double amount, IconData icon, Color color) {
+  Widget _summaryItem(
+    String label,
+    double amount,
+    final dynamic icon,
+    Color color,
+  ) {
     return Expanded(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -177,7 +182,11 @@ class MonthlySalesDetailPage extends StatelessWidget {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: const [
-                Icon(FontAwesomeIcons.boxOpen, size: 40, color: Colors.black12),
+                FaIcon(
+                  FontAwesomeIcons.boxOpen,
+                  size: 40,
+                  color: Colors.black12,
+                ),
                 SizedBox(height: 16),
                 Text(
                   "No invoices generated on this date",
@@ -193,7 +202,7 @@ class MonthlySalesDetailPage extends StatelessWidget {
         return ListView.separated(
           padding: const EdgeInsets.only(left: 20, right: 20, bottom: 40),
           itemCount: transactions.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 12),
+          separatorBuilder: (_, _) => const SizedBox(height: 12),
           itemBuilder: (context, index) {
             final tx = transactions[index];
             return _buildTransactionCard(tx);
@@ -243,7 +252,7 @@ class MonthlySalesDetailPage extends StatelessWidget {
               borderRadius: BorderRadius.circular(8),
             ),
             child: Center(
-              child: Icon(
+              child: FaIcon(
                 isCondition
                     ? FontAwesomeIcons.truckFast
                     : FontAwesomeIcons.fileInvoice,

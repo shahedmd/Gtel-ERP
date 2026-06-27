@@ -313,7 +313,7 @@ class DailyExpensesPage extends StatelessWidget {
               color: activeAccent.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Icon(
+            child: FaIcon(
               FontAwesomeIcons.wallet,
               color: activeAccent,
               size: isMobile ? 20 : 24,

@@ -854,7 +854,7 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
                 ? const NeverScrollableScrollPhysics()
                 : const AlwaysScrollableScrollPhysics(),
         itemCount: purchaseCtrl.cartItems.length,
-        separatorBuilder: (_, __) => const Divider(height: 1),
+        separatorBuilder: (_, _) => const Divider(height: 1),
         itemBuilder: (context, index) {
           var item = purchaseCtrl.cartItems[index];
           final hasWarehouse = item.containsKey('warehouse_name');
@@ -1198,7 +1198,7 @@ class _AddSupplierDialogState extends State<AddSupplierDialog> {
               ),
               child: Row(
                 children: [
-                  const Icon(
+                  const FaIcon(
                     FontAwesomeIcons.userPlus,
                     color: Colors.white,
                     size: 18,

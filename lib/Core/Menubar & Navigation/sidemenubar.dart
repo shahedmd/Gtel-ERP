@@ -33,7 +33,7 @@ class NavigationController extends GetxController {
 
 class _NavGroup extends StatelessWidget {
   final String title;
-  final IconData icon;
+  final dynamic icon;
   final List<Widget> children;
 
   const _NavGroup({
@@ -71,7 +71,7 @@ class _NavGroup extends StatelessWidget {
 class _NavTile extends StatelessWidget {
   final String id;
   final String title;
-  final IconData? icon;
+  final dynamic icon;
   final bool isSubItem;
 
   const _NavTile({
@@ -412,7 +412,7 @@ class SidebarMenu extends StatelessWidget {
               color: activeAccent.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Icon(
+            child: const FaIcon(
               FontAwesomeIcons.bolt,
               color: activeAccent,
               size: 20,

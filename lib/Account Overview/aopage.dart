@@ -91,21 +91,16 @@ class FinancialOverviewPage extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ===============================================
-                    // 1. BIG NUMBERS (KPI)
-                    // ===============================================
+                    // KPI Section
                     _buildTopKPIs(controller, currency, isMobile),
 
                     SizedBox(height: isMobile ? 20 : 30),
 
-                    // ===============================================
-                    // 2. ASSETS & LIABILITIES (SPLIT OR STACKED)
-                    // ===============================================
+                    // ASSETS & LIABILITIES
                     Flex(
                       direction: isDesktop ? Axis.horizontal : Axis.vertical,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // ASSETS
                         Expanded(
                           flex: isDesktop ? 1 : 0,
                           child: _buildAssetsColumn(
@@ -116,14 +111,10 @@ class FinancialOverviewPage extends StatelessWidget {
                             context,
                           ),
                         ),
-
-                        // RESPONSIVE SPACING
                         SizedBox(
                           width: isDesktop ? 24 : 0,
                           height: isDesktop ? 0 : 24,
                         ),
-
-                        // LIABILITIES
                         Expanded(
                           flex: isDesktop ? 1 : 0,
                           child: _buildLiabilitiesColumn(
@@ -134,12 +125,7 @@ class FinancialOverviewPage extends StatelessWidget {
                         ),
                       ],
                     ),
-
                     const SizedBox(height: 30),
-
-                    // ===============================================
-                    // 3. FINAL EQUATION FOOTER
-                    // ===============================================
                     _buildFinalEquation(controller, currency, isMobile),
                     const SizedBox(height: 50),
                   ],
@@ -152,9 +138,6 @@ class FinancialOverviewPage extends StatelessWidget {
     );
   }
 
-  // ===========================================================================
-  // SECTION 1: TOP KPIs
-  // ===========================================================================
   Widget _buildTopKPIs(
     FinancialController ctrl,
     NumberFormat fmt,
@@ -205,9 +188,6 @@ class FinancialOverviewPage extends StatelessWidget {
     });
   }
 
-  // ===========================================================================
-  // SECTION 2: ASSETS (WHAT YOU HAVE)
-  // ===========================================================================
   Widget _buildAssetsColumn(
     FinancialController ctrl,
     CashDrawerController cashCtrl,
@@ -217,7 +197,6 @@ class FinancialOverviewPage extends StatelessWidget {
   ) {
     return Column(
       children: [
-        // 1. CASH ACCOUNTS
         _ErpSectionHeader(
           title: "WHAT YOU HAVE (ASSETS)",
           color: Colors.teal[800]!,
@@ -246,46 +225,32 @@ class FinancialOverviewPage extends StatelessWidget {
             ),
           ),
         ),
-
         const SizedBox(height: 16),
-
-        // 2. INVENTORY & RECEIVABLES
         _ErpCard(
           title: "Inventory & Pending Collections",
           icon: FontAwesomeIcons.boxesStacked,
           accentColor: Colors.blueGrey,
           action: IconButton(
             icon: const Icon(Icons.add_circle, color: Colors.blueGrey),
-            tooltip: "Add Manual Asset",
             onPressed: () => _showAddAssetDialog(context, ctrl),
           ),
           child: Obx(
             () => Column(
               children: [
-                _StatRow(
-                  "Stock Valuation",
-                  ctrl.totalStockValuation,
-                  fmt,
-                  helpText: "Purchase price of items",
-                ),
+                _StatRow("Stock Valuation", ctrl.totalStockValuation, fmt),
                 _StatRow(
                   "Incoming Shipments",
                   ctrl.totalShipmentValuation,
                   fmt,
-                  helpText: "Products on the way",
                 ),
                 _StatRow(
                   "Customers Owe You",
                   ctrl.totalDebtorReceivables,
                   fmt,
                   color: Colors.orange[800],
-                  helpText: "Due customer payments",
                 ),
                 _StatRow("Loans Given to Staff", ctrl.totalEmployeeDebt, fmt),
-
                 const Divider(height: 20),
-
-                // Manual Fixed Assets
                 if (ctrl.fixedAssets.isNotEmpty) ...[
                   Align(
                     alignment: Alignment.centerLeft,
@@ -309,7 +274,6 @@ class FinancialOverviewPage extends StatelessWidget {
                   ),
                   const Divider(height: 20),
                 ],
-
                 _StatRow(
                   "TOTAL ASSETS VALUE",
                   ctrl.grandTotalAssets,
@@ -325,9 +289,6 @@ class FinancialOverviewPage extends StatelessWidget {
     );
   }
 
-  // ===========================================================================
-  // SECTION 3: LIABILITIES (WHAT YOU OWE)
-  // ===========================================================================
   Widget _buildLiabilitiesColumn(
     FinancialController ctrl,
     NumberFormat fmt,
@@ -340,8 +301,6 @@ class FinancialOverviewPage extends StatelessWidget {
           color: Colors.red[800]!,
         ),
         const SizedBox(height: 12),
-
-        // 1. PAYABLES
         _ErpCard(
           title: "Suppliers & Dues",
           icon: FontAwesomeIcons.handHoldingDollar,
@@ -354,15 +313,8 @@ class FinancialOverviewPage extends StatelessWidget {
                   ctrl.totalVendorDue,
                   fmt,
                   color: Colors.red[700],
-                  helpText: "Money owed to vendors",
                 ),
-                _StatRow(
-                  "To Pay Customers",
-                  ctrl.totalDebtorPayable,
-                  fmt,
-                  helpText: "Returns/advanced payments",
-                ),
-
+                _StatRow("To Pay Customers", ctrl.totalDebtorPayable, fmt),
                 const Divider(height: 24),
                 _StatRow(
                   "TOTAL PAYABLES",
@@ -375,17 +327,13 @@ class FinancialOverviewPage extends StatelessWidget {
             ),
           ),
         ),
-
         const SizedBox(height: 16),
-
-        // 2. MONTHLY EXPENSES
         _ErpCard(
           title: "Monthly Fixed Costs",
           icon: FontAwesomeIcons.calendarCheck,
           accentColor: Colors.orange[800]!,
           action: IconButton(
             icon: const Icon(Icons.add_circle, color: Colors.deepOrange),
-            tooltip: "Add Monthly Cost",
             onPressed: () => _showAddExpenseDialog(context, ctrl),
           ),
           child: Obx(
@@ -403,7 +351,6 @@ class FinancialOverviewPage extends StatelessWidget {
                       ),
                     ),
                   ),
-
                 ...ctrl.recurringExpenses.map(
                   (item) => _ManualItemRow(
                     label: item.title,
@@ -412,7 +359,6 @@ class FinancialOverviewPage extends StatelessWidget {
                     onDelete: () => ctrl.deleteRecurringExpense(item.id!),
                   ),
                 ),
-
                 const Divider(height: 20),
                 Container(
                   padding: const EdgeInsets.all(12),
@@ -436,9 +382,6 @@ class FinancialOverviewPage extends StatelessWidget {
     );
   }
 
-  // ===========================================================================
-  // SECTION 4: FINAL CALCULATION
-  // ===========================================================================
   Widget _buildFinalEquation(
     FinancialController ctrl,
     NumberFormat fmt,
@@ -486,7 +429,7 @@ class FinancialOverviewPage extends StatelessWidget {
                   fmt: fmt,
                   color: Colors.greenAccent,
                 ),
-                const Icon(
+                const FaIcon(
                   FontAwesomeIcons.minus,
                   color: Colors.white24,
                   size: 16,
@@ -497,7 +440,7 @@ class FinancialOverviewPage extends StatelessWidget {
                   fmt: fmt,
                   color: Colors.redAccent,
                 ),
-                const Icon(
+                const FaIcon(
                   FontAwesomeIcons.equals,
                   color: Colors.white,
                   size: 16,
@@ -540,27 +483,19 @@ class FinancialOverviewPage extends StatelessWidget {
     );
   }
 
-  // ===========================================================================
-  // WIDGET HELPERS (DIALOGS)
-  // ===========================================================================
   void _showAddAssetDialog(BuildContext context, FinancialController ctrl) {
     final nameC = TextEditingController();
     final valC = TextEditingController();
     final catC = TextEditingController();
     Get.defaultDialog(
       title: "Add Business Asset",
-      titleStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-      contentPadding: const EdgeInsets.all(20),
-      radius: 8,
       content: Column(
         children: [
           TextField(
             controller: nameC,
             decoration: const InputDecoration(
               labelText: "Item Name",
-              hintText: "e.g. Shop Laptop",
               border: OutlineInputBorder(),
-              isDense: true,
             ),
           ),
           const SizedBox(height: 12),
@@ -568,10 +503,9 @@ class FinancialOverviewPage extends StatelessWidget {
             controller: valC,
             keyboardType: TextInputType.number,
             decoration: const InputDecoration(
-              labelText: "Current Value",
+              labelText: "Value",
               prefixText: "৳ ",
               border: OutlineInputBorder(),
-              isDense: true,
             ),
           ),
           const SizedBox(height: 12),
@@ -579,26 +513,17 @@ class FinancialOverviewPage extends StatelessWidget {
             controller: catC,
             decoration: const InputDecoration(
               labelText: "Category",
-              hintText: "e.g. Electronics",
               border: OutlineInputBorder(),
-              isDense: true,
             ),
           ),
         ],
       ),
       confirm: ElevatedButton(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFF1E293B),
-        ),
         onPressed: () {
           ctrl.addAsset(nameC.text, double.tryParse(valC.text) ?? 0, catC.text);
           Get.back();
         },
-        child: const Text("Save Record", style: TextStyle(color: Colors.white)),
-      ),
-      cancel: TextButton(
-        onPressed: () => Get.back(),
-        child: const Text("Cancel"),
+        child: const Text("Save"),
       ),
     );
   }
@@ -608,18 +533,13 @@ class FinancialOverviewPage extends StatelessWidget {
     final amountC = TextEditingController();
     Get.defaultDialog(
       title: "Add Monthly Cost",
-      titleStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-      contentPadding: const EdgeInsets.all(20),
-      radius: 8,
       content: Column(
         children: [
           TextField(
             controller: titleC,
             decoration: const InputDecoration(
-              labelText: "Expense Name",
-              hintText: "e.g. Shop Rent",
+              labelText: "Name",
               border: OutlineInputBorder(),
-              isDense: true,
             ),
           ),
           const SizedBox(height: 12),
@@ -627,16 +547,14 @@ class FinancialOverviewPage extends StatelessWidget {
             controller: amountC,
             keyboardType: TextInputType.number,
             decoration: const InputDecoration(
-              labelText: "Monthly Cost",
+              labelText: "Amount",
               prefixText: "৳ ",
               border: OutlineInputBorder(),
-              isDense: true,
             ),
           ),
         ],
       ),
       confirm: ElevatedButton(
-        style: ElevatedButton.styleFrom(backgroundColor: Colors.deepOrange),
         onPressed: () {
           ctrl.addRecurringExpense(
             titleC.text,
@@ -645,25 +563,17 @@ class FinancialOverviewPage extends StatelessWidget {
           );
           Get.back();
         },
-        child: const Text("Save Cost", style: TextStyle(color: Colors.white)),
-      ),
-      cancel: TextButton(
-        onPressed: () => Get.back(),
-        child: const Text("Cancel"),
+        child: const Text("Save"),
       ),
     );
   }
 }
 
-// -----------------------------------------------------------------------------
-// REUSABLE COMPONENTS
-// -----------------------------------------------------------------------------
-
 class _SummaryTile extends StatelessWidget {
   final String label;
   final String subLabel;
   final double amount;
-  final IconData icon;
+  final dynamic icon;
   final Color color;
   final NumberFormat formatter;
   final bool isHighlight;
@@ -681,7 +591,7 @@ class _SummaryTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
@@ -699,7 +609,6 @@ class _SummaryTile extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header
           Row(
             children: [
               Container(
@@ -708,7 +617,7 @@ class _SummaryTile extends StatelessWidget {
                   color: color.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Icon(icon, size: 16, color: color),
+                child: FaIcon(icon, size: 16, color: color),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -718,18 +627,13 @@ class _SummaryTile extends StatelessWidget {
                     color: Colors.grey[600],
                     fontSize: 11,
                     fontWeight: FontWeight.bold,
-                    letterSpacing: 0.5,
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
           ),
           const SizedBox(height: 16),
-          // Amount
           FittedBox(
-            alignment: Alignment.centerLeft,
             fit: BoxFit.scaleDown,
             child: Text(
               formatter.format(amount),
@@ -741,7 +645,6 @@ class _SummaryTile extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 4),
-          // Footer
           Text(
             subLabel,
             style: TextStyle(
@@ -749,8 +652,6 @@ class _SummaryTile extends StatelessWidget {
               fontSize: 11,
               fontWeight: FontWeight.w600,
             ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),
@@ -762,7 +663,6 @@ class _ErpSectionHeader extends StatelessWidget {
   final String title;
   final Color color;
   const _ErpSectionHeader({required this.title, required this.color});
-
   @override
   Widget build(BuildContext context) {
     return Row(
@@ -776,7 +676,6 @@ class _ErpSectionHeader extends StatelessWidget {
               color: Colors.blueGrey[800],
               fontWeight: FontWeight.w800,
               fontSize: 13,
-              letterSpacing: 1.0,
             ),
           ),
         ),
@@ -787,11 +686,10 @@ class _ErpSectionHeader extends StatelessWidget {
 
 class _ErpCard extends StatelessWidget {
   final String title;
-  final IconData icon;
+  final dynamic icon;
   final Color accentColor;
   final Widget child;
   final Widget? action;
-
   const _ErpCard({
     required this.title,
     required this.icon,
@@ -820,25 +718,22 @@ class _ErpCard extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(20, 12, 12, 12),
             child: Row(
               children: [
-                Icon(icon, color: accentColor, size: 18),
+                FaIcon(icon, color: accentColor, size: 18),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
                     title,
                     style: const TextStyle(
-                      color: Colors.black87,
                       fontWeight: FontWeight.w700,
                       fontSize: 15,
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
                 if (action != null) action!,
               ],
             ),
           ),
-          const Divider(height: 1, thickness: 1, color: Color(0xFFF1F5F9)),
+          const Divider(height: 1),
           Padding(padding: const EdgeInsets.all(20.0), child: child),
         ],
       ),
@@ -853,16 +748,13 @@ class _StatRow extends StatelessWidget {
   final bool isBold;
   final Color? color;
   final String? helpText;
-
   const _StatRow(
     this.label,
     this.amount,
     this.fmt, {
     this.isBold = false,
     this.color,
-    this.helpText,
-  });
-
+  }) : helpText = null;
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -878,21 +770,17 @@ class _StatRow extends StatelessWidget {
                   label,
                   style: TextStyle(
                     fontWeight: isBold ? FontWeight.w700 : FontWeight.w500,
-                    color: Colors.grey[800],
                     fontSize: isBold ? 15 : 14,
                   ),
                 ),
-                if (helpText != null) ...[
-                  const SizedBox(height: 2),
+                if (helpText != null)
                   Text(
                     helpText!,
                     style: TextStyle(fontSize: 10, color: Colors.grey[500]),
                   ),
-                ],
               ],
             ),
           ),
-          const SizedBox(width: 12),
           Text(
             fmt.format(amount),
             style: TextStyle(
@@ -912,30 +800,21 @@ class _ManualItemRow extends StatelessWidget {
   final double amount;
   final NumberFormat compactFmt;
   final VoidCallback onDelete;
-
   const _ManualItemRow({
     required this.label,
     required this.amount,
     required this.compactFmt,
     required this.onDelete,
   });
-
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6.0),
       child: Row(
         children: [
-          Icon(Icons.circle, size: 6, color: Colors.grey[300]),
+          const Icon(Icons.circle, size: 6, color: Colors.grey),
           const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              label,
-              style: const TextStyle(fontSize: 13, color: Colors.black87),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
+          Expanded(child: Text(label, style: const TextStyle(fontSize: 13))),
           Text(
             compactFmt.format(amount),
             style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
@@ -943,11 +822,7 @@ class _ManualItemRow extends StatelessWidget {
           const SizedBox(width: 8),
           InkWell(
             onTap: onDelete,
-            borderRadius: BorderRadius.circular(12),
-            child: Padding(
-              padding: const EdgeInsets.all(4.0),
-              child: Icon(Icons.close, size: 16, color: Colors.red[300]),
-            ),
+            child: const Icon(Icons.close, size: 16, color: Colors.red),
           ),
         ],
       ),
@@ -960,14 +835,12 @@ class _EquationItem extends StatelessWidget {
   final double amount;
   final NumberFormat fmt;
   final Color color;
-
   const _EquationItem({
     required this.label,
     required this.amount,
     required this.fmt,
     required this.color,
   });
-
   @override
   Widget build(BuildContext context) {
     return Column(

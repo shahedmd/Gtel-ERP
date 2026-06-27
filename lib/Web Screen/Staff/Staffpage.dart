@@ -384,7 +384,7 @@ class _Header extends StatelessWidget {
                   shrinkWrap: true,
                   padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
                   itemCount: months.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 6),
+                  separatorBuilder: (_, _) => const SizedBox(height: 6),
                   itemBuilder: (_, i) {
                     final Map<String, dynamic> m = months[i];
                     return Material(

@@ -714,7 +714,7 @@ class ShipmentPage extends StatelessWidget {
                                 padding: EdgeInsets.zero,
                                 itemCount: items.length,
                                 separatorBuilder:
-                                    (_, __) => const Divider(height: 1),
+                                    (_, _) => const Divider(height: 1),
                                 itemBuilder: (ctx, i) {
                                   final item = items[i];
                                   // Find true index in original list to safely remove
@@ -854,7 +854,7 @@ class ShipmentPage extends StatelessWidget {
                         }
                         return ListView.separated(
                           itemCount: prodCtrl.allProducts.length,
-                          separatorBuilder: (_, __) => const Divider(height: 1),
+                          separatorBuilder: (_, _) => const Divider(height: 1),
                           itemBuilder: (ctx, i) {
                             final p = prodCtrl.allProducts[i];
                             return ListTile(

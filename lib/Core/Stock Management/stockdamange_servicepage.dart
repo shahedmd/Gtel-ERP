@@ -590,7 +590,7 @@ class ServicePage extends StatelessWidget {
     return ListView.separated(
       padding: const EdgeInsets.all(12),
       itemCount: list.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 12),
+      separatorBuilder: (_, _) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
         final item = list[index];
         final qty = int.tryParse(item['qty'].toString()) ?? 0;

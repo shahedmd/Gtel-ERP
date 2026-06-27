@@ -102,7 +102,7 @@ class DailyOverviewPage extends StatelessWidget {
                         Text(
                           "Sorted by Time (Newest First)",
                           style: TextStyle(
-                            color: slateMedium.withValues(alpha:0.8),
+                            color: slateMedium.withValues(alpha: 0.8),
                             fontSize: isMobile ? 10 : 11,
                           ),
                         ),
@@ -263,7 +263,7 @@ class DailyOverviewPage extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(
+              FaIcon(
                 FontAwesomeIcons.vault,
                 size: 16,
                 color: Colors.blue.shade800,
@@ -412,8 +412,8 @@ class DailyOverviewPage extends StatelessWidget {
               amount: ctrl.totalCashIn.value,
               icon: FontAwesomeIcons.arrowTrendUp,
               color: successGreen,
-              bg: successGreen.withValues(alpha:0.05),
-              border: successGreen.withValues(alpha:0.2),
+              bg: successGreen.withValues(alpha: 0.05),
+              border: successGreen.withValues(alpha: 0.2),
             ),
           ),
           SizedBox(width: isMobile ? 8 : 12),
@@ -423,8 +423,8 @@ class DailyOverviewPage extends StatelessWidget {
               amount: ctrl.totalCashOut.value,
               icon: FontAwesomeIcons.arrowTrendDown,
               color: errorRed,
-              bg: errorRed.withValues(alpha:0.05),
-              border: errorRed.withValues(alpha:0.2),
+              bg: errorRed.withValues(alpha: 0.05),
+              border: errorRed.withValues(alpha: 0.2),
             ),
           ),
         ],
@@ -435,7 +435,7 @@ class DailyOverviewPage extends StatelessWidget {
   Widget _statCard({
     required String title,
     required double amount,
-    required IconData icon,
+    final dynamic icon,
     required Color color,
     required Color bg,
     required Color border,
@@ -462,7 +462,7 @@ class DailyOverviewPage extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
-                    color: color.withValues(alpha:0.9),
+                    color: color.withValues(alpha: 0.9),
                     letterSpacing: 0.5,
                   ),
                 ),
@@ -511,7 +511,7 @@ class DailyOverviewPage extends StatelessWidget {
                   color: slateDark,
                 ),
               ),
-              const Icon(
+              const FaIcon(
                 FontAwesomeIcons.chartPie,
                 color: slateMedium,
                 size: 16,
@@ -540,9 +540,9 @@ class DailyOverviewPage extends StatelessWidget {
                       ),
                     ),
                     Center(
-                      child: Icon(
+                      child: FaIcon(
                         FontAwesomeIcons.wallet,
-                        color: slateMedium.withValues(alpha:0.3),
+                        color: slateMedium.withValues(alpha: 0.3),
                         size: 28,
                       ),
                     ),
@@ -744,7 +744,7 @@ class DailyOverviewPage extends StatelessWidget {
     required double total,
     required List<LedgerItem> items,
     required Color colorTheme,
-    required IconData icon,
+    final dynamic icon,
   }) {
     return Container(
       decoration: BoxDecoration(
@@ -753,7 +753,7 @@ class DailyOverviewPage extends StatelessWidget {
         border: Border.all(color: borderGrey),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withValues(alpha:0.04),
+            color: Colors.grey.withValues(alpha: 0.04),
             offset: const Offset(0, 4),
             blurRadius: 10,
           ),
@@ -765,13 +765,13 @@ class DailyOverviewPage extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             decoration: BoxDecoration(
-              color: colorTheme.withValues(alpha:0.08),
+              color: colorTheme.withValues(alpha: 0.08),
               borderRadius: const BorderRadius.only(
                 topLeft: Radius.circular(12),
                 topRight: Radius.circular(12),
               ),
               border: Border(
-                bottom: BorderSide(color: colorTheme.withValues(alpha:0.1)),
+                bottom: BorderSide(color: colorTheme.withValues(alpha: 0.1)),
               ),
             ),
             child: Row(
@@ -810,7 +810,7 @@ class DailyOverviewPage extends StatelessWidget {
               child: Center(
                 child: Column(
                   children: [
-                    const Icon(
+                    const FaIcon(
                       FontAwesomeIcons.folderOpen,
                       size: 28,
                       color: borderGrey,
@@ -834,8 +834,10 @@ class DailyOverviewPage extends StatelessWidget {
               shrinkWrap: true,
               itemCount: items.length,
               separatorBuilder:
-                  (c, i) =>
-                      Divider(height: 1, color: borderGrey.withValues(alpha:0.5)),
+                  (c, i) => Divider(
+                    height: 1,
+                    color: borderGrey.withValues(alpha: 0.5),
+                  ),
               itemBuilder: (ctx, i) => _buildLedgerItemRow(items[i]),
             ),
         ],
@@ -929,7 +931,8 @@ class DailyOverviewPage extends StatelessWidget {
 
   // --- HELPER: Visual Icon ---
   Widget _buildMethodIcon(String method) {
-    IconData icon = FontAwesomeIcons.moneyBillWave;
+    // IconData-এর বদলে dynamic ব্যবহার করা হয়েছে
+    dynamic icon = FontAwesomeIcons.moneyBillWave;
     Color color = colCash;
     Color bg = colCash.withValues(alpha: 0.1);
 
@@ -937,22 +940,23 @@ class DailyOverviewPage extends StatelessWidget {
     if (upper.contains("BKASH")) {
       icon = FontAwesomeIcons.mobileScreen;
       color = colBkash;
-      bg = colBkash.withValues( alpha:0.1);
+      bg = colBkash.withValues(alpha: 0.1);
     } else if (upper.contains("NAGAD")) {
       icon = FontAwesomeIcons.mobileScreen;
       color = colNagad;
-      bg = colNagad.withValues(alpha:0.1);
+      bg = colNagad.withValues(alpha: 0.1);
     } else if (upper.contains("BANK")) {
       icon = FontAwesomeIcons.buildingColumns;
       color = colBank;
-      bg = colBank.withValues(alpha:0.1);
+      bg = colBank.withValues(alpha: 0.1);
     }
 
     return Container(
       width: 36,
       height: 36,
       decoration: BoxDecoration(color: bg, shape: BoxShape.circle),
-      child: Center(child: Icon(icon, size: 14, color: color)),
+      // এখানে Icon-এর বদলে FaIcon ব্যবহার করা হয়েছে
+      child: Center(child: FaIcon(icon, size: 14, color: color)),
     );
   }
 
@@ -964,16 +968,16 @@ class DailyOverviewPage extends StatelessWidget {
     String upper = text.toUpperCase();
 
     if (upper.contains("BKASH")) {
-      bg = colBkash.withValues(alpha:0.1);
+      bg = colBkash.withValues(alpha: 0.1);
       fg = colBkash;
     } else if (upper.contains("NAGAD")) {
-      bg = colNagad.withValues(alpha:0.1);
+      bg = colNagad.withValues(alpha: 0.1);
       fg = colNagad;
     } else if (upper.contains("BANK")) {
-      bg = colBank.withValues(alpha:0.1);
+      bg = colBank.withValues(alpha: 0.1);
       fg = colBank;
     } else if (upper.contains("CASH")) {
-      bg = colCash.withValues(alpha:0.08);
+      bg = colCash.withValues(alpha: 0.08);
       fg = colCash;
     }
 

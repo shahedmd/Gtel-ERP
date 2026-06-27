@@ -145,7 +145,7 @@ class SaleReturnController extends GetxController {
                 height: 250,
                 child: ListView.separated(
                   itemCount: multipleSearchResults.length,
-                  separatorBuilder: (_, __) => const Divider(),
+                  separatorBuilder: (_, _) => const Divider(),
                   itemBuilder: (ctx, i) {
                     var item = multipleSearchResults[i];
                     return ListTile(

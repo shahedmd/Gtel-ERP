@@ -155,7 +155,7 @@ class LiveOrderSalesPage extends StatelessWidget {
               Obx(
                 () => Switch(
                   value: controller.isConditionSale.value,
-                  activeColor: Colors.white,
+                  activeThumbColor: Colors.white,
                   activeTrackColor: Colors.orange.shade300,
                   inactiveThumbColor: Colors.white,
                   inactiveTrackColor: Colors.grey,
@@ -310,7 +310,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                     isAgent
                         ? controller.filteredDebtors.length
                         : controller.filteredRegularCustomers.length,
-                separatorBuilder: (_, __) => const Divider(height: 1),
+                separatorBuilder: (_, _) => const Divider(height: 1),
                 itemBuilder: (context, i) {
                   String cName = "";
                   String cPhone = "";
@@ -989,7 +989,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                 : const NeverScrollableScrollPhysics(),
         padding: EdgeInsets.zero,
         itemCount: filteredCart.length,
-        separatorBuilder: (_, __) => const Divider(height: 1),
+        separatorBuilder: (_, _) => const Divider(height: 1),
         itemBuilder: (context, index) {
           final item = filteredCart[index];
           final originalIndex = controller.cart.indexOf(item);
@@ -1464,7 +1464,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                   ? const AlwaysScrollableScrollPhysics()
                   : const NeverScrollableScrollPhysics(),
           itemCount: controller.productCtrl.allProducts.length,
-          separatorBuilder: (_, __) => const Divider(height: 1),
+          separatorBuilder: (_, _) => const Divider(height: 1),
           itemBuilder: (context, index) {
             final p = controller.productCtrl.allProducts[index];
             final stockColor =

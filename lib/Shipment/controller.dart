@@ -628,12 +628,14 @@ class ShipmentController extends GetxController {
 
   Future<void> receiveShipmentFast(
     ShipmentModel shipment,
-    DateTime arrivalDate,
-  ) async {
+    DateTime arrivalDate, {
+    int? warehouseId,
+    String? warehouseLocation,
+  }) async {
     if (isLoading.value) return;
     isLoading.value = true;
     try {
-      // 1. Stock
+      // 1. Stock — warehouse_id & location inject করা হচ্ছে প্রতিটি item এ
       List<Map<String, dynamic>> bulkItems =
           shipment.items.map((item) {
             return {
@@ -643,11 +645,14 @@ class ShipmentController extends GetxController {
               'local_qty': 0,
               'local_price': 0.0,
               'shipmentdate': DateFormat('yyyy-MM-dd').format(arrivalDate),
+              if (warehouseId != null) 'warehouse_id': warehouseId,
+              if (warehouseLocation != null && warehouseLocation.isNotEmpty)
+                'warehouse_location': warehouseLocation,
             };
           }).toList();
       await productController.bulkAddStockMixed(bulkItems);
 
-      // 2. Loss
+      // 2. Loss (on-hold) — unchanged
       WriteBatch batch = _firestore.batch();
       bool hasLoss = false;
       for (var item in shipment.items) {
@@ -666,12 +671,15 @@ class ShipmentController extends GetxController {
             'productModel': item.productModel,
             'missingQty': missing,
             'createdAt': FieldValue.serverTimestamp(),
+            // on-hold item এও warehouse info store করা হচ্ছে
+            // পরে resolve করার সময় কাজে লাগবে
+            if (warehouseId != null) 'warehouseId': warehouseId,
           });
         }
       }
       if (hasLoss) await batch.commit();
 
-      // 3. Update Status
+      // 3. Update Status — unchanged
       double totalRecVal = shipment.items.fold(
         0.0,
         (sumv, i) => sumv + i.receivedItemValue,
@@ -685,7 +693,12 @@ class ShipmentController extends GetxController {
         'arrivalDate': Timestamp.fromDate(arrivalDate),
         'vendorLossAmount': (diff > 0) ? diff : 0.0,
         'vendorLossAmountRMB': (diff > 0) ? diffRmb : 0.0,
+        // shipment document এও কোন warehouse এ গেছে সেটা save করা হচ্ছে
+        if (warehouseId != null) 'receivedWarehouseId': warehouseId,
+        if (warehouseLocation != null && warehouseLocation.isNotEmpty)
+          'receivedWarehouseLocation': warehouseLocation,
       });
+
       Get.back();
       Get.snackbar(
         "Success",
@@ -700,17 +713,40 @@ class ShipmentController extends GetxController {
     }
   }
 
-  Future<void> resolveOnHoldItem(OnHoldItem item) async {
+  Future<void> resolveOnHoldItem(
+    OnHoldItem item, {
+    required int releaseQty,
+    int? warehouseId,
+    String? warehouseLocation,
+  }) async {
+    // Safety clamp — max হলো missingQty
+    final qty = releaseQty.clamp(1, item.missingQty);
+    final isFullRelease = qty >= item.missingQty;
+
     isLoading.value = true;
     try {
       await productController.addMixedStock(
         productId: item.productId,
-        airQty: item.missingQty,
+        airQty: qty,
+        warehouseId: warehouseId,
+        warehouseLocation: warehouseLocation,
       );
-      await _firestore.collection('on_hold_items').doc(item.docId).delete();
+
+      if (isFullRelease) {
+        // সব qty release — doc delete করো
+        await _firestore.collection('on_hold_items').doc(item.docId).delete();
+      } else {
+        // Partial release — remaining qty update করো
+        await _firestore.collection('on_hold_items').doc(item.docId).update({
+          'missingQty': item.missingQty - qty,
+        });
+      }
+
       Get.snackbar(
         "Success",
-        "Resolved",
+        isFullRelease
+            ? "Fully Released to Stock"
+            : "Partially Released ($qty pcs). ${item.missingQty - qty} still on hold.",
         backgroundColor: Colors.green,
         colorText: Colors.white,
       );

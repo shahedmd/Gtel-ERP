@@ -751,7 +751,7 @@ class DailySalesPage extends StatelessWidget {
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       itemCount: list.length,
-      separatorBuilder: (_, __) => const Divider(height: 1, thickness: 0.5),
+      separatorBuilder: (_, _) => const Divider(height: 1, thickness: 0.5),
       itemBuilder: (context, index) {
         final sale = list[index];
         bool isDebtor =

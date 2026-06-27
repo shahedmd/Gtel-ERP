@@ -1173,6 +1173,10 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
   }
 
   void _showReceiveConfirmation() {
+    // Local reactive state — dialog এর ভেতরেই scoped
+    final Rx<Warehouse?> selectedWarehouse = Rx<Warehouse?>(null);
+    final locationCtrl = TextEditingController();
+
     String warningMoneyStr =
         widget.shipment.exchangeRate > 0
             ? "${controller.formatMoney(valueDifference)} / ${controller.formatRMB(valueDifference / widget.shipment.exchangeRate)}"
@@ -1182,12 +1186,15 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
       title: "Confirm Stock Receipt",
       contentPadding: const EdgeInsets.all(20),
       content: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
           const Text(
             "Are you sure you want to finalize this shipment?",
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 10),
+
+          // Shortage warning — unchanged
           if (valueDifference > 0)
             Container(
               padding: const EdgeInsets.all(10),
@@ -1202,6 +1209,70 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
                 textAlign: TextAlign.center,
               ),
             ),
+          const SizedBox(height: 14),
+
+          // ── WAREHOUSE SELECTION ──────────────────────────
+          Obx(
+            () => DropdownButtonFormField<Warehouse?>(
+              value: selectedWarehouse.value,
+              decoration: const InputDecoration(
+                labelText: "Destination Warehouse",
+                hintText: "Optional",
+                border: OutlineInputBorder(),
+                isDense: true,
+                prefixIcon: Icon(Icons.warehouse_outlined, size: 18),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+              ),
+              items: [
+                const DropdownMenuItem<Warehouse?>(
+                  value: null,
+                  child: Text(
+                    "No specific warehouse",
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                ),
+                ...productController.activeWarehouses.map(
+                  (w) => DropdownMenuItem<Warehouse?>(
+                    value: w,
+                    child: Text(w.name),
+                  ),
+                ),
+              ],
+              onChanged: (w) => selectedWarehouse.value = w,
+            ),
+          ),
+
+          // ── LOCATION FIELD — warehouse select হলেই দেখাবে ──
+          Obx(
+            () =>
+                selectedWarehouse.value != null
+                    ? Padding(
+                      padding: const EdgeInsets.only(top: 10),
+                      child: TextField(
+                        controller: locationCtrl,
+                        decoration: const InputDecoration(
+                          labelText: "Location in Warehouse",
+                          hintText: "e.g. Rack A3, Shelf 2",
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                          prefixIcon: Icon(
+                            Icons.location_on_outlined,
+                            size: 18,
+                          ),
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                        ),
+                      ),
+                    )
+                    : const SizedBox.shrink(),
+          ),
+
+          // ────────────────────────────────────────────────
           const SizedBox(height: 10),
           const Text(
             "Stock will be added to inventory immediately.",
@@ -1209,7 +1280,8 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
           ),
         ],
       ),
-      // --- REACTIVE CANCEL BUTTON ---
+
+      // Cancel — unchanged
       cancel: Obx(() {
         final isLoading = controller.isLoading.value;
         return TextButton(
@@ -1220,7 +1292,8 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
           ),
         );
       }),
-      // --- REACTIVE CONFIRM BUTTON ---
+
+      // Confirm — warehouseId + warehouseLocation এখন pass হচ্ছে
       confirm: Obx(() {
         final isLoading = controller.isLoading.value;
         return ElevatedButton(
@@ -1231,7 +1304,7 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
           ),
           onPressed:
               isLoading
-                  ? null // Disables button while loading
+                  ? null
                   : () async {
                     final updatedShipment = ShipmentModel(
                       docId: widget.shipment.docId,
@@ -1251,18 +1324,24 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
                       carrierReport: reportCtrl.text,
                     );
 
-                    // 1. Await the update details
                     await controller.updateShipmentDetails(
                       updatedShipment,
                       editedItems,
                       reportCtrl.text,
                     );
 
-                    // 2. Await the final receive process
+                    // ── warehouse info সহ receive ──
                     await controller.receiveShipmentFast(
                       updatedShipment,
                       DateTime.now(),
+                      warehouseId: selectedWarehouse.value?.id,
+                      warehouseLocation:
+                          locationCtrl.text.trim().isEmpty
+                              ? null
+                              : locationCtrl.text.trim(),
                     );
+
+                    locationCtrl.dispose();
                   },
           child:
               isLoading

@@ -160,7 +160,7 @@ class HotSellingProductPage extends StatelessWidget {
                         return ListView.separated(
                           itemCount: controller.displayList.length,
                           separatorBuilder:
-                              (_, __) =>
+                              (_, _) =>
                                   const Divider(height: 1, color: Colors.grey),
                           itemBuilder: (context, index) {
                             final item = controller.displayList[index];
