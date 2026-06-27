@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:get/get.dart';
 
@@ -41,8 +42,10 @@ class SessionController extends GetxService {
   String get userRole => currentUser.value?.role ?? 'viewer';
   bool get isSuperAdmin => currentUser.value?.isSuperAdmin ?? false;
 
+  // ── শুধু data load করে, auth listen করে না ──────────────────────────────
   Future<bool> loadSession(String uid) async {
     try {
+      isSessionLoaded.value = false; // reset before loading
       final doc = await _db.collection('users').doc(uid).get();
 
       if (!doc.exists) {
@@ -68,7 +71,6 @@ class SessionController extends GetxService {
     isSessionLoaded.value = false;
   }
 
-  // Firestore doc নেই এমন পুরনো user-এর জন্য
   void _setFallbackUser(String uid) {
     currentUser.value = AppUser(
       uid: uid,

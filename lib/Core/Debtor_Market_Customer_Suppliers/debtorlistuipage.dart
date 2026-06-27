@@ -8,6 +8,9 @@ import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/debtordetails_tra
 import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/gteldebtorcontroller.dart';
 import 'package:intl/intl.dart';
 
+import '../../Permission/permission_button.dart';
+import '../../Permission/permission_controller.dart';
+import '../../controller.dart';
 
 // --- ERP COLOR PALETTE ---
 const Color primaryColor = Color(0xFF2563EB);
@@ -88,16 +91,20 @@ class Debatorpage extends StatelessWidget {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => adddebatorDialog(controller),
-        backgroundColor: primaryColor,
-        icon: const Icon(Icons.add, color: Colors.white),
-        label: const Text(
-          "New Debtor",
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-            fontSize: 13,
+      floatingActionButton: PermissionVisibility(
+        moduleKey: 'debtor',
+        action: 'create',
+        child: FloatingActionButton.extended(
+          onPressed: () => adddebatorDialog(controller),
+          backgroundColor: primaryColor,
+          icon: const Icon(Icons.add, color: Colors.white),
+          label: const Text(
+            "New Debtor",
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 13,
+            ),
           ),
         ),
       ),
@@ -263,39 +270,59 @@ class Debatorpage extends StatelessWidget {
 
   List<Widget> _buildReportButtons() {
     return [
-      _buildReportButton(
-        icon: Icons.sync,
-        label: "Sync Balances",
-        onTap: _confirmSyncDialog,
-        color: Colors.purple,
+      PermissionVisibility(
+        moduleKey: 'debtor',
+        action: 'sync',
+        child: _buildReportButton(
+          icon: Icons.sync,
+          label: "Sync Balances",
+          onTap: _confirmSyncDialog,
+          color: Colors.purple,
+        ),
       ),
       const SizedBox(width: 8),
-      _buildReportButton(
-        icon: Icons.auto_fix_high,
-        label: "Fix Search",
-        onTap: _confirmRepairDialog,
-        color: Colors.blueAccent,
+      PermissionVisibility(
+        moduleKey: 'debtor',
+        action: 'report',
+        child: _buildReportButton(
+          icon: Icons.auto_fix_high,
+          label: "Fix Search",
+          onTap: _confirmRepairDialog,
+          color: Colors.blueAccent,
+        ),
       ),
       const SizedBox(width: 8),
-      _buildReportButton(
-        icon: Icons.upload_file,
-        label: "Payables Rpt",
-        onTap: controller.downloadAllPayablesReport,
-        color: Colors.orange.shade700,
+      PermissionVisibility(
+        moduleKey: 'debtor',
+        action: 'report',
+        child: _buildReportButton(
+          icon: Icons.upload_file,
+          label: "Payables Rpt",
+          onTap: controller.downloadAllPayablesReport,
+          color: Colors.orange.shade700,
+        ),
       ),
       const SizedBox(width: 8),
-      _buildReportButton(
-        icon: Icons.download_for_offline,
-        label: "Due Report",
-        onTap: controller.downloadAllDebtorsReport,
-        color: primaryColor,
+      PermissionVisibility(
+        moduleKey: 'debtor',
+        action: 'report',
+        child: _buildReportButton(
+          icon: Icons.download_for_offline,
+          label: "Due Report",
+          onTap: controller.downloadAllDebtorsReport,
+          color: primaryColor,
+        ),
       ),
       const SizedBox(width: 8),
-      _buildReportButton(
-        icon: FontAwesomeIcons.gift,
-        label: "Eid Bonus Rpt",
-        onTap: controller.downloadYearlyEidBonusReport,
-        color: Colors.teal,
+      PermissionVisibility(
+        moduleKey: 'debtor',
+        action: 'report',
+        child: _buildReportButton(
+          icon: FontAwesomeIcons.gift,
+          label: "Eid Bonus Rpt",
+          onTap: controller.downloadYearlyEidBonusReport,
+          color: Colors.teal,
+        ),
       ),
     ];
   }
@@ -646,50 +673,73 @@ class Debatorpage extends StatelessWidget {
             ),
             SizedBox(
               width: 70,
-              child: PopupMenuButton<String>(
-                icon: const Icon(Icons.more_vert, color: textLight),
-                tooltip: "Options",
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                onSelected: (value) {
-                  if (value == 'view') {
-                    Get.to(
-                      () => Debatordetails(id: debtor.id, name: debtor.name),
-                    );
-                  } else if (value == 'delete')
-                    {_confirmDeleteDebtor(debtor);}
+              child: Builder(
+                builder: (context) {
+                  final roleCtrl = Get.find<RoleController>();
+                  final permCtrl = Get.find<PermissionController>();
+
+                  final canView =
+                      roleCtrl.isSuperAdmin || permCtrl.can('debtor', 'view');
+                  final canDelete =
+                      roleCtrl.isSuperAdmin || permCtrl.can('debtor', 'delete');
+
+                  // কোনো permission নেই তাহলে button hide করো
+                  if (!canView && !canDelete) return const SizedBox.shrink();
+
+                  return PopupMenuButton<String>(
+                    icon: const Icon(Icons.more_vert, color: textLight),
+                    tooltip: "Options",
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    onSelected: (value) {
+                      if (value == 'view') {
+                        Get.to(
+                          () =>
+                              Debatordetails(id: debtor.id, name: debtor.name),
+                        );
+                      } else if (value == 'delete') {
+                        _confirmDeleteDebtor(debtor);
+                      }
+                    },
+                    itemBuilder:
+                        (context) => [
+                          if (canView)
+                            const PopupMenuItem(
+                              value: 'view',
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.visibility,
+                                    color: primaryColor,
+                                    size: 20,
+                                  ),
+                                  SizedBox(width: 10),
+                                  Text("View Account"),
+                                ],
+                              ),
+                            ),
+                          if (canDelete)
+                            const PopupMenuItem(
+                              value: 'delete',
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.delete,
+                                    color: dangerRed,
+                                    size: 20,
+                                  ),
+                                  SizedBox(width: 10),
+                                  Text(
+                                    "Delete Debtor",
+                                    style: TextStyle(color: dangerRed),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                  );
                 },
-                itemBuilder:
-                    (context) => [
-                      const PopupMenuItem(
-                        value: 'view',
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.visibility,
-                              color: primaryColor,
-                              size: 20,
-                            ),
-                            SizedBox(width: 10),
-                            Text("View Account"),
-                          ],
-                        ),
-                      ),
-                      const PopupMenuItem(
-                        value: 'delete',
-                        child: Row(
-                          children: [
-                            Icon(Icons.delete, color: dangerRed, size: 20),
-                            SizedBox(width: 10),
-                            Text(
-                              "Delete Debtor",
-                              style: TextStyle(color: dangerRed),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
               ),
             ),
           ],
@@ -763,50 +813,77 @@ class Debatorpage extends StatelessWidget {
                       ],
                     ),
                   ),
-                  PopupMenuButton<String>(
-                    icon: const Icon(Icons.more_vert, color: textLight),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    onSelected: (value) {
-                      if (value == 'view') {
-                        Get.to(
-                          () =>
-                              Debatordetails(id: debtor.id, name: debtor.name),
-                        );
-                      } else if (value == 'delete')
-                        {_confirmDeleteDebtor(debtor);}
+                  Builder(
+                    builder: (context) {
+                      final roleCtrl = Get.find<RoleController>();
+                      final permCtrl = Get.find<PermissionController>();
+
+                      final canView =
+                          roleCtrl.isSuperAdmin ||
+                          permCtrl.can('debtor', 'view');
+                      final canDelete =
+                          roleCtrl.isSuperAdmin ||
+                          permCtrl.can('debtor', 'delete');
+
+                      if (!canView && !canDelete) {
+                        return const SizedBox.shrink();
+                      }
+
+                      return PopupMenuButton<String>(
+                        icon: const Icon(Icons.more_vert, color: textLight),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        onSelected: (value) {
+                          if (value == 'view') {
+                            Get.to(
+                              () => Debatordetails(
+                                id: debtor.id,
+                                name: debtor.name,
+                              ),
+                            );
+                          } else if (value == 'delete') {
+                            _confirmDeleteDebtor(debtor);
+                          }
+                        },
+                        itemBuilder:
+                            (context) => [
+                              if (canView)
+                                const PopupMenuItem(
+                                  value: 'view',
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.visibility,
+                                        color: primaryColor,
+                                        size: 18,
+                                      ),
+                                      SizedBox(width: 10),
+                                      Text("View Account"),
+                                    ],
+                                  ),
+                                ),
+                              if (canDelete)
+                                const PopupMenuItem(
+                                  value: 'delete',
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.delete,
+                                        color: dangerRed,
+                                        size: 18,
+                                      ),
+                                      SizedBox(width: 10),
+                                      Text(
+                                        "Delete",
+                                        style: TextStyle(color: dangerRed),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                            ],
+                      );
                     },
-                    itemBuilder:
-                        (context) => const [
-                          PopupMenuItem(
-                            value: 'view',
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.visibility,
-                                  color: primaryColor,
-                                  size: 18,
-                                ),
-                                SizedBox(width: 10),
-                                Text("View Account"),
-                              ],
-                            ),
-                          ),
-                          PopupMenuItem(
-                            value: 'delete',
-                            child: Row(
-                              children: [
-                                Icon(Icons.delete, color: dangerRed, size: 18),
-                                SizedBox(width: 10),
-                                Text(
-                                  "Delete",
-                                  style: TextStyle(color: dangerRed),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
                   ),
                 ],
               ),

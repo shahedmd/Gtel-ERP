@@ -7,15 +7,19 @@ import 'package:gtel_erp/Core/Auth/auth_binding.dart';
 import 'package:gtel_erp/Core/Bindings/home_bindings.dart';
 import 'ActivityLogger/activity_logger.dart';
 import 'Core/Services/session_controller.dart';
+import 'Core/Services/splash_screen.dart';
+import 'Permission/permission_controller.dart';
 import 'firebase_options.dart';
 import 'Core/Auth/login.dart';
 import 'Web Screen/homepage.dart';
+
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   await Get.putAsync(() async => SessionController());
   await Get.putAsync(() async => ActivityLogger());
+  Get.put(PermissionController(), permanent: true);
   runApp(const MyApp());
 }
 
@@ -39,8 +43,12 @@ class MyApp extends StatelessWidget {
             textTheme: Typography.englishLike2021.apply(fontSizeFactor: 1.sp),
           ),
           initialBinding: AuthBinding(),
-          initialRoute: '/',
+          initialRoute: '/splash',
           getPages: [
+            GetPage(
+              name: '/splash',
+              page: () => const SplashScreen(),
+            ), // ← নতুন
             GetPage(name: '/', page: () => const LoginPage()),
             GetPage(
               name: '/home',

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Live%20order/salemodel.dart';
 
+import '../Permission/permission_button.dart';
+
 class LiveOrderSalesPage extends StatelessWidget {
   const LiveOrderSalesPage({super.key});
 
@@ -1322,53 +1324,57 @@ class LiveOrderSalesPage extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  height: 50,
-                  child: Obx(
-                    () => ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor:
-                            controller.isConditionSale.value
-                                ? Colors.deepOrange
-                                : const Color(0xFF1E293B),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
+                PermissionVisibility(
+                  moduleKey: 'new_order',
+                  action: 'create',
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: Obx(
+                      () => ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor:
+                              controller.isConditionSale.value
+                                  ? Colors.deepOrange
+                                  : const Color(0xFF1E293B),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          elevation: 2,
                         ),
-                        elevation: 2,
+                        onPressed:
+                            controller.isProcessing.value
+                                ? null
+                                : controller.finalizeSale,
+                        icon:
+                            controller.isProcessing.value
+                                ? const SizedBox.shrink()
+                                : const Icon(
+                                  Icons.print,
+                                  size: 20,
+                                  color: Colors.white,
+                                ),
+                        label:
+                            controller.isProcessing.value
+                                ? const SizedBox(
+                                  width: 24,
+                                  height: 24,
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                                : Text(
+                                  controller.isConditionSale.value
+                                      ? "PROCESS CHALLAN"
+                                      : "COMPLETE INVOICE",
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 15,
+                                  ),
+                                ),
                       ),
-                      onPressed:
-                          controller.isProcessing.value
-                              ? null
-                              : controller.finalizeSale,
-                      icon:
-                          controller.isProcessing.value
-                              ? const SizedBox.shrink()
-                              : const Icon(
-                                Icons.print,
-                                size: 20,
-                                color: Colors.white,
-                              ),
-                      label:
-                          controller.isProcessing.value
-                              ? const SizedBox(
-                                width: 24,
-                                height: 24,
-                                child: CircularProgressIndicator(
-                                  color: Colors.white,
-                                  strokeWidth: 2,
-                                ),
-                              )
-                              : Text(
-                                controller.isConditionSale.value
-                                    ? "PROCESS CHALLAN"
-                                    : "COMPLETE INVOICE",
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 15,
-                                ),
-                              ),
                     ),
                   ),
                 ),
@@ -1535,6 +1541,7 @@ class LiveOrderSalesPage extends StatelessWidget {
                         }),
                       ),
                       const SizedBox(width: 10),
+
                       SizedBox(
                         width: 40,
                         height: 30,

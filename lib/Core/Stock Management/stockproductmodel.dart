@@ -1,5 +1,7 @@
 // ignore_for_file: avoid_dynamic_calls
 
+import 'dart:convert';
+
 class Product {
   final int id;
   final String name;
@@ -15,7 +17,7 @@ class Product {
   final double shipmentTax;
   final int shipmentNo;
   final double currency;
-  int stockQty; // Kept non-final to support your existing direct modifications
+  int stockQty;
 
   // --- Logistics & Alerts ---
   final double shipmentTaxAir;
@@ -27,6 +29,9 @@ class Product {
   final int seaStockQty;
   final int airStockQty;
   final int localQty;
+
+  // --- Warehouse Stocks ---
+  final List<Map<String, dynamic>> warehouseStocks;
 
   Product({
     required this.id,
@@ -51,8 +56,8 @@ class Product {
     required this.seaStockQty,
     required this.airStockQty,
     required this.localQty,
+    this.warehouseStocks = const [],
   });
-
 
   static int _parseInt(dynamic value) {
     if (value == null) return 0;
@@ -71,10 +76,35 @@ class Product {
   }
 
   static DateTime? _parseDate(dynamic value) {
-    if (value == null || value.toString() == '0' || value.toString() == 'null') {
+    if (value == null ||
+        value.toString() == '0' ||
+        value.toString() == 'null') {
       return null;
     }
     return DateTime.tryParse(value.toString());
+  }
+
+  // Parses warehouse_stocks — handles List or JSON string
+  static List<Map<String, dynamic>> _parseWarehouseStocks(dynamic raw) {
+    if (raw == null) return [];
+
+    List<dynamic> list = [];
+
+    if (raw is List) {
+      list = raw;
+    } else if (raw is String && raw.isNotEmpty && raw != '[]') {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is List) list = decoded;
+      } catch (_) {
+        return [];
+      }
+    }
+
+    return list
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
   }
 
   factory Product.fromJson(Map<String, dynamic> json) {
@@ -103,6 +133,7 @@ class Product {
       seaStockQty: _parseInt(json['sea_stock_qty']),
       airStockQty: _parseInt(json['air_stock_qty']),
       localQty: _parseInt(json['local_qty']),
+      warehouseStocks: _parseWarehouseStocks(json['warehouse_stocks']),
     );
   }
 
@@ -130,6 +161,7 @@ class Product {
       'sea_stock_qty': seaStockQty,
       'air_stock_qty': airStockQty,
       'local_qty': localQty,
+      'warehouse_stocks': warehouseStocks, // ← এটাই মূল fix
     };
   }
 
@@ -156,6 +188,7 @@ class Product {
     int? seaStockQty,
     int? airStockQty,
     int? localQty,
+    List<Map<String, dynamic>>? warehouseStocks,
   }) {
     return Product(
       id: id ?? this.id,
@@ -180,12 +213,24 @@ class Product {
       seaStockQty: seaStockQty ?? this.seaStockQty,
       airStockQty: airStockQty ?? this.airStockQty,
       localQty: localQty ?? this.localQty,
+      warehouseStocks: warehouseStocks ?? this.warehouseStocks,
     );
   }
 
   bool get isLowStock => stockQty <= alertQty;
   double get profitAgent => agent - avgPurchasePrice;
   double get profitWholesale => wholesale - avgPurchasePrice;
+
+  // Helper: get qty in a specific warehouse directly from model
+  int qtyInWarehouse(int warehouseId) {
+    for (final s in warehouseStocks) {
+      final id = int.tryParse(s['warehouse_id']?.toString() ?? '');
+      if (id == warehouseId) {
+        return int.tryParse(s['qty']?.toString() ?? '0') ?? 0;
+      }
+    }
+    return 0;
+  }
 
   @override
   bool operator ==(Object other) {

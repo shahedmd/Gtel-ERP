@@ -186,10 +186,8 @@ class SidebarMenu extends StatelessWidget {
               final isSuperAdmin = rolecontroller.isSuperAdmin;
 
               // ── Permission controller (live listens user permissions) ──
-              final permCtrl =
-                  Get.isRegistered<PermissionController>()
-                      ? Get.find<PermissionController>()
-                      : Get.put(PermissionController(), permanent: true);
+              // ── এটা রাখো ─────────────────────────────────────────────────────────────
+              final permCtrl = Get.find<PermissionController>();
 
               // Super Admin হলে সব true, অন্য রোলে permissions থেকে চেক
               bool canView(String moduleKey) =>

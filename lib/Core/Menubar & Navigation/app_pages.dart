@@ -66,172 +66,161 @@ abstract class AppPages {
       binding: HomeBinding(),
     ),
   ];
-static final List<GetPage> nestedPages = [
-  GetPage(
-    name: Routes.overviewaccount,
-    page: () => const PermissionGuard(
-      moduleKey: 'overview',
-      child: FinancialOverviewPage(),
+  static final List<GetPage> nestedPages = [
+    GetPage(
+      name: Routes.overviewaccount,
+      page:
+          () => const PermissionGuard(
+            moduleKey: 'overview',
+            child: FinancialOverviewPage(),
+          ),
     ),
-  ),
-  GetPage(
-    name: Routes.dashboard,
-    page: () => PermissionGuard(
-      moduleKey: 'daily_ledger',
-      child: DailyOverviewPage(),
+    GetPage(
+      name: Routes.dashboard,
+      page:
+          () => PermissionGuard(
+            moduleKey: 'daily_ledger',
+            child: DailyOverviewPage(),
+          ),
     ),
-  ),
-  GetPage(
-    name: Routes.debtor,
-    page: () => PermissionGuard(
-      moduleKey: 'debtor',
-      child: Debatorpage(),
+    GetPage(
+      name: Routes.debtor,
+      page: () => PermissionGuard(moduleKey: 'debtor', child: Debatorpage()),
     ),
-  ),
-  GetPage(
-    name: Routes.dailyexpenses,
-    page: () =>  PermissionGuard(
-      moduleKey: 'daily_expenses',
-      child: DailyExpensesPage(),
+    GetPage(
+      name: Routes.dailyexpenses,
+      page:
+          () => PermissionGuard(
+            moduleKey: 'daily_expenses',
+            child: DailyExpensesPage(),
+          ),
     ),
-  ),
-  GetPage(
-    name: Routes.monthlyexpense,
-    page: () =>  PermissionGuard(
-      moduleKey: 'monthly_expenses',
-      child: MonthlyExpensesPage(),
+    GetPage(
+      name: Routes.monthlyexpense,
+      page:
+          () => PermissionGuard(
+            moduleKey: 'monthly_expenses',
+            child: MonthlyExpensesPage(),
+          ),
     ),
-  ),
-  GetPage(
-    name: Routes.dailysales,
-    page: () =>  PermissionGuard(
-      moduleKey: 'daily_sales',
-      child: DailySalesPage(),
+    GetPage(
+      name: Routes.dailysales,
+      page:
+          () => PermissionGuard(
+            moduleKey: 'daily_sales',
+            child: DailySalesPage(),
+          ),
     ),
-  ),
-  GetPage(
-    name: Routes.monthlysalespage,
-    page: () =>  PermissionGuard(
-      moduleKey: 'monthly_sales',
-      child: MonthlySalesPage(),
+    GetPage(
+      name: Routes.monthlysalespage,
+      page:
+          () => PermissionGuard(
+            moduleKey: 'monthly_sales',
+            child: MonthlySalesPage(),
+          ),
     ),
-  ),
-  GetPage(
-    name: Routes.stock,
-    page: () => PermissionGuard(
-      moduleKey: 'stock',
-      child: ProductScreen(),
+    GetPage(
+      name: Routes.stock,
+      page: () => PermissionGuard(moduleKey: 'stock', child: ProductScreen()),
     ),
-  ),
-  GetPage(
-    name: Routes.staff,
-    page: () =>  PermissionGuard(
-      moduleKey: 'staff',
-      child: StaffListPage(),
+    GetPage(
+      name: Routes.staff,
+      page: () => PermissionGuard(moduleKey: 'staff', child: StaffListPage()),
     ),
-  ),
-  GetPage(
-    name: Routes.liveorder,
-    page: () =>  PermissionGuard(
-      moduleKey: 'new_order',
-      child: LiveOrderSalesPage(),
+    GetPage(
+      name: Routes.liveorder,
+      page:
+          () => PermissionGuard(
+            moduleKey: 'new_order',
+            child: LiveOrderSalesPage(),
+          ),
     ),
-  ),
-  GetPage(
-    name: Routes.profitloss,
-    page: () => PermissionGuard(
-      moduleKey: 'profit_loss',
-      child: ProfitView(),
+    GetPage(
+      name: Routes.profitloss,
+      page:
+          () => PermissionGuard(moduleKey: 'profit_loss', child: ProfitView()),
     ),
-  ),
-  GetPage(
-    name: Routes.cash,
-    page: () =>  PermissionGuard(
-      moduleKey: 'cash',
-      child: CashDrawerView(),
+    GetPage(
+      name: Routes.cash,
+      page: () => PermissionGuard(moduleKey: 'cash', child: CashDrawerView()),
     ),
-  ),
-  GetPage(
-    name: Routes.service,
-    page: () =>  PermissionGuard(
-      moduleKey: 'service',
-      child: ServicePage(),
+    GetPage(
+      name: Routes.service,
+      page: () => PermissionGuard(moduleKey: 'service', child: ServicePage()),
     ),
-  ),
-  GetPage(
-    name: Routes.salereturn,
-    page: () =>  PermissionGuard(
-      moduleKey: 'sale_return',
-      child: SaleReturnPage(),
+    GetPage(
+      name: Routes.salereturn,
+      page:
+          () => PermissionGuard(
+            moduleKey: 'sale_return',
+            child: SaleReturnPage(),
+          ),
     ),
-  ),
-  GetPage(
-    name: Routes.shipment,
-    page: () =>  PermissionGuard(
-      moduleKey: 'shipment',
-      child: ShipmentPage(),
+    GetPage(
+      name: Routes.shipment,
+      page: () => PermissionGuard(moduleKey: 'shipment', child: ShipmentPage()),
     ),
-  ),
-  GetPage(
-    name: Routes.conditionpage,
-    page: () =>  PermissionGuard(
-      moduleKey: 'condition_sale',
-      child: ConditionSalesPage(),
+    GetPage(
+      name: Routes.conditionpage,
+      page:
+          () => PermissionGuard(
+            moduleKey: 'condition_sale',
+            child: ConditionSalesPage(),
+          ),
     ),
-  ),
-  GetPage(
-    name: Routes.vendor,
-    page: () =>  PermissionGuard(
-      moduleKey: 'vendor',
-      child: VendorPage(),
+    GetPage(
+      name: Routes.vendor,
+      page: () => PermissionGuard(moduleKey: 'vendor', child: VendorPage()),
     ),
-  ),
-  GetPage(
-    name: Routes.customeroverview,
-    page: () =>  PermissionGuard(
-      moduleKey: 'customer',
-      child: CustomerAnalyticsPage(),
+    GetPage(
+      name: Routes.customeroverview,
+      page:
+          () => PermissionGuard(
+            moduleKey: 'customer',
+            child: CustomerAnalyticsPage(),
+          ),
     ),
-  ),
-  GetPage(
-    name: Routes.staffsalesreport,
-    page: () => const PermissionGuard(
-      moduleKey: 'staff_overview',
-      child: StaffReportScreen(),
+    GetPage(
+      name: Routes.staffsalesreport,
+      page:
+          () => const PermissionGuard(
+            moduleKey: 'staff_overview',
+            child: StaffReportScreen(),
+          ),
     ),
-  ),
-  GetPage(
-    name: Routes.productoverview,
-    page: () => const PermissionGuard(
-      moduleKey: 'product_overview',
-      child: HotSellingProductPage(),
+    GetPage(
+      name: Routes.productoverview,
+      page:
+          () => const PermissionGuard(
+            moduleKey: 'product_overview',
+            child: HotSellingProductPage(),
+          ),
     ),
-  ),
-  GetPage(
-    name: Routes.purchase,
-    page: () =>  PermissionGuard(
-      moduleKey: 'purchase_history',
-      child: GlobalPurchasePage(),
+    GetPage(
+      name: Routes.purchase,
+      page:
+          () => PermissionGuard(
+            moduleKey: 'purchase_history',
+            child: GlobalPurchasePage(),
+          ),
     ),
-  ),
-  GetPage(
-    name: Routes.orderlist,
-    page: () =>  PermissionGuard(
-      moduleKey: 'order_list',
-      child: OrderHistoryPage(),
+    GetPage(
+      name: Routes.orderlist,
+      page:
+          () => PermissionGuard(
+            moduleKey: 'order_list',
+            child: OrderHistoryPage(),
+          ),
     ),
-  ),
-  GetPage(
-    name: Routes.localpurchase,
-    page: () => const PermissionGuard(
-      moduleKey: 'local_purchase',
-      child: SmartPurchaseScreen(),
+    GetPage(
+      name: Routes.localpurchase,
+      page:
+          () => const PermissionGuard(
+            moduleKey: 'local_purchase',
+            child: SmartPurchaseScreen(),
+          ),
     ),
-  ),
-  // ── Super Admin Panel — permission guard নেই, role check করে ────────────
-  GetPage(
-    name: Routes.superadmin,
-    page: () => const SuperAdminPage(),
-  ),
-];
+    // ── Super Admin Panel — permission guard নেই, role check করে ────────────
+    GetPage(name: Routes.superadmin, page: () => const SuperAdminPage()),
+  ];
 }

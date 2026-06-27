@@ -1,5 +1,3 @@
-// ignore_for_file: deprecated_member_use, curly_braces_in_flow_control_structures
-
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
@@ -104,7 +102,7 @@ class DailyOverviewPage extends StatelessWidget {
                         Text(
                           "Sorted by Time (Newest First)",
                           style: TextStyle(
-                            color: slateMedium.withOpacity(0.8),
+                            color: slateMedium.withValues(alpha:0.8),
                             fontSize: isMobile ? 10 : 11,
                           ),
                         ),
@@ -414,8 +412,8 @@ class DailyOverviewPage extends StatelessWidget {
               amount: ctrl.totalCashIn.value,
               icon: FontAwesomeIcons.arrowTrendUp,
               color: successGreen,
-              bg: successGreen.withOpacity(0.05),
-              border: successGreen.withOpacity(0.2),
+              bg: successGreen.withValues(alpha:0.05),
+              border: successGreen.withValues(alpha:0.2),
             ),
           ),
           SizedBox(width: isMobile ? 8 : 12),
@@ -425,8 +423,8 @@ class DailyOverviewPage extends StatelessWidget {
               amount: ctrl.totalCashOut.value,
               icon: FontAwesomeIcons.arrowTrendDown,
               color: errorRed,
-              bg: errorRed.withOpacity(0.05),
-              border: errorRed.withOpacity(0.2),
+              bg: errorRed.withValues(alpha:0.05),
+              border: errorRed.withValues(alpha:0.2),
             ),
           ),
         ],
@@ -464,7 +462,7 @@ class DailyOverviewPage extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
-                    color: color.withOpacity(0.9),
+                    color: color.withValues(alpha:0.9),
                     letterSpacing: 0.5,
                   ),
                 ),
@@ -544,7 +542,7 @@ class DailyOverviewPage extends StatelessWidget {
                     Center(
                       child: Icon(
                         FontAwesomeIcons.wallet,
-                        color: slateMedium.withOpacity(0.3),
+                        color: slateMedium.withValues(alpha:0.3),
                         size: 28,
                       ),
                     ),
@@ -755,7 +753,7 @@ class DailyOverviewPage extends StatelessWidget {
         border: Border.all(color: borderGrey),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.04),
+            color: Colors.grey.withValues(alpha:0.04),
             offset: const Offset(0, 4),
             blurRadius: 10,
           ),
@@ -767,13 +765,13 @@ class DailyOverviewPage extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             decoration: BoxDecoration(
-              color: colorTheme.withOpacity(0.08),
+              color: colorTheme.withValues(alpha:0.08),
               borderRadius: const BorderRadius.only(
                 topLeft: Radius.circular(12),
                 topRight: Radius.circular(12),
               ),
               border: Border(
-                bottom: BorderSide(color: colorTheme.withOpacity(0.1)),
+                bottom: BorderSide(color: colorTheme.withValues(alpha:0.1)),
               ),
             ),
             child: Row(
@@ -837,7 +835,7 @@ class DailyOverviewPage extends StatelessWidget {
               itemCount: items.length,
               separatorBuilder:
                   (c, i) =>
-                      Divider(height: 1, color: borderGrey.withOpacity(0.5)),
+                      Divider(height: 1, color: borderGrey.withValues(alpha:0.5)),
               itemBuilder: (ctx, i) => _buildLedgerItemRow(items[i]),
             ),
         ],
@@ -933,21 +931,21 @@ class DailyOverviewPage extends StatelessWidget {
   Widget _buildMethodIcon(String method) {
     IconData icon = FontAwesomeIcons.moneyBillWave;
     Color color = colCash;
-    Color bg = colCash.withOpacity(0.1);
+    Color bg = colCash.withValues(alpha: 0.1);
 
     String upper = method.toUpperCase();
     if (upper.contains("BKASH")) {
       icon = FontAwesomeIcons.mobileScreen;
       color = colBkash;
-      bg = colBkash.withOpacity(0.1);
+      bg = colBkash.withValues( alpha:0.1);
     } else if (upper.contains("NAGAD")) {
       icon = FontAwesomeIcons.mobileScreen;
       color = colNagad;
-      bg = colNagad.withOpacity(0.1);
+      bg = colNagad.withValues(alpha:0.1);
     } else if (upper.contains("BANK")) {
       icon = FontAwesomeIcons.buildingColumns;
       color = colBank;
-      bg = colBank.withOpacity(0.1);
+      bg = colBank.withValues(alpha:0.1);
     }
 
     return Container(
@@ -966,16 +964,16 @@ class DailyOverviewPage extends StatelessWidget {
     String upper = text.toUpperCase();
 
     if (upper.contains("BKASH")) {
-      bg = colBkash.withOpacity(0.1);
+      bg = colBkash.withValues(alpha:0.1);
       fg = colBkash;
     } else if (upper.contains("NAGAD")) {
-      bg = colNagad.withOpacity(0.1);
+      bg = colNagad.withValues(alpha:0.1);
       fg = colNagad;
     } else if (upper.contains("BANK")) {
-      bg = colBank.withOpacity(0.1);
+      bg = colBank.withValues(alpha:0.1);
       fg = colBank;
     } else if (upper.contains("CASH")) {
-      bg = colCash.withOpacity(0.08);
+      bg = colCash.withValues(alpha:0.08);
       fg = colCash;
     }
 
@@ -984,7 +982,7 @@ class DailyOverviewPage extends StatelessWidget {
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: fg.withOpacity(0.2)),
+        border: Border.all(color: fg.withValues(alpha: 0.2)),
       ),
       child: Text(
         text,

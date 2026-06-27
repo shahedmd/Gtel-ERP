@@ -45,6 +45,8 @@ class SuperAdminController extends GetxController {
     'edit',
     'delete',
     'export',
+    'sync',
+    'report'
   ];
 
   Future<void> createUser({

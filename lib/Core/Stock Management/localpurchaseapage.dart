@@ -39,6 +39,10 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
   final RxString selectedLocation = 'Local'.obs;
   final Rx<DateTime> selectedDate = DateTime.now().obs;
 
+  // --- Warehouse States ---
+  final Rx<Warehouse?> selectedPurchaseWarehouse = Rx<Warehouse?>(null);
+  late TextEditingController warehouseLocationCtrl;
+
   // --- Input Controllers (Memory Safe) ---
   late TextEditingController qtyController;
   late TextEditingController costController;
@@ -52,10 +56,12 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
     qtyController = TextEditingController(text: '1');
     costController = TextEditingController();
     noteController = TextEditingController();
+    warehouseLocationCtrl = TextEditingController();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (debtorCtrl.bodies.isEmpty) debtorCtrl.loadBodies();
       if (productCtrl.allProducts.isEmpty) productCtrl.fetchProducts();
+      if (productCtrl.warehouses.isEmpty) productCtrl.fetchWarehouses();
       purchaseCtrl.cartItems.clear();
     });
   }
@@ -66,6 +72,7 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
     qtyController.dispose();
     costController.dispose();
     noteController.dispose();
+    warehouseLocationCtrl.dispose();
     super.dispose();
   }
 
@@ -75,10 +82,12 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
   void _resetPage() {
     selectedSupplier.value = null;
     selectedProduct.value = null;
+    selectedPurchaseWarehouse.value = null;
     purchaseCtrl.cartItems.clear();
     qtyController.text = '1';
     costController.clear();
     noteController.clear();
+    warehouseLocationCtrl.clear();
     _internalSupplierCtrl?.clear();
     _internalProductCtrl?.clear();
     debtorCtrl.loadBodies();
@@ -137,6 +146,12 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
         'id': selectedProduct.value!.id,
         'name': selectedProduct.value!.name,
         'model': selectedProduct.value!.model,
+        if (selectedPurchaseWarehouse.value != null)
+          'warehouse_id': selectedPurchaseWarehouse.value!.id,
+        if (selectedPurchaseWarehouse.value != null)
+          'warehouse_name': selectedPurchaseWarehouse.value!.name,
+        if (warehouseLocationCtrl.text.trim().isNotEmpty)
+          'warehouse_location': warehouseLocationCtrl.text.trim(),
       },
       qty,
       cost,
@@ -147,6 +162,9 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
     _internalProductCtrl?.clear();
     qtyController.text = '1';
     costController.clear();
+    warehouseLocationCtrl.clear();
+    // Note: selectedPurchaseWarehouse intentionally kept — usually all items
+    // in one purchase go to the same warehouse.
   }
 
   void _finalize() async {
@@ -287,7 +305,7 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
                 ),
               ],
             ),
-            child: _buildCartSection(true), // Passes true to use shrinkWrap
+            child: _buildCartSection(true),
           ),
         ],
       ),
@@ -419,12 +437,12 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
             ) {
               _internalSupplierCtrl = controller;
               return TextField(
-                style: TextStyle(fontSize: 13),
+                style: const TextStyle(fontSize: 13),
                 controller: controller,
                 focusNode: focusNode,
                 decoration: InputDecoration(
                   labelText: "Search Supplier by Name, Phone, NID...",
-                  labelStyle: TextStyle(fontSize: 11),
+                  labelStyle: const TextStyle(fontSize: 11),
                   prefixIcon: const Icon(Icons.business, color: textLight),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
@@ -606,12 +624,12 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
             ) {
               _internalProductCtrl = controller;
               return TextField(
-                style: TextStyle(fontSize: 13),
+                style: const TextStyle(fontSize: 13),
                 controller: controller,
                 focusNode: focusNode,
                 decoration: InputDecoration(
                   labelText: "Search Product by Model, Name, Brand...",
-                  labelStyle: TextStyle(fontSize: 11),
+                  labelStyle: const TextStyle(fontSize: 11),
                   prefixIcon: const Icon(
                     Icons.inventory_2_outlined,
                     color: textLight,
@@ -631,7 +649,7 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
           ),
           const SizedBox(height: 20),
 
-          // RESPONSIVE INPUTS
+          // ROW 1: Location / Qty / Cost
           if (isMobile) ...[
             _buildLocationDropdown(),
             const SizedBox(height: 12),
@@ -646,6 +664,22 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
                 Expanded(child: _buildQtyInput()),
                 const SizedBox(width: 16),
                 Expanded(child: _buildCostInput()),
+              ],
+            ),
+
+          const SizedBox(height: 12),
+
+          // ROW 2: Warehouse / Location
+          if (isMobile) ...[
+            _buildWarehouseDropdown(),
+            const SizedBox(height: 12),
+            _buildWarehouseLocationInput(),
+          ] else
+            Row(
+              children: [
+                Expanded(flex: 2, child: _buildWarehouseDropdown()),
+                const SizedBox(width: 16),
+                Expanded(flex: 2, child: _buildWarehouseLocationInput()),
               ],
             ),
 
@@ -683,7 +717,7 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
         value: selectedLocation.value,
         decoration: InputDecoration(
           labelText: 'Purchase Location',
-          labelStyle: TextStyle(fontSize: 11),
+          labelStyle: const TextStyle(fontSize: 11),
           filled: true,
           fillColor: Colors.white,
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
@@ -693,7 +727,7 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
                 .map(
                   (e) => DropdownMenuItem(
                     value: e,
-                    child: Text(e, style: TextStyle(fontSize: 13)),
+                    child: Text(e, style: const TextStyle(fontSize: 13)),
                   ),
                 )
                 .toList(),
@@ -709,10 +743,10 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
     return TextField(
       controller: qtyController,
       keyboardType: TextInputType.number,
-      style: TextStyle(fontSize: 13),
+      style: const TextStyle(fontSize: 13),
       decoration: InputDecoration(
         labelText: 'Quantity',
-        labelStyle: TextStyle(fontSize: 11),
+        labelStyle: const TextStyle(fontSize: 11),
         filled: true,
         fillColor: Colors.white,
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
@@ -723,15 +757,64 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
   Widget _buildCostInput() {
     return TextField(
       controller: costController,
-      style: TextStyle(fontSize: 13),
-
+      style: const TextStyle(fontSize: 13),
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
       decoration: InputDecoration(
         labelText: 'Unit Cost (৳)',
-        labelStyle: TextStyle(fontSize: 11),
-
+        labelStyle: const TextStyle(fontSize: 11),
         filled: true,
         fillColor: Colors.white,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+      ),
+    );
+  }
+
+  // ----------------------------------------------------------------
+  // UI: WAREHOUSE INPUTS
+  // ----------------------------------------------------------------
+
+  Widget _buildWarehouseDropdown() {
+    return Obx(
+      () => DropdownButtonFormField<Warehouse?>(
+        value: selectedPurchaseWarehouse.value,
+        decoration: InputDecoration(
+          labelText: 'Warehouse (Optional)',
+          labelStyle: const TextStyle(fontSize: 11),
+          filled: true,
+          fillColor: Colors.white,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          prefixIcon: const Icon(Icons.warehouse_outlined, color: textLight),
+        ),
+        items: [
+          const DropdownMenuItem<Warehouse?>(
+            value: null,
+            child: Text(
+              'No Warehouse',
+              style: TextStyle(fontSize: 13, color: textLight),
+            ),
+          ),
+          ...productCtrl.activeWarehouses.map(
+            (w) => DropdownMenuItem<Warehouse?>(
+              value: w,
+              child: Text(w.name, style: const TextStyle(fontSize: 13)),
+            ),
+          ),
+        ],
+        onChanged: (val) => selectedPurchaseWarehouse.value = val,
+      ),
+    );
+  }
+
+  Widget _buildWarehouseLocationInput() {
+    return TextField(
+      controller: warehouseLocationCtrl,
+      style: const TextStyle(fontSize: 13),
+      decoration: InputDecoration(
+        labelText: 'Shelf / Location (Optional)',
+        labelStyle: const TextStyle(fontSize: 11),
+        filled: true,
+        fillColor: Colors.white,
+        prefixIcon: const Icon(Icons.pin_drop_outlined, color: textLight),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
       ),
     );
@@ -765,7 +848,7 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
         );
       }
       return ListView.separated(
-        shrinkWrap: isMobile, // Crucial for mobile scrolling
+        shrinkWrap: isMobile,
         physics:
             isMobile
                 ? const NeverScrollableScrollPhysics()
@@ -774,6 +857,9 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
         separatorBuilder: (_, __) => const Divider(height: 1),
         itemBuilder: (context, index) {
           var item = purchaseCtrl.cartItems[index];
+          final hasWarehouse = item.containsKey('warehouse_name');
+          final hasLocation = item.containsKey('warehouse_location');
+
           return Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Row(
@@ -798,6 +884,49 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
                           fontSize: 12,
                         ),
                       ),
+                      if (hasWarehouse) ...[
+                        const SizedBox(height: 2),
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.warehouse_outlined,
+                              size: 11,
+                              color: activeAccent,
+                            ),
+                            const SizedBox(width: 3),
+                            Text(
+                              item['warehouse_name'],
+                              style: const TextStyle(
+                                color: activeAccent,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            if (hasLocation) ...[
+                              const Text(
+                                " · ",
+                                style: TextStyle(
+                                  color: Colors.grey,
+                                  fontSize: 11,
+                                ),
+                              ),
+                              const Icon(
+                                Icons.pin_drop_outlined,
+                                size: 11,
+                                color: Colors.grey,
+                              ),
+                              const SizedBox(width: 2),
+                              Text(
+                                item['warehouse_location'],
+                                style: const TextStyle(
+                                  color: Colors.grey,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -938,11 +1067,11 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
               ),
               const SizedBox(height: 20),
               TextField(
-                style: TextStyle(fontSize: 13),
+                style: const TextStyle(fontSize: 13),
                 controller: noteController,
                 decoration: InputDecoration(
                   labelText: 'Purchase Note / Invoice No. (Optional)',
-                  labelStyle: TextStyle(fontSize: 11),
+                  labelStyle: const TextStyle(fontSize: 11),
                   prefixIcon: const Icon(
                     Icons.note_alt_outlined,
                     color: textLight,
@@ -1020,7 +1149,7 @@ class _AddSupplierDialogState extends State<AddSupplierDialog> {
     nidC = TextEditingController();
     phoneC = TextEditingController();
     addressC = TextEditingController();
-    addPaymentForm(); // Add initial cash payment option
+    addPaymentForm();
   }
 
   void addPaymentForm() {
@@ -1706,7 +1835,7 @@ class _CreateProductInlineDialogState extends State<CreateProductInlineDialog> {
     bool isNumber = false,
   }) {
     return TextField(
-      style: TextStyle(fontSize: 13),
+      style: const TextStyle(fontSize: 13),
       controller: ctrl,
       keyboardType:
           isNumber
@@ -1714,7 +1843,7 @@ class _CreateProductInlineDialogState extends State<CreateProductInlineDialog> {
               : TextInputType.text,
       decoration: InputDecoration(
         labelText: label,
-        labelStyle: TextStyle(fontSize: 13),
+        labelStyle: const TextStyle(fontSize: 13),
         isDense: true,
         filled: true,
         fillColor: bgGrey,

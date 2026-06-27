@@ -6,7 +6,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'stockcontroller.dart';
-import 'stockproductmodel.dart'; 
+import 'stockproductmodel.dart';
 
 const Color darkSlate = Color(0xFF0F172A);
 const Color activeAccent = Color(0xFF2563EB);
@@ -131,7 +131,10 @@ class ServicePage extends StatelessWidget {
                         children: [
                           Icon(Icons.build, size: 18, color: Colors.orange),
                           SizedBox(width: 8),
-                          Text("Print Service Report", style: TextStyle(fontSize: 13)),
+                          Text(
+                            "Print Service Report",
+                            style: TextStyle(fontSize: 13),
+                          ),
                         ],
                       ),
                     ),
@@ -141,7 +144,10 @@ class ServicePage extends StatelessWidget {
                         children: [
                           Icon(Icons.broken_image, size: 18, color: Colors.red),
                           SizedBox(width: 8),
-                          Text("Print Damage Report", style: TextStyle(fontSize: 13)),
+                          Text(
+                            "Print Damage Report",
+                            style: TextStyle(fontSize: 13),
+                          ),
                         ],
                       ),
                     ),
@@ -908,9 +914,6 @@ class ServicePage extends StatelessWidget {
   }
 }
 
-// ==========================================
-// 3. MEMORY SAFE DIALOG (Stateful)
-// ==========================================
 class _ReturnStockDialog extends StatefulWidget {
   final int id;
   final String modelName;
@@ -930,21 +933,31 @@ class _ReturnStockDialog extends StatefulWidget {
 
 class _ReturnStockDialogState extends State<_ReturnStockDialog> {
   late TextEditingController qtyController;
+  late TextEditingController locationController;
+  int? selectedWarehouseId;
 
   @override
   void initState() {
     super.initState();
     qtyController = TextEditingController(text: widget.maxQty.toString());
+    locationController = TextEditingController();
+    final warehouses = widget.controller.activeWarehouses;
+    if (warehouses.isNotEmpty) {
+      selectedWarehouseId = warehouses.first.id;
+    }
   }
 
   @override
   void dispose() {
     qtyController.dispose();
+    locationController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final warehouses = widget.controller.activeWarehouses;
+
     return AlertDialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       title: const Text(
@@ -958,18 +971,78 @@ class _ReturnStockDialogState extends State<_ReturnStockDialog> {
             "Return ${widget.modelName} from Service?",
             style: const TextStyle(fontSize: 14),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 4),
           Text(
             "Max available: ${widget.maxQty}",
             style: const TextStyle(color: Colors.grey, fontSize: 12),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
+
+          // Quantity
           TextField(
             controller: qtyController,
             keyboardType: TextInputType.number,
             textAlign: TextAlign.center,
             decoration: const InputDecoration(
               labelText: "Quantity",
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // Warehouse selector
+          if (warehouses.isNotEmpty) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<int>(
+                  isExpanded: true,
+                  value: selectedWarehouseId,
+                  hint: const Text(
+                    'Select Warehouse',
+                    style: TextStyle(fontSize: 13),
+                  ),
+                  items:
+                      warehouses
+                          .map(
+                            (w) => DropdownMenuItem(
+                              value: w.id,
+                              child: Row(
+                                children: [
+                                  const Icon(
+                                    Icons.store_outlined,
+                                    size: 15,
+                                    color: Color(0xFF64748B),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    w.name,
+                                    style: const TextStyle(fontSize: 13),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                          .toList(),
+                  onChanged: (v) => setState(() => selectedWarehouseId = v),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+          ],
+
+          // Location (optional)
+          TextField(
+            controller: locationController,
+            decoration: const InputDecoration(
+              labelText: "Location (optional)",
+              hintText: "e.g. Aisle 3, Shelf 2",
+              prefixIcon: Icon(Icons.location_on, size: 18, color: Colors.teal),
               border: OutlineInputBorder(),
               isDense: true,
             ),
@@ -1007,18 +1080,23 @@ class _ReturnStockDialogState extends State<_ReturnStockDialog> {
               return;
             }
             Get.back();
-            widget.controller.returnFromService(widget.id, enteredQty);
+            widget.controller.returnFromService(
+              widget.id,
+              enteredQty,
+              warehouseId: selectedWarehouseId,
+              location:
+                  locationController.text.trim().isNotEmpty
+                      ? locationController.text.trim()
+                      : null,
+            );
           },
-          child: const Text("Confirm"),
+          child: const Text("Confirm Return"),
         ),
       ],
     );
   }
 }
 
-// ==========================================
-// 4. ENTERPRISE PDF GENERATOR
-// ==========================================
 class ServicePdfGenerator {
   static Future<void> generateAndDownloadPdf(
     String reportType,
@@ -1369,4 +1447,5 @@ class PdfService {
       },
       oddRowDecoration: const pw.BoxDecoration(color: PdfColors.grey50),
     );
-  }}
+  }
+}
