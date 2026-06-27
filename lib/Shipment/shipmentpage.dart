@@ -1059,17 +1059,44 @@ class ShipmentPage extends StatelessWidget {
               Expanded(
                 flex: 2,
                 child: Obx(
-                  () => DropdownButtonFormField<String>(
-                    decoration: denseDeco("Carrier", Icons.local_shipping),
-                    style: const TextStyle(fontSize: 13, color: Colors.black),
-                    value: ctrl.selectedCarrier.value,
-                    items:
-                        ctrl.carrierList
-                            .map(
-                              (c) => DropdownMenuItem(value: c, child: Text(c)),
-                            )
-                            .toList(),
-                    onChanged: (val) => ctrl.selectedCarrier.value = val,
+                  () => Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      DropdownButtonFormField<String>(
+                        decoration: denseDeco("Carrier", Icons.local_shipping),
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: Colors.black,
+                        ),
+                        value: ctrl.selectedCarrier.value,
+                        items:
+                            ctrl.carrierList
+                                .map(
+                                  (c) => DropdownMenuItem(
+                                    value: c,
+                                    child: Text(c),
+                                  ),
+                                )
+                                .toList(),
+                        onChanged: (val) {
+                          ctrl.selectedCarrier.value = val;
+                          if (val != 'Other') ctrl.customCarrierCtrl.clear();
+                        },
+                      ),
+                      if (ctrl.selectedCarrier.value == 'Other') ...[
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: ctrl.customCarrierCtrl,
+                          decoration: denseDeco(
+                            "Enter Carrier Name",
+                            Icons.edit,
+                          ),
+                          style: const TextStyle(fontSize: 13),
+                          autofocus: true,
+                        ),
+                      ],
+                    ],
                   ),
                 ),
               ),

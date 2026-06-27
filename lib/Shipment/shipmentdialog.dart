@@ -1,13 +1,20 @@
 // ignore_for_file: deprecated_member_use, avoid_print
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
 import 'package:gtel_erp/Shipment/controller.dart';
-import 'package:gtel_erp/Core/Stock%20Management/stockproductmodel.dart';
+import '../Core/Stock Management/stockcontroller.dart';
+import '../Core/Stock Management/stockproductmodel.dart';
 import 'shipmodel.dart';
 
+/// Shows the shipment entry dialog for adding/editing a product in the manifest.
+///
+/// The dialog now shows:
+///   • Base sea/air cost (calculated from yuan × rate + weight × tax)
+///   • Carrier share per unit (based on total manifest carrier cost ÷ total units)
+///   • Effective sea/air landing cost (base + carrier share) — what the product
+///     actually costs you including shipping, for setting agent/wholesale prices
 void showShipmentEntryDialog(
-  Product? p, // Nullable: Pass null to CREATE NEW PRODUCT
+  Product? p,
   ShipmentController shipCtrl,
   ProductController prodCtrl,
   double globalRate, {
@@ -15,7 +22,7 @@ void showShipmentEntryDialog(
 }) {
   final isNewProduct = p == null;
 
-  // -- CONTROLLERS --
+  // ── CONTROLLERS ────────────────────────────────────────────────────────────
   final nameC = TextEditingController(text: p?.name ?? '');
   final categoryC = TextEditingController(
     text: p?.category ?? 'Mobile Accessories',
@@ -23,13 +30,11 @@ void showShipmentEntryDialog(
   final brandC = TextEditingController(text: p?.brand ?? '');
   final modelC = TextEditingController(text: p?.model ?? '');
 
-  // Rates & Weights
-  double effectiveRate = (globalRate > 0) ? globalRate : (p?.currency ?? 18.20);
+  final double effectiveRate =
+      globalRate > 0 ? globalRate : (p?.currency ?? 18.20);
   final weightC = TextEditingController(text: (p?.weight ?? 0.0).toString());
   final yuanC = TextEditingController(text: (p?.yuan ?? 0.0).toString());
   final currencyC = TextEditingController(text: effectiveRate.toString());
-
-  // Tax
   final seaTaxC = TextEditingController(
     text: (p?.shipmentTax ?? 550.0).toString(),
   );
@@ -37,138 +42,177 @@ void showShipmentEntryDialog(
     text: (p?.shipmentTaxAir ?? 1200.0).toString(),
   );
 
-  // Prices (Calculated)
-  double initSea =
+  // Base prices (calculated, read-only)
+  final double initSea =
       isNewProduct
           ? 0.0
           : (p.yuan * effectiveRate) + (p.weight * p.shipmentTax);
-  double initAir =
+  final double initAir =
       isNewProduct
           ? 0.0
           : (p.yuan * effectiveRate) + (p.weight * p.shipmentTaxAir);
-
   final seaPriceC = TextEditingController(text: initSea.toStringAsFixed(2));
   final airPriceC = TextEditingController(text: initAir.toStringAsFixed(2));
 
-  // Sales
+  // Effective prices including carrier share (read-only display)
+  final effSeaC = TextEditingController(text: initSea.toStringAsFixed(2));
+  final effAirC = TextEditingController(text: initAir.toStringAsFixed(2));
+  final carrierShareC = TextEditingController(text: '0.00');
+
+  // Avg purchase price tracking
+  final existingAvg =
+      isNewProduct ? 0.0 : ((p.avgPurchasePrice as num?)?.toDouble() ?? 0.0);
+  final existingStock = isNewProduct ? 0 : (p.stockQty);
+  final newAvgC = TextEditingController(
+    text: existingAvg > 0 ? existingAvg.toStringAsFixed(2) : '0.00',
+  );
+
+  // Sales & manifest
   final agentC = TextEditingController(text: (p?.agent ?? 0).toString());
   final wholesaleC = TextEditingController(
     text: (p?.wholesale ?? 0).toString(),
   );
   final alertQtyC = TextEditingController(text: (p?.alertQty ?? 5).toString());
-
-  // Shipment Quantity
   final addSeaQtyC = TextEditingController(text: '0');
   final addAirQtyC = TextEditingController(text: '0');
   final cartonNoC = TextEditingController();
 
-  // Stock Reference (Only for existing)
+  // Stock reference
   final oldSeaStock = p?.seaStockQty ?? 0;
   final oldAirStock = p?.airStockQty ?? 0;
   final oldLocalStock = p?.localQty ?? 0;
   final onWayQty = isNewProduct ? 0 : shipCtrl.getOnWayQty(p.id);
 
-  // -- LOGIC: Auto Calculate Prices --
-  void recalculatePrices() {
-    double yuan = double.tryParse(yuanC.text) ?? 0.0;
-    double weight = double.tryParse(weightC.text) ?? 0.0;
-    double curr = double.tryParse(currencyC.text) ?? 0.0;
-    double sTax = double.tryParse(seaTaxC.text) ?? 0.0;
-    double aTax = double.tryParse(airTaxC.text) ?? 0.0;
-
-    double calculatedSea = (yuan * curr) + (weight * sTax);
-    double calculatedAir = (yuan * curr) + (weight * aTax);
-
-    seaPriceC.text = calculatedSea.toStringAsFixed(2);
-    airPriceC.text = calculatedAir.toStringAsFixed(2);
+  // Carrier cost for THIS item = parseCartonCount(cartonNo) x cost_per_carton
+  // Carrier per unit = item_carrier_cost / this_item_qty
+  // Example: cost/carton=50, cartonNo="1-3" (3 cartons), qty=10
+  //   item carrier = 150tk  =>  per unit = 15tk/unit
+  int parseCartonCount(String cartonNo) {
+    final trimmed = cartonNo.trim();
+    if (trimmed.isEmpty) return 1;
+    final parts = trimmed.split('-');
+    if (parts.length == 2) {
+      final start = int.tryParse(parts[0].trim()) ?? 1;
+      final end = int.tryParse(parts[1].trim()) ?? 1;
+      return (end - start + 1).clamp(1, 9999);
+    }
+    return 1;
   }
 
-  // Bind Listeners
-  yuanC.addListener(recalculatePrices);
-  weightC.addListener(recalculatePrices);
-  currencyC.addListener(recalculatePrices);
-  seaTaxC.addListener(recalculatePrices);
-  airTaxC.addListener(recalculatePrices);
+  void recalculateAll() {
+    final yuan = double.tryParse(yuanC.text) ?? 0.0;
+    final weight = double.tryParse(weightC.text) ?? 0.0;
+    final curr = double.tryParse(currencyC.text) ?? 0.0;
+    final sTax = double.tryParse(seaTaxC.text) ?? 0.0;
+    final aTax = double.tryParse(airTaxC.text) ?? 0.0;
 
-  // If new, trigger once to set zeros or defaults
-  if (isNewProduct) recalculatePrices();
+    final baseSea = (yuan * curr) + (weight * sTax);
+    final baseAir = (yuan * curr) + (weight * aTax);
+    seaPriceC.text = baseSea.toStringAsFixed(2);
+    airPriceC.text = baseAir.toStringAsFixed(2);
+
+    // Carton-based carrier share for THIS item only
+    final thisSeaQty = int.tryParse(addSeaQtyC.text) ?? 0;
+    final thisAirQty = int.tryParse(addAirQtyC.text) ?? 0;
+    final thisQty = thisSeaQty + thisAirQty;
+    final costPerCarton =
+        double.tryParse(shipCtrl.carrierCostPerCtnCtrl.text) ?? 0.0;
+    final itemCartons = parseCartonCount(cartonNoC.text);
+    final itemCarrierCost = itemCartons * costPerCarton;
+    final share = thisQty > 0 ? itemCarrierCost / thisQty : 0.0;
+
+    final effSea = baseSea + share;
+    final effAir = baseAir + share;
+
+    carrierShareC.text = share.toStringAsFixed(2);
+    effSeaC.text = effSea.toStringAsFixed(2);
+    effAirC.text = effAir.toStringAsFixed(2);
+
+    // ── Live weighted avg_purchase_price calculation ──────────────────────
+    // Formula: (existingStock x existingAvg + newQty x effectiveCost)
+    //          / (existingStock + newQty)
+    // effectiveCost = blended effective cost based on sea/air qty split
+    if (!isNewProduct) {
+      double newEffCost;
+      if (thisSeaQty > 0 && thisAirQty > 0) {
+        newEffCost = (thisSeaQty * effSea + thisAirQty * effAir) / thisQty;
+      } else if (thisSeaQty > 0) {
+        newEffCost = effSea;
+      } else if (thisAirQty > 0) {
+        newEffCost = effAir;
+      } else {
+        newEffCost = effSea > 0 ? effSea : effAir;
+      }
+
+      double projectedAvg;
+      if (existingStock > 0 && existingAvg > 0 && thisQty > 0) {
+        projectedAvg =
+            ((existingStock * existingAvg) + (thisQty * newEffCost)) /
+            (existingStock + thisQty);
+      } else if (thisQty > 0) {
+        projectedAvg = newEffCost;
+      } else {
+        projectedAvg = existingAvg;
+      }
+
+      newAvgC.text = projectedAvg.toStringAsFixed(2);
+    }
+  }
+
+  // Bind all listeners -- cartonNoC included so share updates as user types
+  for (final ctrl in [
+    yuanC,
+    weightC,
+    currencyC,
+    seaTaxC,
+    airTaxC,
+    addSeaQtyC,
+    addAirQtyC,
+    cartonNoC,
+  ]) {
+    ctrl.addListener(recalculateAll);
+  }
+
+  // Initial calculation
+  recalculateAll();
 
   Get.dialog(
     Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      elevation: 4,
       backgroundColor: Colors.transparent,
       child: Container(
-        width: 850,
-        constraints: const BoxConstraints(maxHeight: 850),
+        width: 900,
+        constraints: const BoxConstraints(maxHeight: 880),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.15),
+              blurRadius: 20,
+              offset: const Offset(0, 8),
+            ),
+          ],
         ),
         child: Column(
           children: [
-            // --- HEADER ---
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-              decoration: BoxDecoration(
-                color:
-                    isNewProduct
-                        ? const Color(0xFF0F766E)
-                        : const Color(0xFF1E293B),
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(8),
-                  topRight: Radius.circular(8),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    isNewProduct ? Icons.add_circle : Icons.edit,
-                    color: Colors.white,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    isNewProduct
-                        ? "NEW PRODUCT ENTRY"
-                        : "EDIT ${p.model.toUpperCase()}",
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
-                    ),
-                  ),
-                  const Spacer(),
-                  if (!isNewProduct)
-                    Text(
-                      "On Way: $onWayQty",
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 12,
-                      ),
-                    ),
-                  const SizedBox(width: 16),
-                  IconButton(
-                    onPressed: () => Get.back(),
-                    icon: const Icon(
-                      Icons.close,
-                      color: Colors.white,
-                      size: 20,
-                    ),
-                  ),
-                ],
-              ),
+            // ── HEADER ────────────────────────────────────────────────────
+            _DialogHeader(
+              isNewProduct: isNewProduct,
+              productModel: p?.model ?? '',
+              onWayQty: onWayQty,
             ),
 
-            // --- BODY (Scrollable) ---
+            // ── BODY ──────────────────────────────────────────────────────
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(24),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ROW 1: BASIC INFO
-                    _sectionTitle("IDENTITY"),
+                    // ROW 1: Identity
+                    _sectionLabel("IDENTITY"),
                     Row(
                       children: [
                         Expanded(
@@ -188,8 +232,8 @@ void showShipmentEntryDialog(
                     ),
                     const SizedBox(height: 20),
 
-                    // ROW 2: COSTING
-                    _sectionTitle("COSTING PARAMETERS"),
+                    // ROW 2: Costing Parameters
+                    _sectionLabel("COSTING PARAMETERS"),
                     Row(
                       children: [
                         Expanded(
@@ -215,16 +259,17 @@ void showShipmentEntryDialog(
                     ),
                     const SizedBox(height: 20),
 
-                    // ROW 3: CALCULATED COSTS & SALES
+                    // ROW 3: Landing Costs + Carrier Share + Effective Costs
                     Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Calculated Costs
+                        // Base landing costs
                         Expanded(
-                          flex: 5,
+                          flex: 4,
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              _sectionTitle("LANDING COST (AUTO)"),
+                              _sectionLabel("BASE LANDING COST"),
                               Row(
                                 children: [
                                   Expanded(
@@ -247,47 +292,137 @@ void showShipmentEntryDialog(
                             ],
                           ),
                         ),
-                        const SizedBox(width: 24),
-                        // Sales Prices
+                        const SizedBox(width: 16),
+
+                        // Carrier share indicator
+                        Expanded(
+                          flex: 2,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _sectionLabel("CARRIER SHARE"),
+                              _erpReadOnly(
+                                carrierShareC,
+                                "Per Unit",
+                                Colors.purple,
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+
+                        // Effective (all-in) costs
                         Expanded(
                           flex: 4,
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              _sectionTitle("SALES PRICES"),
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: _erpInput(
-                                      agentC,
-                                      "Agent",
-                                      isNum: true,
-                                    ),
+                              _sectionLabel("EFFECTIVE COST (BASE + CARRIER)"),
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.withOpacity(0.05),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(
+                                    color: Colors.green.withOpacity(0.3),
                                   ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: _erpInput(
-                                      wholesaleC,
-                                      "Wholesale",
-                                      isNum: true,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: _erpReadOnly(
+                                        effSeaC,
+                                        "Eff. Sea",
+                                        Colors.green[700]!,
+                                      ),
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: _erpReadOnly(
+                                        effAirC,
+                                        "Eff. Air",
+                                        Colors.green[800]!,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ],
                           ),
                         ),
                       ],
                     ),
+                    const SizedBox(height: 4),
+                    // Info text about carrier share — reactive via ValueListenableBuilder
+                    // on carrierShareC (updated by recalculateAll) so no Obx needed here.
+                    ValueListenableBuilder<TextEditingValue>(
+                      valueListenable: carrierShareC,
+                      builder: (_, val, _) {
+                        final share = double.tryParse(val.text) ?? 0.0;
+                        final costPerCarton =
+                            double.tryParse(
+                              shipCtrl.carrierCostPerCtnCtrl.text,
+                            ) ??
+                            0.0;
+                        if (share <= 0 || costPerCarton <= 0) {
+                          return const SizedBox.shrink();
+                        }
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 4, bottom: 4),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.info_outline,
+                                size: 13,
+                                color: Colors.purple[400],
+                              ),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  "BDT ${costPerCarton.toStringAsFixed(2)}/carton  •  "
+                                  "BDT ${share.toStringAsFixed(2)}/unit carrier share",
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.purple[400],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
                     const SizedBox(height: 20),
 
-                    // ROW 4: SHIPMENT ENTRY & SETTINGS
-                    _sectionTitle("MANIFEST ENTRY"),
+                    _sectionLabel("SALES PRICES"),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _erpInput(agentC, "Agent Price", isNum: true),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _erpInput(
+                            wholesaleC,
+                            "Wholesale Price",
+                            isNum: true,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _erpInput(alertQtyC, "Alert Qty", isNum: true),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+
+                    // ROW 5: Manifest Entry
+                    _sectionLabel("MANIFEST ENTRY"),
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
                         color: Colors.blue[50],
-                        borderRadius: BorderRadius.circular(6),
+                        borderRadius: BorderRadius.circular(8),
                         border: Border.all(color: Colors.blue[100]!),
                       ),
                       child: Row(
@@ -296,7 +431,7 @@ void showShipmentEntryDialog(
                           Expanded(
                             child: _erpInput(
                               addSeaQtyC,
-                              "Add Sea Qty",
+                              "Sea Qty",
                               isNum: true,
                               bgColor: Colors.white,
                             ),
@@ -305,7 +440,7 @@ void showShipmentEntryDialog(
                           Expanded(
                             child: _erpInput(
                               addAirQtyC,
-                              "Add Air Qty",
+                              "Air Qty",
                               isNum: true,
                               bgColor: Colors.white,
                             ),
@@ -316,113 +451,232 @@ void showShipmentEntryDialog(
                               cartonNoC,
                               "Carton No",
                               bgColor: Colors.white,
-                              hint: "1-5",
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: _erpInput(
-                              alertQtyC,
-                              "Alert Qty",
-                              isNum: true,
-                              bgColor: Colors.white,
+                              hint: "e.g. 1-3",
                             ),
                           ),
                         ],
                       ),
                     ),
 
-                    // UPDATED CURRENT STOCK DISPLAY
-                    if (!isNewProduct)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 16),
-                        child: Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(
-                            vertical: 10,
-                            horizontal: 16,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.orange[50],
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: Colors.orange[200]!),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.inventory_2_outlined,
-                                size: 20,
-                                color: Colors.orange[800],
-                              ),
-                              const SizedBox(width: 10),
-                              Text(
-                                "CURRENT STOCK:   SEA: $oldSeaStock   |   AIR: $oldAirStock   |   LOCAL: $oldLocalStock",
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.orange[900],
+                    if (!isNewProduct) ...[
+                      const SizedBox(height: 12),
+
+                      // ── AVG PRICE PANEL ──────────────────────────────────
+                      // Shows current avg price and live projected new avg
+                      // after this shipment is added.
+                      ValueListenableBuilder<TextEditingValue>(
+                        valueListenable: newAvgC,
+                        builder: (_, val, _) {
+                          final projected = double.tryParse(val.text) ?? 0.0;
+                          final hasChange =
+                              (projected - existingAvg).abs() > 0.01;
+                          final isIncrease = projected > existingAvg;
+
+                          return Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(
+                              vertical: 12,
+                              horizontal: 16,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF1E293B),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.analytics_outlined,
+                                  size: 18,
+                                  color: Colors.white70,
                                 ),
+                                const SizedBox(width: 10),
+                                // Current avg
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      "CURRENT AVG PRICE",
+                                      style: TextStyle(
+                                        fontSize: 9,
+                                        color: Colors.white54,
+                                        fontWeight: FontWeight.bold,
+                                        letterSpacing: 0.5,
+                                      ),
+                                    ),
+                                    Text(
+                                      existingAvg > 0
+                                          ? "BDT ${existingAvg.toStringAsFixed(2)}"
+                                          : "Not set",
+                                      style: const TextStyle(
+                                        fontSize: 15,
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(width: 16),
+                                // Arrow
+                                Icon(
+                                  Icons.arrow_forward,
+                                  color:
+                                      hasChange
+                                          ? (isIncrease
+                                              ? Colors.redAccent
+                                              : Colors.greenAccent)
+                                          : Colors.white38,
+                                  size: 18,
+                                ),
+                                const SizedBox(width: 16),
+                                // New projected avg
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      "NEW AVG PRICE",
+                                      style: TextStyle(
+                                        fontSize: 9,
+                                        color: Colors.white54,
+                                        fontWeight: FontWeight.bold,
+                                        letterSpacing: 0.5,
+                                      ),
+                                    ),
+                                    Text(
+                                      projected > 0
+                                          ? "BDT ${projected.toStringAsFixed(2)}"
+                                          : "—",
+                                      style: TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.bold,
+                                        color:
+                                            hasChange
+                                                ? (isIncrease
+                                                    ? Colors.redAccent[100]!
+                                                    : Colors.greenAccent[200]!)
+                                                : Colors.white,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const Spacer(),
+                                // Change indicator
+                                if (hasChange)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color:
+                                          isIncrease
+                                              ? Colors.red.withOpacity(0.25)
+                                              : Colors.green.withOpacity(0.25),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      "${isIncrease ? '▲' : '▼'} "
+                                      "${(projected - existingAvg).abs().toStringAsFixed(2)}",
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                        color:
+                                            isIncrease
+                                                ? Colors.redAccent[100]!
+                                                : Colors.greenAccent[200]!,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 8),
+
+                      // ── STOCK INFO ROW ───────────────────────────────────
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 10,
+                          horizontal: 16,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.orange[50],
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: Colors.orange[200]!),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.inventory_2_outlined,
+                              size: 18,
+                              color: Colors.orange[800],
+                            ),
+                            const SizedBox(width: 10),
+                            Text(
+                              "STOCK:  SEA: $oldSeaStock  |  AIR: $oldAirStock  "
+                              "|  LOCAL: $oldLocalStock  |  ON WAY: $onWayQty  "
+                              "|  TOTAL: ${oldSeaStock + oldAirStock + oldLocalStock}",
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.orange[900],
                               ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
                       ),
+                    ],
                   ],
                 ),
               ),
             ),
 
-            // --- FOOTER ---
+            // ── FOOTER ────────────────────────────────────────────────────
             Container(
-              padding: const EdgeInsets.all(16),
-              decoration: const BoxDecoration(
-                border: Border(top: BorderSide(color: Colors.grey)),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+              decoration: BoxDecoration(
+                border: const Border(top: BorderSide(color: Color(0xFFE2E8F0))),
+                color: Colors.grey[50],
               ),
               child: Obx(() {
-                // Listen to the controller's loading state
-                final bool isDialogLoading = shipCtrl.isLoading.value;
-
+                final loading = shipCtrl.isLoading.value;
                 return Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    // Cancel Button
                     TextButton(
-                      onPressed: isDialogLoading ? null : () => Get.back(),
+                      onPressed: loading ? null : () => Get.back(),
                       child: Text(
                         "Cancel",
                         style: TextStyle(
-                          color:
-                              isDialogLoading ? Colors.grey[300] : Colors.grey,
+                          color: loading ? Colors.grey[300] : Colors.grey[600],
                         ),
                       ),
                     ),
                     const SizedBox(width: 12),
-
-                    // Submit Button
-                    ElevatedButton(
+                    ElevatedButton.icon(
                       onPressed:
-                          isDialogLoading
-                              ? null // Disables the button while loading
+                          loading
+                              ? null
                               : () async {
-                                // 1. Validation
                                 if (modelC.text.isEmpty || nameC.text.isEmpty) {
                                   Get.snackbar(
                                     "Required",
-                                    "Model and Name are missing",
+                                    "Model and Name are required",
                                     backgroundColor: Colors.redAccent,
                                     colorText: Colors.white,
                                   );
                                   return;
                                 }
 
-                                // Capture calculated costs
-                                double sCost =
+                                final sCost =
                                     double.tryParse(seaPriceC.text) ?? 0.0;
-                                double aCost =
+                                final aCost =
                                     double.tryParse(airPriceC.text) ?? 0.0;
+                                final sQty = int.tryParse(addSeaQtyC.text) ?? 0;
+                                final aQty = int.tryParse(addAirQtyC.text) ?? 0;
 
-                                // 2. Prepare Data Map (FIXED AVG PURCHASE PRICE)
-                                final Map<String, dynamic> data = {
+                                final data = <String, dynamic>{
                                   'name': nameC.text,
                                   'category': categoryC.text,
                                   'brand': brandC.text,
@@ -438,8 +692,8 @@ void showShipmentEntryDialog(
                                       double.tryParse(airTaxC.text) ?? 0.0,
                                   'sea': sCost,
                                   'air': aCost,
-                                  'avg_purchase_price':
-                                      sCost > 0 ? sCost : aCost,
+                                  // avg_purchase_price for existing products is preserved
+                                  // below. It is recalculated at RECEIVE time only.
                                   'agent': double.tryParse(agentC.text) ?? 0.0,
                                   'wholesale':
                                       double.tryParse(wholesaleC.text) ?? 0.0,
@@ -447,25 +701,41 @@ void showShipmentEntryDialog(
                                       int.tryParse(alertQtyC.text) ?? 5,
                                 };
 
-                                // 3. Preserve Stock Logic
                                 if (!isNewProduct) {
+                                  // Preserve stock quantities
                                   data['stock_qty'] = p.stockQty;
                                   data['sea_stock_qty'] = p.seaStockQty;
                                   data['air_stock_qty'] = p.airStockQty;
                                   data['local_qty'] = p.localQty;
+
+                                  // Save the live-calculated new avg price immediately.
+                                  // This is the weighted average of existing stock + new
+                                  // shipment qty at the effective cost (base + carrier share).
+                                  // Formula: (existingStock x existingAvg + newQty x effCost)
+                                  //          / (existingStock + newQty)
+                                  final computedAvg =
+                                      double.tryParse(newAvgC.text) ?? 0.0;
+                                  if (computedAvg > 0) {
+                                    data['avg_purchase_price'] = computedAvg;
+                                  }
                                 } else {
                                   data['stock_qty'] = 0;
                                   data['sea_stock_qty'] = 0;
                                   data['air_stock_qty'] = 0;
                                   data['local_qty'] = 0;
+                                  // For new products, avg price = effective sea cost
+                                  final effSea =
+                                      double.tryParse(effSeaC.text) ?? 0.0;
+                                  final effAir =
+                                      double.tryParse(effAirC.text) ?? 0.0;
+                                  final initAvg = effSea > 0 ? effSea : effAir;
+                                  if (initAvg > 0) {
+                                    data['avg_purchase_price'] = initAvg;
+                                  }
                                 }
 
-                                int sQty = int.tryParse(addSeaQtyC.text) ?? 0;
-                                int aQty = int.tryParse(addAirQtyC.text) ?? 0;
-
-                                // 4. Submit
                                 if (onSubmit != null) {
-                                  // Edit Existing Item in Manifest List (Synchronous)
+                                  // Edit mode: synchronous local update
                                   final newItem = ShipmentItem(
                                     productId: isNewProduct ? 0 : p.id,
                                     productName: nameC.text,
@@ -484,10 +754,9 @@ void showShipmentEntryDialog(
                                     ignoreMissing: true,
                                   );
                                   onSubmit(newItem);
-                                  Get.back(); // Close immediately for synchronous local edit
+                                  Get.back();
                                 } else {
-                                  // Add New to Controller (Asynchronous)
-                                  // We use await here so the button stays disabled until it finishes
+                                  // Add new: async via controller
                                   await shipCtrl.addToManifestAndVerify(
                                     productId: isNewProduct ? null : p.id,
                                     productData: data,
@@ -495,7 +764,6 @@ void showShipmentEntryDialog(
                                     airQty: aQty,
                                     cartonNo: cartonNoC.text,
                                   );
-                                  // Note: shipCtrl.addToManifestAndVerify already calls Get.back() automatically on success!
                                 }
                               },
                       style: ElevatedButton.styleFrom(
@@ -503,27 +771,35 @@ void showShipmentEntryDialog(
                             isNewProduct
                                 ? const Color(0xFF0F766E)
                                 : const Color(0xFF1E293B),
-                        disabledBackgroundColor:
-                            Colors.grey[400], // Visual cue when disabled
-                        minimumSize: const Size(140, 45),
+                        disabledBackgroundColor: Colors.grey[400],
+                        minimumSize: const Size(160, 44),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
                       ),
-                      child:
-                          isDialogLoading
+                      icon:
+                          loading
                               ? const SizedBox(
-                                width: 20,
-                                height: 20,
+                                width: 16,
+                                height: 16,
                                 child: CircularProgressIndicator(
-                                  strokeWidth: 2.5,
+                                  strokeWidth: 2,
                                   color: Colors.white,
                                 ),
                               )
-                              : Text(
-                                isNewProduct ? "CREATE & ADD" : "UPDATE & ADD",
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                ),
+                              : Icon(
+                                isNewProduct ? Icons.add_circle : Icons.check,
+                                size: 18,
                               ),
+                      label: Text(
+                        loading
+                            ? "Processing..."
+                            : (isNewProduct ? "CREATE & ADD" : "UPDATE & ADD"),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ),
                   ],
                 );
@@ -537,20 +813,88 @@ void showShipmentEntryDialog(
   );
 }
 
-// --- SMALLER ERP INPUTS WIDGETS ---
-Widget _sectionTitle(String title) {
-  return Padding(
-    padding: const EdgeInsets.only(bottom: 6),
-    child: Text(
-      title,
-      style: const TextStyle(
-        fontSize: 11,
-        fontWeight: FontWeight.w700,
-        color: Colors.grey,
+// ── HEADER WIDGET ────────────────────────────────────────────────────────────
+class _DialogHeader extends StatelessWidget {
+  final bool isNewProduct;
+  final String productModel;
+  final int onWayQty;
+  const _DialogHeader({
+    required this.isNewProduct,
+    required this.productModel,
+    required this.onWayQty,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+      decoration: BoxDecoration(
+        color: isNewProduct ? const Color(0xFF0F766E) : const Color(0xFF1E293B),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
       ),
-    ),
-  );
+      child: Row(
+        children: [
+          Icon(
+            isNewProduct ? Icons.add_circle_outline : Icons.edit_outlined,
+            color: Colors.white,
+            size: 20,
+          ),
+          const SizedBox(width: 12),
+          Text(
+            isNewProduct
+                ? "NEW PRODUCT ENTRY"
+                : "EDIT: ${productModel.toUpperCase()}",
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 15,
+            ),
+          ),
+          const Spacer(),
+          if (!isNewProduct && onWayQty > 0)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.sailing, color: Colors.white70, size: 14),
+                  const SizedBox(width: 4),
+                  Text(
+                    "$onWayQty on way",
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+          const SizedBox(width: 8),
+          IconButton(
+            onPressed: () => Get.back(),
+            icon: const Icon(Icons.close, color: Colors.white, size: 20),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
+        ],
+      ),
+    );
+  }
 }
+
+// ── REUSABLE INPUT WIDGETS ────────────────────────────────────────────────────
+Widget _sectionLabel(String title) => Padding(
+  padding: const EdgeInsets.only(bottom: 6),
+  child: Text(
+    title,
+    style: const TextStyle(
+      fontSize: 10,
+      fontWeight: FontWeight.w700,
+      color: Colors.grey,
+      letterSpacing: 0.5,
+    ),
+  ),
+);
 
 Widget _erpInput(
   TextEditingController ctrl,
@@ -569,7 +913,7 @@ Widget _erpInput(
       ),
       const SizedBox(height: 4),
       SizedBox(
-        height: 36, // Compact height for ERP
+        height: 36,
         child: TextField(
           controller: ctrl,
           autofocus: autoFocus,
@@ -580,6 +924,7 @@ Widget _erpInput(
           style: const TextStyle(fontSize: 12),
           decoration: InputDecoration(
             hintText: hint,
+            hintStyle: const TextStyle(fontSize: 12, color: Colors.grey),
             contentPadding: const EdgeInsets.symmetric(horizontal: 10),
             filled: true,
             fillColor: bgColor ?? Colors.grey[50],
@@ -620,15 +965,15 @@ Widget _erpReadOnly(TextEditingController ctrl, String label, Color color) {
         padding: const EdgeInsets.symmetric(horizontal: 10),
         alignment: Alignment.centerLeft,
         decoration: BoxDecoration(
-          color: color.withOpacity(0.05),
+          color: color.withOpacity(0.06),
           borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: color.withOpacity(0.2)),
+          border: Border.all(color: color.withOpacity(0.25)),
         ),
         child: TextField(
           controller: ctrl,
           readOnly: true,
           style: TextStyle(
-            fontSize: 12,
+            fontSize: 13,
             fontWeight: FontWeight.bold,
             color: color,
           ),

@@ -313,6 +313,15 @@ class ProductController extends GetxController {
   Future<void> updateProduct(int id, Map<String, dynamic> data) =>
       _runAction('/products/$id', 'PUT', data, 'Product Updated');
 
+  Future<bool> updateAvgPurchasePrice(int id, double avgPrice) async {
+    final res = await _apiCall(
+      '/products/$id',
+      method: 'PUT',
+      body: {'avg_purchase_price': avgPrice},
+    );
+    return res != null;
+  }
+
   Future<void> deleteProduct(int id) =>
       _runAction('/products/$id', 'DELETE', {}, 'Product Deleted');
 

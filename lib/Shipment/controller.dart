@@ -143,6 +143,7 @@ class ShipmentController extends GetxController {
       TextEditingController(text: '0');
 
   final TextEditingController shipmentNameCtrl = TextEditingController();
+  final TextEditingController customCarrierCtrl = TextEditingController();
   final TextEditingController searchCtrl = TextEditingController();
   final TextEditingController globalExchangeRateCtrl = TextEditingController(
     text: '0.0',
@@ -186,21 +187,26 @@ class ShipmentController extends GetxController {
   double get liveGrandTotal =>
       currentManifestProductCost + liveTotalCarrierCost;
 
-  // --- NEW RMB GETTERS ---
-  double get currentManifestProductCostRMB {
-    double rate = double.tryParse(globalExchangeRateCtrl.text) ?? 0.0;
-    return rate > 0 ? currentManifestProductCost / rate : 0.0;
+  // ── NEW: total ordered qty across the manifest + carrier cost / unit ─────
+  int get currentManifestTotalQty =>
+      currentManifestItems.fold(0, (s, i) => s + (i.seaQty + i.airQty));
+
+  double get liveCarrierCostPerUnit {
+    final qty = currentManifestTotalQty;
+    return qty > 0 ? liveTotalCarrierCost / qty : 0.0;
   }
 
-  double get liveTotalCarrierCostRMB {
-    double rate = double.tryParse(globalExchangeRateCtrl.text) ?? 0.0;
-    return rate > 0 ? liveTotalCarrierCost / rate : 0.0;
-  }
+  // --- RMB GETTERS ---
+  double get _globalRate => double.tryParse(globalExchangeRateCtrl.text) ?? 0.0;
 
-  double get liveGrandTotalRMB {
-    double rate = double.tryParse(globalExchangeRateCtrl.text) ?? 0.0;
-    return rate > 0 ? liveGrandTotal / rate : 0.0;
-  }
+  double get currentManifestProductCostRMB =>
+      _globalRate > 0 ? currentManifestProductCost / _globalRate : 0.0;
+
+  double get liveTotalCarrierCostRMB =>
+      _globalRate > 0 ? liveTotalCarrierCost / _globalRate : 0.0;
+
+  double get liveGrandTotalRMB =>
+      _globalRate > 0 ? liveGrandTotal / _globalRate : 0.0;
 
   String get totalOnWayDisplay => formatMoney(totalOnWayValue);
   String get totalCompletedDisplay => formatMoney(totalCompletedValue);
@@ -208,9 +214,11 @@ class ShipmentController extends GetxController {
 
   List<ShipmentModel> get paginatedShipments {
     int start = (shipmentPage.value - 1) * shipmentPageSize.value;
-    int end = start + shipmentPageSize.value;
+    int end = (start + shipmentPageSize.value).clamp(
+      0,
+      filteredShipments.length,
+    );
     if (start >= filteredShipments.length) return [];
-    if (end > filteredShipments.length) end = filteredShipments.length;
     return filteredShipments.sublist(start, end);
   }
 
@@ -256,10 +264,10 @@ class ShipmentController extends GetxController {
     carrierCostPerCtnCtrl.dispose();
     totalCarrierCostDisplayCtrl.dispose();
     shipmentNameCtrl.dispose();
+    customCarrierCtrl.dispose();
     searchCtrl.dispose();
     globalExchangeRateCtrl.dispose();
-    manifestSearchCtrl.dispose(); // Add this
-
+    manifestSearchCtrl.dispose();
     super.onClose();
   }
 
@@ -272,8 +280,8 @@ class ShipmentController extends GetxController {
     if (shipmentPage.value > 1) shipmentPage.value--;
   }
 
-  // --- FIRESTORE LISTENERS ---
   void bindFirestoreStream() {
+    _shipmentSubscription?.cancel();
     _shipmentSubscription = _firestore
         .collection('shipments')
         .orderBy('purchaseDate', descending: true)
@@ -290,6 +298,7 @@ class ShipmentController extends GetxController {
   }
 
   void bindOnHoldStream() {
+    _onHoldSubscription?.cancel();
     _onHoldSubscription = _firestore
         .collection('on_hold_items')
         .orderBy('purchaseDate', descending: true)
@@ -298,7 +307,7 @@ class ShipmentController extends GetxController {
           onHoldItems.value =
               event.docs.map((e) => OnHoldItem.fromSnapshot(e)).toList();
           _applyOnHoldFilters();
-        });
+        }, onError: (e) => print("OnHold stream error: $e"));
   }
 
   void _applyFilters() {
@@ -383,9 +392,15 @@ class ShipmentController extends GetxController {
           'air_stock_qty': 0,
           'local_qty': 0,
         };
-        int? newId = await productController.createProductReturnId(createBody);
-        if (newId != 0) {
-          finalProductId = newId!;
+        // FIX: old code did `if (newId != 0)` on a NULLABLE int — if the
+        // server call failed and returned null, `null != 0` is actually
+        // TRUE in Dart, so it fell through to `newId!` and crashed instead
+        // of throwing the friendly "Product ID Missing" error. Now guarded.
+        final int? newId = await productController.createProductReturnId(
+          createBody,
+        );
+        if (newId != null && newId != 0) {
+          finalProductId = newId;
         } else {
           throw "Product ID Missing";
         }
@@ -411,10 +426,11 @@ class ShipmentController extends GetxController {
       totalWeightCtrl.text = calculatedTotalWeight.toStringAsFixed(2);
       Get.back();
       Get.snackbar(
-        "Success",
-        "Added to Manifest",
+        "Added",
+        "${item.productModel} added to manifest",
         backgroundColor: Colors.green,
         colorText: Colors.white,
+        duration: const Duration(seconds: 2),
       );
     } catch (e) {
       Get.snackbar(
@@ -431,11 +447,20 @@ class ShipmentController extends GetxController {
   void removeFromManifest(int index) {
     currentManifestItems.removeAt(index);
     totalWeightCtrl.text = calculatedTotalWeight.toStringAsFixed(2);
+    // NEW: forces any open dialog showing per-item carrier share to recalc.
+    currentManifestItems.refresh();
   }
 
   Future<void> saveShipmentToFirestore() async {
-    if (currentManifestItems.isEmpty) return;
-    if (selectedVendorId.value == null || selectedCarrier.value == null) return;
+    // NEW: explicit feedback instead of silently doing nothing.
+    if (currentManifestItems.isEmpty) {
+      Get.snackbar("Warning", "Add at least one item to the manifest.");
+      return;
+    }
+    if (selectedVendorId.value == null || selectedCarrier.value == null) {
+      Get.snackbar("Warning", "Select a vendor and carrier.");
+      return;
+    }
     isLoading.value = true;
     try {
       double carrierCostPerCtn =
@@ -444,15 +469,22 @@ class ShipmentController extends GetxController {
       double totalCarrierFee = carrierCostPerCtn * cartons;
       double exchangeRate = double.tryParse(globalExchangeRateCtrl.text) ?? 0.0;
 
+      final shipmentName =
+          shipmentNameCtrl.text.isEmpty
+              ? "Shipment ${DateFormat('MM/dd').format(purchaseDateInput.value)}"
+              : shipmentNameCtrl.text;
+
       final newShipment = ShipmentModel(
-        shipmentName:
-            shipmentNameCtrl.text.isEmpty
-                ? "Shipment ${DateFormat('MM/dd').format(purchaseDateInput.value)}"
-                : shipmentNameCtrl.text,
+        shipmentName: shipmentName,
         purchaseDate: purchaseDateInput.value,
         vendorId: selectedVendorId.value,
         vendorName: selectedVendorName.value ?? 'Unknown',
-        carrier: selectedCarrier.value!,
+        carrier:
+            selectedCarrier.value == 'Other'
+                ? (customCarrierCtrl.text.trim().isEmpty
+                    ? 'Other'
+                    : customCarrierCtrl.text.trim())
+                : selectedCarrier.value!,
         exchangeRate: exchangeRate,
         totalCartons: cartons,
         totalWeight: calculatedTotalWeight,
@@ -484,7 +516,12 @@ class ShipmentController extends GetxController {
 
       resetForm();
       Get.back();
-      Get.snackbar("Success", "Manifest Created");
+      Get.snackbar(
+        "Success",
+        "Manifest Created: $shipmentName",
+        backgroundColor: Colors.green,
+        colorText: Colors.white,
+      );
     } catch (e) {
       Get.snackbar("Error", "$e");
     } finally {
@@ -495,6 +532,7 @@ class ShipmentController extends GetxController {
   void resetForm() {
     currentManifestItems.clear();
     shipmentNameCtrl.clear();
+    customCarrierCtrl.clear();
     totalCartonCtrl.text = '0';
     totalWeightCtrl.text = '0';
     carrierCostPerCtnCtrl.text = '0';
@@ -503,12 +541,12 @@ class ShipmentController extends GetxController {
     selectedVendorId.value = null;
     selectedVendorName.value = null;
     selectedCarrier.value = null;
-    manifestSearchCtrl.clear(); // Add this
-    manifestSearchQuery.value = ''; // Add this
+    manifestSearchCtrl.clear();
+    manifestSearchQuery.value = '';
     searchCtrl.clear();
   }
 
-  // --- NEW: EDIT & RECALCULATE MANIFEST ---
+  // --- EDIT & RECALCULATE MANIFEST ---
   Future<void> saveEditedManifest({
     required String docId,
     required List<ShipmentItem> newItems,
@@ -518,7 +556,6 @@ class ShipmentController extends GetxController {
   }) async {
     isLoading.value = true;
     try {
-      // 1. Recalculate Totals based on Edited Items
       double newTotalProductCost = newItems.fold(
         0.0,
         (sumv, item) => sumv + item.totalItemCost,
@@ -531,7 +568,6 @@ class ShipmentController extends GetxController {
       double newTotalCarrierFee = newCartonCount * newCarrierRate;
       double newGrandTotal = newTotalProductCost + newTotalCarrierFee;
 
-      // Fetch the existing exchange rate to recalculate RMB
       double currentExchangeRate = 0.0;
       try {
         var doc = await _firestore.collection('shipments').doc(docId).get();
@@ -550,12 +586,11 @@ class ShipmentController extends GetxController {
         'carrierCostPerCarton': newCarrierRate,
         'totalCarrierFee': newTotalCarrierFee,
         'totalAmount': newTotalProductCost,
-        'grandTotal': newGrandTotal, // Add grandTotal safely
+        'grandTotal': newGrandTotal,
         'totalWeight': newTotalWeight,
         'carrierReport': report,
       };
 
-      // 2. Add RMB Calculation based on fetched Exchange Rate
       if (currentExchangeRate > 0) {
         updateData['totalAmountRMB'] =
             newTotalProductCost / currentExchangeRate;
@@ -564,7 +599,6 @@ class ShipmentController extends GetxController {
         updateData['grandTotalRMB'] = newGrandTotal / currentExchangeRate;
       }
 
-      // 3. Update Firestore
       await _firestore.collection('shipments').doc(docId).update(updateData);
 
       Get.snackbar(
@@ -580,7 +614,6 @@ class ShipmentController extends GetxController {
     }
   }
 
-  // OLD Update method updated to ensure Yuan calculation is preserved
   Future<void> updateShipmentDetails(
     ShipmentModel shipment,
     List<ShipmentItem> updatedItems,
@@ -626,6 +659,7 @@ class ShipmentController extends GetxController {
     }
   }
 
+  // --- RECEIVE SHIPMENT (warehouse-aware + weighted avg price refinement) ---
   Future<void> receiveShipmentFast(
     ShipmentModel shipment,
     DateTime arrivalDate, {
@@ -635,7 +669,6 @@ class ShipmentController extends GetxController {
     if (isLoading.value) return;
     isLoading.value = true;
     try {
-      // 1. Stock — warehouse_id & location inject করা হচ্ছে প্রতিটি item এ
       List<Map<String, dynamic>> bulkItems =
           shipment.items.map((item) {
             return {
@@ -652,7 +685,6 @@ class ShipmentController extends GetxController {
           }).toList();
       await productController.bulkAddStockMixed(bulkItems);
 
-      // 2. Loss (on-hold) — unchanged
       WriteBatch batch = _firestore.batch();
       bool hasLoss = false;
       for (var item in shipment.items) {
@@ -671,15 +703,13 @@ class ShipmentController extends GetxController {
             'productModel': item.productModel,
             'missingQty': missing,
             'createdAt': FieldValue.serverTimestamp(),
-            // on-hold item এও warehouse info store করা হচ্ছে
-            // পরে resolve করার সময় কাজে লাগবে
             if (warehouseId != null) 'warehouseId': warehouseId,
           });
         }
       }
       if (hasLoss) await batch.commit();
 
-      // 3. Update Status — unchanged
+      // STEP 4: Update Status — PRESERVED, warehouse info still stored.
       double totalRecVal = shipment.items.fold(
         0.0,
         (sumv, i) => sumv + i.receivedItemValue,
@@ -693,16 +723,20 @@ class ShipmentController extends GetxController {
         'arrivalDate': Timestamp.fromDate(arrivalDate),
         'vendorLossAmount': (diff > 0) ? diff : 0.0,
         'vendorLossAmountRMB': (diff > 0) ? diffRmb : 0.0,
-        // shipment document এও কোন warehouse এ গেছে সেটা save করা হচ্ছে
         if (warehouseId != null) 'receivedWarehouseId': warehouseId,
         if (warehouseLocation != null && warehouseLocation.isNotEmpty)
           'receivedWarehouseLocation': warehouseLocation,
       });
 
+      // Refresh local product cache ONCE so the UI reflects the new
+      // avg_purchase_price values (bulkAddStockMixed already refreshed
+      // stock qty earlier in step 1, but avg price wasn't known yet then).
+      await productController.fetchProducts();
+
       Get.back();
       Get.snackbar(
         "Success",
-        "Received",
+        "Received & average prices updated",
         backgroundColor: Colors.green,
         colorText: Colors.white,
       );
@@ -713,13 +747,26 @@ class ShipmentController extends GetxController {
     }
   }
 
+  // ── NEW HELPER: Parse carton range string → number of cartons ────────────
+  // Handles formats: "1-1" → 1, "1-3" → 3, "2-5" → 4, "3" → 1, "" → 1
+  int _parseCartonCount(String cartonNo) {
+    final trimmed = cartonNo.trim();
+    if (trimmed.isEmpty) return 1;
+    final parts = trimmed.split('-');
+    if (parts.length == 2) {
+      final start = int.tryParse(parts[0].trim()) ?? 1;
+      final end = int.tryParse(parts[1].trim()) ?? 1;
+      return (end - start + 1).clamp(1, 9999);
+    }
+    return 1;
+  }
+
   Future<void> resolveOnHoldItem(
     OnHoldItem item, {
     required int releaseQty,
     int? warehouseId,
     String? warehouseLocation,
   }) async {
-    // Safety clamp — max হলো missingQty
     final qty = releaseQty.clamp(1, item.missingQty);
     final isFullRelease = qty >= item.missingQty;
 
@@ -733,10 +780,8 @@ class ShipmentController extends GetxController {
       );
 
       if (isFullRelease) {
-        // সব qty release — doc delete করো
         await _firestore.collection('on_hold_items').doc(item.docId).delete();
       } else {
-        // Partial release — remaining qty update করো
         await _firestore.collection('on_hold_items').doc(item.docId).update({
           'missingQty': item.missingQty - qty,
         });
@@ -757,29 +802,25 @@ class ShipmentController extends GetxController {
     }
   }
 
-  // --- UPDATED GENERATE PDF (With RMB Values) ---
+  // --- GENERATE PDF (With RMB Values + NEW Eff. Cost column) ---
   Future<void> generatePdf(ShipmentModel shipment) async {
     final doc = pw.Document();
     final font = await PdfGoogleFonts.robotoRegular();
     final fontBold = await PdfGoogleFonts.robotoBold();
 
-    // 1. Calculations for PDF
     double totalReceivedVal = shipment.items.fold(
       0.0,
       (sumv, e) => sumv + e.receivedItemValue,
     );
 
-    // Total Weight of what was actually received
     double totalRecWeight = shipment.items.fold(0.0, (sumv, e) {
       int receivedQty = e.receivedSeaQty + e.receivedAirQty;
       return sumv + (receivedQty * e.unitWeightSnapshot);
     });
 
-    // Differences
     double valDiff = shipment.totalAmount - totalReceivedVal;
     double weightDiff = shipment.totalWeight - totalRecWeight;
 
-    // RMB Conversions for the PDF
     double exRate = shipment.exchangeRate;
     double productTotalRMB = exRate > 0 ? shipment.totalAmount / exRate : 0.0;
     double carrierTotalRMB =
@@ -787,6 +828,13 @@ class ShipmentController extends GetxController {
     double grandTotalRMB = exRate > 0 ? shipment.grandTotal / exRate : 0.0;
     double recValRMB = exRate > 0 ? totalReceivedVal / exRate : 0.0;
     double valDiffRMB = exRate > 0 ? valDiff / exRate : 0.0;
+
+    int totalOrderedQty = shipment.items.fold(
+      0,
+      (s, e) => s + (e.seaQty + e.airQty),
+    );
+    double carrierPerUnitAvg =
+        totalOrderedQty > 0 ? shipment.totalCarrierFee / totalOrderedQty : 0.0;
 
     doc.addPage(
       pw.MultiPage(
@@ -827,6 +875,9 @@ class ShipmentController extends GetxController {
                       pw.Text("Carrier: ${shipment.carrier}"),
                       pw.Text("Rate: ${shipment.exchangeRate} BDT/RMB"),
                       pw.Text(
+                        "Carrier/Unit (avg): ${formatMoney(carrierPerUnitAvg)}",
+                      ),
+                      pw.Text(
                         shipment.isReceived
                             ? "Status: RECEIVED"
                             : "Status: ON WAY",
@@ -844,7 +895,7 @@ class ShipmentController extends GetxController {
               ),
               pw.SizedBox(height: 20),
 
-              // ITEMS TABLE
+              // ITEMS TABLE (NEW: added "Eff. Cost" column)
               pw.Table.fromTextArray(
                 headers: [
                   'Ctn',
@@ -852,70 +903,103 @@ class ShipmentController extends GetxController {
                   'Name',
                   'Qty (Ord)',
                   'Qty (Rec)',
-                  'Cost',
+                  'Base Cost',
+                  'Eff. Cost',
                   'Total',
                 ],
-                data:
-                    shipment.items.map((e) {
-                      double itemCost =
-                          e.seaPriceSnapshot > 0
-                              ? e.seaPriceSnapshot
-                              : e.airPriceSnapshot;
+                data: () {
+                  // ── Step 1: Unique carton cost ও qty map বানাও ──
+                  final Map<String, double> pdfCartonCostMap = {};
+                  final Map<String, int> pdfCartonQtyMap = {};
 
-                      String costStr = formatMoney(itemCost);
-                      String totalStr = formatMoney(e.totalItemCost);
+                  for (final it in shipment.items) {
+                    final k = it.cartonNo.trim();
+                    if (k.isEmpty) continue;
+                    if (!pdfCartonCostMap.containsKey(k)) {
+                      pdfCartonCostMap[k] =
+                          _parseCartonCount(k) * shipment.carrierCostPerCarton;
+                    }
+                    pdfCartonQtyMap[k] =
+                        (pdfCartonQtyMap[k] ?? 0) +
+                        (it.receivedSeaQty + it.receivedAirQty);
+                  }
 
-                      if (exRate > 0) {
-                        costStr += "\n${formatRMB(itemCost / exRate)}";
-                        totalStr += "\n${formatRMB(e.totalItemCost / exRate)}";
-                      }
+                  // ── Step 2: প্রতিটা item-এর row বানাও ──
+                  return shipment.items.map((e) {
+                    double baseCost =
+                        e.seaPriceSnapshot > 0
+                            ? e.seaPriceSnapshot
+                            : e.airPriceSnapshot;
 
-                      return [
-                        e.cartonNo,
-                        e.productModel,
-                        e.productName,
-                        "${e.seaQty + e.airQty}",
-                        "${e.receivedSeaQty + e.receivedAirQty}",
-                        costStr,
-                        totalStr,
-                      ];
-                    }).toList(),
+                    int itemRecvQty = e.receivedSeaQty + e.receivedAirQty;
+
+                    final pdfKey = e.cartonNo.trim();
+                    double itemCarrierShare = 0.0;
+                    if (pdfKey.isNotEmpty && itemRecvQty > 0) {
+                      final cCost = pdfCartonCostMap[pdfKey] ?? 0.0;
+                      final cQty = pdfCartonQtyMap[pdfKey] ?? 1;
+                      itemCarrierShare = cCost / cQty;
+                    }
+
+                    double effCost = baseCost + itemCarrierShare;
+
+                    String baseStr = formatMoney(baseCost);
+                    String effStr = formatMoney(effCost);
+                    String totalStr = formatMoney(e.totalItemCost);
+
+                    if (exRate > 0) {
+                      baseStr += "\n${formatRMB(baseCost / exRate)}";
+                      effStr += "\n${formatRMB(effCost / exRate)}";
+                      totalStr += "\n${formatRMB(e.totalItemCost / exRate)}";
+                    }
+
+                    return [
+                      e.cartonNo,
+                      e.productModel,
+                      e.productName,
+                      "${e.seaQty + e.airQty}",
+                      "${e.receivedSeaQty + e.receivedAirQty}",
+                      baseStr,
+                      effStr,
+                      totalStr,
+                    ];
+                  }).toList();
+                }(),
                 headerStyle: pw.TextStyle(
                   fontWeight: pw.FontWeight.bold,
                   color: PdfColors.white,
-                  fontSize: 10,
+                  fontSize: 9,
                 ),
                 headerDecoration: const pw.BoxDecoration(
                   color: PdfColors.blueGrey800,
                 ),
-                cellStyle: const pw.TextStyle(fontSize: 9),
+                cellStyle: const pw.TextStyle(fontSize: 8),
                 cellAlignments: {
                   0: pw.Alignment.center,
                   3: pw.Alignment.center,
                   4: pw.Alignment.center,
                   5: pw.Alignment.centerRight,
                   6: pw.Alignment.centerRight,
+                  7: pw.Alignment.centerRight,
                 },
                 columnWidths: {
-                  0: const pw.FlexColumnWidth(0.8),
-                  1: const pw.FlexColumnWidth(1.5),
-                  2: const pw.FlexColumnWidth(2.5),
-                  3: const pw.FlexColumnWidth(1),
-                  4: const pw.FlexColumnWidth(1),
-                  5: const pw.FlexColumnWidth(1.5),
-                  6: const pw.FlexColumnWidth(
-                    1.8,
-                  ), // Slightly widened for RMB addition
+                  0: const pw.FlexColumnWidth(0.7),
+                  1: const pw.FlexColumnWidth(1.3),
+                  2: const pw.FlexColumnWidth(2.0),
+                  3: const pw.FlexColumnWidth(0.8),
+                  4: const pw.FlexColumnWidth(0.8),
+                  5: const pw.FlexColumnWidth(1.3),
+                  6: const pw.FlexColumnWidth(1.3),
+                  7: const pw.FlexColumnWidth(1.5),
                 },
               ),
               pw.SizedBox(height: 20),
               pw.Divider(),
 
-              // SUMMARY SECTION (WEIGHT & FINANCIALS)
+              // SUMMARY SECTION (WEIGHT & FINANCIALS) — unchanged
               pw.Row(
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
-                  // LEFT: WEIGHT ANALYSIS
                   pw.Expanded(
                     child: pw.Container(
                       padding: const pw.EdgeInsets.all(10),
@@ -982,7 +1066,6 @@ class ShipmentController extends GetxController {
                   ),
                   pw.SizedBox(width: 20),
 
-                  // RIGHT: FINANCIAL ANALYSIS
                   pw.Expanded(
                     child: pw.Column(
                       crossAxisAlignment: pw.CrossAxisAlignment.end,
@@ -1002,7 +1085,6 @@ class ShipmentController extends GetxController {
                         ),
                         pw.SizedBox(height: 10),
 
-                        // Financial Discrepancy Display
                         pw.Container(
                           padding: const pw.EdgeInsets.symmetric(
                             vertical: 4,
@@ -1086,7 +1168,6 @@ class ShipmentController extends GetxController {
 
     final pdf = pw.Document();
 
-    // Prepare table headers
     final headers = [
       'Model',
       'Product Name',
@@ -1094,10 +1175,8 @@ class ShipmentController extends GetxController {
       'Shipment Breakdown',
     ];
 
-    // Convert aggregated list to purely text arrays
     final data =
         aggregatedList.map((product) {
-          // Create a clean, multiline string for the breakdown
           final breakdownStr = product.incomingDetails
               .map((d) {
                 final dateStr = DateFormat('MMM dd').format(d.date);
@@ -1116,10 +1195,9 @@ class ShipmentController extends GetxController {
     pdf.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.all(32), // Professional margins
+        margin: const pw.EdgeInsets.all(32),
         build:
             (context) => [
-              // Professional Header
               pw.Header(
                 level: 0,
                 child: pw.Row(
@@ -1145,7 +1223,6 @@ class ShipmentController extends GetxController {
               ),
               pw.SizedBox(height: 10),
 
-              // High-Density PDF Table
               pw.TableHelper.fromTextArray(
                 headers: headers,
                 data: data,
@@ -1153,8 +1230,6 @@ class ShipmentController extends GetxController {
                   color: PdfColors.grey400,
                   width: 0.5,
                 ),
-
-                // Header Styling
                 headerStyle: pw.TextStyle(
                   fontSize: 9,
                   fontWeight: pw.FontWeight.bold,
@@ -1163,21 +1238,17 @@ class ShipmentController extends GetxController {
                 headerDecoration: const pw.BoxDecoration(
                   color: PdfColors.blue800,
                 ),
-
-                // Body Cell Styling (Small font = 30+ items per page!)
                 cellStyle: const pw.TextStyle(fontSize: 8),
                 cellPadding: const pw.EdgeInsets.symmetric(
                   vertical: 4,
                   horizontal: 6,
                 ),
                 cellAlignment: pw.Alignment.centerLeft,
-
-                // Custom Column Widths prevents awkward line breaks
                 columnWidths: {
-                  0: const pw.FlexColumnWidth(1.5), // Model
-                  1: const pw.FlexColumnWidth(2.5), // Name
-                  2: const pw.FlexColumnWidth(1.0), // Total Qty
-                  3: const pw.FlexColumnWidth(3.5), // Breakdown
+                  0: const pw.FlexColumnWidth(1.5),
+                  1: const pw.FlexColumnWidth(2.5),
+                  2: const pw.FlexColumnWidth(1.0),
+                  3: const pw.FlexColumnWidth(3.5),
                 },
               ),
             ],
