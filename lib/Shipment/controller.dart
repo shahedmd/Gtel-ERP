@@ -392,10 +392,7 @@ class ShipmentController extends GetxController {
           'air_stock_qty': 0,
           'local_qty': 0,
         };
-        // FIX: old code did `if (newId != 0)` on a NULLABLE int — if the
-        // server call failed and returned null, `null != 0` is actually
-        // TRUE in Dart, so it fell through to `newId!` and crashed instead
-        // of throwing the friendly "Product ID Missing" error. Now guarded.
+
         final int? newId = await productController.createProductReturnId(
           createBody,
         );
@@ -424,7 +421,8 @@ class ShipmentController extends GetxController {
       );
       currentManifestItems.add(item);
       totalWeightCtrl.text = calculatedTotalWeight.toStringAsFixed(2);
-      Get.back();
+      Get.until((route) => route.settings.name != 'shipment-entry-dialog');
+
       Get.snackbar(
         "Added",
         "${item.productModel} added to manifest",

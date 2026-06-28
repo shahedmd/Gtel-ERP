@@ -764,6 +764,7 @@ void showShipmentEntryDialog(
                                     airQty: aQty,
                                     cartonNo: cartonNoC.text,
                                   );
+                                  if (Get.isDialogOpen ?? false) Get.back();
                                 }
                               },
                       style: ElevatedButton.styleFrom(
@@ -810,6 +811,7 @@ void showShipmentEntryDialog(
       ),
     ),
     barrierDismissible: false,
+    routeSettings: const RouteSettings(name: 'shipment-entry-dialog'),
   );
 }
 
