@@ -22,7 +22,9 @@ class HotSellingProductPage extends StatelessWidget {
         iconTheme: const IconThemeData(color: Colors.black),
         actions: [
           IconButton(
-            onPressed: () => controller.fetchSalesData(),
+            onPressed:
+                () =>
+                    controller.refreshNow(), // was: controller.fetchSalesData()
             icon: const Icon(Icons.refresh, color: Colors.black),
             tooltip: "Refresh Data",
           ),
