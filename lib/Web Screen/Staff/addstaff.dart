@@ -306,7 +306,7 @@ Widget _buildField(
     decoration: InputDecoration(
       hintText: hint,
       hintStyle: const TextStyle(fontSize: 14, color: Colors.grey),
-      prefixIcon: Icon(icon, size: 15, color: Colors.grey),
+      prefixIcon: FaIcon(icon, size: 15, color: Colors.grey),
       filled: true,
       fillColor: _kBg,
       contentPadding: const EdgeInsets.symmetric(vertical: 15),

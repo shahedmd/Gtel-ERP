@@ -33,37 +33,16 @@ class SalesCartItem {
 class LiveSalesController extends GetxController {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  // External Controllers
   final productCtrl = Get.find<ProductController>();
   final debtorCtrl = Get.find<DebatorController>();
   final dailyCtrl = Get.find<DailySalesController>();
 
-  // --- STATE VARIABLES ---
-  final RxString customerType = "WHOLESALE".obs;
-  final RxBool isConditionSale = false.obs;
-  final RxList<SalesCartItem> cart = <SalesCartItem>[].obs;
-  final RxBool isProcessing = false.obs;
+  // ─── DYNAMIC LISTS (Firestore থেকে আসে) ────────────────────────────────────
+  final RxList<String> courierList = <String>[].obs;
+  final RxList<String> packagerList = <String>[].obs;
 
-  // --- AGENT DEBTOR SEARCH STATE ---
-  final Rxn<DebtorModel> selectedDebtor = Rxn<DebtorModel>();
-  final RxList<DebtorModel> filteredDebtors = <DebtorModel>[].obs;
-
-  // --- REGULAR CUSTOMER SEARCH STATE (WHOLESALE/VIP) ---
-  final Rxn<Map<String, dynamic>> selectedRegularCustomer =
-      Rxn<Map<String, dynamic>>();
-  final RxList<Map<String, dynamic>> filteredRegularCustomers =
-      <Map<String, dynamic>>[].obs;
-
-  // --- LOCAL CACHE FOR REGULAR + CONDITION CUSTOMERS ---
-  final RxList<Map<String, dynamic>> allRegularCustomersCache =
-      <Map<String, dynamic>>[].obs;
-
-  // Search Debounce Timer
-  Timer? _searchDebounce;
-
-  final List<String> customerTypesList = ['WHOLESALE', 'VIP', 'AGENT'];
-
-  final List<String> courierList = [
+  // Default values — প্রথমবার app চালালে এগুলো Firestore-এ save হবে
+  static const List<String> _defaultCouriers = [
     'A.J.R',
     'Pathao',
     'Korutoya',
@@ -74,8 +53,7 @@ class LiveSalesController extends GetxController {
     'RedX',
     'Other',
   ];
-
-  final List<String> packagerList = [
+  static const List<String> _defaultPackagers = [
     'Ashraf Noyon',
     'Md. Riyad',
     'Foysal Ahmed',
@@ -84,8 +62,33 @@ class LiveSalesController extends GetxController {
     'Md. Yeamin',
     'Md. Siyam',
   ];
-  final RxnString selectedPackager = RxnString();
 
+  // Firestore path
+  static const String _cfgDoc = 'sales_lists';
+
+  // ────────────────────────────────────────────────────────────────────────────
+
+  final RxString customerType = "WHOLESALE".obs;
+  final RxBool isConditionSale = false.obs;
+  final RxList<SalesCartItem> cart = <SalesCartItem>[].obs;
+  final RxBool isProcessing = false.obs;
+
+  final Rxn<DebtorModel> selectedDebtor = Rxn<DebtorModel>();
+  final RxList<DebtorModel> filteredDebtors = <DebtorModel>[].obs;
+
+  final Rxn<Map<String, dynamic>> selectedRegularCustomer =
+      Rxn<Map<String, dynamic>>();
+  final RxList<Map<String, dynamic>> filteredRegularCustomers =
+      <Map<String, dynamic>>[].obs;
+
+  final RxList<Map<String, dynamic>> allRegularCustomersCache =
+      <Map<String, dynamic>>[].obs;
+
+  Timer? _searchDebounce;
+
+  final List<String> customerTypesList = ['WHOLESALE', 'VIP', 'AGENT'];
+
+  final RxnString selectedPackager = RxnString();
   final RxDouble debtorOldDue = 0.0.obs;
   final RxDouble debtorRunningDue = 0.0.obs;
   double get totalPreviousDue => debtorOldDue.value + debtorRunningDue.value;
@@ -113,7 +116,6 @@ class LiveSalesController extends GetxController {
   final RxDouble changeReturn = 0.0.obs;
   final RxDouble calculatedCourierDue = 0.0.obs;
 
-  // --- PAGINATION HELPERS ---
   int get currentPage => productCtrl.currentPage.value;
   int get totalPages =>
       (productCtrl.totalProducts.value / productCtrl.pageSize.value).ceil();
@@ -124,7 +126,8 @@ class LiveSalesController extends GetxController {
   void onInit() {
     super.onInit();
 
-    // Fetch all non-agent customers + condition customers into local cache
+    _fetchSalesLists(); // ← Dynamic list load
+
     _fetchAllRegularCustomers();
 
     cashC.addListener(updatePaymentCalculations);
@@ -132,7 +135,6 @@ class LiveSalesController extends GetxController {
     nagadC.addListener(updatePaymentCalculations);
     bankC.addListener(updatePaymentCalculations);
 
-    // --- UNIFIED SEARCH LISTENER ---
     debtorPhoneSearch.addListener(() {
       String query = debtorPhoneSearch.text.trim();
 
@@ -146,14 +148,12 @@ class LiveSalesController extends GetxController {
 
       _searchDebounce = Timer(const Duration(milliseconds: 300), () {
         if (customerType.value == 'AGENT') {
-          // Ignore if already selected
           if (selectedDebtor.value != null &&
               query == selectedDebtor.value!.phone) {
             return;
           }
           _searchGlobalAgent(query);
         } else {
-          // Ignore if already selected
           if (selectedRegularCustomer.value != null &&
               query == selectedRegularCustomer.value!['phone']) {
             return;
@@ -191,15 +191,108 @@ class LiveSalesController extends GetxController {
     });
   }
 
-  // ---------------------------------------------------------------------------
-  // FETCH ALL REGULAR + CONDITION CUSTOMERS INTO LOCAL CACHE
-  // Now merges both 'customers' and 'condition_customers' collections.
-  // Condition customers get type = 'CONDITION' so they are never filtered out.
-  // Deduplication is done by phone number — condition entry wins on conflict.
-  // ---------------------------------------------------------------------------
+  // ─── DYNAMIC LIST: FETCH FROM FIRESTORE ─────────────────────────────────────
+  // App চালু হলে Firestore থেকে courier ও packager list load হয়।
+  // যদি document না থাকে, তাহলে default values দিয়ে তৈরি করে।
+  Future<void> _fetchSalesLists() async {
+    try {
+      final doc = await _db.collection('app_config').doc(_cfgDoc).get();
+      if (doc.exists && doc.data() != null) {
+        final data = doc.data()!;
+        courierList.value = List<String>.from(
+          data['couriers'] ?? _defaultCouriers,
+        );
+        packagerList.value = List<String>.from(
+          data['packagers'] ?? _defaultPackagers,
+        );
+      } else {
+        // প্রথমবার — default দিয়ে Firestore-এ save করো
+        courierList.value = List<String>.from(_defaultCouriers);
+        packagerList.value = List<String>.from(_defaultPackagers);
+        await _db.collection('app_config').doc(_cfgDoc).set({
+          'couriers': _defaultCouriers,
+          'packagers': _defaultPackagers,
+        });
+      }
+    } catch (e) {
+      // Firestore ব্যর্থ হলে default দেখাও
+      courierList.value = List<String>.from(_defaultCouriers);
+      packagerList.value = List<String>.from(_defaultPackagers);
+      AppLogger.i("fetchSalesLists error: $e");
+    }
+  }
+
+  // ─── DYNAMIC LIST: SAVE TO FIRESTORE ────────────────────────────────────────
+  Future<void> _saveList(String key) async {
+    await _db.collection('app_config').doc(_cfgDoc).set({
+      key: key == 'couriers' ? courierList.toList() : packagerList.toList(),
+    }, SetOptions(merge: true));
+  }
+
+  RxList<String> _getList(String key) =>
+      key == 'couriers' ? courierList : packagerList;
+
+  // ─── ADD ─────────────────────────────────────────────────────────────────────
+  Future<void> addListItem(String key, String item) async {
+    final name = item.trim();
+    if (name.isEmpty) return;
+    _getList(key).add(name);
+    try {
+      await _saveList(key);
+    } catch (e) {
+      _getList(key).remove(name);
+      Get.snackbar("Error", "Add failed");
+    }
+  }
+
+  // ─── EDIT ────────────────────────────────────────────────────────────────────
+  Future<void> editListItem(String key, String oldName, String newName) async {
+    final name = newName.trim();
+    if (name.isEmpty || name == oldName) return;
+    final list = _getList(key);
+    final idx = list.indexOf(oldName);
+    if (idx == -1) return;
+    list[idx] = name;
+    if (key == 'packagers' && selectedPackager.value == oldName) {
+      selectedPackager.value = name;
+    }
+    if (key == 'couriers' && selectedCourier.value == oldName) {
+      selectedCourier.value = name;
+    }
+    try {
+      await _saveList(key);
+    } catch (e) {
+      list[idx] = oldName;
+      Get.snackbar("Error", "Edit failed");
+    }
+  }
+
+  // ─── DELETE ──────────────────────────────────────────────────────────────────
+  Future<void> deleteListItem(String key, String item) async {
+    final list = _getList(key);
+    final idx = list.indexOf(item);
+    if (idx == -1) return;
+    list.removeAt(idx);
+    if (key == 'packagers' && selectedPackager.value == item) {
+      selectedPackager.value = null;
+    }
+    if (key == 'couriers' && selectedCourier.value == item) {
+      selectedCourier.value = null;
+    }
+    try {
+      await _saveList(key);
+    } catch (e) {
+      list.insert(idx, item);
+      Get.snackbar("Error", "Delete failed");
+    }
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // বাকি সব method আগের মতোই — কোনো পরিবর্তন নেই
+  // ────────────────────────────────────────────────────────────────────────────
+
   Future<void> _fetchAllRegularCustomers() async {
     try {
-      // 1. Fetch regular customers (WHOLESALE / VIP)
       var regularSnap = await _db.collection('customers').get();
       var regularList =
           regularSnap.docs
@@ -207,7 +300,6 @@ class LiveSalesController extends GetxController {
               .where((c) => c['type'] != 'AGENT')
               .toList();
 
-      // 2. Fetch condition customers
       var conditionSnap = await _db.collection('condition_customers').get();
       var conditionList =
           conditionSnap.docs
@@ -220,9 +312,7 @@ class LiveSalesController extends GetxController {
               )
               .toList();
 
-      // 3. Merge — keyed by phone; condition entry overwrites on duplicate phone
       final Map<String, Map<String, dynamic>> merged = {};
-
       for (var c in regularList) {
         final key = (c['phone'] ?? c['id']).toString();
         merged[key] = c;
@@ -231,14 +321,12 @@ class LiveSalesController extends GetxController {
         final key = (c['phone'] ?? c['id']).toString();
         merged[key] = c;
       }
-
       allRegularCustomersCache.value = merged.values.toList();
     } catch (e) {
       AppLogger.i("Error fetching regular/condition customers: $e");
     }
   }
 
-  // SEARCH AGENT
   Future<void> _searchGlobalAgent(String queryText) async {
     try {
       String q = queryText.trim();
@@ -298,7 +386,6 @@ class LiveSalesController extends GetxController {
                     d.address.toLowerCase().contains(qLower),
               )
               .toList();
-
       for (var m in localMatches) {
         results[m.id] = m;
       }
@@ -309,12 +396,6 @@ class LiveSalesController extends GetxController {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // SEARCH REGULAR + CONDITION CUSTOMERS
-  // Local cache search covers both collections instantly.
-  // Firestore fallback queries BOTH 'customers' and 'condition_customers'.
-  // AGENT entries are always excluded from results.
-  // ---------------------------------------------------------------------------
   Future<void> _searchRegularCustomer(String queryText) async {
     try {
       String q = queryText.trim();
@@ -323,25 +404,16 @@ class LiveSalesController extends GetxController {
 
       Map<String, Map<String, dynamic>> results = {};
 
-      // ------------------------------------------------------------------
-      // 1. LOCAL CACHE SEARCH (covers both regular + condition customers)
-      //    Matches any part of name or phone, case-insensitive.
-      // ------------------------------------------------------------------
       var localMatches =
           allRegularCustomersCache.where((c) {
             String name = (c['name'] ?? '').toString().toLowerCase();
             String phone = (c['phone'] ?? '').toString().toLowerCase();
             return name.contains(qLower) || phone.contains(qLower);
           }).toList();
-
       for (var m in localMatches) {
         results[m['id'].toString()] = m;
       }
 
-      // ------------------------------------------------------------------
-      // 2. FIRESTORE FALLBACK — 'customers' collection
-      //    Runs in case the cache is still loading.
-      // ------------------------------------------------------------------
       var phoneSnap =
           await _db
               .collection('customers')
@@ -383,10 +455,6 @@ class LiveSalesController extends GetxController {
         results[doc.id] = {'id': doc.id, ...doc.data()};
       }
 
-      // ------------------------------------------------------------------
-      // 3. FIRESTORE FALLBACK — 'condition_customers' collection
-      //    Ensures condition customers appear even if cache hasn't loaded.
-      // ------------------------------------------------------------------
       var condPhoneSnap =
           await _db
               .collection('condition_customers')
@@ -419,7 +487,6 @@ class LiveSalesController extends GetxController {
         results[doc.id] = {'id': doc.id, 'type': 'CONDITION', ...doc.data()};
       }
 
-      // Exclude AGENTS only; limit to 15 results
       filteredRegularCustomers.value =
           results.values.where((c) => c['type'] != 'AGENT').take(15).toList();
     } catch (e) {
@@ -644,7 +711,6 @@ class LiveSalesController extends GetxController {
           isProcessing.value = true;
           DocumentReference newDebtorRef = _db.collection('debatorbody').doc();
           finalDebtorId = newDebtorRef.id;
-
           await newDebtorRef.set({
             'id': finalDebtorId,
             'name': fName,
@@ -734,7 +800,6 @@ class LiveSalesController extends GetxController {
     return keywords.toSet().toList();
   }
 
-  // --- CASH LEDGER: Helper method to perfectly split & map Cash records ---
   void _insertCashLedgerRecords({
     required WriteBatch batch,
     required Map<String, dynamic> payMap,
@@ -795,12 +860,8 @@ class LiveSalesController extends GetxController {
     double oldDueSnap = debtorOldDue.value,
         runningDueSnap = debtorRunningDue.value;
 
-    // ==============================================================================
-    // PRIORITY LOGIC: CURRENT INVOICE -> OLD DUE -> PREV RUNNING DUE
-    // ==============================================================================
     double remaining = totalPaidInputVal;
 
-    // 1. Pay Current Invoice FIRST
     if (remaining > 0) {
       if (remaining >= grandTotal) {
         allocatedToInvoice = grandTotal;
@@ -814,7 +875,6 @@ class LiveSalesController extends GetxController {
     if (customerType.value == "AGENT" &&
         !isConditionSale.value &&
         debtorId != null) {
-      // 2. Pay Old Due (Historic Loan) NEXT
       if (oldDueSnap > 0 && remaining > 0) {
         if (remaining >= oldDueSnap) {
           allocatedToOldDue = oldDueSnap;
@@ -824,8 +884,6 @@ class LiveSalesController extends GetxController {
           remaining = 0.0;
         }
       }
-
-      // 3. Pay Running Due (Previous Unpaid Bills) LAST
       if (runningDueSnap > 0 && remaining > 0) {
         if (remaining >= runningDueSnap) {
           allocatedToPrevRunningDue = runningDueSnap;
@@ -839,7 +897,6 @@ class LiveSalesController extends GetxController {
       allocatedToInvoice =
           totalPaidInputVal > grandTotal ? grandTotal : totalPaidInputVal;
     }
-    // ==============================================================================
 
     double invoiceDueAmount = _round(grandTotal - allocatedToInvoice);
     if (invoiceDueAmount < 0) invoiceDueAmount = 0;
@@ -881,7 +938,6 @@ class LiveSalesController extends GetxController {
         totalPaidInputVal,
       );
 
-      // --- SALES_ORDER SCHEMA ---
       batch.set(orderRef, {
         "invoiceId": invNo,
         "timestamp": FieldValue.serverTimestamp(),
@@ -951,7 +1007,6 @@ class LiveSalesController extends GetxController {
           sellerUid,
         );
       } else {
-        // --- SAVING REGULAR WHOLESALE/VIP CUSTOMERS ---
         DocumentReference custRef = _db.collection('customers').doc(fPhone);
         batch.set(custRef, {
           "name": fName,
@@ -964,7 +1019,6 @@ class LiveSalesController extends GetxController {
           "searchKeywords": _generateSearchKeywords(fName, fPhone),
         }, SetOptions(merge: true));
 
-        // Update Local Customer Cache Immediately
         _updateCustomerCache(
           fPhone,
           fName,
@@ -1073,10 +1127,6 @@ class LiveSalesController extends GetxController {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // UPDATE CUSTOMER CACHE IMMEDIATELY AFTER A SALE
-  // Accepts WHOLESALE, VIP, and CONDITION types. AGENT is excluded.
-  // ---------------------------------------------------------------------------
   void _updateCustomerCache(
     String phone,
     String name,
@@ -1085,7 +1135,6 @@ class LiveSalesController extends GetxController {
     String type,
   ) {
     if (type == 'AGENT') return;
-
     var existingIndex = allRegularCustomersCache.indexWhere(
       (c) => c['phone'] == phone || c['id'] == phone,
     );
@@ -1097,7 +1146,6 @@ class LiveSalesController extends GetxController {
       'address': address,
       'type': type,
     };
-
     if (existingIndex >= 0) {
       allRegularCustomersCache[existingIndex] = updatedCust;
     } else {
@@ -1134,7 +1182,6 @@ class LiveSalesController extends GetxController {
       "totalCourierDue": FieldValue.increment(invoiceDueAmount),
     }, SetOptions(merge: true));
 
-    // Also update the local cache so they appear in future searches immediately
     _updateCustomerCache(fPhone, fName, shopC.text, addressC.text, 'CONDITION');
 
     DocumentReference condTxRef = condCustRef.collection('orders').doc(invNo);
@@ -1243,7 +1290,6 @@ class LiveSalesController extends GetxController {
               .collection('transactions')
               .doc();
       String oldPayTxId = oldPayRef.id;
-
       batch.set(oldPayRef, {
         "amount": allocatedToOldDue,
         "transactionId": oldPayTxId,
@@ -1255,7 +1301,6 @@ class LiveSalesController extends GetxController {
         "collectedBy": sellerName,
         "collectedByPhone": sellerPhone,
       });
-
       _insertCashLedgerRecords(
         batch: batch,
         payMap: _extractPaymentFor(allocatedToOldDue),
@@ -1308,7 +1353,6 @@ class LiveSalesController extends GetxController {
           .doc(debtorId)
           .collection('transactions')
           .doc(surplusTxId);
-
       batch.set(surplusRef, {
         "amount": allocatedToPrevRunningDue,
         "transactionId": surplusTxId,
@@ -1319,7 +1363,6 @@ class LiveSalesController extends GetxController {
         "paymentMethod": _extractPaymentFor(allocatedToPrevRunningDue),
         "collectedBy": sellerName,
       });
-
       _insertCashLedgerRecords(
         batch: batch,
         payMap: _extractPaymentFor(allocatedToPrevRunningDue),
@@ -1382,9 +1425,9 @@ class LiveSalesController extends GetxController {
                   .where('transactionId', isEqualTo: saleTxId)
                   .limit(1)
                   .get();
-          double currentPendingD = 0.0;
-          double currentPaidD = 0.0;
-          double currentLedgerPaidD = 0.0;
+          double currentPendingD = 0.0,
+              currentPaidD = 0.0,
+              currentLedgerPaidD = 0.0;
           DocumentSnapshot? dailyDoc;
 
           if (dailySnap.docs.isNotEmpty) {
@@ -1432,13 +1475,11 @@ class LiveSalesController extends GetxController {
                   ? actualPending
                   : remainingToAllocate;
           bool isNowFullyPaid = (actualPending - take) <= 0.5;
-
           Map<String, dynamic> surplusMethodMap = _extractPaymentFor(take);
           double sCash = surplusMethodMap['cash'] ?? 0.0;
           double sBkash = surplusMethodMap['bkash'] ?? 0.0;
           double sNagad = surplusMethodMap['nagad'] ?? 0.0;
           double sBank = surplusMethodMap['bank'] ?? 0.0;
-
           String bNum = surplusMethodMap['bkashNumber'] ?? '';
           String nNum = surplusMethodMap['nagadNumber'] ?? '';
           String bankName = surplusMethodMap['bankName'] ?? '';
@@ -1448,7 +1489,6 @@ class LiveSalesController extends GetxController {
             "paid": FieldValue.increment(take),
             "paymentDetails.due": FieldValue.increment(-take),
           };
-
           if (oData['customerName'] != fName) {
             orderUpdate['customerName'] = fName;
           }
@@ -1476,7 +1516,6 @@ class LiveSalesController extends GetxController {
               orderUpdate["paymentDetails.accountNumber"] = accNum;
             }
           }
-
           if (isNowFullyPaid) {
             orderUpdate["isFullyPaid"] = true;
             orderUpdate["status"] = "completed";
@@ -1599,14 +1638,11 @@ class LiveSalesController extends GetxController {
     double rawBkash = double.tryParse(bkashC.text) ?? 0;
     double rawNagad = double.tryParse(nagadC.text) ?? 0;
     double rawBank = double.tryParse(bankC.text) ?? 0;
-
     double totalInput = rawCash + rawBkash + rawNagad + rawBank;
-
     double finalCash = 0.0, finalBkash = 0.0, finalNagad = 0.0, finalBank = 0.0;
 
     if (totalInput > 0 && targetAmount > 0) {
       double ratio = targetAmount / totalInput;
-
       if ((targetAmount - totalInput).abs() < 0.01) {
         finalCash = rawCash;
         finalBkash = rawBkash;
@@ -1649,7 +1685,6 @@ class LiveSalesController extends GetxController {
     } else if (finalBank > 0) {
       type = "bank";
     }
-
     if (targetAmount <= 0.01) type = "Due";
 
     return {
@@ -1724,10 +1759,8 @@ class LiveSalesController extends GetxController {
     challanC.clear();
     cartonsC.clear();
     otherCourierC.clear();
-
     discountC.clear();
     discountNoteC.clear();
-
     cashC.clear();
     bkashC.clear();
     bkashNumberC.clear();
@@ -1736,19 +1769,15 @@ class LiveSalesController extends GetxController {
     bankC.clear();
     bankNameC.clear();
     bankAccC.clear();
-
     discountVal.value = 0.0;
     totalPaidInput.value = 0.0;
     changeReturn.value = 0.0;
     selectedCourier.value = null;
     calculatedCourierDue.value = 0.0;
-
     selectedDebtor.value = null;
     filteredDebtors.clear();
-
     selectedRegularCustomer.value = null;
     filteredRegularCustomers.clear();
-
     debtorPhoneSearch.clear();
     debtorOldDue.value = 0.0;
     debtorRunningDue.value = 0.0;
@@ -1760,7 +1789,6 @@ class LiveSalesController extends GetxController {
     if (number == 0) return "Zero";
     int num = number.floor();
     if (num < 0) return "Negative ${_numberToWords(-number)}";
-
     const units = [
       "",
       "One",
@@ -1795,7 +1823,6 @@ class LiveSalesController extends GetxController {
       "Eighty",
       "Ninety",
     ];
-
     String convertLessThanOneThousand(int n) {
       String result = "";
       if (n >= 100) {
@@ -1818,14 +1845,12 @@ class LiveSalesController extends GetxController {
     int thousand = num ~/ 1000;
     num %= 1000;
     int remainder = num;
-
     if (crore > 0) result += "${convertLessThanOneThousand(crore)}Crore ";
     if (lakh > 0) result += "${convertLessThanOneThousand(lakh)}Lakh ";
     if (thousand > 0) {
       result += "${convertLessThanOneThousand(thousand)}Thousand ";
     }
     if (remainder > 0) result += convertLessThanOneThousand(remainder);
-
     return result.trim();
   }
 
@@ -1850,7 +1875,6 @@ class LiveSalesController extends GetxController {
     String? packagerName,
   }) async {
     final pdf = pw.Document();
-
     final boldFont = await PdfGoogleFonts.robotoBold();
     final regularFont = await PdfGoogleFonts.robotoRegular();
     final italicFont = await PdfGoogleFonts.robotoItalic();
@@ -1859,7 +1883,6 @@ class LiveSalesController extends GetxController {
     double paidPrevRun =
         double.tryParse(payMap['paidForPrevRunning'].toString()) ?? 0.0;
     double invDue = double.tryParse(payMap['due'].toString()) ?? 0.0;
-
     double totalPaidForInvoice =
         double.tryParse(payMap['paidForInvoice']?.toString() ?? '0') ?? 0.0;
     double totalPaidInput =
@@ -1879,7 +1902,6 @@ class LiveSalesController extends GetxController {
     if ((double.tryParse(payMap['bank']?.toString() ?? '0') ?? 0) > 0) {
       methodsUsed.add('Bank');
     }
-
     String paymentMethodsStr =
         methodsUsed.isNotEmpty ? methodsUsed.join(', ') : "None/Credit";
 
@@ -1888,12 +1910,11 @@ class LiveSalesController extends GetxController {
       (sumv, item) =>
           sumv + (double.tryParse(item['subtotal'].toString()) ?? 0),
     );
-
-    double remainingOldDue = oldDueSnap - paidOld;
-    if (remainingOldDue < 0) remainingOldDue = 0;
-    double remainingPrevRunning = runningDueSnap - paidPrevRun;
-    if (remainingPrevRunning < 0) remainingPrevRunning = 0;
-
+    double remainingOldDue = (oldDueSnap - paidOld).clamp(0, double.infinity);
+    double remainingPrevRunning = (runningDueSnap - paidPrevRun).clamp(
+      0,
+      double.infinity,
+    );
     double netTotalDue = remainingOldDue + remainingPrevRunning + invDue;
     double totalPreviousBalance = oldDueSnap + runningDueSnap;
     double currentInvTotal = subTotal - discount;
@@ -1911,74 +1932,20 @@ class LiveSalesController extends GetxController {
     pdf.addPage(
       pw.MultiPage(
         pageTheme: pageTheme,
-        footer: (pw.Context context) => _buildNewFooter(context, regularFont),
-        build: (pw.Context context) {
-          return [
-            _buildNewHeader(
-              boldFont,
-              regularFont,
-              invId,
-              "Sales Invoice",
-              packagerName,
-              authorizedName,
-              invDue,
-              false,
-              null,
-              "",
-              paymentMethodsStr,
-            ),
-            _buildNewCustomerBox(
-              name,
-              address,
-              phone,
-              shopName,
-              regularFont,
-              boldFont,
-            ),
-            pw.SizedBox(height: 5),
-            _buildNewTable(items, boldFont, regularFont),
-            _buildNewSummary(
-              subTotal,
-              discount,
-              currentInvTotal,
-              totalPaidInput,
-              paymentMethodsStr,
-              items,
-              boldFont,
-              regularFont,
-              discountNote,
-            ),
-            pw.SizedBox(height: 5),
-            _buildNewDues(totalPreviousBalance, netTotalDue, regularFont),
-            if (invDue <= 0 && !isCondition)
-              _buildPaidStamp(boldFont, regularFont),
-            if (invDue > 0 || isCondition) pw.SizedBox(height: 15),
-            _buildWordsBox(currentInvTotal, boldFont),
-            pw.SizedBox(height: 40),
-            _buildNewSignatures(regularFont),
-          ];
-        },
-      ),
-    );
-
-    if (isCondition) {
-      pdf.addPage(
-        pw.MultiPage(
-          pageTheme: pageTheme,
-          footer: (pw.Context context) => _buildNewFooter(context, regularFont),
-          build: (context) {
-            return [
+        footer: (ctx) => _buildNewFooter(ctx, regularFont),
+        build:
+            (ctx) => [
               _buildNewHeader(
                 boldFont,
                 regularFont,
                 invId,
-                "DELIVERY CHALLAN",
+                "Sales Invoice",
                 packagerName,
                 authorizedName,
                 invDue,
-                isCondition,
-                courier,
-                challan,
+                false,
+                null,
+                "",
                 paymentMethodsStr,
               ),
               _buildNewCustomerBox(
@@ -1989,20 +1956,72 @@ class LiveSalesController extends GetxController {
                 regularFont,
                 boldFont,
               ),
-              pw.SizedBox(height: 20),
-              _buildCourierBox(
-                courier,
-                challan,
-                cartons,
-                regularFont,
+              pw.SizedBox(height: 5),
+              _buildNewTable(items, boldFont, regularFont),
+              _buildNewSummary(
+                subTotal,
+                discount,
+                currentInvTotal,
+                totalPaidInput,
+                paymentMethodsStr,
+                items,
                 boldFont,
+                regularFont,
+                discountNote,
               ),
-              pw.SizedBox(height: 60),
-              _buildChallanCenterBox(boldFont, regularFont, invDue),
-              pw.SizedBox(height: 100),
+              pw.SizedBox(height: 5),
+              _buildNewDues(totalPreviousBalance, netTotalDue, regularFont),
+              if (invDue <= 0 && !isCondition)
+                _buildPaidStamp(boldFont, regularFont),
+              if (invDue > 0 || isCondition) pw.SizedBox(height: 15),
+              _buildWordsBox(currentInvTotal, boldFont),
+              pw.SizedBox(height: 40),
               _buildNewSignatures(regularFont),
-            ];
-          },
+            ],
+      ),
+    );
+
+    if (isCondition) {
+      pdf.addPage(
+        pw.MultiPage(
+          pageTheme: pageTheme,
+          footer: (ctx) => _buildNewFooter(ctx, regularFont),
+          build:
+              (ctx) => [
+                _buildNewHeader(
+                  boldFont,
+                  regularFont,
+                  invId,
+                  "DELIVERY CHALLAN",
+                  packagerName,
+                  authorizedName,
+                  invDue,
+                  isCondition,
+                  courier,
+                  challan,
+                  paymentMethodsStr,
+                ),
+                _buildNewCustomerBox(
+                  name,
+                  address,
+                  phone,
+                  shopName,
+                  regularFont,
+                  boldFont,
+                ),
+                pw.SizedBox(height: 20),
+                _buildCourierBox(
+                  courier,
+                  challan,
+                  cartons,
+                  regularFont,
+                  boldFont,
+                ),
+                pw.SizedBox(height: 60),
+                _buildChallanCenterBox(boldFont, regularFont, invDue),
+                pw.SizedBox(height: 100),
+                _buildNewSignatures(regularFont),
+              ],
         ),
       );
     }
@@ -2259,7 +2278,6 @@ class LiveSalesController extends GetxController {
     );
     String discountLabel = "Less Discount";
     if (discountNote.isNotEmpty) discountLabel += " ($discountNote)";
-
     return pw.Container(
       decoration: const pw.BoxDecoration(
         border: pw.Border(

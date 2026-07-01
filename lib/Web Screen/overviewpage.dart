@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
-import 'overviewcontroller.dart'; // Ensure this import points to your controller file
+import 'overviewcontroller.dart';
 
 class DailyOverviewPage extends StatelessWidget {
   DailyOverviewPage({super.key});
@@ -13,7 +13,6 @@ class DailyOverviewPage extends StatelessWidget {
     permanent: true,
   );
 
-  // --- ERP THEME COLORS ---
   static const Color slateDark = Color(0xFF0F172A);
   static const Color slateMedium = Color(0xFF64748B);
   static const Color slateLight = Color(0xFFF1F5F9);
@@ -467,7 +466,7 @@ class DailyOverviewPage extends StatelessWidget {
                   ),
                 ),
               ),
-              Icon(icon, size: 16, color: color),
+              FaIcon(icon, size: 16, color: color),
             ],
           ),
           FittedBox(
@@ -776,7 +775,7 @@ class DailyOverviewPage extends StatelessWidget {
             ),
             child: Row(
               children: [
-                Icon(icon, size: 14, color: colorTheme),
+                FaIcon(icon, size: 14, color: colorTheme),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -929,7 +928,6 @@ class DailyOverviewPage extends StatelessWidget {
     );
   }
 
-  // --- HELPER: Visual Icon ---
   Widget _buildMethodIcon(String method) {
     // IconData-এর বদলে dynamic ব্যবহার করা হয়েছে
     dynamic icon = FontAwesomeIcons.moneyBillWave;
@@ -955,12 +953,10 @@ class DailyOverviewPage extends StatelessWidget {
       width: 36,
       height: 36,
       decoration: BoxDecoration(color: bg, shape: BoxShape.circle),
-      // এখানে Icon-এর বদলে FaIcon ব্যবহার করা হয়েছে
       child: Center(child: FaIcon(icon, size: 14, color: color)),
     );
   }
 
-  // --- HELPER: Small Badge ---
   Widget _createMethodBadge(String method) {
     Color bg = slateLight;
     Color fg = slateMedium;

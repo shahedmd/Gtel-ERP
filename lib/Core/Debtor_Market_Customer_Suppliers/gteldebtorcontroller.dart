@@ -1,5 +1,3 @@
-// ignore_for_file: empty_catches, deprecated_member_use
-
 import 'dart:async';
 import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';

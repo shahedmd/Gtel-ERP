@@ -345,8 +345,6 @@ Widget _typeButton(
   );
 }
 
-/// Pill-style payment method selector — replaces the old dropdown.
-/// Shows icon + label for each method with color highlight on selection.
 Widget _buildMethodSelector(RxString selectedMethod) {
   return Obx(
     () => Row(
@@ -377,7 +375,7 @@ Widget _buildMethodSelector(RxString selectedMethod) {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(
+                      FaIcon(
                         icon,
                         size: 16,
                         color: isSelected ? color : Colors.grey[500],
@@ -402,7 +400,6 @@ Widget _buildMethodSelector(RxString selectedMethod) {
   );
 }
 
-/// Small contextual banner telling the user which balance will be affected
 Widget _buildInfoBanner(StaffTransactionType type, String method) {
   final color = _methodColors[method] ?? activeAccent;
   final isRepayment = type == StaffTransactionType.REPAYMENT;
@@ -634,7 +631,7 @@ Widget _buildField(
     decoration: InputDecoration(
       hintText: hint,
       hintStyle: const TextStyle(fontSize: 14, color: Colors.grey),
-      prefixIcon: Icon(icon, size: 16, color: Colors.blueGrey),
+      prefixIcon: FaIcon(icon, size: 16, color: Colors.blueGrey),
       filled: true,
       fillColor: bgGrey,
       contentPadding: const EdgeInsets.symmetric(vertical: 16),

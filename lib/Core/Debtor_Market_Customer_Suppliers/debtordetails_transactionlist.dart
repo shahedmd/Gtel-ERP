@@ -1218,18 +1218,20 @@ class Debatordetails extends StatelessWidget {
 
   Map<String, dynamic> _getTxInfo(DisplayTx tx) {
     Color typeColor = Colors.grey;
-    // IconData এর বদলে dynamic ব্যবহার করা হয়েছে কারণ FontAwesomeIcons এখন আর IconData নয়
     dynamic typeIcon = Icons.circle;
     String typeLabel = tx.type;
+    String? invId;
 
     if (tx.type == 'credit') {
       typeColor = debitColor;
       typeIcon = FontAwesomeIcons.fileInvoiceDollar;
       typeLabel = "INVOICE / DUE";
+      invId = tx.originalTx.id;
     } else if (tx.type == 'paid_sale') {
       typeColor = const Color(0xFF0D9488);
       typeIcon = FontAwesomeIcons.checkDouble;
       typeLabel = "CASH SALE";
+      invId = tx.originalTx.id;
     } else if (tx.type == 'debit') {
       typeColor = creditColor;
       typeIcon = FontAwesomeIcons.handHoldingDollar;
@@ -1260,7 +1262,12 @@ class Debatordetails extends StatelessWidget {
       typeLabel = "LOAN COLLECT";
     }
 
-    return {"color": typeColor, "icon": typeIcon, "label": typeLabel};
+    return {
+      "color": typeColor,
+      "icon": typeIcon,
+      "label": typeLabel,
+      "invId": invId,
+    };
   }
 
   Widget _iconBtn(IconData icon, Color color, VoidCallback onTap) => InkWell(

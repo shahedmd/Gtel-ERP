@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Live%20order/salemodel.dart';
-
 import '../Permission/permission_button.dart';
 
 class LiveOrderSalesPage extends StatelessWidget {
@@ -10,8 +9,8 @@ class LiveOrderSalesPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final controller = Get.put(LiveSalesController());
-    final RxString cartSearchQuery = ''.obs;
 
+    final RxString cartSearchQuery = ''.obs;
     final double screenWidth = MediaQuery.sizeOf(context).width;
     final double screenHeight = MediaQuery.sizeOf(context).height;
     final bool isDesktop = screenWidth >= 900;
@@ -79,7 +78,183 @@ class LiveOrderSalesPage extends StatelessWidget {
     );
   }
 
-  // --- 1. TOP BAR ---
+  // ─── HELPER: LIST MANAGER DIALOG ─────────────────────────────────────────────
+  void _showListManagerDialog(
+    BuildContext context,
+    LiveSalesController controller,
+    String key,
+  ) {
+    final addCtrl = TextEditingController();
+    final String title =
+        key == 'couriers' ? 'Manage Couriers' : 'Manage Packagers';
+    final Color accentColor = key == 'couriers' ? Colors.orange : Colors.blue;
+    final RxList<String> list =
+        key == 'couriers' ? controller.courierList : controller.packagerList;
+
+    Get.dialog(
+      Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: SizedBox(
+          width: 440,
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // ── Header ──────────────────────────────────────────────────
+                Row(
+                  children: [
+                    Icon(
+                      key == 'couriers'
+                          ? Icons.local_shipping
+                          : Icons.person_pin,
+                      color: accentColor,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      onPressed: () => Get.back(),
+                      icon: const Icon(Icons.close, size: 20),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                  ],
+                ),
+                const Divider(height: 20),
+
+                // ── Add new item ─────────────────────────────────────────────
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: addCtrl,
+                        style: const TextStyle(fontSize: 13),
+                        decoration: InputDecoration(
+                          hintText:
+                              key == 'couriers'
+                                  ? 'New courier name...'
+                                  : 'New packager name...',
+                          hintStyle: const TextStyle(fontSize: 12),
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 10,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                        ),
+                        onSubmitted: (v) async {
+                          if (v.trim().isEmpty) return;
+                          await controller.addListItem(key, v.trim());
+                          addCtrl.clear();
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton.icon(
+                      onPressed: () async {
+                        final val = addCtrl.text.trim();
+                        if (val.isEmpty) return;
+                        await controller.addListItem(key, val);
+                        addCtrl.clear();
+                      },
+                      icon: const Icon(Icons.add, size: 16),
+                      label: const Text('Add', style: TextStyle(fontSize: 13)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: accentColor,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 10,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        elevation: 0,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+
+                // ── List ─────────────────────────────────────────────────────
+                // Each row is a StatefulWidget so editing state is fully
+                // isolated — no full-list rebuild when one row enters edit mode.
+                SizedBox(
+                  height: 300,
+                  child: Obx(
+                    () => ListView.separated(
+                      itemCount: list.length,
+                      separatorBuilder: (_, _) => const Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final item = list[index];
+                        return _ListManagerRow(
+                          key: ValueKey('$key-$item-$index'),
+                          item: item,
+                          index: index,
+                          accentColor: accentColor,
+                          onSave: (newName) async {
+                            await controller.editListItem(key, item, newName);
+                          },
+                          onDelete: () async {
+                            final confirmed = await Get.dialog<bool>(
+                              AlertDialog(
+                                title: Text('Delete "$item"?'),
+                                content: const Text(
+                                  'This will remove it from the list permanently.',
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Get.back(result: false),
+                                    child: const Text('CANCEL'),
+                                  ),
+                                  ElevatedButton(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.red,
+                                      foregroundColor: Colors.white,
+                                    ),
+                                    onPressed: () => Get.back(result: true),
+                                    child: const Text('DELETE'),
+                                  ),
+                                ],
+                              ),
+                            );
+                            if (confirmed == true) {
+                              await controller.deleteListItem(key, item);
+                            }
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: TextButton(
+                    onPressed: () => Get.back(),
+                    child: const Text('Done'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ─── 1. TOP BAR ──────────────────────────────────────────────────────────────
   Widget _buildTopBar(LiveSalesController controller, bool isDesktop) {
     Widget titleBlock = Row(
       children: [
@@ -180,35 +355,45 @@ class LiveOrderSalesPage extends StatelessWidget {
       ],
     );
 
-    return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: 20,
-        vertical: isDesktop ? 0 : 16,
+    // Wrap entire top bar in Obx for background color reactivity
+    return Obx(
+      () => Container(
+        padding: EdgeInsets.symmetric(
+          horizontal: 20,
+          vertical: isDesktop ? 0 : 16,
+        ),
+        height: isDesktop ? 60 : null,
+        decoration: BoxDecoration(
+          color:
+              controller.isConditionSale.value
+                  ? const Color(0xFFC2410C)
+                  : const Color(0xFF0F172A),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.15),
+              blurRadius: 6,
+            ),
+          ],
+        ),
+        child:
+            isDesktop
+                ? Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [titleBlock, toggleBlock],
+                )
+                : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    titleBlock,
+                    const SizedBox(height: 16),
+                    toggleBlock,
+                  ],
+                ),
       ),
-      height: isDesktop ? 60 : null,
-      decoration: BoxDecoration(
-        color:
-            controller.isConditionSale.value
-                ? const Color(0xFFC2410C)
-                : const Color(0xFF0F172A),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 6),
-        ],
-      ),
-      child:
-          isDesktop
-              ? Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [titleBlock, toggleBlock],
-              )
-              : Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [titleBlock, const SizedBox(height: 16), toggleBlock],
-              ),
     );
   }
 
-  // --- 2. CUSTOMER SECTION (UPDATED FOR UNIFIED SEARCH) ---
+  // ─── 2. CUSTOMER SECTION ─────────────────────────────────────────────────────
   Widget _buildCustomerSection(
     LiveSalesController controller,
     bool isDesktop,
@@ -217,7 +402,6 @@ class LiveOrderSalesPage extends StatelessWidget {
     return Obx(() {
       bool isAgent = controller.customerType.value == "AGENT";
 
-      // Reusable Tabs
       Widget tabsBlock = SizedBox(
         width: isDesktop ? 320 : double.infinity,
         child: Row(
@@ -270,7 +454,6 @@ class LiveOrderSalesPage extends StatelessWidget {
         ),
       );
 
-      // --- DYNAMIC SEARCH FIELD BLOCK ---
       bool showAgentList = isAgent && controller.filteredDebtors.isNotEmpty;
       bool showRegularList =
           !isAgent && controller.filteredRegularCustomers.isNotEmpty;
@@ -379,7 +562,6 @@ class LiveOrderSalesPage extends StatelessWidget {
         ],
       );
 
-      // --- DYNAMIC BADGE BLOCK ---
       Widget badgeBlock;
       if (isAgent) {
         badgeBlock =
@@ -490,6 +672,136 @@ class LiveOrderSalesPage extends StatelessWidget {
                 );
       }
 
+      // ── Packager row: reactive dropdown + manage button ──────────────────────
+      Widget packagerRow = Obx(
+        () => Row(
+          children: [
+            Expanded(
+              child: Container(
+                height: 40,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade300),
+                  borderRadius: BorderRadius.circular(6),
+                  color: Colors.white,
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: controller.selectedPackager.value,
+                    hint: const Text(
+                      "Select Packager",
+                      style: TextStyle(fontSize: 12),
+                    ),
+                    isExpanded: true,
+                    style: const TextStyle(fontSize: 13, color: Colors.black),
+                    items:
+                        controller.packagerList
+                            .map(
+                              (value) => DropdownMenuItem(
+                                value: value,
+                                child: Text(value),
+                              ),
+                            )
+                            .toList(),
+                    onChanged: (n) => controller.selectedPackager.value = n,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            // Manage packager list button
+            Tooltip(
+              message: 'Manage Packagers',
+              child: InkWell(
+                onTap:
+                    () => _showListManagerDialog(
+                      context,
+                      controller,
+                      'packagers',
+                    ),
+                borderRadius: BorderRadius.circular(6),
+                child: Container(
+                  height: 40,
+                  width: 40,
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    border: Border.all(color: Colors.blue.shade200),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Icon(
+                    Icons.manage_accounts,
+                    size: 18,
+                    color: Colors.blue.shade600,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+
+      // ── Courier row: reactive dropdown + manage button ───────────────────────
+      Widget courierRow = Obx(
+        () => Row(
+          children: [
+            Expanded(
+              child: Container(
+                height: 40,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade50,
+                  border: Border.all(color: Colors.orange.shade200),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: controller.selectedCourier.value,
+                    hint: const Text(
+                      "Select Courier",
+                      style: TextStyle(fontSize: 12),
+                    ),
+                    isExpanded: true,
+                    style: const TextStyle(fontSize: 13, color: Colors.black),
+                    items:
+                        controller.courierList
+                            .map(
+                              (c) => DropdownMenuItem(value: c, child: Text(c)),
+                            )
+                            .toList(),
+                    onChanged: (v) => controller.selectedCourier.value = v,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            // Manage courier list button
+            Tooltip(
+              message: 'Manage Couriers',
+              child: InkWell(
+                onTap:
+                    () =>
+                        _showListManagerDialog(context, controller, 'couriers'),
+                borderRadius: BorderRadius.circular(6),
+                child: Container(
+                  height: 40,
+                  width: 40,
+                  decoration: BoxDecoration(
+                    color: Colors.orange.shade50,
+                    border: Border.all(color: Colors.orange.shade200),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Icon(
+                    Icons.local_shipping,
+                    size: 18,
+                    color: Colors.orange.shade700,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -548,7 +860,6 @@ class LiveOrderSalesPage extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 10),
-
                 Expanded(
                   flex: 2,
                   child: _erpInput(
@@ -595,127 +906,110 @@ class LiveOrderSalesPage extends StatelessWidget {
                 _erpInput(controller.shopC, "Shop Name", icon: Icons.store),
               ],
             ),
+
+          // ── Bottom controls: packager + courier (condition) ──────────────────
           Padding(
             padding: const EdgeInsets.only(top: 12),
-            child: Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                Container(
-                  height: 40,
-                  width: isDesktop ? 240 : double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey.shade300),
-                    borderRadius: BorderRadius.circular(6),
-                    color: Colors.white,
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      value: controller.selectedPackager.value,
-                      hint: const Text(
-                        "Select Packager",
-                        style: TextStyle(fontSize: 12),
+            child: Obx(() {
+              bool isCondition = controller.isConditionSale.value;
+
+              if (isDesktop) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Packager (always visible): fixed width + manage btn
+                    SizedBox(width: 280, child: packagerRow),
+
+                    if (isCondition) ...[
+                      Container(
+                        width: 1,
+                        height: 40,
+                        color: Colors.grey.shade300,
+                        margin: const EdgeInsets.symmetric(horizontal: 12),
                       ),
-                      isExpanded: true,
-                      style: const TextStyle(fontSize: 13, color: Colors.black),
-                      items:
-                          controller.packagerList
-                              .map(
-                                (String value) => DropdownMenuItem(
-                                  value: value,
-                                  child: Text(value),
-                                ),
-                              )
-                              .toList(),
-                      onChanged: (n) => controller.selectedPackager.value = n,
-                    ),
-                  ),
-                ),
-                if (controller.isConditionSale.value) ...[
-                  if (isDesktop)
-                    Container(
-                      width: 1,
-                      height: 25,
-                      color: Colors.grey.shade300,
-                      margin: const EdgeInsets.symmetric(horizontal: 6),
-                    ),
-                  Container(
-                    height: 40,
-                    width: isDesktop ? 200 : double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    decoration: BoxDecoration(
-                      color: Colors.orange.shade50,
-                      border: Border.all(color: Colors.orange.shade200),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<String>(
-                        value: controller.selectedCourier.value,
-                        hint: const Text(
-                          "Select Courier",
-                          style: TextStyle(fontSize: 12),
+                      // Courier dropdown + manage btn
+                      SizedBox(width: 240, child: courierRow),
+                      const SizedBox(width: 10),
+                      SizedBox(
+                        width: 140,
+                        child: _erpInput(
+                          controller.challanC,
+                          "Challan No",
+                          icon: Icons.receipt,
                         ),
-                        isExpanded: true,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          color: Colors.black,
+                      ),
+                      const SizedBox(width: 10),
+                      SizedBox(
+                        width: 100,
+                        child: _erpInput(
+                          controller.cartonsC,
+                          "Carton Qty",
+                          isNumber: true,
+                          icon: Icons.inventory_2,
                         ),
-                        items:
-                            controller.courierList
-                                .map(
-                                  (c) => DropdownMenuItem(
-                                    value: c,
-                                    child: Text(c),
-                                  ),
-                                )
-                                .toList(),
-                        onChanged: (v) => controller.selectedCourier.value = v,
                       ),
-                    ),
-                  ),
-                  SizedBox(
-                    width:
-                        isDesktop
-                            ? 140
-                            : (MediaQuery.sizeOf(context).width / 2) - 22,
-                    child: _erpInput(
-                      controller.challanC,
-                      "Challan No",
-                      icon: Icons.receipt,
-                    ),
-                  ),
-                  SizedBox(
-                    width:
-                        isDesktop
-                            ? 100
-                            : (MediaQuery.sizeOf(context).width / 2) - 22,
-                    child: _erpInput(
-                      controller.cartonsC,
-                      "Carton Qty",
-                      isNumber: true,
-                      icon: Icons.inventory_2,
-                    ),
-                  ),
-                  if (controller.selectedCourier.value == 'Other')
-                    SizedBox(
-                      width: isDesktop ? 250 : double.infinity,
-                      child: _erpInput(
-                        controller.otherCourierC,
-                        "Custom Courier Name",
+                      if (controller.selectedCourier.value == 'Other') ...[
+                        const SizedBox(width: 10),
+                        SizedBox(
+                          width: 200,
+                          child: _erpInput(
+                            controller.otherCourierC,
+                            "Custom Courier Name",
+                          ),
+                        ),
+                      ],
+                    ],
+                  ],
+                );
+              } else {
+                // Mobile layout
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    packagerRow,
+                    if (isCondition) ...[
+                      const SizedBox(height: 10),
+                      courierRow,
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _erpInput(
+                              controller.challanC,
+                              "Challan No",
+                              icon: Icons.receipt,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: _erpInput(
+                              controller.cartonsC,
+                              "Carton Qty",
+                              isNumber: true,
+                              icon: Icons.inventory_2,
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                ],
-              ],
-            ),
+                      if (controller.selectedCourier.value == 'Other') ...[
+                        const SizedBox(height: 8),
+                        _erpInput(
+                          controller.otherCourierC,
+                          "Custom Courier Name",
+                        ),
+                      ],
+                    ],
+                  ],
+                );
+              }
+            }),
           ),
         ],
       );
     });
   }
 
-  // --- 3. EXPANDED PAYMENT SECTION ---
+  // ─── 3. PAYMENT SECTION ───────────────────────────────────────────────────────
   Widget _buildExpandedPaymentSection(
     LiveSalesController controller,
     bool isDesktop,
@@ -939,7 +1233,7 @@ class LiveOrderSalesPage extends StatelessWidget {
     }
   }
 
-  // --- 4. CART & SEARCH ---
+  // ─── 4. CART SECTION ─────────────────────────────────────────────────────────
   Widget _buildCartSection(
     LiveSalesController controller,
     RxString searchQuery,
@@ -1386,7 +1680,7 @@ class LiveOrderSalesPage extends StatelessWidget {
     );
   }
 
-  // --- 5. PRODUCT TABLE (LEFT SIDE) ---
+  // ─── 5. PRODUCT TABLE ─────────────────────────────────────────────────────────
   Widget _productInventoryTable(
     LiveSalesController controller,
     bool isDesktop,
@@ -1541,7 +1835,6 @@ class LiveOrderSalesPage extends StatelessWidget {
                         }),
                       ),
                       const SizedBox(width: 10),
-
                       SizedBox(
                         width: 40,
                         height: 30,
@@ -1631,8 +1924,8 @@ class LiveOrderSalesPage extends StatelessWidget {
                     : Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Row(
-                          children: const [
+                        const Row(
+                          children: [
                             Icon(
                               Icons.inventory_2_outlined,
                               size: 20,
@@ -1653,11 +1946,11 @@ class LiveOrderSalesPage extends StatelessWidget {
                         SizedBox(
                           height: 40,
                           child: TextField(
-                            style: TextStyle(fontSize: 13),
+                            style: const TextStyle(fontSize: 13),
                             onChanged: (v) => controller.productCtrl.search(v),
                             decoration: InputDecoration(
                               hintText: "Search Name / Model...",
-                              hintStyle: TextStyle(fontSize: 12),
+                              hintStyle: const TextStyle(fontSize: 12),
                               prefixIcon: const Icon(Icons.search, size: 18),
                               contentPadding: EdgeInsets.zero,
                               border: OutlineInputBorder(
@@ -1717,6 +2010,7 @@ class LiveOrderSalesPage extends StatelessWidget {
     );
   }
 
+  // ─── SHARED INPUT HELPERS ─────────────────────────────────────────────────────
   Widget _erpInput(
     TextEditingController c,
     String hint, {
@@ -1801,10 +2095,233 @@ class LiveOrderSalesPage extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------------------
-// LOGIC WIDGETS
-// ---------------------------------------------------------------------------
+// ─── LIST MANAGER ROW ────────────────────────────────────────────────────────
+// Each row manages its own edit state as a StatefulWidget.
+// This prevents the Obx list rebuild from destroying the active TextField.
+class _ListManagerRow extends StatefulWidget {
+  final String item;
+  final int index;
+  final Color accentColor;
+  final Future<void> Function(String newName) onSave;
+  final Future<void> Function() onDelete;
 
+  const _ListManagerRow({
+    super.key,
+    required this.item,
+    required this.index,
+    required this.accentColor,
+    required this.onSave,
+    required this.onDelete,
+  });
+
+  @override
+  State<_ListManagerRow> createState() => _ListManagerRowState();
+}
+
+class _ListManagerRowState extends State<_ListManagerRow> {
+  bool _isEditing = false;
+  bool _isSaving = false;
+  late TextEditingController _editCtrl;
+  late FocusNode _focusNode;
+
+  @override
+  void initState() {
+    super.initState();
+    _editCtrl = TextEditingController(text: widget.item);
+    _focusNode = FocusNode();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ListManagerRow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // If the item name changed externally (after save) and we're not editing,
+    // sync the controller text.
+    if (oldWidget.item != widget.item && !_isEditing) {
+      _editCtrl.text = widget.item;
+    }
+  }
+
+  @override
+  void dispose() {
+    _editCtrl.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  void _startEditing() {
+    setState(() {
+      _editCtrl.text = widget.item;
+      _isEditing = true;
+    });
+    // Request focus after the frame so the TextField is already in the tree
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _focusNode.requestFocus();
+      // Move cursor to end
+      _editCtrl.selection = TextSelection.fromPosition(
+        TextPosition(offset: _editCtrl.text.length),
+      );
+    });
+  }
+
+  Future<void> _save() async {
+    final newName = _editCtrl.text.trim();
+    if (newName.isEmpty || newName == widget.item) {
+      setState(() => _isEditing = false);
+      return;
+    }
+    setState(() => _isSaving = true);
+    await widget.onSave(newName);
+    if (mounted) {
+      setState(() {
+        _isEditing = false;
+        _isSaving = false;
+      });
+    }
+  }
+
+  void _cancel() => setState(() {
+    _isEditing = false;
+    _editCtrl.text = widget.item;
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bgColor = widget.index % 2 == 0 ? Colors.white : Colors.grey.shade50;
+
+    return Container(
+      color: bgColor,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      child:
+          _isEditing
+              // ── Edit mode ────────────────────────────────────────────────
+              ? Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _editCtrl,
+                      focusNode: _focusNode,
+                      style: const TextStyle(fontSize: 13),
+                      decoration: InputDecoration(
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 8,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(4),
+                          borderSide: BorderSide(color: widget.accentColor),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(4),
+                          borderSide: BorderSide(
+                            color: widget.accentColor,
+                            width: 2,
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(4),
+                          borderSide: BorderSide(
+                            color: widget.accentColor.withValues(alpha: 0.4),
+                          ),
+                        ),
+                      ),
+                      onSubmitted: (_) => _save(),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  // Save button
+                  _isSaving
+                      ? const SizedBox(
+                        width: 26,
+                        height: 26,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                      : InkWell(
+                        onTap: _save,
+                        borderRadius: BorderRadius.circular(4),
+                        child: Container(
+                          padding: const EdgeInsets.all(5),
+                          decoration: BoxDecoration(
+                            color: Colors.green,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Icon(
+                            Icons.check,
+                            size: 14,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                  const SizedBox(width: 4),
+                  // Cancel button
+                  InkWell(
+                    onTap: _cancel,
+                    borderRadius: BorderRadius.circular(4),
+                    child: Container(
+                      padding: const EdgeInsets.all(5),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade300,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Icon(
+                        Icons.close,
+                        size: 14,
+                        color: Colors.black54,
+                      ),
+                    ),
+                  ),
+                ],
+              )
+              // ── Display mode ─────────────────────────────────────────────
+              : Row(
+                children: [
+                  Icon(
+                    Icons.drag_indicator,
+                    size: 16,
+                    color: Colors.grey.shade300,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      widget.item,
+                      style: const TextStyle(fontSize: 13),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  // Edit button
+                  InkWell(
+                    onTap: _startEditing,
+                    borderRadius: BorderRadius.circular(4),
+                    child: Padding(
+                      padding: const EdgeInsets.all(6),
+                      child: Icon(
+                        Icons.edit,
+                        size: 15,
+                        color: widget.accentColor,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                  // Delete button
+                  InkWell(
+                    onTap: widget.onDelete,
+                    borderRadius: BorderRadius.circular(4),
+                    child: Padding(
+                      padding: const EdgeInsets.all(6),
+                      child: Icon(
+                        Icons.delete_outline,
+                        size: 15,
+                        color: Colors.red.shade300,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+    );
+  }
+}
+
+// ─── CART QUANTITY EDITOR ─────────────────────────────────────────────────────
 class CartQuantityEditor extends StatefulWidget {
   final int currentQty;
   final int maxStock;
@@ -1904,6 +2421,7 @@ class _CartQuantityEditorState extends State<CartQuantityEditor> {
   }
 }
 
+// ─── CART PRICE EDITOR ───────────────────────────────────────────────────────
 class CartPriceEditor extends StatefulWidget {
   final double initialPrice;
   final bool isLoss;

@@ -1,5 +1,3 @@
-// ignore_for_file: deprecated_member_use, file_names
-
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
@@ -129,10 +127,9 @@ class _Header extends StatelessWidget {
           ),
         ),
         Obx(() {
-          final total = controller.staffList.fold<int>(
-            0,
-            (sum, item) => sum + item.salary,
-          );
+          final total = controller.staffList
+              .where((s) => s.status != 'resigned')
+              .fold<int>(0, (sum, item) => sum + item.salary);
           return Text(
             'Monthly Payroll: Tk ${NumberFormat.decimalPattern().format(total)}',
             style: const TextStyle(
@@ -347,7 +344,7 @@ class _Header extends StatelessWidget {
                           Text(
                             '${DateTime.now().year}  ·  Year Total: Tk ${NumberFormat.decimalPattern().format(yearTotal)}',
                             style: TextStyle(
-                              color: Colors.white.withOpacity(0.85),
+                              color: Colors.white.withValues(alpha: 0.85),
                               fontSize: 12,
                             ),
                           ),
@@ -414,7 +411,7 @@ class _Header extends StatelessWidget {
                                 width: 40,
                                 height: 40,
                                 decoration: BoxDecoration(
-                                  color: kBonusGold.withOpacity(0.12),
+                                  color: kBonusGold.withValues(alpha: 0.12),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: const Center(
@@ -564,8 +561,8 @@ class _FilterBar extends StatelessWidget {
                 decoration: BoxDecoration(
                   color:
                       selected
-                          ? Colors.white.withOpacity(0.25)
-                          : chipColor.withOpacity(0.12),
+                          ? Colors.white.withValues(alpha: 0.25)
+                          : chipColor.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(
@@ -682,7 +679,7 @@ class _DesktopRow extends StatelessWidget {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                 decoration: BoxDecoration(
-                  color: kBlue.withOpacity(0.08),
+                  color: kBlue.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
@@ -848,13 +845,13 @@ class _Avatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Color bgColor = kBlue.withOpacity(0.12);
+    Color bgColor = kBlue.withValues(alpha: 0.12);
     Color textColor = kBlue;
     if (status == 'suspended') {
-      bgColor = kOrange.withOpacity(0.12);
+      bgColor = kOrange.withValues(alpha: 0.12);
       textColor = kOrange;
     } else if (status == 'resigned') {
-      bgColor = kRed.withOpacity(0.10);
+      bgColor = kRed.withValues(alpha: 0.10);
       textColor = kRed;
     }
 
@@ -907,7 +904,7 @@ class _StatusBadge extends StatelessWidget {
         vertical: small ? 2 : 3,
       ),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.10),
+        color: color.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(
@@ -1311,9 +1308,11 @@ void showSuspendDialog(
                       () => Container(
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
-                          color: kOrange.withOpacity(0.06),
+                          color: kOrange.withValues(alpha: 0.06),
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: kOrange.withOpacity(0.3)),
+                          border: Border.all(
+                            color: kOrange.withValues(alpha: 0.3),
+                          ),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1450,7 +1449,7 @@ Widget _dialogHeader(
               Text(
                 'Staff: $subtitle',
                 style: TextStyle(
-                  color: Colors.white.withOpacity(0.8),
+                  color: Colors.white.withValues(alpha: 0.8),
                   fontSize: 12,
                 ),
               ),
@@ -1533,7 +1532,7 @@ class _EmptyState extends StatelessWidget {
           FaIcon(
             FontAwesomeIcons.usersSlash,
             size: 48,
-            color: kTextMuted.withOpacity(0.4),
+            color: kTextMuted.withValues(alpha: 0.4),
           ),
           const SizedBox(height: 16),
           const Text(
