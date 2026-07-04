@@ -632,7 +632,7 @@ class LiveOrderSalesPage extends StatelessWidget {
         badgeBlock =
             controller.selectedRegularCustomer.value != null
                 ? Container(
-                  height: 40,
+                  height: 48,
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   decoration: BoxDecoration(
                     color: Colors.blue.shade50,
@@ -647,13 +647,41 @@ class LiveOrderSalesPage extends StatelessWidget {
                         color: Colors.blue,
                       ),
                       const SizedBox(width: 8),
-                      Text(
-                        "CUSTOMER FOUND",
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.blue.shade700,
+                      Expanded(
+                        child: Text(
+                          "CUSTOMER FOUND",
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue.shade700,
+                          ),
                         ),
+                      ),
+                      Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          const Text(
+                            "Previous Due",
+                            style: TextStyle(fontSize: 9, color: Colors.grey),
+                          ),
+                          Obx(
+                            () => Text(
+                              "৳${controller.regularCustomerPreviousDue.value.toStringAsFixed(0)}",
+                              style: TextStyle(
+                                color:
+                                    controller
+                                                .regularCustomerPreviousDue
+                                                .value >
+                                            0
+                                        ? Colors.red
+                                        : Colors.green,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -1483,47 +1511,134 @@ class LiveOrderSalesPage extends StatelessWidget {
             child: Column(
               children: [
                 Obx(() {
-                  double paid = controller.totalPaidInput.value;
-                  double due = controller.grandTotal - paid;
+                  final double paid = controller.totalPaidInput.value;
+                  final double currentDue = controller.grandTotal - paid;
+                  final double safeCurrentDue =
+                      currentDue > 0 ? currentDue : 0.0;
+
+                  final bool showRegularPreviousDue =
+                      controller.customerType.value != "AGENT" &&
+                      !controller.isConditionSale.value &&
+                      controller.regularCustomerPreviousDue.value > 0;
+
+                  final double previousDue =
+                      showRegularPreviousDue
+                          ? controller.regularCustomerPreviousDue.value
+                          : 0.0;
+
+                  final double totalReceivable = previousDue + safeCurrentDue;
+
                   String lbl =
-                      due > 0
-                          ? "DUE AMOUNT"
+                      currentDue > 0
+                          ? "CURRENT DUE"
                           : (paid > controller.grandTotal
                               ? "CHANGE RETURN"
                               : "PAID");
-                  Color clr = due > 0 ? Colors.red : Colors.green;
-                  double val = due > 0 ? due : (paid - controller.grandTotal);
+
+                  Color clr = currentDue > 0 ? Colors.red : Colors.green;
+                  double val =
+                      currentDue > 0
+                          ? currentDue
+                          : (paid - controller.grandTotal);
                   if (paid == controller.grandTotal) val = 0;
 
-                  return Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  return Column(
                     children: [
-                      Text(
-                        "Paid: ৳${paid.toStringAsFixed(0)}",
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 13,
-                          color: Colors.grey,
-                        ),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            "Paid: ৳${paid.toStringAsFixed(0)}",
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                              color: Colors.grey,
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: clr.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              "$lbl: ৳${val.toStringAsFixed(0)}",
+                              style: TextStyle(
+                                fontWeight: FontWeight.w900,
+                                color: clr,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: clr.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          "$lbl: ৳${val.toStringAsFixed(0)}",
-                          style: TextStyle(
-                            fontWeight: FontWeight.w900,
-                            color: clr,
-                            fontSize: 14,
+                      if (showRegularPreviousDue) ...[
+                        const SizedBox(height: 8),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade50,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: Colors.red.shade100),
+                          ),
+                          child: Column(
+                            children: [
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text(
+                                    "Previous Due",
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.red,
+                                    ),
+                                  ),
+                                  Text(
+                                    "৳${previousDue.toStringAsFixed(0)}",
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w900,
+                                      color: Colors.red,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text(
+                                    "Total Receivable After Invoice",
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFF991B1B),
+                                    ),
+                                  ),
+                                  Text(
+                                    "৳${totalReceivable.toStringAsFixed(0)}",
+                                    style: const TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w900,
+                                      color: Color(0xFF991B1B),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
                           ),
                         ),
-                      ),
+                      ],
                     ],
                   );
                 }),

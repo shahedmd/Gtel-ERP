@@ -7,7 +7,6 @@ import 'addstaff.dart';
 import 'details.dart';
 import 'model.dart';
 
-// ── Theme Constants ───────────────────────────────────────────────────────────
 const Color kDarkSlate = Color(0xFF111827);
 const Color kBlue = Color(0xFF3B82F6);
 const Color kBgGrey = Color(0xFFF9FAFB);

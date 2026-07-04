@@ -572,7 +572,7 @@ class DailySalesController extends GetxController {
       String customerType =
           (saleData['customerType'] ?? '').toString().toLowerCase();
 
-      if (customerType.contains('debtor')) {
+      if (customerType.contains('debtor') || customerType.contains('agent')) {
         Get.snackbar(
           "Access Denied",
           "Debtor sales must be managed in the Debtor Ledger.",
@@ -634,7 +634,9 @@ class DailySalesController extends GetxController {
                 .doc(invoiceId);
             transaction.delete(invRef);
 
-            String? custPhone = invData['customerPhone'];
+            String? custPhone =
+                saleData['customerPhone'] ?? invData['customerPhone'];
+
             if (custPhone != null && custPhone.isNotEmpty) {
               DocumentReference custHistRef = _db
                   .collection('customers')
@@ -643,6 +645,26 @@ class DailySalesController extends GetxController {
                   .doc(invoiceId);
               transaction.delete(custHistRef);
             }
+
+            final double pendingDue =
+                (saleData['pending'] as num?)?.toDouble() ??
+                (((saleData['amount'] as num?)?.toDouble() ?? 0.0) -
+                    ((saleData['paid'] as num?)?.toDouble() ?? 0.0));
+
+            if ((customerType == 'wholesale' || customerType == 'vip') &&
+                pendingDue > 0.5 &&
+                custPhone != null &&
+                custPhone.isNotEmpty) {
+              transaction.set(
+                _db.collection('customers').doc(custPhone),
+                {
+                  'currentDue': FieldValue.increment(-pendingDue),
+                  'lastShopDate': FieldValue.serverTimestamp(),
+                },
+                SetOptions(merge: true),
+              );
+            }
+
             transaction.delete(dailySnap.reference);
           });
         }

@@ -1,10 +1,5 @@
-// ignore_for_file: deprecated_member_use
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-// ==========================================
-// 1. HIGH-PERFORMANCE PARSERS
-// ==========================================
 double _parseSafeDouble(dynamic value) {
   if (value == null) return 0.0;
   if (value is num) return value.toDouble();
@@ -21,8 +16,13 @@ DateTime? _parseSafeDate(dynamic value) {
 }
 
 // ==========================================
-// 2. DEBTOR MODEL
+// SOURCE TYPE (Agent Debtor vs Regular Customer Due)
 // ==========================================
+class DebtorSourceType {
+  static const String agent = 'AGENT';
+  static const String regular = 'REGULAR';
+}
+
 class DebtorModel {
   final String id;
   final String name;
@@ -36,6 +36,13 @@ class DebtorModel {
   final double balance; // Receivable (Sales Due)
   final double purchaseDue; // Payable
 
+  // --- NEW: Unified List Support (Agent vs Regular Customer) ---
+  // 'AGENT'   -> comes from `debatorbody` collection, has full transaction ledger
+  // 'REGULAR' -> comes from `customers` collection (WHOLESALE/VIP), invoice-wise due only
+  final String sourceType;
+  // For REGULAR: 'WHOLESALE' / 'VIP' / 'CONDITION' (from customers.type). Null for AGENT.
+  final String? customerCategory;
+
   DebtorModel({
     required this.id,
     required this.name,
@@ -48,7 +55,12 @@ class DebtorModel {
     this.lastTransactionDate,
     this.balance = 0.0,
     this.purchaseDue = 0.0,
+    this.sourceType = DebtorSourceType.agent,
+    this.customerCategory,
   });
+
+  bool get isAgent => sourceType == DebtorSourceType.agent;
+  bool get isRegularCustomer => sourceType == DebtorSourceType.regular;
 
   factory DebtorModel.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>? ?? {};
@@ -68,6 +80,30 @@ class DebtorModel {
               .toList(),
       createdAt: _parseSafeDate(data['createdAt']),
       lastTransactionDate: _parseSafeDate(data['lastTransactionDate']),
+      sourceType: DebtorSourceType.agent,
+    );
+  }
+
+  // --- NEW: Maps a `customers` collection doc (WHOLESALE/VIP) into the
+  // same shape used by the Debtor list/detail UI. `balance` here means
+  // the customer's outstanding sales due (`currentDue` field).
+  factory DebtorModel.fromRegularCustomer(DocumentSnapshot doc) {
+    final data = doc.data() as Map<String, dynamic>? ?? {};
+
+    return DebtorModel(
+      id: doc.id, // phone is used as doc id in `customers`
+      name: (data['name'] ?? '').toString().trim(),
+      des: (data['shop'] ?? '').toString().trim(),
+      nid: '',
+      phone: (data['phone'] ?? doc.id).toString().trim(),
+      address: (data['address'] ?? '').toString().trim(),
+      balance: _parseSafeDouble(data['currentDue']),
+      purchaseDue: 0.0,
+      payments: const [],
+      createdAt: null,
+      lastTransactionDate: _parseSafeDate(data['lastShopDate']),
+      sourceType: DebtorSourceType.regular,
+      customerCategory: (data['type'] ?? 'WHOLESALE').toString().trim(),
     );
   }
 
@@ -84,6 +120,8 @@ class DebtorModel {
     DateTime? lastTransactionDate,
     double? balance,
     double? purchaseDue,
+    String? sourceType,
+    String? customerCategory,
   }) {
     return DebtorModel(
       id: id ?? this.id,
@@ -97,18 +135,25 @@ class DebtorModel {
       lastTransactionDate: lastTransactionDate ?? this.lastTransactionDate,
       balance: balance ?? this.balance,
       purchaseDue: purchaseDue ?? this.purchaseDue,
+      sourceType: sourceType ?? this.sourceType,
+      customerCategory: customerCategory ?? this.customerCategory,
     );
   }
 
   // --- VALUE EQUALITY ---
+  // NOTE: id alone is compared. Agent ids come from `debatorbody` auto-ids,
+  // Regular customer ids are phone numbers from `customers` — these two
+  // spaces don't collide, so plain id equality remains safe.
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
-    return other is DebtorModel && other.id == id;
+    return other is DebtorModel &&
+        other.id == id &&
+        other.sourceType == sourceType;
   }
 
   @override
-  int get hashCode => id.hashCode;
+  int get hashCode => Object.hash(id, sourceType);
 }
 
 // ==========================================

@@ -15,17 +15,20 @@ import '../Gtel Expense/Daily Expense/dailyexpensecontroller.dart';
 class HomeBinding extends Bindings {
   @override
   void dependencies() {
-    Get.lazyPut(() => NavigationController());
-    Get.lazyPut(() => MonthlyExpensesController());
-    Get.lazyPut(() => DailySalesController());
-    Get.lazyPut(() => DebatorController());
-    Get.lazyPut(() => ProductController());
-    Get.lazyPut(() => CashDrawerController());
-    Get.lazyPut(() => ShipmentController());
-    Get.lazyPut(() => StaffController());
-    Get.lazyPut(() => DebtorPurchaseController());
-    Get.lazyPut(() => OverviewController());
-    Get.lazyPut(() => RoleController());
-    Get.lazyPut(() => DailyExpensesController());
+    Get.put(NavigationController(), permanent: true);
+
+    Get.put(MonthlyExpensesController(), permanent: true);
+    Get.put(DailyExpensesController(), permanent: true);
+
+    Get.put(DailySalesController(), permanent: true);
+    Get.put(OverviewController(), permanent: true);
+
+    Get.lazyPut(() => DebatorController(), fenix: true);
+    Get.lazyPut(() => ProductController(), fenix: true);
+    Get.lazyPut(() => CashDrawerController(), fenix: true);
+    Get.lazyPut(() => ShipmentController(), fenix: true);
+    Get.lazyPut(() => StaffController(), fenix: true);
+    Get.lazyPut(() => DebtorPurchaseController(), fenix: true);
+    Get.lazyPut(() => RoleController(), fenix: true);
   }
 }

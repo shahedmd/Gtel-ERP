@@ -7,8 +7,8 @@ import 'package:gtel_erp/Core/Gtel%20Expense/expensedatamodel.dart';
 import 'package:intl/intl.dart';
 
 class DailyExpensesPage extends StatelessWidget {
-  final DailyExpensesController controller = Get.put(DailyExpensesController());
-
+  final DailyExpensesController controller =
+      Get.find<DailyExpensesController>();
   // Professional Theme Colors (Sync with Sidebar)
   static const Color darkSlate = Color(0xFF0F172A);
   static const Color activeAccent = Color(0xFF3B82F6);

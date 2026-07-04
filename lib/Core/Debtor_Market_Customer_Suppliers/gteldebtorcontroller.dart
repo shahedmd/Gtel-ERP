@@ -22,6 +22,9 @@ class DebatorController extends GetxController {
   final RxList<DebtorModel> bodies = <DebtorModel>[].obs;
   final RxList<DebtorModel> filteredBodies = <DebtorModel>[].obs;
 
+  // NEW: Regular Customer (Wholesale/VIP) dues — merged into filteredBodies
+  final RxList<DebtorModel> regularCustomerDues = <DebtorModel>[].obs;
+
   // Loading States
   final RxBool isBodiesLoading = false.obs;
   final RxBool isSearching = false.obs;
@@ -58,12 +61,13 @@ class DebatorController extends GetxController {
   );
 
   @override
+  @override
   void onInit() {
     super.onInit();
     _silentAutoRepair();
     loadPage(1);
-    loadBodies();
     calculateTotalOutstanding();
+    _fetchRegularCustomerDues();
   }
 
   // ==========================================
@@ -84,7 +88,7 @@ class DebatorController extends GetxController {
 
     if (queryText.trim().isEmpty) {
       isSearching.value = false;
-      filteredBodies.assignAll(bodies);
+      _applyMergedList();
       return;
     }
 
@@ -94,9 +98,397 @@ class DebatorController extends GetxController {
     );
   }
 
-  // ==========================================
-  // 3. CORE FINANCIAL CALCULATIONS
-  // ==========================================
+  Future<void> _fetchRegularCustomerDues() async {
+    try {
+      final snap =
+          await db
+              .collection('daily_sales')
+              .where('pending', isGreaterThan: 0.5)
+              .get();
+
+      final Map<String, DebtorModel> grouped = {};
+
+      for (var doc in snap.docs) {
+        final data = doc.data();
+        final type = (data['customerType'] ?? '').toString().toUpperCase();
+
+        if (type != 'WHOLESALE' && type != 'VIP') continue;
+
+        final name = (data['name'] ?? '').toString().trim();
+        final phone = (data['customerPhone'] ?? '').toString().trim();
+        final pending = (data['pending'] as num?)?.toDouble() ?? 0.0;
+
+        if (name.isEmpty || pending <= 0.5) continue;
+
+        final key = phone.isNotEmpty ? phone : '$type-$name';
+        final existing = grouped[key];
+
+        grouped[key] = DebtorModel(
+          id: phone.isNotEmpty ? phone : key,
+          name: name,
+          des: existing?.des ?? '',
+          nid: '',
+          phone: phone,
+          address: existing?.address ?? '',
+          payments: const [],
+          balance: (existing?.balance ?? 0.0) + pending,
+          purchaseDue: 0.0,
+          lastTransactionDate:
+              data['timestamp'] is Timestamp
+                  ? (data['timestamp'] as Timestamp).toDate()
+                  : existing?.lastTransactionDate,
+          sourceType: DebtorSourceType.regular,
+          customerCategory: type,
+        );
+      }
+
+      regularCustomerDues.value =
+          grouped.values.toList()
+            ..sort((a, b) => b.balance.compareTo(a.balance));
+
+      _applyMergedList();
+    } catch (e) {
+      AppLogger.i("Error fetching pending regular customer dues: $e");
+    }
+  }
+
+  void _applyMergedList() {
+    if (isSearching.value) return;
+
+    if (currentPage.value == 1) {
+      filteredBodies.assignAll([...regularCustomerDues, ...bodies]);
+    } else {
+      filteredBodies.assignAll(bodies);
+    }
+  }
+
+  // Call this after collecting a regular customer's due payment
+  // (used by the payment-collection step we'll add later).
+  Future<void> refreshRegularCustomerDues() async {
+    await _fetchRegularCustomerDues();
+    await calculateTotalOutstanding();
+  }
+
+  Future<List<Map<String, dynamic>>> getRegularCustomerInvoices({
+    required String customerName,
+    String? customerCategory,
+    String? customerPhone,
+  }) async {
+    try {
+      final normalizedType = (customerCategory ?? '').trim().toLowerCase();
+      final safePhone = (customerPhone ?? '').trim();
+      final safeName = customerName.trim();
+
+      final Map<String, QueryDocumentSnapshot> docs = {};
+
+      if (safePhone.isNotEmpty) {
+        final phoneSnap =
+            await db
+                .collection('daily_sales')
+                .where('customerPhone', isEqualTo: safePhone)
+                .get();
+
+        for (var doc in phoneSnap.docs) {
+          docs[doc.id] = doc;
+        }
+      }
+
+      if (safeName.isNotEmpty) {
+        final nameSnap =
+            await db
+                .collection('daily_sales')
+                .where('name', isEqualTo: safeName)
+                .get();
+
+        for (var doc in nameSnap.docs) {
+          docs[doc.id] = doc;
+        }
+      }
+
+      final list =
+          docs.values
+              .map((d) {
+                final data = Map<String, dynamic>.from(d.data() as Map);
+                data['docId'] = d.id;
+                return data;
+              })
+              .where((data) {
+                final pending = (data['pending'] as num?)?.toDouble() ?? 0.0;
+                final type =
+                    (data['customerType'] ?? '').toString().toLowerCase();
+
+                final typeMatched =
+                    normalizedType.isEmpty || type == normalizedType;
+
+                return typeMatched && pending > 0.5;
+              })
+              .toList();
+
+      list.sort((a, b) {
+        final t1 =
+            a['timestamp'] is Timestamp
+                ? a['timestamp'] as Timestamp
+                : Timestamp.now();
+        final t2 =
+            b['timestamp'] is Timestamp
+                ? b['timestamp'] as Timestamp
+                : Timestamp.now();
+        return t2.compareTo(t1);
+      });
+
+      return list;
+    } catch (e) {
+      AppLogger.i("Error fetching pending customer invoices: $e");
+      return [];
+    }
+  }
+
+  Future<void> collectRegularCustomerDue({
+    required String customerId,
+    required String customerName,
+    required String? customerCategory,
+    required double amount,
+    required String note,
+    required DateTime date,
+    required Map<String, dynamic> paymentMethodData,
+  }) async {
+    if (amount <= 0) {
+      Get.snackbar("Error", "Enter a valid amount to collect.");
+      return;
+    }
+
+    bool isSameDay(DateTime a, DateTime b) =>
+        a.year == b.year && a.month == b.month && a.day == b.day;
+
+    gbIsLoading.value = true;
+
+    try {
+      final normalizedType = (customerCategory ?? '').trim().toLowerCase();
+      final safePhone = customerId.trim();
+      final safeName = customerName.trim();
+
+      String parsedMethod = (paymentMethodData['type'] ?? 'cash').toString();
+      if (parsedMethod.toLowerCase() == 'cash' &&
+          (paymentMethodData['bankName'] ?? '').toString().trim().isNotEmpty) {
+        parsedMethod = 'Bank';
+      }
+
+      final String pType = parsedMethod.toLowerCase();
+
+      final Map<String, QueryDocumentSnapshot> docs = {};
+
+      // New records: customerPhone exists.
+      if (safePhone.isNotEmpty) {
+        final phoneSnap =
+            await db
+                .collection('daily_sales')
+                .where('customerPhone', isEqualTo: safePhone)
+                .get();
+
+        for (var doc in phoneSnap.docs) {
+          docs[doc.id] = doc;
+        }
+      }
+
+      // Old records: customerPhone may not exist, so match by name.
+      if (safeName.isNotEmpty) {
+        final nameSnap =
+            await db
+                .collection('daily_sales')
+                .where('name', isEqualTo: safeName)
+                .get();
+
+        for (var doc in nameSnap.docs) {
+          docs[doc.id] = doc;
+        }
+      }
+
+      final pendingDocs =
+          docs.values.where((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            final pending = (data['pending'] as num?)?.toDouble() ?? 0.0;
+            final type = (data['customerType'] ?? '').toString().toLowerCase();
+
+            final typeMatched =
+                normalizedType.isEmpty || type == normalizedType;
+
+            return typeMatched && pending > 0.5;
+          }).toList();
+
+      pendingDocs.sort((a, b) {
+        final da = a.data() as Map<String, dynamic>;
+        final dbb = b.data() as Map<String, dynamic>;
+
+        final t1 =
+            da['timestamp'] is Timestamp
+                ? da['timestamp'] as Timestamp
+                : Timestamp.now();
+        final t2 =
+            dbb['timestamp'] is Timestamp
+                ? dbb['timestamp'] as Timestamp
+                : Timestamp.now();
+
+        return t1.compareTo(t2);
+      });
+
+      final double totalPending = pendingDocs.fold(0.0, (sum, doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        return sum + ((data['pending'] as num?)?.toDouble() ?? 0.0);
+      });
+
+      if (totalPending <= 0.5) {
+        Get.snackbar("No Due", "No pending invoice found for this customer.");
+        return;
+      }
+
+      final double amountToCollect =
+          amount > totalPending ? totalPending : amount;
+
+      double remaining = amountToCollect;
+      double oldDueLedgerAmount = 0.0;
+
+      final String sourceTxId =
+          "COLLECT-${DateTime.now().millisecondsSinceEpoch}";
+
+      final batch = db.batch();
+
+      for (var doc in pendingDocs) {
+        if (remaining <= 0.01) break;
+
+        final data = doc.data() as Map<String, dynamic>;
+
+        final double currentPending =
+            (data['pending'] as num?)?.toDouble() ?? 0.0;
+        final double currentPaid = (data['paid'] as num?)?.toDouble() ?? 0.0;
+        final double currentLedgerPaid =
+            (data['ledgerPaid'] as num?)?.toDouble() ?? 0.0;
+
+        final double take =
+            remaining >= currentPending ? currentPending : remaining;
+
+        final double newPending = currentPending - take;
+        final bool fullyPaid = newPending <= 0.5;
+
+        final DateTime invoiceDate =
+            data['timestamp'] is Timestamp
+                ? (data['timestamp'] as Timestamp).toDate()
+                : date;
+
+        final bool sameDayCollection = isSameDay(invoiceDate, date);
+
+        if (!sameDayCollection) {
+          oldDueLedgerAmount += take;
+        }
+
+        final String invoiceId =
+            (data['invoiceId'] ?? data['transactionId'] ?? '').toString();
+
+        final history = {
+          'amount': take,
+          'note': note.trim().isNotEmpty ? note.trim() : "Due Collection",
+          'timestamp': Timestamp.fromDate(date),
+          'paidAt': Timestamp.now(),
+          'type': pType,
+          'number': paymentMethodData['number'] ?? '',
+          'bankName': paymentMethodData['bankName'] ?? '',
+          'accountNumber':
+              paymentMethodData['accountNo'] ??
+              paymentMethodData['accountNumber'] ??
+              '',
+          'sourceTxId': sourceTxId,
+          'appliedTo': doc.id,
+          'invoiceId': invoiceId,
+          'collectionMode': sameDayCollection ? 'same_day' : 'old_due_ledger',
+        };
+
+        batch.update(doc.reference, {
+          'paid': currentPaid + take,
+          if (!sameDayCollection) 'ledgerPaid': currentLedgerPaid + take,
+          'pending': newPending < 0 ? 0.0 : newPending,
+          'status': fullyPaid ? 'paid' : 'partial',
+          'lastPaymentAt': FieldValue.serverTimestamp(),
+          'paymentHistory': FieldValue.arrayUnion([history]),
+          'paymentMethod.$pType': FieldValue.increment(take),
+        });
+
+        if (invoiceId.isNotEmpty) {
+          final orderRef = db.collection('sales_orders').doc(invoiceId);
+          final orderSnap = await orderRef.get();
+
+          if (orderSnap.exists) {
+            batch.update(orderRef, {
+              'paid': FieldValue.increment(take),
+              'paymentDetails.due': FieldValue.increment(-take),
+              'paymentDetails.paidForInvoice': FieldValue.increment(take),
+              'paymentDetails.$pType': FieldValue.increment(take),
+              'isFullyPaid': fullyPaid,
+              'status': fullyPaid ? 'completed' : 'partial',
+              if (pType == 'bkash')
+                'paymentDetails.bkashNumber': paymentMethodData['number'] ?? '',
+              if (pType == 'nagad')
+                'paymentDetails.nagadNumber': paymentMethodData['number'] ?? '',
+              if (pType == 'bank')
+                'paymentDetails.bankName': paymentMethodData['bankName'] ?? '',
+              if (pType == 'bank')
+                'paymentDetails.accountNumber':
+                    paymentMethodData['accountNo'] ??
+                    paymentMethodData['accountNumber'] ??
+                    '',
+            });
+          }
+        }
+
+        remaining -= take;
+      }
+
+      if (safePhone.isNotEmpty && !safePhone.contains('-')) {
+        batch.set(db.collection('customers').doc(safePhone), {
+          'currentDue': FieldValue.increment(-amountToCollect),
+          'lastShopDate': Timestamp.now(),
+        }, SetOptions(merge: true));
+      }
+
+      await batch.commit();
+
+      if (oldDueLedgerAmount > 0.5) {
+        await db.collection('cash_ledger').add({
+          'type': 'deposit',
+          'amount': oldDueLedgerAmount,
+          'method': parsedMethod,
+          'details': paymentMethodData,
+          'description':
+              "Old due collection from $customerName (${customerCategory?.toUpperCase() ?? 'CUSTOMER'})",
+          'timestamp': Timestamp.fromDate(date),
+          'linkedCustomerId': customerId,
+          'linkedTxId': sourceTxId,
+          'source': 'customer_old_due_collection',
+        });
+      }
+
+      await refreshRegularCustomerDues();
+
+      if (Get.isRegistered<DailySalesController>()) {
+        await Get.find<DailySalesController>().loadDailySales();
+      }
+
+      if (Get.isRegistered<OverviewController>()) {
+        Get.find<OverviewController>().refreshData();
+      }
+
+      if (Get.isRegistered<CashDrawerController>()) {
+        Get.find<CashDrawerController>().fetchData();
+      }
+
+      if (Get.isDialogOpen ?? false) Get.back();
+
+      Get.snackbar("Success", "Payment collected from $customerName");
+    } catch (e) {
+      Get.snackbar("Error", e.toString());
+    } finally {
+      gbIsLoading.value = false;
+    }
+  }
+
   Future<void> calculateTotalOutstanding() async {
     try {
       final snap = await db.collection('debatorbody').get();
@@ -108,9 +500,24 @@ class DebatorController extends GetxController {
         double bal = (data['balance'] as num?)?.toDouble() ?? 0.0;
         double pDue = (data['purchaseDue'] as num?)?.toDouble() ?? 0.0;
 
-        // STRICT FIX: Only sum positive numbers. Ignore negative (advance) balances.
         if (bal > 0) totalRec += bal;
         if (pDue > 0) totalPay += pDue;
+      }
+
+      final dueSalesSnap =
+          await db
+              .collection('daily_sales')
+              .where('pending', isGreaterThan: 0.5)
+              .get();
+
+      for (var doc in dueSalesSnap.docs) {
+        final data = doc.data();
+        final type = (data['customerType'] ?? '').toString().toUpperCase();
+
+        if (type == 'WHOLESALE' || type == 'VIP') {
+          final due = (data['pending'] as num?)?.toDouble() ?? 0.0;
+          if (due > 0) totalRec += due;
+        }
       }
 
       totalMarketOutstanding.value = totalRec;
@@ -258,7 +665,8 @@ class DebatorController extends GetxController {
 
     try {
       String qLower = queryText.trim().toLowerCase();
-      Map<String, DebtorModel> results = {};
+      Map<String, DebtorModel> agentResults = {};
+      Map<String, DebtorModel> regularResults = {};
       List<String> searchTerms = qLower.split(RegExp(r'\s+'));
       String primaryTerm = searchTerms.first;
 
@@ -270,26 +678,42 @@ class DebatorController extends GetxController {
                 .limit(50)
                 .get();
         for (var doc in kwSnap.docs) {
-          results[doc.id] = DebtorModel.fromFirestore(doc);
+          agentResults[doc.id] = DebtorModel.fromFirestore(doc);
+        }
+
+        // NEW: search Regular customers too (kept only if they still owe)
+        var custKwSnap =
+            await db
+                .collection('customers')
+                .where('searchKeywords', arrayContains: primaryTerm)
+                .limit(50)
+                .get();
+        for (var doc in custKwSnap.docs) {
+          final model = DebtorModel.fromRegularCustomer(doc);
+          if (model.balance > 0) regularResults[doc.id] = model;
         }
       }
 
       for (var m in bodies) {
-        results[m.id] = m;
+        agentResults[m.id] = m;
+      }
+      for (var m in regularCustomerDues) {
+        regularResults[m.id] = m;
       }
 
-      List<DebtorModel> finalMatches =
-          results.values.where((d) {
-            String combinedString =
-                "${d.name} ${d.phone} ${d.nid} ${d.address}".toLowerCase();
-            try {
-              combinedString += " ${(d as dynamic).des}".toLowerCase();
-            } catch (_) {}
-            for (String term in searchTerms) {
-              if (!combinedString.contains(term)) return false;
-            }
-            return true;
-          }).toList();
+      bool matchesTerms(DebtorModel d) {
+        String combinedString =
+            "${d.name} ${d.phone} ${d.nid} ${d.address} ${d.des}".toLowerCase();
+        for (String term in searchTerms) {
+          if (!combinedString.contains(term)) return false;
+        }
+        return true;
+      }
+
+      List<DebtorModel> finalMatches = [
+        ...regularResults.values.where(matchesTerms),
+        ...agentResults.values.where(matchesTerms),
+      ];
 
       filteredBodies.value = finalMatches;
     } finally {
@@ -516,7 +940,7 @@ class DebatorController extends GetxController {
           }
         }
         currentPage.value = pageIndex;
-        filteredBodies.assignAll(bodies);
+        _applyMergedList();
       } else {
         if (pageIndex == 1) bodies.clear();
         hasMore.value = false;
@@ -564,7 +988,7 @@ class DebatorController extends GetxController {
       }
 
       calculateTotalOutstanding();
-      if (!isSearching.value) filteredBodies.assignAll(bodies);
+      if (!isSearching.value) _applyMergedList();
     } catch (e) {
       Get.snackbar("Error", "Could not load debtors: $e");
     } finally {
@@ -1388,7 +1812,9 @@ class DebatorController extends GetxController {
       await batch.commit();
 
       bodies.removeWhere((element) => element.id == id);
-      filteredBodies.removeWhere((element) => element.id == id);
+      filteredBodies.removeWhere(
+        (element) => element.id == id && element.isAgent,
+      );
 
       calculateTotalOutstanding();
       Get.snackbar("Success", "Debtor account deleted successfully.");
@@ -1402,39 +1828,121 @@ class DebatorController extends GetxController {
   Future<void> _generateGeneralReport({
     required String title,
     required bool isPayable,
+    String reportType = 'both', // agent / regular / both
   }) async {
     gbIsLoading.value = true;
-    try {
-      final snap = await db.collection('debatorbody').get();
-      final allDebtors =
-          snap.docs
-              .map((d) {
-                try {
-                  return DebtorModel.fromFirestore(d);
-                } catch (e) {
-                  return null;
-                }
-              })
-              .whereType<DebtorModel>()
-              .toList();
 
-      final targetDebtors =
-          allDebtors.where((d) {
-            double val = isPayable ? d.purchaseDue : d.balance;
-            return val > 0.01;
-          }).toList();
+    try {
+      final List<DebtorModel> targetDebtors = [];
+
+      // =========================
+      // PAYABLE REPORT
+      // Only agent/vendor payable comes from debatorbody.purchaseDue
+      // =========================
+      if (isPayable) {
+        final snap = await db.collection('debatorbody').get();
+
+        final allDebtors =
+            snap.docs
+                .map((d) {
+                  try {
+                    return DebtorModel.fromFirestore(d);
+                  } catch (e) {
+                    return null;
+                  }
+                })
+                .whereType<DebtorModel>()
+                .toList();
+
+        targetDebtors.addAll(
+          allDebtors.where((d) => d.purchaseDue > 0.01).toList(),
+        );
+      } else {
+        // =========================
+        // AGENT RECEIVABLE DUE
+        // Source: debatorbody.balance
+        // =========================
+        if (reportType == 'agent' || reportType == 'both') {
+          final agentSnap = await db.collection('debatorbody').get();
+
+          final agentDebtors =
+              agentSnap.docs
+                  .map((d) {
+                    try {
+                      return DebtorModel.fromFirestore(d);
+                    } catch (e) {
+                      return null;
+                    }
+                  })
+                  .whereType<DebtorModel>()
+                  .where((d) => d.balance > 0.01)
+                  .toList();
+
+          targetDebtors.addAll(agentDebtors);
+        }
+
+        // =========================
+        // WHOLESALE / VIP RECEIVABLE DUE
+        // Source: actual pending daily_sales invoices
+        // This avoids stale customers.currentDue problems.
+        // =========================
+        if (reportType == 'regular' || reportType == 'both') {
+          final dueSalesSnap =
+              await db
+                  .collection('daily_sales')
+                  .where('pending', isGreaterThan: 0.5)
+                  .get();
+
+          final Map<String, DebtorModel> grouped = {};
+
+          for (var doc in dueSalesSnap.docs) {
+            final data = doc.data();
+            final type = (data['customerType'] ?? '').toString().toUpperCase();
+
+            if (type != 'WHOLESALE' && type != 'VIP') continue;
+
+            final name = (data['name'] ?? '').toString().trim();
+            final phone = (data['customerPhone'] ?? '').toString().trim();
+            final pending = (data['pending'] as num?)?.toDouble() ?? 0.0;
+
+            if (name.isEmpty || pending <= 0.5) continue;
+
+            final key = phone.isNotEmpty ? phone : '$type-$name';
+            final existing = grouped[key];
+
+            grouped[key] = DebtorModel(
+              id: phone.isNotEmpty ? phone : key,
+              name: name,
+              des: existing?.des ?? '',
+              nid: '',
+              phone: phone,
+              address: existing?.address ?? '',
+              payments: const [],
+              balance: (existing?.balance ?? 0.0) + pending,
+              purchaseDue: 0.0,
+              lastTransactionDate:
+                  data['timestamp'] is Timestamp
+                      ? (data['timestamp'] as Timestamp).toDate()
+                      : existing?.lastTransactionDate,
+              sourceType: DebtorSourceType.regular,
+              customerCategory: type,
+            );
+          }
+
+          targetDebtors.addAll(grouped.values);
+        }
+      }
 
       if (targetDebtors.isEmpty) {
         Get.snackbar("Info", "No data to print.");
         return;
       }
 
-      targetDebtors.sort(
-        (a, b) =>
-            isPayable
-                ? b.purchaseDue.compareTo(a.purchaseDue)
-                : b.balance.compareTo(a.balance),
-      );
+      targetDebtors.sort((a, b) {
+        final av = isPayable ? a.purchaseDue : a.balance;
+        final bv = isPayable ? b.purchaseDue : b.balance;
+        return bv.compareTo(av);
+      });
 
       double grandTotal = 0.0;
       for (var d in targetDebtors) {
@@ -1493,25 +2001,36 @@ class DebatorController extends GetxController {
                     vertical: 6,
                     horizontal: 8,
                   ),
-                  headers: ["SL", "Name", "Phone", "Amount"],
+                  headers: ["SL", "Type", "Name", "Phone", "Amount"],
                   columnWidths: {
                     0: const pw.FlexColumnWidth(0.5),
-                    1: const pw.FlexColumnWidth(4),
-                    2: const pw.FlexColumnWidth(2),
+                    1: const pw.FlexColumnWidth(1.4),
+                    2: const pw.FlexColumnWidth(3.5),
                     3: const pw.FlexColumnWidth(2),
+                    4: const pw.FlexColumnWidth(2),
                   },
                   cellAlignments: {
                     0: pw.Alignment.centerLeft,
                     1: pw.Alignment.centerLeft,
                     2: pw.Alignment.centerLeft,
-                    3: pw.Alignment.centerRight,
+                    3: pw.Alignment.centerLeft,
+                    4: pw.Alignment.centerRight,
                   },
                   data: List<List<String>>.generate(targetDebtors.length, (
                     idx,
                   ) {
                     final d = targetDebtors[idx];
+
+                    final String typeLabel =
+                        isPayable
+                            ? "PAYABLE"
+                            : d.isAgent
+                            ? "AGENT"
+                            : (d.customerCategory ?? "CUSTOMER").toUpperCase();
+
                     return [
                       "${idx + 1}",
+                      typeLabel,
                       d.name,
                       d.phone,
                       bdCurrency.format(isPayable ? d.purchaseDue : d.balance),
@@ -1563,9 +2082,6 @@ class DebatorController extends GetxController {
     }
   }
 
-  // =========================================================
-  // 5. ENTERPRISE PDF GENERATORS (Upgraded)
-  // =========================================================
   void _silentAutoRepair() async {
     try {
       final snap = await db.collection('debatorbody').get();
@@ -2140,11 +2656,19 @@ class DebatorController extends GetxController {
     }
   }
 
-  // --- MARKET REPORT (UPGRADED) ---
-  Future<void> downloadAllDebtorsReport() async => await _generateGeneralReport(
-    title: "MARKET DUE REPORT",
-    isPayable: false,
-  );
+  Future<void> downloadAllDebtorsReport({String reportType = 'both'}) async {
+    await _generateGeneralReport(
+      title:
+          reportType == 'agent'
+              ? "Agent Receivable Due Report"
+              : reportType == 'regular'
+              ? "Wholesale & VIP Receivable Due Report"
+              : "All Receivable Due Report",
+      isPayable: false,
+      reportType: reportType,
+    );
+  }
+
   Future<void> downloadAllPayablesReport() async =>
       await _generateGeneralReport(
         title: "MARKET PAYABLE REPORT",

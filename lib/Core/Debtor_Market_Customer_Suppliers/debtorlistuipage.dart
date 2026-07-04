@@ -1,15 +1,18 @@
 // ignore_for_file: deprecated_member_use
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/createdebtordialog.dart';
 import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/debtordetails_transactionlist.dart';
 import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/gteldebtorcontroller.dart';
+import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/debtordartmodel.dart';
 import 'package:intl/intl.dart';
 import '../../Permission/permission_button.dart';
 import '../../Permission/permission_controller.dart';
 import '../../controller.dart';
+import '../../Web Screen/Sales/controller.dart';
 
 // --- ERP COLOR PALETTE ---
 const Color primaryColor = Color(0xFF2563EB);
@@ -20,9 +23,17 @@ const Color textLight = Color(0xFF64748B);
 const Color borderCol = Color(0xFFE2E8F0);
 const Color successGreen = Color(0xFF16A34A);
 const Color dangerRed = Color(0xFFDC2626);
+const Color wholesaleColor = Color(0xFF7C3AED); // purple
+const Color vipColor = Color(0xFFCA8A04); // gold/amber
+
+// ==========================================
+// CATEGORY FILTER
+// ==========================================
+enum DebtorCategoryFilter { all, agent, wholesale, vip }
 
 class DebtorPageController extends GetxController {
   final TextEditingController searchController = TextEditingController();
+  final Rx<DebtorCategoryFilter> categoryFilter = DebtorCategoryFilter.all.obs;
 
   @override
   void onClose() {
@@ -38,7 +49,6 @@ class Debatorpage extends StatelessWidget {
   final DebtorPageController pageCtrl = Get.put(DebtorPageController());
 
   final ScrollController _hScroll = ScrollController();
-  final ScrollController _vScroll = ScrollController();
 
   final NumberFormat bdCurrency = NumberFormat.currency(
     locale: 'en_IN',
@@ -46,17 +56,46 @@ class Debatorpage extends StatelessWidget {
     decimalDigits: 2,
   );
 
+  // Category color/label helper — used by badges, avatars, and chips.
+  Color _categoryColor(DebtorModel d) {
+    if (d.isAgent) return primaryColor;
+    final cat = (d.customerCategory ?? '').toUpperCase();
+    if (cat == 'VIP') return vipColor;
+    return wholesaleColor; // default regular-customer color
+  }
+
+  String _categoryLabel(DebtorModel d) {
+    if (d.isAgent) return "AGENT";
+    final cat = (d.customerCategory ?? 'WHOLESALE').toUpperCase();
+    return cat;
+  }
+
+  bool _matchesFilter(DebtorModel d, DebtorCategoryFilter filter) {
+    switch (filter) {
+      case DebtorCategoryFilter.all:
+        return true;
+      case DebtorCategoryFilter.agent:
+        return d.isAgent;
+      case DebtorCategoryFilter.wholesale:
+        return d.isRegularCustomer &&
+            (d.customerCategory ?? '').toUpperCase() == 'WHOLESALE';
+      case DebtorCategoryFilter.vip:
+        return d.isRegularCustomer &&
+            (d.customerCategory ?? '').toUpperCase() == 'VIP';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final bool isMobile = MediaQuery.of(context).size.width < 900;
 
     return Scaffold(
       backgroundColor: scaffoldBg,
-      body: Column(
-        children: [
-          _buildDashboardSection(isMobile),
-          Expanded(
-            child: Container(
+      body: SingleChildScrollView(
+        child: Column(
+          children: [
+            _buildDashboardSection(isMobile),
+            Container(
               margin: EdgeInsets.fromLTRB(
                 isMobile ? 12 : 20,
                 0,
@@ -81,14 +120,14 @@ class Debatorpage extends StatelessWidget {
                   if (!isMobile) _buildTableHeader(),
                   if (!isMobile)
                     const Divider(height: 1, color: borderCol, thickness: 1),
-                  Expanded(child: _buildDataLayout(isMobile)),
+                  _buildDataLayout(isMobile),
                   const Divider(height: 1, color: borderCol, thickness: 1),
                   _buildPaginationFooter(),
                 ],
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
       floatingActionButton: PermissionVisibility(
         moduleKey: 'debtor',
@@ -132,7 +171,7 @@ class Debatorpage extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             const Text(
-              "Manage receivables and customer accounts",
+              "Agent debtors & wholesale/VIP customer dues, in one place",
               style: TextStyle(fontSize: 12, color: textLight),
             ),
             const SizedBox(height: 16),
@@ -158,7 +197,7 @@ class Debatorpage extends StatelessWidget {
                     ),
                     SizedBox(height: 4),
                     Text(
-                      "Manage receivables and customer accounts",
+                      "Agent debtors & wholesale/VIP customer dues, in one place",
                       style: TextStyle(fontSize: 13, color: textLight),
                     ),
                   ],
@@ -206,7 +245,8 @@ class Debatorpage extends StatelessWidget {
                   controller: pageCtrl.searchController,
                   onChanged: (val) => controller.searchDebtors(val),
                   decoration: InputDecoration(
-                    hintText: "Search name, description, or phone...",
+                    hintText:
+                        "Search agent debtors or wholesale/VIP customers...",
                     hintStyle: const TextStyle(fontSize: 12, color: textLight),
                     prefixIcon: const Icon(Icons.search, color: textLight),
                     filled: true,
@@ -260,9 +300,117 @@ class Debatorpage extends StatelessWidget {
                   ),
                 ),
               ),
+              const SizedBox(width: 8),
+              IconButton(
+                tooltip: "Refresh dues",
+                onPressed: () async {
+                  await controller.refreshRegularCustomerDues();
+                  await controller.loadPage(controller.currentPage.value);
+                },
+                icon: const Icon(Icons.refresh, color: textLight),
+                style: IconButton.styleFrom(
+                  backgroundColor: scaffoldBg,
+                  padding: const EdgeInsets.all(12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    side: const BorderSide(color: borderCol),
+                  ),
+                ),
+              ),
             ],
           ),
+
+          const SizedBox(height: 14),
+
+          // --- CATEGORY FILTER CHIPS ---
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Obx(
+              () => Row(
+                children: [
+                  _filterChip("All", DebtorCategoryFilter.all, textDark),
+                  const SizedBox(width: 8),
+                  _filterChip(
+                    "Agent Debtors",
+                    DebtorCategoryFilter.agent,
+                    primaryColor,
+                  ),
+                  const SizedBox(width: 8),
+                  _filterChip(
+                    "Wholesale",
+                    DebtorCategoryFilter.wholesale,
+                    wholesaleColor,
+                  ),
+                  const SizedBox(width: 8),
+                  _filterChip("VIP", DebtorCategoryFilter.vip, vipColor),
+                ],
+              ),
+            ),
+          ),
         ],
+      ),
+    );
+  }
+
+  Widget _filterChip(String label, DebtorCategoryFilter value, Color color) {
+    final bool selected = pageCtrl.categoryFilter.value == value;
+    return InkWell(
+      onTap: () => pageCtrl.categoryFilter.value = value,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? color : color.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected ? color : color.withValues(alpha: 0.3),
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: selected ? Colors.white : color,
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showDueReportOptions() {
+    Get.dialog(
+      AlertDialog(
+        title: const Text("Receivable Due Report"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.person),
+              title: const Text("Agent Due Report"),
+              onTap: () {
+                Get.back();
+                controller.downloadAllDebtorsReport(reportType: 'agent');
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.store),
+              title: const Text("Wholesale / VIP Due Report"),
+              onTap: () {
+                Get.back();
+                controller.downloadAllDebtorsReport(reportType: 'regular');
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.all_inbox),
+              title: const Text("Both Together"),
+              onTap: () {
+                Get.back();
+                controller.downloadAllDebtorsReport(reportType: 'both');
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -308,7 +456,7 @@ class Debatorpage extends StatelessWidget {
         child: _buildReportButton(
           icon: Icons.download_for_offline,
           label: "Due Report",
-          onTap: controller.downloadAllDebtorsReport,
+          onTap: _showDueReportOptions,
           color: primaryColor,
         ),
       ),
@@ -355,7 +503,6 @@ class Debatorpage extends StatelessWidget {
               color: color.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(10),
             ),
-            // এখানে চেক করা হচ্ছে আইকনটি ফ্লাটারের নাকি ফন্ট অসামের
             child:
                 icon is IconData
                     ? Icon(icon, color: color, size: isMobile ? 18 : 20)
@@ -409,7 +556,6 @@ class Debatorpage extends StatelessWidget {
         ),
         child: Row(
           children: [
-            // আইকন রেন্ডারিং লজিক আপডেট করা হয়েছে
             icon is IconData
                 ? Icon(icon, size: 16, color: color)
                 : FaIcon(icon, size: 16, color: color),
@@ -431,23 +577,32 @@ class Debatorpage extends StatelessWidget {
   Widget _buildDataLayout(bool isMobile) {
     return Obx(() {
       if (controller.isBodiesLoading.value) {
-        return const Center(
-          child: CircularProgressIndicator(color: primaryColor),
+        return const SizedBox(
+          height: 300,
+          child: Center(child: CircularProgressIndicator(color: primaryColor)),
         );
       }
-      if (controller.filteredBodies.isEmpty) return _buildEmptyState();
+
+      final visible =
+          controller.filteredBodies
+              .where((d) => _matchesFilter(d, pageCtrl.categoryFilter.value))
+              .toList();
+
+      if (visible.isEmpty) {
+        return SizedBox(height: 300, child: _buildEmptyState());
+      }
 
       if (isMobile) {
         return ListView.separated(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
           padding: const EdgeInsets.all(12),
-          itemCount: controller.filteredBodies.length,
+          itemCount: visible.length,
           separatorBuilder: (_, _) => const SizedBox(height: 12),
-          itemBuilder:
-              (context, index) =>
-                  _buildMobileCard(controller.filteredBodies[index]),
+          itemBuilder: (context, index) => _buildMobileCard(visible[index]),
         );
       } else {
-        return _buildDesktopTable();
+        return _buildDesktopTable(visible);
       }
     });
   }
@@ -503,36 +658,26 @@ class Debatorpage extends StatelessWidget {
     );
   }
 
-  Widget _buildDesktopTable() {
+  Widget _buildDesktopTable(List<DebtorModel> visible) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final tableWidth =
             constraints.maxWidth > 900 ? constraints.maxWidth : 900.0;
         return Scrollbar(
-          controller: _vScroll,
+          controller: _hScroll,
           thumbVisibility: true,
           trackVisibility: true,
           child: SingleChildScrollView(
-            controller: _vScroll,
-            scrollDirection: Axis.vertical,
-            child: Scrollbar(
-              controller: _hScroll,
-              thumbVisibility: true,
-              trackVisibility: true,
-              child: SingleChildScrollView(
-                controller: _hScroll,
-                scrollDirection: Axis.horizontal,
-                child: SizedBox(
-                  width: tableWidth,
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    itemCount: controller.filteredBodies.length,
-                    itemBuilder:
-                        (context, index) =>
-                            _buildDesktopRow(controller.filteredBodies[index]),
-                  ),
-                ),
+            controller: _hScroll,
+            scrollDirection: Axis.horizontal,
+            child: SizedBox(
+              width: tableWidth,
+              child: ListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: visible.length,
+                itemBuilder:
+                    (context, index) => _buildDesktopRow(visible[index]),
               ),
             ),
           ),
@@ -541,13 +686,56 @@ class Debatorpage extends StatelessWidget {
     );
   }
 
+  // Small pill next to the name showing AGENT / WHOLESALE / VIP.
+  Widget _sourceBadge(DebtorModel d) {
+    final Color c = _categoryColor(d);
+    return Container(
+      margin: const EdgeInsets.only(top: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: c.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        _categoryLabel(d),
+        style: TextStyle(
+          fontSize: 9,
+          fontWeight: FontWeight.w800,
+          color: c,
+          letterSpacing: 0.3,
+        ),
+      ),
+    );
+  }
+
+  void _openDebtor(dynamic debtor) {
+    if (debtor.isAgent) {
+      Get.to(() => Debatordetails(id: debtor.id, name: debtor.name));
+    } else {
+      Get.dialog(
+        GetBuilder<_CustomerLedgerController>(
+          init: _CustomerLedgerController(debtor, controller),
+          tag: debtor.id,
+          builder:
+              (ledgerCtrl) => _CustomerLedgerDialog(
+                debtor: debtor,
+                categoryColor: _categoryColor(debtor),
+                ledgerCtrl: ledgerCtrl,
+              ),
+        ),
+        barrierDismissible: false,
+      ).then((_) => Get.delete<_CustomerLedgerController>(tag: debtor.id));
+    }
+  }
+
   Widget _buildDesktopRow(dynamic debtor) {
     double bal = debtor.balance;
     bool isDue = bal > 0;
+    bool isAgent = debtor.isAgent;
+    Color catColor = _categoryColor(debtor);
 
     return InkWell(
-      onTap:
-          () => Get.to(() => Debatordetails(id: debtor.id, name: debtor.name)),
+      onTap: () => _openDebtor(debtor),
       hoverColor: Colors.grey.shade50,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
@@ -562,13 +750,13 @@ class Debatorpage extends StatelessWidget {
                 children: [
                   CircleAvatar(
                     radius: 18,
-                    backgroundColor: primaryColor.withValues(alpha: 0.1),
+                    backgroundColor: catColor.withValues(alpha: 0.1),
                     child: Text(
                       debtor.name.isNotEmpty
                           ? debtor.name[0].toUpperCase()
                           : '?',
-                      style: const TextStyle(
-                        color: primaryColor,
+                      style: TextStyle(
+                        color: catColor,
                         fontWeight: FontWeight.bold,
                         fontSize: 14,
                       ),
@@ -599,6 +787,7 @@ class Debatorpage extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
+                        _sourceBadge(debtor),
                       ],
                     ),
                   ),
@@ -685,8 +874,12 @@ class Debatorpage extends StatelessWidget {
 
                   final canView =
                       roleCtrl.isSuperAdmin || permCtrl.can('debtor', 'view');
+                  // Delete only ever operates on the `debatorbody`
+                  // collection — never allow it for merged-in customer dues.
                   final canDelete =
-                      roleCtrl.isSuperAdmin || permCtrl.can('debtor', 'delete');
+                      isAgent &&
+                      (roleCtrl.isSuperAdmin ||
+                          permCtrl.can('debtor', 'delete'));
 
                   if (!canView && !canDelete) return const SizedBox.shrink();
 
@@ -698,10 +891,7 @@ class Debatorpage extends StatelessWidget {
                     ),
                     onSelected: (value) {
                       if (value == 'view') {
-                        Get.to(
-                          () =>
-                              Debatordetails(id: debtor.id, name: debtor.name),
-                        );
+                        _openDebtor(debtor);
                       } else if (value == 'delete') {
                         _confirmDeleteDebtor(debtor);
                       }
@@ -709,17 +899,23 @@ class Debatorpage extends StatelessWidget {
                     itemBuilder:
                         (context) => [
                           if (canView)
-                            const PopupMenuItem(
+                            PopupMenuItem(
                               value: 'view',
                               child: Row(
                                 children: [
                                   Icon(
-                                    Icons.visibility,
-                                    color: primaryColor,
+                                    isAgent
+                                        ? Icons.visibility
+                                        : Icons.receipt_long,
+                                    color: catColor,
                                     size: 20,
                                   ),
-                                  SizedBox(width: 10),
-                                  Text("View Account"),
+                                  const SizedBox(width: 10),
+                                  Text(
+                                    isAgent
+                                        ? "View Account"
+                                        : "Collect Due / Invoices",
+                                  ),
                                 ],
                               ),
                             ),
@@ -755,6 +951,8 @@ class Debatorpage extends StatelessWidget {
   Widget _buildMobileCard(dynamic debtor) {
     double bal = debtor.balance;
     bool isDue = bal > 0;
+    bool isAgent = debtor.isAgent;
+    Color catColor = _categoryColor(debtor);
 
     return Container(
       decoration: BoxDecoration(
@@ -763,9 +961,7 @@ class Debatorpage extends StatelessWidget {
         border: Border.all(color: borderCol),
       ),
       child: InkWell(
-        onTap:
-            () =>
-                Get.to(() => Debatordetails(id: debtor.id, name: debtor.name)),
+        onTap: () => _openDebtor(debtor),
         borderRadius: BorderRadius.circular(10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -780,13 +976,13 @@ class Debatorpage extends StatelessWidget {
                 children: [
                   CircleAvatar(
                     radius: 16,
-                    backgroundColor: primaryColor.withValues(alpha: 0.1),
+                    backgroundColor: catColor.withValues(alpha: 0.1),
                     child: Text(
                       debtor.name.isNotEmpty
                           ? debtor.name[0].toUpperCase()
                           : '?',
-                      style: const TextStyle(
-                        color: primaryColor,
+                      style: TextStyle(
+                        color: catColor,
                         fontWeight: FontWeight.bold,
                         fontSize: 14,
                       ),
@@ -813,6 +1009,7 @@ class Debatorpage extends StatelessWidget {
                               color: textLight,
                             ),
                           ),
+                        _sourceBadge(debtor),
                       ],
                     ),
                   ),
@@ -825,8 +1022,9 @@ class Debatorpage extends StatelessWidget {
                           roleCtrl.isSuperAdmin ||
                           permCtrl.can('debtor', 'view');
                       final canDelete =
-                          roleCtrl.isSuperAdmin ||
-                          permCtrl.can('debtor', 'delete');
+                          isAgent &&
+                          (roleCtrl.isSuperAdmin ||
+                              permCtrl.can('debtor', 'delete'));
 
                       if (!canView && !canDelete) {
                         return const SizedBox.shrink();
@@ -839,12 +1037,7 @@ class Debatorpage extends StatelessWidget {
                         ),
                         onSelected: (value) {
                           if (value == 'view') {
-                            Get.to(
-                              () => Debatordetails(
-                                id: debtor.id,
-                                name: debtor.name,
-                              ),
-                            );
+                            _openDebtor(debtor);
                           } else if (value == 'delete') {
                             _confirmDeleteDebtor(debtor);
                           }
@@ -852,17 +1045,23 @@ class Debatorpage extends StatelessWidget {
                         itemBuilder:
                             (context) => [
                               if (canView)
-                                const PopupMenuItem(
+                                PopupMenuItem(
                                   value: 'view',
                                   child: Row(
                                     children: [
                                       Icon(
-                                        Icons.visibility,
-                                        color: primaryColor,
+                                        isAgent
+                                            ? Icons.visibility
+                                            : Icons.receipt_long,
+                                        color: catColor,
                                         size: 18,
                                       ),
-                                      SizedBox(width: 10),
-                                      Text("View Account"),
+                                      const SizedBox(width: 10),
+                                      Text(
+                                        isAgent
+                                            ? "View Account"
+                                            : "Collect Due",
+                                      ),
                                     ],
                                   ),
                                 ),
@@ -1019,7 +1218,7 @@ class Debatorpage extends StatelessWidget {
           ),
           const SizedBox(height: 5),
           const Text(
-            "Try checking for spelling or using a different keyword.",
+            "Try checking for spelling, a different keyword, or clearing the category filter.",
             style: TextStyle(color: textLight, fontSize: 14),
           ),
         ],
@@ -1097,7 +1296,7 @@ class Debatorpage extends StatelessWidget {
     Get.defaultDialog(
       title: "Synchronize Balances",
       middleText:
-          "This will recalculate all debtor balances perfectly from their transaction history to fix any mismatches in your PDFs or Dashboard.",
+          "This will recalculate all agent-debtor balances perfectly from their transaction history to fix any mismatches in your PDFs or Dashboard. Wholesale/VIP customer dues are updated live as you collect payments.",
       textConfirm: "Sync Now",
       textCancel: "Cancel",
       confirmTextColor: Colors.white,
@@ -1126,6 +1325,14 @@ class Debatorpage extends StatelessWidget {
   }
 
   void _confirmDeleteDebtor(dynamic debtor) {
+    if (!debtor.isAgent) {
+      Get.snackbar(
+        "Not Allowed",
+        "Wholesale/VIP customer records are managed from the Customers module.",
+      );
+      return;
+    }
+
     Get.dialog(
       AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -1167,6 +1374,611 @@ class Debatorpage extends StatelessWidget {
         ],
       ),
       barrierDismissible: false,
+    );
+  }
+}
+
+// ============================================================================
+// WHOLESALE / VIP CUSTOMER LEDGER DIALOG
+// (Collect Due + Invoice list + Reprint — the customer-side equivalent of
+// the agent debtor's Debatordetails page, but scoped to what's actually
+// possible against the `customers` + `daily_sales` data model.)
+// ============================================================================
+
+class _CustomerLedgerController extends GetxController {
+  final DebtorModel debtor;
+  final DebatorController mainCtrl;
+  _CustomerLedgerController(this.debtor, this.mainCtrl);
+
+  final RxBool isLoadingInvoices = true.obs;
+  final RxList<Map<String, dynamic>> invoices = <Map<String, dynamic>>[].obs;
+
+  // Collect-due form state
+  final amountC = TextEditingController();
+  final noteC = TextEditingController();
+  final bankNameC = TextEditingController();
+  final accountNoC = TextEditingController();
+  final mobileNoC = TextEditingController();
+  final RxString payMethodType = 'cash'.obs;
+  final RxBool showCollectForm = false.obs;
+  final RxBool isSubmitting = false.obs;
+
+  @override
+  void onInit() {
+    super.onInit();
+    _loadInvoices();
+  }
+
+  @override
+  void onClose() {
+    amountC.dispose();
+    noteC.dispose();
+    bankNameC.dispose();
+    accountNoC.dispose();
+    mobileNoC.dispose();
+    super.onClose();
+  }
+
+  Future<void> _loadInvoices() async {
+    isLoadingInvoices.value = true;
+    final list = await mainCtrl.getRegularCustomerInvoices(
+      customerName: debtor.name,
+      customerCategory: debtor.customerCategory,
+      customerPhone: debtor.phone,
+    );
+    invoices.value = list;
+    isLoadingInvoices.value = false;
+  }
+
+  @override
+  Future<void> refresh() async {
+    await _loadInvoices();
+  }
+
+  Future<void> submitCollection() async {
+    double amount = double.tryParse(amountC.text.trim()) ?? 0;
+    if (amount <= 0) {
+      Get.snackbar("Error", "Enter a valid amount to collect.");
+      return;
+    }
+
+    isSubmitting.value = true;
+    try {
+      Map<String, dynamic> pm = {'type': 'cash'};
+      if (payMethodType.value == 'bank') {
+        pm = {
+          'type': 'bank',
+          'bankName': bankNameC.text.trim(),
+          'accountNo': accountNoC.text.trim(),
+        };
+      } else if (['bkash', 'nagad', 'rocket'].contains(payMethodType.value)) {
+        pm = {'type': payMethodType.value, 'number': mobileNoC.text.trim()};
+      }
+
+      await mainCtrl.collectRegularCustomerDue(
+        customerId: debtor.id,
+        customerName: debtor.name,
+        customerCategory: debtor.customerCategory,
+        amount: amount,
+        note: noteC.text.trim(),
+        date: DateTime.now(),
+        paymentMethodData: pm,
+      );
+
+      amountC.clear();
+      noteC.clear();
+      bankNameC.clear();
+      accountNoC.clear();
+      mobileNoC.clear();
+      showCollectForm.value = false;
+      await _loadInvoices();
+    } finally {
+      isSubmitting.value = false;
+    }
+  }
+
+  Future<void> reprintInvoice(String invoiceId) async {
+    try {
+      if (!Get.isRegistered<DailySalesController>()) {
+        Get.put(DailySalesController());
+      }
+      await Get.find<DailySalesController>().reprintInvoice(invoiceId);
+    } catch (e) {
+      Get.snackbar("Error", "Could not load invoice: $e");
+    }
+  }
+}
+
+class _CustomerLedgerDialog extends StatelessWidget {
+  final DebtorModel debtor;
+  final Color categoryColor;
+  final _CustomerLedgerController ledgerCtrl;
+
+  const _CustomerLedgerDialog({
+    required this.debtor,
+    required this.categoryColor,
+    required this.ledgerCtrl,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isMobile = MediaQuery.of(context).size.width < 600;
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      insetPadding: EdgeInsets.symmetric(
+        horizontal: isMobile ? 12 : 60,
+        vertical: 24,
+      ),
+      child: Container(
+        width: 620,
+        constraints: const BoxConstraints(maxHeight: 700),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // --- HEADER ---
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 22),
+              decoration: BoxDecoration(
+                color: categoryColor,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(16),
+                ),
+              ),
+              child: Row(
+                children: [
+                  const FaIcon(
+                    FontAwesomeIcons.crown,
+                    color: Colors.white,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          debtor.name,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                        Text(
+                          "${(debtor.customerCategory ?? 'WHOLESALE').toUpperCase()} CUSTOMER  •  ${debtor.phone}",
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white),
+                    onPressed: () => Get.back(),
+                  ),
+                ],
+              ),
+            ),
+
+            // --- OUTSTANDING DUE + COLLECT BUTTON ---
+            Padding(
+              padding: const EdgeInsets.all(18),
+              child: Obx(() {
+                final freshDebtor = ledgerCtrl.mainCtrl.regularCustomerDues
+                    .firstWhereOrNull((d) => d.id == debtor.id);
+                final double liveBalance =
+                    freshDebtor?.balance ?? debtor.balance;
+
+                return Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: dangerRed.withValues(alpha: 0.06),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: dangerRed.withValues(alpha: 0.2),
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              "OUTSTANDING DUE",
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w800,
+                                color: textLight,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              "৳ ${liveBalance.toStringAsFixed(0)}",
+                              style: const TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.w900,
+                                color: dangerRed,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    ElevatedButton.icon(
+                      onPressed:
+                          liveBalance <= 0
+                              ? null
+                              : () => ledgerCtrl.showCollectForm.toggle(),
+                      icon: const Icon(Icons.payments, size: 18),
+                      label: const Text("Collect Due"),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: successGreen,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 18,
+                          vertical: 18,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              }),
+            ),
+
+            // --- COLLECT DUE FORM (collapsible) ---
+            Obx(
+              () =>
+                  ledgerCtrl.showCollectForm.value
+                      ? Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 18),
+                        child: _CollectDueForm(ledgerCtrl: ledgerCtrl),
+                      )
+                      : const SizedBox.shrink(),
+            ),
+
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 18),
+              child: Divider(height: 24, color: borderCol),
+            ),
+
+            // --- INVOICE LIST ---
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 18),
+              child: Row(
+                children: [
+                  const Text(
+                    "INVOICES",
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      color: textLight,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  const Spacer(),
+                  Obx(
+                    () => IconButton(
+                      icon: const Icon(
+                        Icons.refresh,
+                        size: 18,
+                        color: textLight,
+                      ),
+                      onPressed:
+                          ledgerCtrl.isLoadingInvoices.value
+                              ? null
+                              : ledgerCtrl.refresh,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: Obx(() {
+                if (ledgerCtrl.isLoadingInvoices.value) {
+                  return const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(30),
+                      child: CircularProgressIndicator(color: primaryColor),
+                    ),
+                  );
+                }
+                if (ledgerCtrl.invoices.isEmpty) {
+                  return const Padding(
+                    padding: EdgeInsets.all(30),
+                    child: Center(
+                      child: Text(
+                        "No invoices found for this customer.",
+                        style: TextStyle(color: textLight),
+                      ),
+                    ),
+                  );
+                }
+                return ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(18, 6, 18, 18),
+                  itemCount: ledgerCtrl.invoices.length,
+                  separatorBuilder:
+                      (_, _) => const Divider(height: 1, color: borderCol),
+                  itemBuilder: (context, index) {
+                    final inv = ledgerCtrl.invoices[index];
+                    return _invoiceRow(inv);
+                  },
+                );
+              }),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _invoiceRow(Map<String, dynamic> inv) {
+    double amount = (inv['amount'] as num?)?.toDouble() ?? 0.0;
+    double pending = (inv['pending'] as num?)?.toDouble() ?? 0.0;
+    String status = (inv['status'] ?? '').toString();
+    String invoiceId =
+        (inv['invoiceId'] ?? inv['transactionId'] ?? '').toString();
+    DateTime? date =
+        inv['timestamp'] is Timestamp
+            ? (inv['timestamp'] as Timestamp).toDate()
+            : null;
+
+    bool isPaid = status.toLowerCase() == 'paid' || pending <= 0.5;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 3,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                InkWell(
+                  onTap:
+                      invoiceId.isEmpty
+                          ? null
+                          : () => ledgerCtrl.reprintInvoice(invoiceId),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          invoiceId.isEmpty ? "Invoice" : invoiceId,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: primaryColor,
+                            decoration: TextDecoration.underline,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      const Icon(Icons.print, size: 14, color: primaryColor),
+                    ],
+                  ),
+                ),
+                if (date != null)
+                  Text(
+                    DateFormat('dd MMM yyyy').format(date),
+                    style: const TextStyle(fontSize: 11, color: textLight),
+                  ),
+              ],
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text(
+              "৳ ${amount.toStringAsFixed(0)}",
+              textAlign: TextAlign.right,
+              style: const TextStyle(fontSize: 12, color: textLight),
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text(
+              "৳ ${pending.toStringAsFixed(0)}",
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+                color: pending > 0.5 ? dangerRed : successGreen,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color:
+                  isPaid
+                      ? successGreen.withValues(alpha: 0.1)
+                      : Colors.orange.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(
+              isPaid ? "PAID" : "DUE",
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+                color: isPaid ? successGreen : Colors.orange.shade800,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CollectDueForm extends StatelessWidget {
+  final _CustomerLedgerController ledgerCtrl;
+  const _CollectDueForm({required this.ledgerCtrl});
+
+  Widget _field(
+    TextEditingController c,
+    String hint,
+    IconData icon, {
+    bool isNum = false,
+  }) {
+    return TextField(
+      style: const TextStyle(fontSize: 13),
+      controller: c,
+      keyboardType: isNum ? TextInputType.number : TextInputType.text,
+      decoration: InputDecoration(
+        prefixIcon: Icon(icon, size: 16, color: textLight),
+        hintText: hint,
+        hintStyle: const TextStyle(fontSize: 13),
+        filled: true,
+        fillColor: scaffoldBg,
+        isDense: true,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide.none,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: successGreen.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: successGreen.withValues(alpha: 0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _field(
+            ledgerCtrl.amountC,
+            "Amount Collected (Tk)",
+            Icons.attach_money,
+            isNum: true,
+          ),
+          const SizedBox(height: 10),
+          _field(ledgerCtrl.noteC, "Note (optional)", Icons.note),
+          const SizedBox(height: 10),
+          Obx(
+            () => Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: surfaceWhite,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: borderCol),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: ledgerCtrl.payMethodType.value,
+                  isExpanded: true,
+                  isDense: true,
+                  items: const [
+                    DropdownMenuItem(value: 'cash', child: Text("Cash")),
+                    DropdownMenuItem(
+                      value: 'bank',
+                      child: Text("Bank Transfer"),
+                    ),
+                    DropdownMenuItem(value: 'bkash', child: Text("Bkash")),
+                    DropdownMenuItem(value: 'nagad', child: Text("Nagad")),
+                    DropdownMenuItem(value: 'rocket', child: Text("Rocket")),
+                  ],
+                  onChanged: (v) {
+                    if (v != null) ledgerCtrl.payMethodType.value = v;
+                  },
+                ),
+              ),
+            ),
+          ),
+          Obx(() {
+            if (ledgerCtrl.payMethodType.value == 'bank') {
+              return Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: Column(
+                  children: [
+                    _field(ledgerCtrl.bankNameC, "Bank Name", Icons.business),
+                    const SizedBox(height: 8),
+                    _field(
+                      ledgerCtrl.accountNoC,
+                      "Account Number",
+                      Icons.numbers,
+                    ),
+                  ],
+                ),
+              );
+            } else if ([
+              'bkash',
+              'nagad',
+              'rocket',
+            ].contains(ledgerCtrl.payMethodType.value)) {
+              return Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: _field(
+                  ledgerCtrl.mobileNoC,
+                  "${ledgerCtrl.payMethodType.value.capitalizeFirst} Number",
+                  Icons.phone_android,
+                  isNum: true,
+                ),
+              );
+            }
+            return const SizedBox.shrink();
+          }),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: () => ledgerCtrl.showCollectForm.value = false,
+                child: const Text("Cancel"),
+              ),
+              const SizedBox(width: 8),
+              Obx(
+                () => ElevatedButton(
+                  onPressed:
+                      ledgerCtrl.isSubmitting.value
+                          ? null
+                          : ledgerCtrl.submitCollection,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: successGreen,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  child:
+                      ledgerCtrl.isSubmitting.value
+                          ? const SizedBox(
+                            height: 16,
+                            width: 16,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                          : const Text(
+                            "Confirm Collection",
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

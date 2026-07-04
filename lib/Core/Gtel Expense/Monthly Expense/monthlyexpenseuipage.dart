@@ -7,9 +7,8 @@ import 'package:intl/intl.dart';
 class MonthlyExpensesPage extends StatelessWidget {
   MonthlyExpensesPage({super.key});
 
-  final MonthlyExpensesController controller = Get.put(
-    MonthlyExpensesController(),
-  );
+  final MonthlyExpensesController controller =
+      Get.find<MonthlyExpensesController>();
 
   // Professional Theme Colors (Sync with entire ERP)
   static const Color darkSlate = Color(0xFF0F172A);

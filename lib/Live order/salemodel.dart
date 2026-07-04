@@ -91,6 +91,7 @@ class LiveSalesController extends GetxController {
   final RxnString selectedPackager = RxnString();
   final RxDouble debtorOldDue = 0.0.obs;
   final RxDouble debtorRunningDue = 0.0.obs;
+  final RxDouble regularCustomerPreviousDue = 0.0.obs;
   double get totalPreviousDue => debtorOldDue.value + debtorRunningDue.value;
   final debtorPhoneSearch = TextEditingController();
   final nameC = TextEditingController();
@@ -219,6 +220,66 @@ class LiveSalesController extends GetxController {
       courierList.value = List<String>.from(_defaultCouriers);
       packagerList.value = List<String>.from(_defaultPackagers);
       AppLogger.i("fetchSalesLists error: $e");
+    }
+  }
+
+  Future<double> getRegularCustomerPreviousDueForInvoice({
+    required String phone,
+    required String name,
+    required String type,
+  }) async {
+    try {
+      final normalizedType = type.toLowerCase();
+      final safePhone = phone.trim();
+      final safeName = name.trim();
+
+      final Map<String, QueryDocumentSnapshot> docs = {};
+
+      // 1. New records: match by customerPhone.
+      // Keep this query simple to avoid Firestore composite index problems.
+      if (safePhone.isNotEmpty) {
+        final phoneSnap =
+            await _db
+                .collection('daily_sales')
+                .where('customerPhone', isEqualTo: safePhone)
+                .get();
+
+        for (var doc in phoneSnap.docs) {
+          docs[doc.id] = doc;
+        }
+      }
+
+      // 2. Old records: many old daily_sales docs may not have customerPhone.
+      // Match by exact name as fallback.
+      if (safeName.isNotEmpty) {
+        final nameSnap =
+            await _db
+                .collection('daily_sales')
+                .where('name', isEqualTo: safeName)
+                .get();
+
+        for (var doc in nameSnap.docs) {
+          docs[doc.id] = doc;
+        }
+      }
+
+      double totalDue = 0.0;
+
+      for (var doc in docs.values) {
+        final data = doc.data() as Map<String, dynamic>;
+
+        final docType = (data['customerType'] ?? '').toString().toLowerCase();
+        final pending = (data['pending'] as num?)?.toDouble() ?? 0.0;
+
+        if (docType == normalizedType && pending > 0.5) {
+          totalDue += pending;
+        }
+      }
+
+      return _round(totalDue);
+    } catch (e) {
+      AppLogger.i("Regular customer previous due fetch error: $e");
+      return 0.0;
     }
   }
 
@@ -500,7 +561,9 @@ class LiveSalesController extends GetxController {
     filteredDebtors.clear();
   }
 
-  void selectRegularCustomerFromDropdown(Map<String, dynamic> customer) {
+  Future<void> selectRegularCustomerFromDropdown(
+    Map<String, dynamic> customer,
+  ) async {
     selectedRegularCustomer.value = customer;
     debtorPhoneSearch.text = customer['phone'] ?? '';
     nameC.text = customer['name'] ?? '';
@@ -508,6 +571,13 @@ class LiveSalesController extends GetxController {
     addressC.text = customer['address'] ?? '';
     shopC.text = customer['shop'] ?? '';
     filteredRegularCustomers.clear();
+
+    regularCustomerPreviousDue
+        .value = await getRegularCustomerPreviousDueForInvoice(
+      phone: phoneC.text.trim(),
+      name: nameC.text.trim(),
+      type: customerType.value,
+    );
   }
 
   void refreshPage() {
@@ -531,6 +601,7 @@ class LiveSalesController extends GetxController {
     filteredRegularCustomers.clear();
     debtorOldDue.value = 0.0;
     debtorRunningDue.value = 0.0;
+    regularCustomerPreviousDue.value = 0.0;
 
     for (var item in cart) {
       item.priceAtSale =
@@ -857,8 +928,17 @@ class LiveSalesController extends GetxController {
     double allocatedToOldDue = 0.0,
         allocatedToInvoice = 0.0,
         allocatedToPrevRunningDue = 0.0;
+
     double oldDueSnap = debtorOldDue.value,
         runningDueSnap = debtorRunningDue.value;
+
+    if (customerType.value != "AGENT" && !isConditionSale.value) {
+      runningDueSnap = await getRegularCustomerPreviousDueForInvoice(
+        phone: fPhone,
+        name: fName,
+        type: customerType.value,
+      );
+    }
 
     double remaining = totalPaidInputVal;
 
@@ -884,6 +964,7 @@ class LiveSalesController extends GetxController {
           remaining = 0.0;
         }
       }
+
       if (runningDueSnap > 0 && remaining > 0) {
         if (remaining >= runningDueSnap) {
           allocatedToPrevRunningDue = runningDueSnap;
@@ -919,6 +1000,7 @@ class LiveSalesController extends GetxController {
         cart
             .map((item) => {'id': item.product.id, 'qty': item.quantity.value})
             .toList();
+
     bool stockSuccess = await productCtrl.updateStockBulk(stockUpdates);
     if (!stockSuccess) {
       isProcessing.value = false;
@@ -1007,6 +1089,8 @@ class LiveSalesController extends GetxController {
           sellerUid,
         );
       } else {
+        double invoiceDue = _round(grandTotal - allocatedToInvoice);
+
         DocumentReference custRef = _db.collection('customers').doc(fPhone);
         batch.set(custRef, {
           "name": fName,
@@ -1016,6 +1100,7 @@ class LiveSalesController extends GetxController {
           "type": customerType.value,
           "lastInv": invNo,
           "lastShopDate": FieldValue.serverTimestamp(),
+          if (invoiceDue > 0.5) "currentDue": FieldValue.increment(invoiceDue),
           "searchKeywords": _generateSearchKeywords(fName, fPhone),
         }, SetOptions(merge: true));
 
@@ -1037,14 +1122,15 @@ class LiveSalesController extends GetxController {
         });
 
         DocumentReference dailyRef = _db.collection('daily_sales').doc();
-        double invoiceDue = _round(grandTotal - allocatedToInvoice);
         Map<String, dynamic> methodMap = _extractPaymentFor(allocatedToInvoice);
         methodMap['pending'] = invoiceDue;
 
         batch.set(dailyRef, {
           "name": fName,
+          "customerPhone": fPhone,
           "amount": grandTotal,
           "paid": allocatedToInvoice,
+          "ledgerPaid": 0.0,
           "pending": invoiceDue,
           "customerType": customerType.value.toLowerCase(),
           "timestamp": Timestamp.fromDate(saleDate),
@@ -1078,7 +1164,13 @@ class LiveSalesController extends GetxController {
 
       await batch.commit();
 
-      if (debtorId != null) debtorCtrl.loadTxPage(debtorId, 1);
+      await dailyCtrl.loadDailySales();
+
+      if (customerType.value == "AGENT" && debtorId != null) {
+        debtorCtrl.loadTxPage(debtorId, 1);
+      } else if (!isConditionSale.value) {
+        await debtorCtrl.refreshRegularCustomerDues();
+      }
 
       await _generatePdf(
         invNo,
@@ -1115,7 +1207,9 @@ class LiveSalesController extends GetxController {
                 (item) => {'id': item.product.id, 'qty': -item.quantity.value},
               )
               .toList();
+
       await productCtrl.updateStockBulk(rollbackStock);
+
       Get.snackbar(
         "Error",
         "Transaction Failed: $e",
@@ -1781,6 +1875,7 @@ class LiveSalesController extends GetxController {
     debtorPhoneSearch.clear();
     debtorOldDue.value = 0.0;
     debtorRunningDue.value = 0.0;
+    regularCustomerPreviousDue.value = 0.0;
     selectedPackager.value = null;
     customerType.value = "WHOLESALE";
   }

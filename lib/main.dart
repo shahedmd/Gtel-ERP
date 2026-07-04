@@ -15,10 +15,13 @@ import 'Web Screen/homepage.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  await Get.putAsync(() async => SessionController());
-  await Get.putAsync(() async => ActivityLogger());
+
   Get.put(PermissionController(), permanent: true);
+  await Get.putAsync(() async => SessionController(), permanent: true);
+  await Get.putAsync(() async => ActivityLogger(), permanent: true);
+
   runApp(const MyApp());
 }
 
