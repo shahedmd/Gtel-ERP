@@ -70,6 +70,17 @@ class LiveSalesController extends GetxController {
 
   final RxString customerType = "WHOLESALE".obs;
   final RxBool isConditionSale = false.obs;
+
+  // NEW: Only meaningful while isConditionSale == true.
+  // When true, the sale still ships via courier (courier/challan/cartons
+  // fields stay required and an extra delivery challan is printed), BUT it
+  // is financially processed exactly like a NORMAL sale — due goes to the
+  // Agent/Wholesale/VIP customer's own account (debtor ledger / customer
+  // due), NOT to courier_ledgers / condition_customers. This solves the
+  // "due customer whose product must go via courier" case without polluting
+  // the Condition Sales page.
+  final RxBool isNonConditionSale = false.obs;
+
   final RxList<SalesCartItem> cart = <SalesCartItem>[].obs;
   final RxBool isProcessing = false.obs;
 
@@ -165,7 +176,11 @@ class LiveSalesController extends GetxController {
     });
 
     ever(customerType, (_) => _handleTypeChange());
-    ever(isConditionSale, (_) => updatePaymentCalculations());
+    ever(isConditionSale, (bool val) {
+      // Non-condition mode only makes sense inside condition-sale mode.
+      if (!val) isNonConditionSale.value = false;
+      updatePaymentCalculations();
+    });
     ever(selectedCourier, (val) {
       if (val != null && val != 'Other') {
         fetchCourierTotalDue(val);
@@ -925,6 +940,18 @@ class LiveSalesController extends GetxController {
     final DateTime saleDate = DateTime.now();
     double totalPaidInputVal = totalPaidInput.value;
 
+    // ── Non-Condition sub-mode flags ─────────────────────────────────────────
+    // isNonConditionMode : condition toggle ON + non-condition toggle ON.
+    //   -> ships via courier (challan printed) but due/ledger handled
+    //      exactly like a normal Agent/Wholesale/VIP sale.
+    // useConditionFlow   : the "real" COD/condition financial flow
+    //   (courier_ledgers + condition_customers) should only run when this
+    //   is true.
+    final bool isNonConditionMode =
+        isConditionSale.value && isNonConditionSale.value;
+    final bool useConditionFlow =
+        isConditionSale.value && !isNonConditionSale.value;
+
     double allocatedToOldDue = 0.0,
         allocatedToInvoice = 0.0,
         allocatedToPrevRunningDue = 0.0;
@@ -932,7 +959,7 @@ class LiveSalesController extends GetxController {
     double oldDueSnap = debtorOldDue.value,
         runningDueSnap = debtorRunningDue.value;
 
-    if (customerType.value != "AGENT" && !isConditionSale.value) {
+    if (customerType.value != "AGENT" && !useConditionFlow) {
       runningDueSnap = await getRegularCustomerPreviousDueForInvoice(
         phone: fPhone,
         name: fName,
@@ -953,7 +980,7 @@ class LiveSalesController extends GetxController {
     }
 
     if (customerType.value == "AGENT" &&
-        !isConditionSale.value &&
+        !useConditionFlow &&
         debtorId != null) {
       if (oldDueSnap > 0 && remaining > 0) {
         if (remaining >= oldDueSnap) {
@@ -1030,12 +1057,20 @@ class LiveSalesController extends GetxController {
         "debtorId": debtorId,
         "shopName": shopC.text,
         "isCondition": isConditionSale.value,
+        // NEW: distinguishes a real COD/condition sale from a normal sale
+        // that simply ships via courier. Useful for filtering the
+        // Condition Sales page so non-condition shipments don't show up
+        // there as pending courier collections.
+        "saleMode":
+            !isConditionSale.value
+                ? "normal"
+                : (isNonConditionMode ? "non_condition" : "condition"),
         "deliveryAddress": addressC.text,
         "challanNo": finalChallan,
         "cartons":
             isConditionSale.value ? (int.tryParse(cartonsC.text) ?? 0) : 0,
         "courierName": isConditionSale.value ? finalCourierName : null,
-        "courierDue": isConditionSale.value ? invoiceDueAmount : 0,
+        "courierDue": useConditionFlow ? invoiceDueAmount : 0,
         "packagerName": selectedPackager.value,
         "soldBy": {"uid": sellerUid, "name": sellerName, "phone": sellerPhone},
         "items": orderItems,
@@ -1051,12 +1086,12 @@ class LiveSalesController extends GetxController {
         "snapshotOldDue": oldDueSnap,
         "snapshotRunningDue": runningDueSnap,
         "status":
-            isConditionSale.value
+            useConditionFlow
                 ? (invoiceDueAmount <= 0 ? "completed" : "on_delivery")
                 : "completed",
       });
 
-      if (isConditionSale.value) {
+      if (useConditionFlow) {
         _handleConditionSale(
           batch,
           fName,
@@ -1168,7 +1203,7 @@ class LiveSalesController extends GetxController {
 
       if (customerType.value == "AGENT" && debtorId != null) {
         debtorCtrl.loadTxPage(debtorId, 1);
-      } else if (!isConditionSale.value) {
+      } else if (!useConditionFlow) {
         await debtorCtrl.refreshRegularCustomerDues();
       }
 
@@ -1179,6 +1214,7 @@ class LiveSalesController extends GetxController {
         masterPaymentMap,
         orderItems,
         isCondition: isConditionSale.value,
+        isNonConditionMode: isNonConditionMode,
         challan: finalChallan,
         address: addressC.text,
         courier: finalCourierName,
@@ -1956,6 +1992,7 @@ class LiveSalesController extends GetxController {
     Map<String, dynamic> payMap,
     List<Map<String, dynamic>> items, {
     bool isCondition = false,
+    bool isNonConditionMode = false,
     String challan = "",
     String address = "",
     String? courier,
@@ -2087,7 +2124,9 @@ class LiveSalesController extends GetxController {
                   boldFont,
                   regularFont,
                   invId,
-                  "DELIVERY CHALLAN",
+                  isNonConditionMode
+                      ? "DELIVERY CHALLAN (NON CONDITION)"
+                      : "DELIVERY CHALLAN",
                   packagerName,
                   authorizedName,
                   invDue,
@@ -2113,7 +2152,12 @@ class LiveSalesController extends GetxController {
                   boldFont,
                 ),
                 pw.SizedBox(height: 60),
-                _buildChallanCenterBox(boldFont, regularFont, invDue),
+                _buildChallanCenterBox(
+                  boldFont,
+                  regularFont,
+                  invDue,
+                  isNonConditionMode,
+                ),
                 pw.SizedBox(height: 100),
                 _buildNewSignatures(regularFont),
               ],
@@ -2263,6 +2307,8 @@ class LiveSalesController extends GetxController {
     pw.Font reg,
     pw.Font bold,
   ) {
+    // NOTE: Now uses _infoRow2 (bold label + bold value) so this box matches
+    // the same all-bold styling as _buildNewCustomerBox.
     return pw.Container(
       width: double.infinity,
       decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.5)),
@@ -2279,26 +2325,26 @@ class LiveSalesController extends GetxController {
             ),
           ),
           pw.SizedBox(height: 8),
-          _infoRow(
+          _infoRow2(
             "Courier Name",
             ": ${courier ?? 'N/A'}",
             reg,
             bold,
-            col1Width: 100,
+            col1Width: 140,
           ),
-          _infoRow(
+          _infoRow2(
             "Booking/Challan No",
             ": $challan",
             reg,
             bold,
-            col1Width: 100,
+            col1Width: 140,
           ),
-          _infoRow(
+          _infoRow2(
             "Total Cartons",
             ": ${cartons?.toString() ?? 'N/A'}",
             reg,
             bold,
-            col1Width: 100,
+            col1Width: 140,
           ),
         ],
       ),
@@ -2594,8 +2640,17 @@ class LiveSalesController extends GetxController {
     );
   }
 
-  pw.Widget _buildChallanCenterBox(pw.Font bold, pw.Font reg, double due) {
-    bool isPaid = due <= 0;
+  pw.Widget _buildChallanCenterBox(
+    pw.Font bold,
+    pw.Font reg,
+    double due,
+    bool forceNonCondition,
+  ) {
+    // forceNonCondition (Non-Condition sale mode) always renders the box as
+    // "NON CONDITION" regardless of the invoice due amount, since that due
+    // is tracked on the Agent/Customer account, not to be collected by the
+    // courier.
+    bool isPaid = forceNonCondition || due <= 0;
     return pw.Container(
       width: double.infinity,
       padding: const pw.EdgeInsets.all(20),

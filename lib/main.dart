@@ -19,7 +19,9 @@ Future<void> main() async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   Get.put(PermissionController(), permanent: true);
+
   await Get.putAsync(() async => SessionController(), permanent: true);
+
   await Get.putAsync(() async => ActivityLogger(), permanent: true);
 
   runApp(const MyApp());
@@ -47,10 +49,7 @@ class MyApp extends StatelessWidget {
           initialBinding: AuthBinding(),
           initialRoute: '/splash',
           getPages: [
-            GetPage(
-              name: '/splash',
-              page: () => const SplashScreen(),
-            ), // ← নতুন
+            GetPage(name: '/splash', page: () => const SplashScreen()),
             GetPage(name: '/', page: () => const LoginPage()),
             GetPage(
               name: '/home',

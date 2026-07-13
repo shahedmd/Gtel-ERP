@@ -1,10 +1,7 @@
-// ignore_for_file: deprecated_member_use
-
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
 
-// Ensure this import points to your actual controller file location
 import 'package:gtel_erp/Cash/controller.dart';
 
 class CashDrawerView extends StatelessWidget {
@@ -96,14 +93,17 @@ class CashDrawerView extends StatelessWidget {
                               padding: EdgeInsets.all(isMobile ? 16 : 24),
                               decoration: BoxDecoration(
                                 gradient: LinearGradient(
-                                  colors: [darkBlue, darkBlue.withOpacity(0.9)],
+                                  colors: [
+                                    darkBlue,
+                                    darkBlue.withValues(alpha: 0.9),
+                                  ],
                                   begin: Alignment.topLeft,
                                   end: Alignment.bottomRight,
                                 ),
                                 borderRadius: BorderRadius.circular(12),
                                 boxShadow: [
                                   BoxShadow(
-                                    color: darkBlue.withOpacity(0.3),
+                                    color: darkBlue.withValues(alpha: 0.3),
                                     blurRadius: 10,
                                     offset: const Offset(0, 4),
                                   ),
@@ -150,7 +150,9 @@ class CashDrawerView extends StatelessWidget {
                                       vertical: 8,
                                     ),
                                     decoration: BoxDecoration(
-                                      color: Colors.white.withOpacity(0.15),
+                                      color: Colors.white.withValues(
+                                        alpha: 0.15,
+                                      ),
                                       borderRadius: BorderRadius.circular(8),
                                       border: Border.all(color: Colors.white24),
                                     ),
@@ -458,7 +460,7 @@ class CashDrawerView extends StatelessWidget {
           border: Border.all(color: borderCol),
           boxShadow: [
             BoxShadow(
-              color: Colors.grey.withOpacity(0.05),
+              color: Colors.grey.withValues(alpha: 0.05),
               blurRadius: 5,
               offset: const Offset(0, 2),
             ),
@@ -469,7 +471,7 @@ class CashDrawerView extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(icon, size: 14, color: col.withOpacity(0.7)),
+                Icon(icon, size: 14, color: col.withValues(alpha: 0.7)),
                 const SizedBox(width: 4),
                 Expanded(
                   child: Text(
@@ -518,7 +520,7 @@ class CashDrawerView extends StatelessWidget {
         border: Border.all(color: borderCol),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.05),
+            color: Colors.grey.withValues(alpha: 0.05),
             blurRadius: 4,
             offset: const Offset(0, 2),
           ),
@@ -529,7 +531,7 @@ class CashDrawerView extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: col.withOpacity(0.1),
+              color: col.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
             child: Icon(icon, color: col, size: 20),
@@ -600,7 +602,7 @@ class CashDrawerView extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: bgCol.withOpacity(0.1),
+              color: bgCol.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(6),
             ),
             child: Icon(icon, size: 16, color: amountColor),
@@ -834,7 +836,7 @@ class CashDrawerView extends StatelessWidget {
                 ),
                 const SizedBox(height: 20),
                 DropdownButtonFormField<String>(
-                  value: method,
+                  initialValue: method,
                   dropdownColor: Colors.white,
                   items:
                       ['cash', 'bank', 'bkash', 'nagad']
@@ -998,7 +1000,7 @@ class CashDrawerView extends StatelessWidget {
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
-                      value: method,
+                      initialValue: method,
                       dropdownColor: Colors.white,
                       items:
                           ['Cash', 'Bank', 'Bkash', 'Nagad']
@@ -1162,7 +1164,7 @@ class CashDrawerView extends StatelessWidget {
                             ),
                             const SizedBox(height: 5),
                             DropdownButtonFormField<String>(
-                              value: fromVal.value,
+                              initialValue: fromVal.value,
                               dropdownColor: Colors.white,
                               isExpanded: true,
                               items:
@@ -1214,7 +1216,7 @@ class CashDrawerView extends StatelessWidget {
                             ),
                             const SizedBox(height: 5),
                             DropdownButtonFormField<String>(
-                              value: toVal.value,
+                              initialValue: toVal.value,
                               dropdownColor: Colors.white,
                               isExpanded: true,
                               items:

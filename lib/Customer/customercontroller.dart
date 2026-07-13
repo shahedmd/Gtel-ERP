@@ -11,15 +11,13 @@ import 'package:printing/printing.dart';
 class CustomerAnalyticsController extends GetxController {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  // --- STATE ---
   var isLoading = false.obs;
-  var isPdfGenerating = false.obs; // Controls PDF Spinner
+  var isPdfGenerating = false.obs;
 
   List<CustomerAnalyticsModel> _fetchedData = [];
   List<CustomerAnalyticsModel> _filteredData = [];
   var paginatedList = <CustomerAnalyticsModel>[].obs;
 
-  // Pagination Main Table
   var currentPage = 1.obs;
   var itemsPerPage = 50;
   var totalItems = 0.obs;
@@ -44,7 +42,6 @@ class CustomerAnalyticsController extends GetxController {
   var selectedGroup = 'All'.obs;
   var searchQuery = ''.obs;
 
-  // --- CUSTOMER DETAILS PAGE (INVOICE PAGINATION STATE) ---
   var isDetailsLoading = false.obs;
   var isDetailsLoadingMore = false.obs;
   var hasMoreInvoices = true.obs;
@@ -52,8 +49,6 @@ class CustomerAnalyticsController extends GetxController {
   var selectedCustomerProfile = Rxn<CustomerAnalyticsModel>();
   DocumentSnapshot? _lastInvoiceDoc;
   final int invoiceLimitPerPage = 20;
-
-  // REPRINTING STATE
   var reprintingInvoiceId = ''.obs;
 
   @override

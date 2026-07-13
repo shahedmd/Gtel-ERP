@@ -16,13 +16,9 @@ import 'debtordartmodel.dart';
 class DebatorController extends GetxController {
   final FirebaseFirestore db = FirebaseFirestore.instance;
 
-  // ==========================================
-  // 1. STATE & VARIABLES
-  // ==========================================
   final RxList<DebtorModel> bodies = <DebtorModel>[].obs;
   final RxList<DebtorModel> filteredBodies = <DebtorModel>[].obs;
 
-  // NEW: Regular Customer (Wholesale/VIP) dues — merged into filteredBodies
   final RxList<DebtorModel> regularCustomerDues = <DebtorModel>[].obs;
 
   // Loading States
@@ -331,9 +327,9 @@ class DebatorController extends GetxController {
         return t1.compareTo(t2);
       });
 
-      final double totalPending = pendingDocs.fold(0.0, (sum, doc) {
+      final double totalPending = pendingDocs.fold(0.0, (sumvalue, doc) {
         final data = doc.data() as Map<String, dynamic>;
-        return sum + ((data['pending'] as num?)?.toDouble() ?? 0.0);
+        return sumvalue + ((data['pending'] as num?)?.toDouble() ?? 0.0);
       });
 
       if (totalPending <= 0.5) {

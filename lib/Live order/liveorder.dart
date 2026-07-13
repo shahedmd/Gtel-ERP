@@ -281,9 +281,11 @@ class LiveOrderSalesPage extends StatelessWidget {
           children: [
             Obx(
               () => Text(
-                controller.isConditionSale.value
-                    ? "CONDITION / COURIER MANAGER"
-                    : "POINT OF SALE (POS)",
+                !controller.isConditionSale.value
+                    ? "POINT OF SALE (POS)"
+                    : (controller.isNonConditionSale.value
+                        ? "COURIER DELIVERY (NON-CONDITION)"
+                        : "CONDITION / COURIER MANAGER"),
                 style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
@@ -340,6 +342,59 @@ class LiveOrderSalesPage extends StatelessWidget {
             ],
           ),
         ),
+
+        // ── NEW: "Non Condition" toggle ──────────────────────────────────
+        // Only shown while Condition Sale is active. When turned on, the
+        // sale is still shipped via courier (courier/challan/cartons fields
+        // stay required and an extra delivery challan is printed) but is
+        // financially processed as a NORMAL sale — due goes to the
+        // Agent / Wholesale / VIP customer as usual, and it will NOT show
+        // up on the Condition Sales page.
+        Obx(() {
+          if (!controller.isConditionSale.value) {
+            return const SizedBox.shrink();
+          }
+          return Row(
+            children: [
+              const SizedBox(width: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(30),
+                ),
+                child: Row(
+                  children: [
+                    const Text(
+                      "Non Condition",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Obx(
+                      () => Switch(
+                        value: controller.isNonConditionSale.value,
+                        activeThumbColor: Colors.white,
+                        activeTrackColor: Colors.teal.shade300,
+                        inactiveThumbColor: Colors.white,
+                        inactiveTrackColor: Colors.grey,
+                        onChanged:
+                            (val) => controller.isNonConditionSale.value = val,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          );
+        }),
+
         const SizedBox(width: 16),
         Container(
           decoration: BoxDecoration(
@@ -365,9 +420,11 @@ class LiveOrderSalesPage extends StatelessWidget {
         height: isDesktop ? 60 : null,
         decoration: BoxDecoration(
           color:
-              controller.isConditionSale.value
-                  ? const Color(0xFFC2410C)
-                  : const Color(0xFF0F172A),
+              !controller.isConditionSale.value
+                  ? const Color(0xFF0F172A)
+                  : (controller.isNonConditionSale.value
+                      ? const Color(0xFF0F766E)
+                      : const Color(0xFFC2410C)),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.15),
@@ -1743,9 +1800,11 @@ class LiveOrderSalesPage extends StatelessWidget {
                       () => ElevatedButton.icon(
                         style: ElevatedButton.styleFrom(
                           backgroundColor:
-                              controller.isConditionSale.value
-                                  ? Colors.deepOrange
-                                  : const Color(0xFF1E293B),
+                              !controller.isConditionSale.value
+                                  ? const Color(0xFF1E293B)
+                                  : (controller.isNonConditionSale.value
+                                      ? Colors.teal.shade700
+                                      : Colors.deepOrange),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8),
                           ),
@@ -1774,9 +1833,11 @@ class LiveOrderSalesPage extends StatelessWidget {
                                   ),
                                 )
                                 : Text(
-                                  controller.isConditionSale.value
-                                      ? "PROCESS CHALLAN"
-                                      : "COMPLETE INVOICE",
+                                  !controller.isConditionSale.value
+                                      ? "COMPLETE INVOICE"
+                                      : (controller.isNonConditionSale.value
+                                          ? "COMPLETE SALE + CHALLAN"
+                                          : "PROCESS CHALLAN"),
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontWeight: FontWeight.bold,

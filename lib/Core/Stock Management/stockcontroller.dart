@@ -94,6 +94,62 @@ class ProductWarehouseStock {
       );
 }
 
+/// A single recorded stock loss / shortage event (damage, theft, count
+/// mismatch, expiry, etc). Mirrors the `product_loss_logs` table.
+class StockLossLog {
+  final int id;
+  final int productId;
+  final String productName;
+  final String brand;
+  final String model;
+  final int? warehouseId;
+  final String warehouseName;
+  final int qty;
+  final double unitCost;
+  final double totalLossValue;
+  final String reason;
+  final String note;
+  final String status;
+  final DateTime? createdAt;
+
+  StockLossLog({
+    required this.id,
+    required this.productId,
+    required this.productName,
+    required this.brand,
+    required this.model,
+    this.warehouseId,
+    required this.warehouseName,
+    required this.qty,
+    required this.unitCost,
+    required this.totalLossValue,
+    required this.reason,
+    required this.note,
+    this.status = 'active',
+    this.createdAt,
+  });
+
+  bool get isReturned => status == 'returned';
+
+  factory StockLossLog.fromJson(Map<String, dynamic> json) => StockLossLog(
+    id: safeInt(json['id']),
+    productId: safeInt(json['product_id']),
+    productName: json['product_name']?.toString() ?? '',
+    brand: json['brand']?.toString() ?? '',
+    model: json['model']?.toString() ?? '',
+    warehouseId:
+        json['warehouse_id'] != null ? safeInt(json['warehouse_id']) : null,
+    warehouseName: json['warehouse_name']?.toString() ?? '',
+    qty: safeInt(json['qty']),
+    unitCost: safeDouble(json['unit_cost']),
+    totalLossValue: safeDouble(json['total_loss_value']),
+    reason: json['reason']?.toString() ?? '',
+    note: json['note']?.toString() ?? '',
+    status: json['status']?.toString() ?? 'active',
+    createdAt: DateTime.tryParse(json['created_at']?.toString() ?? ''),
+  );
+}
+
 class ProductController extends GetxController {
   static const baseUrl = 'https://dart-server-1zun.onrender.com';
 
@@ -129,11 +185,29 @@ class ProductController extends GetxController {
   final RxBool isWarehouseLoading = false.obs;
   final RxBool isTransferLoading = false.obs;
 
+  // ─── Stock Loss / Shortage ──────────────────────────────────
+  final RxList<StockLossLog> lossLogs = <StockLossLog>[].obs;
+  final RxInt lossPage = 1.obs;
+  final RxInt lossLimit = 20.obs;
+  final RxInt lossTotal = 0.obs;
+  final RxInt lossTotalQty = 0.obs;
+  final RxDouble lossTotalValue = 0.0.obs;
+  final RxString lossSearchText = ''.obs;
+  final Rx<DateTime?> lossFromDate = Rx<DateTime?>(null);
+  final Rx<DateTime?> lossToDate = Rx<DateTime?>(null);
+  final RxBool includeReturnedLoss = false.obs;
+  final RxBool isLossLoading = false.obs;
+
+  final RxMap<String, dynamic> lossSummary = <String, dynamic>{}.obs;
+  final RxBool isLossSummaryLoading = false.obs;
+
   Timer? _searchDebounce;
   Timer? _shortlistDebounce;
+  Timer? _lossSearchDebounce;
 
   int _productsRequestId = 0;
   int _shortlistRequestId = 0;
+  int _lossRequestId = 0;
 
   @override
   void onInit() {
@@ -146,6 +220,7 @@ class ProductController extends GetxController {
   void onClose() {
     _searchDebounce?.cancel();
     _shortlistDebounce?.cancel();
+    _lossSearchDebounce?.cancel();
     super.onClose();
   }
 
@@ -682,6 +757,176 @@ class ProductController extends GetxController {
       return true;
     }
     return false;
+  }
+
+  // ─── Stock Loss / Shortage ──────────────────────────────────
+  //
+  // Use this whenever you count stock physically and find you have less
+  // than the system thinks (damaged, stolen, expired, count mismatch,
+  // etc). This deducts the product's stock (same as a sale would) and
+  // records the value of the shortage for reporting.
+
+  /// Record a stock loss/shortage for [productId]. Deducts stock from
+  /// [warehouseId] if given, otherwise from whichever warehouse(s) have
+  /// stock (FIFO across warehouses, same behaviour as other deductions).
+  /// [reason] is a free-text label (e.g. "Damaged", "Stolen", "Count
+  /// mismatch", "Expired") used for grouping in the report.
+  Future<bool> recordStockLoss({
+    required int productId,
+    required int qty,
+    int? warehouseId,
+    String reason = 'Unspecified',
+    String note = '',
+  }) async {
+    if (qty <= 0) {
+      _showError('Quantity must be greater than zero');
+      return false;
+    }
+
+    isActionLoading.value = true;
+    final res = await _apiCall(
+      '/stock/loss',
+      method: 'POST',
+      body: {
+        'product_id': productId,
+        'qty': qty,
+        if (warehouseId != null) 'warehouse_id': warehouseId,
+        'reason': reason,
+        if (note.isNotEmpty) 'note': note,
+      },
+    );
+    isActionLoading.value = false;
+
+    if (res != null) {
+      final value = safeDouble(res['total_loss_value']);
+      _showSuccess('Loss recorded: ৳${formatCurrency(value)}');
+      await Future.wait([fetchProducts(), fetchLossLogs(page: 1)]);
+      return true;
+    }
+    return false;
+  }
+
+  Future<void> fetchLossLogs({int? page}) async {
+    isLossLoading.value = true;
+    final current = page ?? lossPage.value;
+    lossPage.value = current;
+    final requestId = ++_lossRequestId;
+
+    final data = await _apiCall(
+      '/stock/loss',
+      queryParams: {
+        'page': current.toString(),
+        'limit': lossLimit.value.toString(),
+        'search': lossSearchText.value.trim(),
+        'include_returned': includeReturnedLoss.value.toString(),
+        if (lossFromDate.value != null)
+          'from_date': lossFromDate.value!.toIso8601String(),
+        if (lossToDate.value != null)
+          'to_date': lossToDate.value!.toIso8601String(),
+      },
+    );
+
+    if (requestId != _lossRequestId) return;
+
+    if (data != null) {
+      lossLogs.assignAll(
+        (data['logs'] as List).map((e) => StockLossLog.fromJson(e)).toList(),
+      );
+      lossTotal.value = safeInt(data['total']);
+      lossTotalQty.value = safeInt(data['total_qty']);
+      lossTotalValue.value = safeDouble(data['total_value']);
+    }
+    isLossLoading.value = false;
+  }
+
+  /// Show/hide already-returned (corrected) loss entries in the history list.
+  void toggleIncludeReturnedLoss() {
+    includeReturnedLoss.value = !includeReturnedLoss.value;
+    fetchLossLogs(page: 1);
+  }
+
+  /// Undo a mistakenly recorded loss entry. Adds the stock back (to
+  /// [warehouseId] if given, otherwise back to the warehouse it was
+  /// originally deducted from) and marks the entry as returned so it no
+  /// longer counts in the loss report. [qty] defaults to the full amount
+  /// on the entry, but you can pass a smaller number for a partial return.
+  Future<bool> returnFromLoss(
+    StockLossLog log, {
+    int? qty,
+    int? warehouseId,
+    String? location,
+  }) async {
+    final qtyToReturn = qty ?? log.qty;
+    if (qtyToReturn <= 0 || qtyToReturn > log.qty) {
+      _showError('Invalid return quantity');
+      return false;
+    }
+
+    isActionLoading.value = true;
+    final res = await _apiCall(
+      '/stock/loss/return',
+      method: 'POST',
+      body: {
+        'log_id': log.id,
+        'qty': qtyToReturn,
+        if (warehouseId != null) 'warehouse_id': warehouseId,
+        if (location != null && location.isNotEmpty)
+          'warehouse_location': location,
+      },
+    );
+    isActionLoading.value = false;
+
+    if (res != null) {
+      _showSuccess('Loss entry reversed, stock restored');
+      await Future.wait([fetchProducts(), fetchLossLogs(page: lossPage.value)]);
+      return true;
+    }
+    return false;
+  }
+
+  void searchLoss(String text) {
+    lossSearchText.value = text;
+    if (_lossSearchDebounce?.isActive ?? false) _lossSearchDebounce!.cancel();
+    _lossSearchDebounce = Timer(
+      const Duration(milliseconds: 600),
+      () => fetchLossLogs(page: 1),
+    );
+  }
+
+  void setLossDateRange(DateTime? from, DateTime? to) {
+    lossFromDate.value = from;
+    lossToDate.value = to;
+    fetchLossLogs(page: 1);
+  }
+
+  void nextLossPage() {
+    if ((lossPage.value * lossLimit.value) < lossTotal.value) {
+      fetchLossLogs(page: lossPage.value + 1);
+    }
+  }
+
+  void prevLossPage() {
+    if (lossPage.value > 1) {
+      fetchLossLogs(page: lossPage.value - 1);
+    }
+  }
+
+  /// Loads the report data: overall total, breakdown by product, by
+  /// reason, and by month. Populates [lossSummary] with keys:
+  /// 'overall', 'by_product', 'by_reason', 'by_month'.
+  Future<void> fetchLossSummary({DateTime? from, DateTime? to}) async {
+    isLossSummaryLoading.value = true;
+    final data = await _apiCall(
+      '/stock/loss/summary',
+      queryParams: {
+        if (from != null) 'from_date': from.toIso8601String(),
+        if (to != null) 'to_date': to.toIso8601String(),
+      },
+    );
+    if (data != null) {
+      lossSummary.assignAll(data);
+    }
+    isLossSummaryLoading.value = false;
   }
 
   // ─── Helpers ──────────────────────────────────────────────

@@ -1,5 +1,3 @@
-// ignore_for_file: deprecated_member_use, avoid_print, empty_catches, prefer_interpolation_to_compose_strings
-
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -142,25 +140,25 @@ class ConditionSalesController extends GetxController {
           _db
               .collection('sales_orders')
               .where('customerName', isGreaterThanOrEqualTo: lowerCase)
-              .where('customerName', isLessThanOrEqualTo: lowerCase + '\uf8ff')
+              .where('customerName', isLessThanOrEqualTo: '$lowerCase\uf8ff')
               .limit(20)
               .get(),
           _db
               .collection('sales_orders')
               .where('customerName', isGreaterThanOrEqualTo: upperCase)
-              .where('customerName', isLessThanOrEqualTo: upperCase + '\uf8ff')
+              .where('customerName', isLessThanOrEqualTo: '$upperCase\uf8ff')
               .limit(20)
               .get(),
           _db
               .collection('sales_orders')
               .where('customerName', isGreaterThanOrEqualTo: titleCase)
-              .where('customerName', isLessThanOrEqualTo: titleCase + '\uf8ff')
+              .where('customerName', isLessThanOrEqualTo: '$titleCase\uf8ff')
               .limit(20)
               .get(),
           _db
               .collection('sales_orders')
               .where('customerName', isGreaterThanOrEqualTo: q)
-              .where('customerName', isLessThanOrEqualTo: q + '\uf8ff')
+              .where('customerName', isLessThanOrEqualTo: '$q\uf8ff')
               .limit(20)
               .get(),
         ]);
@@ -187,7 +185,7 @@ class ConditionSalesController extends GetxController {
       allOrders.value = tempOrders;
       applyClientSideFilters();
     } catch (e) {
-      print("Search Error: $e");
+      debugPrint("Search Error: $e");
     } finally {
       isLoading.value = false;
     }
@@ -236,7 +234,7 @@ class ConditionSalesController extends GetxController {
       }
       applyClientSideFilters();
     } catch (e) {
-      print("Error loading sales: $e");
+      debugPrint("Error loading sales: $e");
     } finally {
       isLoading.value = false;
       isMoreLoading.value = false;
@@ -301,7 +299,7 @@ class ConditionSalesController extends GetxController {
       allOrders.value = tempOrders;
       applyClientSideFilters();
     } catch (e) {
-      print("Report Error: $e");
+      debugPrint("Report Error: $e");
     } finally {
       isLoading.value = false;
     }
@@ -352,7 +350,7 @@ class ConditionSalesController extends GetxController {
         courierBalances.value = cBalances;
         totalPendingAmount.value = total;
       } catch (e) {
-        print("Global Stat Error: $e");
+        debugPrint("Global Stat Error: $e");
       }
     } else {
       double total = 0.0;
@@ -372,6 +370,218 @@ class ConditionSalesController extends GetxController {
       totalPendingAmount.value = total;
       courierBalances.value = cBalances;
     }
+  }
+
+  bool _isValidChallan(String challanNo) {
+    String c = challanNo.trim();
+    if (c.isEmpty) return false;
+    if (c.length <= 1) {
+      return false; // single char like "0" or "x" = not set yet
+    }
+    return true;
+  }
+
+  Future<void> downloadPendingConditionSalesReport(String courierName) async {
+    isLoading.value = true;
+    try {
+      QuerySnapshot snap =
+          await _db
+              .collection('sales_orders')
+              .where('isCondition', isEqualTo: true)
+              .where('courierName', isEqualTo: courierName)
+              .get();
+
+      List<ConditionOrderModel> pending = [];
+      for (var doc in snap.docs) {
+        final model = ConditionOrderModel.fromFirestore(doc);
+        // Only: still due AND a real challan number has been entered
+        if (model.courierDue > 0.5 && _isValidChallan(model.challanNo)) {
+          pending.add(model);
+        }
+      }
+
+      if (pending.isEmpty) {
+        Get.snackbar(
+          "No Data",
+          "No pending condition sales with a valid challan number were found for $courierName.",
+        );
+        return;
+      }
+
+      pending.sort((a, b) => b.date.compareTo(a.date));
+
+      await _generatePendingReportPdf(pending, courierName);
+    } catch (e) {
+      Get.snackbar("Error", "Failed to generate report: $e");
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+  Future<void> _generatePendingReportPdf(
+    List<ConditionOrderModel> orders,
+    String courierName,
+  ) async {
+    final pdf = pw.Document();
+    final boldFont = await PdfGoogleFonts.robotoBold();
+    final regularFont = await PdfGoogleFonts.robotoRegular();
+
+    double grandTotal = orders.fold(
+      0.0,
+      (sumvalue, o) => sumvalue + o.courierDue,
+    );
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageTheme: pw.PageTheme(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(30),
+          theme: pw.ThemeData.withFont(base: regularFont, bold: boldFont),
+        ),
+        footer:
+            (pw.Context context) => pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text(
+                  "Generated: ${DateFormat('dd/MM/yyyy h:mm a').format(DateTime.now())}",
+                  style: pw.TextStyle(font: regularFont, fontSize: 8),
+                ),
+                pw.Text(
+                  "Page ${context.pageNumber} of ${context.pagesCount}",
+                  style: pw.TextStyle(font: regularFont, fontSize: 8),
+                ),
+              ],
+            ),
+        build:
+            (context) => [
+              pw.Text(
+                "G TEL",
+                style: pw.TextStyle(
+                  font: boldFont,
+                  fontSize: 20,
+                  color: PdfColors.blue900,
+                ),
+              ),
+              pw.SizedBox(height: 4),
+              pw.Text(
+                "Pending Condition Sales Report",
+                style: pw.TextStyle(font: boldFont, fontSize: 14),
+              ),
+              pw.Text(
+                "Courier: $courierName",
+                style: pw.TextStyle(
+                  font: boldFont,
+                  fontSize: 11,
+                  color: PdfColors.blue900,
+                ),
+              ),
+              pw.Text(
+                "(Only invoices with challan number issued & courier due outstanding)",
+                style: pw.TextStyle(
+                  font: regularFont,
+                  fontSize: 9,
+                  color: PdfColors.grey700,
+                ),
+              ),
+              pw.SizedBox(height: 12),
+              pw.Table(
+                border: pw.TableBorder.all(width: 0.5),
+                columnWidths: {
+                  0: const pw.FixedColumnWidth(28),
+                  1: const pw.FlexColumnWidth(3),
+                  2: const pw.FlexColumnWidth(2),
+                  3: const pw.FlexColumnWidth(2),
+                  4: const pw.FlexColumnWidth(2),
+                },
+                children: [
+                  pw.TableRow(
+                    decoration: const pw.BoxDecoration(
+                      color: PdfColors.grey300,
+                    ),
+                    children: [
+                      _reportCell("SL", boldFont, align: pw.TextAlign.center),
+                      _reportCell("Customer Name", boldFont),
+                      _reportCell("Phone", boldFont),
+                      _reportCell("Challan No", boldFont),
+                      _reportCell(
+                        "Amount",
+                        boldFont,
+                        align: pw.TextAlign.right,
+                      ),
+                    ],
+                  ),
+                  ...List.generate(orders.length, (i) {
+                    final o = orders[i];
+                    return pw.TableRow(
+                      children: [
+                        _reportCell(
+                          (i + 1).toString(),
+                          regularFont,
+                          align: pw.TextAlign.center,
+                        ),
+                        _reportCell(o.customerName, regularFont),
+                        _reportCell(o.customerPhone, regularFont),
+                        _reportCell(o.challanNo, regularFont),
+                        _reportCell(
+                          o.courierDue.toStringAsFixed(2),
+                          regularFont,
+                          align: pw.TextAlign.right,
+                        ),
+                      ],
+                    );
+                  }),
+                ],
+              ),
+              pw.SizedBox(height: 10),
+              pw.Container(
+                alignment: pw.Alignment.centerRight,
+                child: pw.Container(
+                  padding: const pw.EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  decoration: pw.BoxDecoration(
+                    border: pw.Border.all(width: 0.7),
+                  ),
+                  child: pw.Row(
+                    mainAxisSize: pw.MainAxisSize.min,
+                    children: [
+                      pw.Text(
+                        "Total Pending Amount : ",
+                        style: pw.TextStyle(font: boldFont, fontSize: 11),
+                      ),
+                      pw.Text(
+                        "৳ ${grandTotal.toStringAsFixed(2)}",
+                        style: pw.TextStyle(
+                          font: boldFont,
+                          fontSize: 13,
+                          color: PdfColors.red800,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+      ),
+    );
+
+    await Printing.layoutPdf(onLayout: (format) => pdf.save());
+  }
+
+  pw.Widget _reportCell(
+    String text,
+    pw.Font font, {
+    pw.TextAlign align = pw.TextAlign.left,
+  }) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.all(6),
+      child: pw.Text(
+        text,
+        textAlign: align,
+        style: pw.TextStyle(font: font, fontSize: 9),
+      ),
+    );
   }
 
   Future<void> receiveConditionPayment({

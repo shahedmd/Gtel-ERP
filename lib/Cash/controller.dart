@@ -1,5 +1,3 @@
-// ignore_for_file: empty_catches, curly_braces_in_flow_control_structures, deprecated_member_use
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:get/get.dart';
 import 'package:flutter/material.dart';
@@ -88,8 +86,9 @@ class CashDrawerController extends GetxController {
     if (startIndex >= _allTransactions.length) {
       paginatedTransactions.clear();
     } else {
-      if (endIndex > _allTransactions.length)
+      if (endIndex > _allTransactions.length) {
         endIndex = _allTransactions.length;
+      }
       paginatedTransactions.assignAll(
         _allTransactions.sublist(startIndex, endIndex),
       );
@@ -278,14 +277,15 @@ class CashDrawerController extends GetxController {
               }
             } else {
               String s = pm.toString().toLowerCase();
-              if (s.contains('bank'))
+              if (s.contains('bank')) {
                 b = actualReceived;
-              else if (s.contains('bkash'))
+              } else if (s.contains('bkash')) {
                 bk = actualReceived;
-              else if (s.contains('nagad'))
+              } else if (s.contains('nagad')) {
                 n = actualReceived;
-              else
+              } else {
                 c = actualReceived;
+              }
             }
 
             List<String> activeMethods = [];
@@ -340,23 +340,25 @@ class CashDrawerController extends GetxController {
             String from = (data['fromMethod'] ?? 'Cash').toString();
             String to = (data['toMethod'] ?? 'Cash').toString();
 
-            if (from == 'Bank')
+            if (from == 'Bank') {
               tBank -= amt;
-            else if (from == 'Bkash')
+            } else if (from == 'Bkash') {
               tBkash -= amt;
-            else if (from == 'Nagad')
+            } else if (from == 'Nagad') {
               tNagad -= amt;
-            else
+            } else {
               tCash -= amt;
+            }
 
-            if (to == 'Bank')
+            if (to == 'Bank') {
               tBank += amt;
-            else if (to == 'Bkash')
+            } else if (to == 'Bkash') {
               tBkash += amt;
-            else if (to == 'Nagad')
+            } else if (to == 'Nagad') {
               tNagad += amt;
-            else
+            } else {
               tCash += amt;
+            }
 
             if (isInPeriod) {
               periodTxList.add(
@@ -377,24 +379,26 @@ class CashDrawerController extends GetxController {
 
             if (type == 'deposit') {
               if (isInPeriod) periodCollections += amt;
-              if (isBank)
+              if (isBank) {
                 tBank += amt;
-              else if (isBkash)
+              } else if (isBkash) {
                 tBkash += amt;
-              else if (isNagad)
+              } else if (isNagad) {
                 tNagad += amt;
-              else
+              } else {
                 tCash += amt;
+              }
             } else {
               if (isInPeriod) periodExpenses += amt;
-              if (isBank)
+              if (isBank) {
                 tBank -= amt;
-              else if (isBkash)
+              } else if (isBkash) {
                 tBkash -= amt;
-              else if (isNagad)
+              } else if (isNagad) {
                 tNagad -= amt;
-              else
+              } else {
                 tCash -= amt;
+              }
             }
 
             if (isInPeriod) {

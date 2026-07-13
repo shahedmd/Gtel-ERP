@@ -6,6 +6,7 @@ import '../../Shipment/controller.dart';
 import 'ongoining_shipment_page.dart';
 import 'stockshorlistandchinaorder.dart';
 import 'stockdamange_servicepage.dart';
+import 'stocklosspage.dart';
 import 'stockcontroller.dart';
 import 'helperdialogs.dart';
 import 'stockproductmodel.dart';
@@ -29,6 +30,8 @@ const _kTextSecondary = Color(0xFF64748B);
 const _kTableHeader = Color(0xFFF1F5F9);
 const _kGrey = Color(0xFF9CA3AF);
 const _kGreySoft = Color(0xFFF3F4F6);
+const _kPurple = Color(0xFF7C3AED);
+const _kPurpleSoft = Color(0xFFF5F3FF);
 
 // ─── Column widths — NAME removed, WAREHOUSE wider ──────────────────────────
 
@@ -209,6 +212,14 @@ class _ProductScreenState extends State<ProductScreen> {
     ),
     const SizedBox(width: 4),
     _appBarBtn(
+      'Loss',
+      Icons.report_gmailerrorred_outlined,
+      _kPurple,
+      () => Get.to(() => StockLossPage()),
+      bg: _kPurpleSoft,
+    ),
+    const SizedBox(width: 4),
+    _appBarBtn(
       'Alerts',
       Icons.warning_amber_rounded,
       _kRed,
@@ -251,6 +262,9 @@ class _ProductScreenState extends State<ProductScreen> {
       case 'service':
         Get.to(() => ServicePage());
         break;
+      case 'loss':
+        Get.to(() => StockLossPage());
+        break;
       case 'alerts':
         Get.to(() => ShortlistPage());
         break;
@@ -263,6 +277,12 @@ class _ProductScreenState extends State<ProductScreen> {
   List<PopupMenuEntry<String>> _appBarMenuItems() => [
     _menuItem('shipments', 'Shipments', Icons.local_shipping, Colors.orange),
     _menuItem('service', 'Service Center', Icons.handyman, Colors.orange),
+    _menuItem(
+      'loss',
+      'Stock Loss',
+      Icons.report_gmailerrorred_outlined,
+      _kPurple,
+    ),
     _menuItem('alerts', 'Low Stock', Icons.warning_amber, _kRed),
     _menuItem('refresh', 'Refresh Data', Icons.refresh, _kBlue),
   ];
@@ -1137,6 +1157,12 @@ class _ProductScreenState extends State<ProductScreen> {
                   _kRed,
                 ),
                 _menuItem(
+                  'loss',
+                  'Report Loss',
+                  Icons.report_gmailerrorred_outlined,
+                  _kPurple,
+                ),
+                _menuItem(
                   'transfer',
                   'Transfer Stock',
                   Icons.swap_horiz,
@@ -1205,6 +1231,9 @@ class _ProductScreenState extends State<ProductScreen> {
             currentAvgPrice: p.avgPurchasePrice,
           ),
         );
+        break;
+      case 'loss':
+        _showReportLossDialog(context, p);
         break;
       case 'transfer':
         _showTransferDialog(context, p);
@@ -2021,6 +2050,342 @@ class _ProductScreenState extends State<ProductScreen> {
               }
             },
             child: Text('Confirm $action'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─── Report Loss Dialog ─────────────────────────────────────────────────────
+  //
+  // Records a stock shortage/loss for this product. Lets the user pick the
+  // warehouse to deduct from (or leave it as "Any / FIFO" to let the server
+  // pick), a reason, an optional note, and the quantity lost.
+
+  static const List<String> _lossReasons = [
+    'Damaged',
+    'Stolen',
+    'Count Mismatch',
+    'Expired',
+    'Unspecified',
+  ];
+
+  void _showReportLossDialog(BuildContext context, Product p) {
+    final qtyC = TextEditingController();
+    final noteC = TextEditingController();
+    final RxString reason = _lossReasons.first.obs;
+    // 0 == "Any warehouse" (server picks FIFO)
+    final RxInt warehouseId = RxInt(0);
+    final RxString lossError = RxString('');
+
+    Get.dialog(
+      AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        titlePadding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
+        contentPadding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+        actionsPadding: const EdgeInsets.all(16),
+        title: Row(
+          children: [
+            const Icon(
+              Icons.report_gmailerrorred_outlined,
+              color: _kPurple,
+              size: 20,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Report Loss: ${p.model}',
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 16,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        content: SizedBox(
+          width: 400,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _kPurpleSoft,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.inventory_2_outlined,
+                        size: 15,
+                        color: _kPurple,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Available stock: ${p.stockQty} · Avg cost: ৳${p.avgPurchasePrice.toStringAsFixed(2)}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: _kPurple,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  'Warehouse',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: _kTextSecondary,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Obx(() {
+                  final options =
+                      p.warehouseStocks
+                          .where((s) => (safeInt(s['qty'])) > 0)
+                          .toList();
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: _kBorder),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<int>(
+                        isExpanded: true,
+                        value: warehouseId.value,
+                        items: [
+                          const DropdownMenuItem(
+                            value: 0,
+                            child: Text(
+                              'Any warehouse (auto)',
+                              style: TextStyle(fontSize: 13),
+                            ),
+                          ),
+                          ...options.map((s) {
+                            final id = safeInt(s['warehouse_id']);
+                            final qty = safeInt(s['qty']);
+                            return DropdownMenuItem(
+                              value: id,
+                              child: Row(
+                                children: [
+                                  const Icon(
+                                    Icons.store_outlined,
+                                    size: 15,
+                                    color: _kTextSecondary,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    '${s['warehouse_name']}',
+                                    style: const TextStyle(fontSize: 13),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: _kBlueSoft,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      '$qty pcs',
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        color: _kBlue,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }),
+                        ],
+                        onChanged: (v) {
+                          if (v != null) {
+                            warehouseId.value = v;
+                            lossError.value = '';
+                          }
+                        },
+                      ),
+                    ),
+                  );
+                }),
+                const SizedBox(height: 14),
+                const Text(
+                  'Reason',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: _kTextSecondary,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Obx(
+                  () => Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: _kBorder),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        isExpanded: true,
+                        value: reason.value,
+                        items:
+                            _lossReasons
+                                .map(
+                                  (r) => DropdownMenuItem(
+                                    value: r,
+                                    child: Text(
+                                      r,
+                                      style: const TextStyle(fontSize: 13),
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                        onChanged: (v) {
+                          if (v != null) reason.value = v;
+                        },
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: qtyC,
+                  keyboardType: TextInputType.number,
+                  autofocus: true,
+                  onChanged: (_) => lossError.value = '',
+                  decoration: InputDecoration(
+                    labelText: 'Quantity Lost',
+                    prefixIcon: const Icon(Icons.numbers, size: 18),
+                    isDense: true,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 12,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: noteC,
+                  maxLines: 2,
+                  decoration: InputDecoration(
+                    labelText: 'Note (optional)',
+                    hintText: 'e.g. Found broken during stock count',
+                    hintStyle: const TextStyle(fontSize: 12),
+                    isDense: true,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 12,
+                    ),
+                  ),
+                ),
+                Obx(
+                  () =>
+                      lossError.value.isEmpty
+                          ? const SizedBox.shrink()
+                          : Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Text(
+                              lossError.value,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: _kRed,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                ),
+                const SizedBox(height: 4),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: Get.back,
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: _kTextSecondary),
+            ),
+          ),
+          Obx(
+            () => ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _kPurple,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              icon:
+                  controller.isActionLoading.value
+                      ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                      : const Icon(Icons.report_gmailerrorred, size: 16),
+              label: const Text(
+                'Record Loss',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              onPressed:
+                  controller.isActionLoading.value
+                      ? null
+                      : () async {
+                        final qty = int.tryParse(qtyC.text) ?? 0;
+                        if (qty <= 0) {
+                          lossError.value =
+                              'Enter a quantity greater than zero.';
+                          return;
+                        }
+                        if (qty > p.stockQty) {
+                          lossError.value =
+                              'Cannot exceed available stock (${p.stockQty}).';
+                          return;
+                        }
+                        final success = await controller.recordStockLoss(
+                          productId: p.id,
+                          qty: qty,
+                          warehouseId:
+                              warehouseId.value == 0 ? null : warehouseId.value,
+                          reason: reason.value,
+                          note: noteC.text.trim(),
+                        );
+                        if (success) Get.back();
+                      },
+            ),
           ),
         ],
       ),
