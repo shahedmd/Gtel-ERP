@@ -35,11 +35,23 @@ class GlobalPurchaseHistoryController extends GetxController {
   var debtorNameCache = <String, String>{}.obs;
 
   // --- FILTER & DATE STATE ---
-  var activeFilter = HistoryFilter.monthly.obs;
+  // FIX: default filter changed from monthly -> daily (today only)
+  var activeFilter = HistoryFilter.daily.obs;
   var dateRange =
       DateTimeRange(
-        start: DateTime(DateTime.now().year, DateTime.now().month, 1),
-        end: DateTime.now(),
+        start: DateTime(
+          DateTime.now().year,
+          DateTime.now().month,
+          DateTime.now().day,
+        ),
+        end: DateTime(
+          DateTime.now().year,
+          DateTime.now().month,
+          DateTime.now().day,
+          23,
+          59,
+          59,
+        ),
       ).obs;
 
   var totalAmount = 0.0.obs;
@@ -62,7 +74,11 @@ class GlobalPurchaseHistoryController extends GetxController {
   @override
   void onInit() {
     super.onInit();
-    applyFilter(HistoryFilter.monthly);
+    // FIX: dateRange already defaults to "today" above, so we just fetch
+    // directly instead of routing through applyFilter(daily), which would
+    // pop open a date picker on first app load (bad UX + needs BuildContext
+    // that may not be ready yet at startup).
+    fetchPurchases();
   }
 
   // ========================================================
@@ -253,8 +269,16 @@ class GlobalPurchaseHistoryController extends GetxController {
       if (snap.docs.isNotEmpty) {
         _lastDocument = snap.docs.last;
         hasMore.value = snap.docs.length == _pageSize;
-        List<Map<String, dynamic>> tempList = [];
 
+        // FIX: batch-fetch any missing debtor names in one (or a few)
+        // queries instead of one query per document inside the loop.
+        List<String> debtorIdsInPage =
+            snap.docs
+                .map((doc) => doc.reference.parent.parent?.id ?? 'Unknown')
+                .toList();
+        await _fetchMissingDebtorNames(debtorIdsInPage);
+
+        List<Map<String, dynamic>> tempList = [];
         for (var doc in snap.docs) {
           Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
           data['id'] = doc.id;
@@ -263,9 +287,6 @@ class GlobalPurchaseHistoryController extends GetxController {
           String debtorId = doc.reference.parent.parent?.id ?? 'Unknown';
           data['debtorId'] = debtorId;
 
-          if (!debtorNameCache.containsKey(debtorId)) {
-            await _fetchDebtorName(debtorId);
-          }
           tempList.add(data);
         }
         purchaseList.value = tempList;
@@ -284,16 +305,46 @@ class GlobalPurchaseHistoryController extends GetxController {
     }
   }
 
-  Future<void> _fetchDebtorName(String id) async {
-    try {
-      if (id == 'Unknown') return;
-      DocumentSnapshot doc = await _db.collection('debatorbody').doc(id).get();
-      if (doc.exists) {
-        debtorNameCache[id] = doc['name'] ?? 'Unknown Debtor';
-      } else {
-        debtorNameCache[id] = 'Deleted Debtor';
+  // FIX: replaces the old per-document `_fetchDebtorName` loop.
+  // Collects every debtorId that isn't already cached and resolves them
+  // in batches of 30 (Firestore's whereIn limit) using the document ID,
+  // instead of firing one .get() per debtor.
+  Future<void> _fetchMissingDebtorNames(List<String> debtorIds) async {
+    List<String> missingIds =
+        debtorIds
+            .where((id) => id != 'Unknown' && !debtorNameCache.containsKey(id))
+            .toSet()
+            .toList();
+
+    if (missingIds.isEmpty) return;
+
+    for (int i = 0; i < missingIds.length; i += 30) {
+      List<String> chunk = missingIds.sublist(
+        i,
+        i + 30 > missingIds.length ? missingIds.length : i + 30,
+      );
+      try {
+        QuerySnapshot snap =
+            await _db
+                .collection('debatorbody')
+                .where(FieldPath.documentId, whereIn: chunk)
+                .get();
+
+        for (var doc in snap.docs) {
+          debtorNameCache[doc.id] = doc['name'] ?? 'Unknown Debtor';
+        }
+
+        // Anything in the chunk that didn't come back no longer exists -
+        // cache it as "Deleted Debtor" so we never re-query it again.
+        for (var id in chunk) {
+          if (!debtorNameCache.containsKey(id)) {
+            debtorNameCache[id] = 'Deleted Debtor';
+          }
+        }
+      } catch (e) {
+        print("Batch debtor name fetch error: $e");
       }
-    } catch (_) {}
+    }
   }
 
   void _calculatePageTotal() {
@@ -340,17 +391,25 @@ class GlobalPurchaseHistoryController extends GetxController {
               ? Timestamp.fromDate(customDate)
               : FieldValue.serverTimestamp();
 
-      batch.set(histRef, {
+      Map<String, dynamic> newPaymentData = {
         'date': dateField,
         'type': 'payment',
         'amount': amount,
         'method': method,
         'note': note,
         'isAdjustment': false,
-      });
+      };
+
+      batch.set(histRef, newPaymentData);
 
       DocumentReference debtorRef = _db.collection('debatorbody').doc(debtorId);
-      batch.update(debtorRef, {'purchaseDue': FieldValue.increment(-amount)});
+      batch.update(debtorRef, {
+        'purchaseDue': FieldValue.increment(-amount),
+        // FIX: keep the running total in sync with DebtorPurchaseController's
+        // stats fields, so per-debtor stats stay correct regardless of which
+        // screen the payment was made from.
+        'totalPaid': FieldValue.increment(amount),
+      });
 
       await batch.commit();
 
@@ -365,7 +424,34 @@ class GlobalPurchaseHistoryController extends GetxController {
         print("Expense Auto-add failed: $e");
       }
 
-      await fetchPurchases();
+      // FIX: avoid a full fetchPurchases() (up to 20 reads + name lookups)
+      // when we can just splice the record we already wrote into the list.
+      DateTime effectiveDate = customDate ?? DateTime.now();
+      bool matchesSupplierFilter =
+          selectedDebtorId.value == null ||
+          selectedDebtorId.value!.isEmpty ||
+          selectedDebtorId.value == debtorId;
+      bool withinRange =
+          !effectiveDate.isBefore(dateRange.value.start) &&
+          !effectiveDate.isAfter(dateRange.value.end);
+
+      if (isFirstPage.value && matchesSupplierFilter && withinRange) {
+        purchaseList.insert(0, {
+          ...newPaymentData,
+          'id': histRef.id,
+          'debtorId': debtorId,
+          'date': effectiveDate,
+        });
+        if (purchaseList.length > _pageSize) {
+          purchaseList.removeLast();
+        }
+        _calculatePageTotal();
+      } else {
+        // Doesn't belong on the currently visible page - a real refetch
+        // is unavoidable here to keep pagination consistent.
+        await fetchPurchases();
+      }
+
       if (Get.isDialogOpen ?? false) Get.back();
       Get.snackbar("Success", "Payment Recorded.");
     } catch (e) {
@@ -419,6 +505,9 @@ class GlobalPurchaseHistoryController extends GetxController {
             .doc(debtorId);
         batch.update(debtorRef, {
           'purchaseDue': FieldValue.increment(difference),
+          // FIX: keep totalPurchased running-total in sync too, since an
+          // edit changes the invoiced amount just like a new purchase would.
+          'totalPurchased': FieldValue.increment(difference),
         });
       }
 
@@ -496,7 +585,25 @@ class GlobalPurchaseHistoryController extends GetxController {
         await Future.wait(stockUpdates);
       }
 
-      await fetchPurchases();
+      // FIX: avoid a full fetchPurchases() re-query. We already know
+      // exactly what changed, so splice it into the existing list.
+      int idx = purchaseList.indexWhere((e) => e['id'] == purchaseId);
+      if (idx != -1) {
+        purchaseList[idx] = {
+          ...purchaseList[idx],
+          'items': newItems,
+          'totalAmount': newTotal,
+          'note': note,
+          if (customDate != null) 'date': customDate,
+        };
+        purchaseList.refresh();
+        _calculatePageTotal();
+      } else {
+        // Item isn't in the currently loaded page (e.g. edited from a
+        // detail view reached another way) - fall back to a real refetch.
+        await fetchPurchases();
+      }
+
       if (Get.isDialogOpen ?? false) Get.back();
       Get.snackbar("Success", "Purchase Invoice successfully updated.");
     } catch (e) {
@@ -536,6 +643,14 @@ class GlobalPurchaseHistoryController extends GetxController {
               .orderBy('date', descending: true)
               .limit(500)
               .get();
+
+      // FIX: batch-resolve any debtor names missing from the cache instead
+      // of falling back to "Debtor #ID" in the report.
+      List<String> debtorIdsInReport =
+          allSnap.docs
+              .map((d) => d.reference.parent.parent?.id ?? 'Unknown')
+              .toList();
+      await _fetchMissingDebtorNames(debtorIdsInReport);
 
       final dataList = <List<String>>[];
       double totalPeriod = 0.0;

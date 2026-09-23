@@ -1,6 +1,7 @@
 import 'package:get/get.dart';
 import 'package:gtel_erp/Cash/controller.dart';
 import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
+import 'package:gtel_erp/Customer/customercontroller.dart';
 import 'package:gtel_erp/Shipment/controller.dart';
 import 'package:gtel_erp/Core/Menubar%20&%20Navigation/sidemenubar.dart';
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/Debtor%20Purchase/purchasecontroller.dart';
@@ -22,13 +23,14 @@ class HomeBinding extends Bindings {
 
     Get.put(DailySalesController(), permanent: true);
     Get.put(OverviewController(), permanent: true);
+    Get.put(CashDrawerController(), permanent: true);
 
     Get.lazyPut(() => DebatorController(), fenix: true);
     Get.lazyPut(() => ProductController(), fenix: true);
-    Get.lazyPut(() => CashDrawerController(), fenix: true);
     Get.lazyPut(() => ShipmentController(), fenix: true);
     Get.lazyPut(() => StaffController(), fenix: true);
     Get.lazyPut(() => DebtorPurchaseController(), fenix: true);
     Get.lazyPut(() => RoleController(), fenix: true);
+    Get.lazyPut(() => CustomerAnalyticsController(), fenix: true);
   }
 }

@@ -1,17 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
-
 import 'package:gtel_erp/Cash/controller.dart';
 
 class CashDrawerView extends StatelessWidget {
-  // Use Get.put to instantiate the controller if not already present
-  final controller = Get.put(CashDrawerController());
+  final controller = Get.find<CashDrawerController>();
   final NumberFormat currencyFormatter = NumberFormat('#,##0.00');
 
   CashDrawerView({super.key});
 
-  // --- THEME COLORS ---
   static const Color darkBlue = Color(0xFF1E293B);
   static const Color bgLight = Color(0xFFF1F5F9);
   static const Color borderCol = Color(0xFFCBD5E1);

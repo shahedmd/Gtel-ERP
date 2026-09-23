@@ -699,14 +699,27 @@ class DailySalesController extends GetxController {
       Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
       bool isCond = data['isCondition'] ?? false;
 
+      // 🌟 FIX: "isCondition" শুধু বোঝায় চালান/ডেলিভারি পেজ প্রিন্ট হবে কিনা।
+      // আসল due টা কোথা থেকে (courierDue vs daily_sales pending) আনতে হবে
+      // সেটা নির্ধারণ করে "saleMode":
+      //   - "condition"      -> real courier-financed sale, due আসে courierDue থেকে
+      //   - "non_condition"  -> condition UI দিয়ে বানানো হলেও financially normal
+      //                         sale, due আসে daily_sales থেকে (ঠিক normal-এর মতো)
+      //   - "normal"         -> সাধারণ sale, due আসে daily_sales থেকে
+      // পুরনো ডকুমেন্টে (saleMode ফিল্ড না থাকলে) isCondition দিয়ে fallback করি,
+      // যেন আগের কোনো sales_orders ডকুমেন্ট ভেঙে না যায়.
+      String saleMode = data['saleMode'] ?? (isCond ? 'condition' : 'normal');
+      bool isRealConditionFlow = saleMode == 'condition';
+
       Map<String, dynamic> payMap = Map<String, dynamic>.from(
         data['paymentDetails'] ?? {},
       );
 
-      if (isCond) {
+      if (isRealConditionFlow) {
         payMap['due'] =
             double.tryParse(data['courierDue']?.toString() ?? '0') ?? 0.0;
       } else {
+        // এই ব্লক এখন normal এবং non_condition — দুটোতেই চলবে
         QuerySnapshot dailySnap =
             await _db
                 .collection('daily_sales')
@@ -809,7 +822,6 @@ class DailySalesController extends GetxController {
       String challan = data['challanNo'] ?? "";
       String packagerName = data['packagerName'] ?? '';
 
-      // 🌟 FIX PART A: EXTRACT THE DISCOUNT NOTE FROM FIRESTORE 🌟
       String savedDiscountNote = data['discountNote'] ?? "";
 
       List<Map<String, dynamic>> items = List<Map<String, dynamic>>.from(
@@ -859,8 +871,7 @@ class DailySalesController extends GetxController {
         runningDueSnap: snapRun,
         authorizedName: sellerName,
         authorizedPhone: sellerPhone,
-        discountNote:
-            savedDiscountNote, // 🌟 FIX PART B: PASS THE SAVED NOTE 🌟
+        discountNote: savedDiscountNote,
         packagerName: packagerName,
         invoiceDate: invoiceDate,
         discount: discountVal,

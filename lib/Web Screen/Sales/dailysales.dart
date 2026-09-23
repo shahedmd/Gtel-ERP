@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:gtel_erp/ActivityLogger/activity_logger.dart';
 import 'package:intl/intl.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:pdf/pdf.dart';
@@ -1215,6 +1216,13 @@ class DailySalesPage extends StatelessWidget {
       onConfirm: () {
         Get.back();
         dailyCtrl.deleteSale(saleId);
+
+        // Activity Log
+        Get.find<ActivityLogger>().logDelete(
+          LogModule.sales,
+          "Deleted daily sale for '$name'",
+          targetId: saleId,
+        );
       },
     );
   }

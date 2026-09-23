@@ -2,6 +2,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:gtel_erp/ActivityLogger/activity_logger.dart';
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/Debtor%20Purchase/purchasepage.dart';
 import 'package:intl/intl.dart';
 import 'gteldebtorcontroller.dart';
@@ -1438,6 +1439,19 @@ class Debatordetails extends StatelessWidget {
                                     tx.originalTx.id,
                                   );
                                 }
+
+                                // Activity Log
+                                final amount =
+                                    tx.debitAmount > 0
+                                        ? tx.debitAmount
+                                        : tx.creditAmount;
+                                Get.find<ActivityLogger>().logDelete(
+                                  LogModule.cash,
+                                  "Deleted ${tx.type} transaction of ৳${amount.toStringAsFixed(0)}"
+                                  "${tx.note.isNotEmpty ? ' (${tx.note})' : ''} for debtor '$name'",
+                                  targetId: tx.originalTx.id,
+                                );
+
                                 if (dialogContext.mounted) {
                                   Navigator.of(dialogContext).pop();
                                 }

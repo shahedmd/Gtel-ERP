@@ -34,7 +34,7 @@ class CustomerAnalyticsController extends GetxController {
     'This Year',
     'Custom',
   ];
-  var selectedDateFilter = 'This Month'.obs;
+  var selectedDateFilter = 'Today'.obs;
   var customStartDate = DateTime.now().obs;
   var customEndDate = DateTime.now().obs;
 
@@ -51,6 +51,21 @@ class CustomerAnalyticsController extends GetxController {
   final int invoiceLimitPerPage = 20;
   var reprintingInvoiceId = ''.obs;
 
+  // ------------------------------------------------------------------
+  // READ-COST GUARD: avoid re-scanning sales_orders on every rebuild /
+  // repeated navigation / accidental double taps.
+  // ------------------------------------------------------------------
+  bool _isFetchingReport = false;
+  String? _lastFetchKey;
+  DateTime? _lastFetchTime;
+  static const Duration _cacheFreshness = Duration(minutes: 3);
+
+  // Per-customer invoice cache so re-opening the same customer's detail
+  // page (without new sales) doesn't re-query Firestore.
+  final Map<String, List<Map<String, dynamic>>> _invoiceCache = {};
+  final Map<String, DocumentSnapshot?> _invoiceCacheLastDoc = {};
+  final Map<String, bool> _invoiceCacheHasMore = {};
+
   @override
   void onInit() {
     super.onInit();
@@ -63,7 +78,36 @@ class CustomerAnalyticsController extends GetxController {
     return NumberFormat('#,##0.00').format(amount);
   }
 
-  Future<void> generateReport() async {
+  String _buildCacheKey() {
+    if (selectedDateFilter.value == 'Custom') {
+      return 'Custom_${customStartDate.value.toIso8601String()}_${customEndDate.value.toIso8601String()}';
+    }
+    return selectedDateFilter.value;
+  }
+
+  /// Fetches & aggregates sales_orders for the selected date range.
+  ///
+  /// [forceRefresh]: bypasses the cache check. Use this for a manual
+  /// "pull to refresh" / explicit re-generate action where the user
+  /// really wants the latest numbers. Normal filter taps should NOT
+  /// force refresh — they should reuse a still-fresh cache.
+  Future<void> generateReport({bool forceRefresh = false}) async {
+    final cacheKey = _buildCacheKey();
+
+    // Skip re-fetch if same filter was fetched recently and caller
+    // didn't explicitly ask for a fresh read.
+    if (!forceRefresh &&
+        _lastFetchKey == cacheKey &&
+        _lastFetchTime != null &&
+        DateTime.now().difference(_lastFetchTime!) < _cacheFreshness) {
+      applyLocalFilters();
+      return;
+    }
+
+    // Prevent overlapping fetches (double-tap on Generate button etc.)
+    if (_isFetchingReport) return;
+    _isFetchingReport = true;
+
     isLoading.value = true;
     _fetchedData.clear();
 
@@ -127,9 +171,6 @@ class CustomerAnalyticsController extends GetxController {
           continue;
         }
 
-        // ==========================================
-        // UPDATED: Now grouping by customerName
-        // ==========================================
         String name = (data['customerName'] ?? '').toString().trim();
         if (name.isEmpty) name = "Guest";
 
@@ -147,14 +188,12 @@ class CustomerAnalyticsController extends GetxController {
         double saleAmt = double.tryParse(data['grandTotal'].toString()) ?? 0.0;
         double profitAmt = double.tryParse(data['profit'].toString()) ?? 0.0;
 
-        // Group by customerName instead of phone
         if (tempMap.containsKey(name)) {
           var entry = tempMap[name]!;
           entry.totalSales += saleAmt;
           entry.totalProfit += profitAmt;
           entry.orderCount += 1;
 
-          // If a customer was saved without a phone earlier, update if phone is found
           if (entry.phone == 'Unknown' && phone != 'Unknown') {
             entry.phone = phone;
           }
@@ -184,11 +223,14 @@ class CustomerAnalyticsController extends GetxController {
       }
 
       _fetchedData = tempMap.values.toList();
+      _lastFetchKey = cacheKey;
+      _lastFetchTime = DateTime.now();
       applyLocalFilters();
     } catch (e) {
       Get.snackbar("Error", "Analysis Failed: $e");
     } finally {
       isLoading.value = false;
+      _isFetchingReport = false;
     }
   }
 
@@ -253,8 +295,20 @@ class CustomerAnalyticsController extends GetxController {
   }
 
   Future<void> loadCustomerDetails(CustomerAnalyticsModel customer) async {
-    isDetailsLoading.value = true;
     selectedCustomerProfile.value = customer;
+
+    // Reuse cached invoices for this customer if we already fetched them
+    // in this session (e.g. user tapped back then re-opened the same
+    // customer). Avoids a repeat query.
+    if (_invoiceCache.containsKey(customer.name)) {
+      selectedCustomerInvoices.value = _invoiceCache[customer.name]!;
+      _lastInvoiceDoc = _invoiceCacheLastDoc[customer.name];
+      hasMoreInvoices.value = _invoiceCacheHasMore[customer.name] ?? true;
+      isDetailsLoading.value = false;
+      return;
+    }
+
+    isDetailsLoading.value = true;
     selectedCustomerInvoices.clear();
     hasMoreInvoices.value = true;
     _lastInvoiceDoc = null;
@@ -263,9 +317,6 @@ class CustomerAnalyticsController extends GetxController {
       QuerySnapshot snap =
           await _db
               .collection('sales_orders')
-              // ==========================================
-              // UPDATED: Now filtering by customerName
-              // ==========================================
               .where('customerName', isEqualTo: customer.name)
               .orderBy('timestamp', descending: true)
               .limit(invoiceLimitPerPage)
@@ -287,6 +338,10 @@ class CustomerAnalyticsController extends GetxController {
       if (snap.docs.length < invoiceLimitPerPage) {
         hasMoreInvoices.value = false;
       }
+
+      _invoiceCache[customer.name] = selectedCustomerInvoices.toList();
+      _invoiceCacheLastDoc[customer.name] = _lastInvoiceDoc;
+      _invoiceCacheHasMore[customer.name] = hasMoreInvoices.value;
     } catch (e) {
       Get.snackbar("Error", "Could not load invoice history: $e");
     } finally {
@@ -306,9 +361,6 @@ class CustomerAnalyticsController extends GetxController {
       QuerySnapshot snap =
           await _db
               .collection('sales_orders')
-              // ==========================================
-              // UPDATED: Now filtering by customerName
-              // ==========================================
               .where(
                 'customerName',
                 isEqualTo: selectedCustomerProfile.value!.name,
@@ -335,6 +387,11 @@ class CustomerAnalyticsController extends GetxController {
       if (snap.docs.length < invoiceLimitPerPage) {
         hasMoreInvoices.value = false;
       }
+
+      final name = selectedCustomerProfile.value!.name;
+      _invoiceCache[name] = selectedCustomerInvoices.toList();
+      _invoiceCacheLastDoc[name] = _lastInvoiceDoc;
+      _invoiceCacheHasMore[name] = hasMoreInvoices.value;
     } catch (e) {
       print("Error loading more invoices: $e");
     } finally {
@@ -405,8 +462,6 @@ class CustomerAnalyticsController extends GetxController {
           build: (context) {
             return [
               pw.SizedBox(height: 10),
-
-              // TABLE STRUCTURE SHOWING LAST ORDER DATE
               pw.Table.fromTextArray(
                 headers: [
                   "Customer Name",

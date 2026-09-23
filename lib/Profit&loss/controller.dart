@@ -28,6 +28,10 @@ class ProfitController extends GetxController {
   var netPendingChange = 0.0.obs;
   var effectiveProfitMargin = 0.0.obs;
 
+  // --- BUSINESS-WIDE (LIFETIME) MARGIN ---
+  var businessAvgMargin = 0.0.obs;
+  bool _marginLoaded = false;
+
   // --- BREAKDOWNS ---
   var saleDailyCustomer = 0.0.obs;
   var saleDebtor = 0.0.obs;
@@ -45,7 +49,6 @@ class ProfitController extends GetxController {
     super.onInit();
     isLoading.value = true;
 
-    // Set default values to TODAY
     final now = DateTime.now();
     startDate.value = DateTime(now.year, now.month, now.day);
     endDate.value = DateTime(now.year, now.month, now.day, 23, 59, 59);
@@ -54,7 +57,6 @@ class ProfitController extends GetxController {
   @override
   void onReady() {
     super.onReady();
-    // Trigger Today's fetch on page load
     Future.delayed(const Duration(milliseconds: 250), () {
       setDateRange('Today');
     });
@@ -62,7 +64,6 @@ class ProfitController extends GetxController {
 
   void refreshData() => fetchProfitAndLoss();
 
-  // --- FAST PARSING HELPER ---
   double _parseDouble(dynamic val) {
     if (val == null) return 0.0;
     if (val is double) return val;
@@ -71,7 +72,6 @@ class ProfitController extends GetxController {
     return 0.0;
   }
 
-  // --- SORTING ---
   void sortTransactions(String? type) {
     if (type != null) sortOption.value = type;
     List<Map<String, dynamic>> temp = List.from(transactionList);
@@ -87,7 +87,7 @@ class ProfitController extends GetxController {
   }
 
   // =========================================================================
-  // DATE FILTERS (Restored YOUR Original Formula)
+  // DATE FILTERS
   // =========================================================================
   void setDateRange(String type) {
     selectedFilterLabel.value = type;
@@ -114,7 +114,7 @@ class ProfitController extends GetxController {
     final DateTimeRange? picked = await showDateRangePicker(
       context: context,
       firstDate: DateTime(2022),
-      lastDate: DateTime(2050), // Prevents Crash
+      lastDate: DateTime(2050),
       initialDateRange: DateTimeRange(
         start: startDate.value,
         end: endDate.value,
@@ -150,11 +150,47 @@ class ProfitController extends GetxController {
   }
 
   // =========================================================================
+  // LIFETIME AVERAGE MARGIN
+  // =========================================================================
+  Future<void> _fetchLifetimeMargin() async {
+    try {
+      final revAgg =
+          await _db
+              .collection('sales_orders')
+              .aggregate(sum('grandTotal'))
+              .get();
+      final costAgg =
+          await _db
+              .collection('sales_orders')
+              .aggregate(sum('totalCost'))
+              .get();
+
+      double totalRev = (revAgg.getSum('grandTotal') ?? 0).toDouble();
+      double totalCost = (costAgg.getSum('totalCost') ?? 0).toDouble();
+
+      if (totalRev > 0) {
+        businessAvgMargin.value = ((totalRev - totalCost) / totalRev).clamp(
+          0.0,
+          1.0,
+        );
+      }
+      _marginLoaded = true;
+    } catch (e) {
+      print("Lifetime margin fetch failed, will retry next time: $e");
+    }
+  }
+
+  // =========================================================================
   // MAIN CALCULATION LOGIC
   // =========================================================================
   Future<void> fetchProfitAndLoss() async {
     isLoading.value = true;
     _resetMetrics();
+
+    if (!_marginLoaded) {
+      await _fetchLifetimeMargin();
+      _marginLoaded = true;
+    }
 
     try {
       final startTS = Timestamp.fromDate(startDate.value);
@@ -193,13 +229,59 @@ class ProfitController extends GetxController {
             profitOnRevenue.value / totalRevenue.value;
       }
 
+      // [BUGFIX] Build the set of invoice IDs that were CREATED in this
+      // same period. A daily_sales collection entry that points back to
+      // one of these invoices is NOT an "old due" recovery -- it's the
+      // exact same money already recognised above via
+      // paymentDetails.totalPaidInput in _processSalesData(). Without
+      // this exclusion, a debtor/wholesale/agent customer who pays
+      // against an invoice created THIS period gets counted twice:
+      // once as period sales profit, and again as "old due" profit at
+      // the average margin -- which is what was pushing Cash Profit
+      // above Paper Profit every month/year.
+      //
+      // NOTE: this assumes each daily_sales doc stores a linking field
+      // back to its invoice (assumed here to be 'invoiceId', matching
+      // the field already read off sales_orders docs below). If your
+      // daily_sales schema uses a different field name (e.g. 'orderId'
+      // or 'saleId'), rename it in the two spots marked [BUGFIX] below.
+      final Set<String> periodInvoiceIds =
+          coreResults[0].docs.map((d) {
+            final data = d.data() as Map<String, dynamic>;
+            return (data['invoiceId']?.toString() ?? d.id);
+          }).toSet();
+
       double oldDueCashProfit = await _processCollectionData(
         coreResults[1],
         ledgerSnap,
+        periodInvoiceIds,
+      );
+
+      print(
+        "DEBUG P&L: salesProfit=$salesProfit, oldDueCashProfit=$oldDueCashProfit, "
+        "businessAvgMargin=${businessAvgMargin.value}, "
+        "profitOnRevenue=${profitOnRevenue.value}",
       );
 
       netRealizedProfit.value = salesProfit + oldDueCashProfit;
       netPendingChange.value = totalRevenue.value - totalCollected.value;
+
+      // [BUGFIX] Safety net: Net Realized (cash) profit should never be
+      // able to exceed Paper Profit for money that originated THIS
+      // period plus genuinely old recoveries -- but if a daily_sales
+      // doc is missing the invoiceId link (so it can't be matched
+      // above), clamp defensively so a data-quality gap can't silently
+      // reintroduce the same symptom. Remove this once you've confirmed
+      // every daily_sales doc reliably carries the link field.
+      if (netRealizedProfit.value > profitOnRevenue.value &&
+          profitOnRevenue.value > 0) {
+        print(
+          "WARNING: netRealizedProfit (${netRealizedProfit.value}) still "
+          "exceeds profitOnRevenue (${profitOnRevenue.value}) after the "
+          "same-period exclusion -- check daily_sales docs for a missing "
+          "or mismatched invoice link field.",
+        );
+      }
 
       sortTransactions(null);
     } catch (e) {
@@ -263,7 +345,6 @@ class ProfitController extends GetxController {
       bool isCondition = data['isCondition'] == true;
       String name = data['customerName'] ?? 'Unknown';
 
-      // Restored original Date extracting just in case Strings were messing it up
       DateTime date;
       if (data['timestamp'] != null) {
         date = (data['timestamp'] as Timestamp).toDate();
@@ -314,6 +395,7 @@ class ProfitController extends GetxController {
   Future<double> _processCollectionData(
     QuerySnapshot dailySnap,
     QuerySnapshot? ledgerSnap,
+    Set<String> periodInvoiceIds, // [BUGFIX] new parameter
   ) async {
     double tColCust = 0, tColDebtor = 0, tColCond = 0, oldMoneyCollected = 0.0;
     int loopCounter = 0;
@@ -335,16 +417,27 @@ class ProfitController extends GetxController {
       String source =
           data['source'] is String ? data['source'].toLowerCase() : '';
 
+      // [BUGFIX] If this collection is linked to an invoice that was
+      // ALSO created in this same period, it's already reflected in
+      // salesProfit via paymentDetails.totalPaidInput -- don't let it
+      // inflate oldMoneyCollected (and therefore oldDueCashProfit) a
+      // second time. Rename 'invoiceId' below if your daily_sales docs
+      // use a different field name to link back to the invoice.
+      final String linkedInvoiceId = data['invoiceId']?.toString() ?? '';
+      final bool isSamePeriodInvoice =
+          linkedInvoiceId.isNotEmpty &&
+          periodInvoiceIds.contains(linkedInvoiceId);
+
       if (source.contains('condition') || type == 'courier_payment') {
         tColCond += amount;
-        oldMoneyCollected += amount;
+        if (!isSamePeriodInvoice) oldMoneyCollected += amount;
       } else if (type == 'debtor' ||
           source.contains('payment') ||
           source.contains('due') ||
           source.contains('old') ||
           source.contains('recovery')) {
         tColDebtor += amount;
-        oldMoneyCollected += amount;
+        if (!isSamePeriodInvoice) oldMoneyCollected += amount;
       } else {
         tColCust += amount;
       }
@@ -371,7 +464,7 @@ class ProfitController extends GetxController {
     collectionCondition.value = tColCond;
     totalCollected.value = tColCust + tColDebtor + tColCond;
 
-    return oldMoneyCollected * effectiveProfitMargin.value;
+    return oldMoneyCollected * businessAvgMargin.value;
   }
 
   void _resetMetrics() {
@@ -441,7 +534,6 @@ class ProfitController extends GetxController {
                 ],
               ),
               pw.SizedBox(height: 20),
-
               pw.Container(
                 padding: const pw.EdgeInsets.all(10),
                 color: PdfColors.grey100,
@@ -466,7 +558,6 @@ class ProfitController extends GetxController {
                 ),
               ),
               pw.SizedBox(height: 15),
-
               pw.Container(
                 padding: const pw.EdgeInsets.all(10),
                 decoration: pw.BoxDecoration(
@@ -508,7 +599,6 @@ class ProfitController extends GetxController {
                 ),
               ),
               pw.SizedBox(height: 15),
-
               pw.Container(
                 padding: const pw.EdgeInsets.all(10),
                 color:
@@ -555,7 +645,6 @@ class ProfitController extends GetxController {
                 style: pw.TextStyle(font: fontBold, fontSize: 12),
               ),
               pw.SizedBox(height: 5),
-
               pw.Table(
                 border: pw.TableBorder.all(
                   color: PdfColors.grey300,

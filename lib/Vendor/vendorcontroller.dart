@@ -621,30 +621,70 @@ class VendorController extends GetxController {
   }
 
   // ============================================================
-  // PROFESSIONAL VENDOR PDF (MULTIPAGE & FULL HISTORY SAFE)
+  // PROFESSIONAL VENDOR PDF (MULTIPAGE, DATE-RANGE FILTER & FIXED COLUMN WIDTHS)
   // ============================================================
 
-  Future<void> generateVendorReport(VendorModel vendor) async {
+  /// Generates a Statement of Account PDF for [vendor].
+  /// Pass [startDate] and [endDate] to restrict the statement to that range
+  /// (both inclusive). If either is null, the full history is used.
+  Future<void> generateVendorReport(
+    VendorModel vendor, {
+    DateTime? startDate,
+    DateTime? endDate,
+  }) async {
     try {
-      // 1. Show loading indicator while we fetch the full history
+      // 1. Show loading indicator while we fetch the history
       Get.dialog(
         const Center(child: CircularProgressIndicator()),
         barrierDismissible: false,
       );
 
-      // 2. Fetch ALL transactions for this vendor (ignoring pagination limits)
-      QuerySnapshot snapshot =
-          await _firestore
-              .collection('vendors')
-              .doc(vendor.docId)
-              .collection('history')
-              .orderBy('date', descending: false) // Fetch chronologically
-              .get();
+      // 2. Build the query — optionally scoped to the selected date range
+      Query historyQuery = _firestore
+          .collection('vendors')
+          .doc(vendor.docId)
+          .collection('history')
+          .orderBy('date', descending: false); // Fetch chronologically
+
+      if (startDate != null) {
+        final DateTime dayStart = DateTime(
+          startDate.year,
+          startDate.month,
+          startDate.day,
+        );
+        historyQuery = historyQuery.where(
+          'date',
+          isGreaterThanOrEqualTo: Timestamp.fromDate(dayStart),
+        );
+      }
+
+      if (endDate != null) {
+        // Push to the very end of the selected end day so that day's
+        // transactions are included too.
+        final DateTime dayEnd = DateTime(
+          endDate.year,
+          endDate.month,
+          endDate.day,
+          23,
+          59,
+          59,
+          999,
+        );
+        historyQuery = historyQuery.where(
+          'date',
+          isLessThanOrEqualTo: Timestamp.fromDate(dayEnd),
+        );
+      }
+
+      QuerySnapshot snapshot = await historyQuery.get();
 
       Get.back(); // Close loading dialog
 
       if (snapshot.docs.isEmpty) {
-        Get.snackbar("Info", "No transactions found to print for this vendor.");
+        Get.snackbar(
+          "Info",
+          "No transactions found to print for this vendor${startDate != null || endDate != null ? ' in the selected date range' : ''}.",
+        );
         return;
       }
 
@@ -659,27 +699,44 @@ class VendorController extends GetxController {
         decimalDigits: 2,
       );
 
-      double totalDebit = 0.0;
-      double totalCredit = 0.0;
+      double totalBills = 0.0;
+      double totalPayments = 0.0;
+      double totalAdvanceRefund = 0.0;
 
-      // 4. Calculate Totals
+      // 4. Calculate Totals — three distinct categories:
+      //    Bill (goods purchased / manually added), Payment (paid to
+      //    vendor, with or without a prior bill — i.e. incl. advance
+      //    payments), and Advance/Refund received FROM the vendor.
       for (var t in transactions) {
-        bool isDebit = (t.type.toUpperCase() == 'CREDIT');
-        double amount = t.amount;
-
-        if (isDebit) {
-          totalDebit += amount;
+        if (t.isIncomingCash) {
+          totalAdvanceRefund += t.amount;
+        } else if (t.type.toUpperCase() == 'CREDIT') {
+          totalBills += t.amount;
         } else {
-          totalCredit += amount;
+          totalPayments += t.amount;
         }
       }
 
-      double netBalance = totalDebit - totalCredit;
+      // Mirrors the same running-balance logic used when the transaction
+      // is recorded (see addTransaction): Bills and incoming Advance/Refund
+      // both add to what's due, Payments reduce it.
+      double netBalance = (totalBills + totalAdvanceRefund) - totalPayments;
       String balanceLabel = "Net Balance";
       if (netBalance > 0) {
         balanceLabel = "Due Balance";
       } else if (netBalance < 0) {
         balanceLabel = "Advance Balance";
+      }
+
+      // Optional date-range label shown under the vendor name in the header
+      String? rangeLabel;
+      if (startDate != null && endDate != null) {
+        rangeLabel =
+            "Period: ${DateFormat('dd MMM yyyy').format(startDate)} - ${DateFormat('dd MMM yyyy').format(endDate)}";
+      } else if (startDate != null) {
+        rangeLabel = "From: ${DateFormat('dd MMM yyyy').format(startDate)}";
+      } else if (endDate != null) {
+        rangeLabel = "Up to: ${DateFormat('dd MMM yyyy').format(endDate)}";
       }
 
       // Helper widget
@@ -706,6 +763,27 @@ class VendorController extends GetxController {
       String formatMethodForPdf(String? method, String type) {
         if (method == null || method.isEmpty) return "-";
         return method;
+      }
+
+      // 'bill'            -> goods purchased / manually added bill (Debit)
+      // 'payment'         -> paid to vendor, incl. advance payments made
+      //                      when there's no bill yet (Credit)
+      // 'advance_refund'  -> advance or refund received FROM the vendor
+      //                      (Credit, but color-coded separately)
+      String transactionCategory(VendorTransaction t) {
+        if (t.isIncomingCash) return 'advance_refund';
+        return (t.type.toUpperCase() == 'CREDIT') ? 'bill' : 'payment';
+      }
+
+      String transactionTypeLabel(String category) {
+        switch (category) {
+          case 'bill':
+            return "BILL";
+          case 'advance_refund':
+            return "ADVANCE/REFUND";
+          default:
+            return "PAYMENT";
+        }
       }
 
       // 5. MultiPage builder ensures NO rows are ever missed.
@@ -740,6 +818,16 @@ class VendorController extends GetxController {
                             fontWeight: pw.FontWeight.bold,
                           ),
                         ),
+                        if (rangeLabel != null) ...[
+                          pw.SizedBox(height: 2),
+                          pw.Text(
+                            rangeLabel,
+                            style: const pw.TextStyle(
+                              fontSize: 10,
+                              color: PdfColors.grey700,
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                     pw.Column(
@@ -774,6 +862,16 @@ class VendorController extends GetxController {
                 ),
                 headerHeight: 28,
                 cellHeight: 25,
+                // Fixed proportional widths so the Description column
+                // (which can contain long notes) never squeezes out the
+                // other columns.
+                columnWidths: {
+                  0: const pw.FlexColumnWidth(1.3), // Date
+                  1: const pw.FlexColumnWidth(2.8), // Description
+                  2: const pw.FlexColumnWidth(1.4), // Payment Method
+                  3: const pw.FlexColumnWidth(1.3), // Debit
+                  4: const pw.FlexColumnWidth(1.3), // Credit
+                },
                 cellAlignments: {
                   0: pw.Alignment.centerLeft,
                   1: pw.Alignment.centerLeft,
@@ -793,15 +891,49 @@ class VendorController extends GetxController {
                   "Debit",
                   "Credit",
                 ],
+                // Color-codes the amount cell so the three transaction
+                // kinds stay visually distinct even though Payment and
+                // Advance/Refund share the Credit column: red for Bill
+                // (Debit), green for Payment, blue for Advance/Refund
+                // received from the vendor.
+                cellDecoration: (int columnIndex, dynamic data, int rowNum) {
+                  final int dataIndex = rowNum - 1; // headerCount == 1
+                  if ((columnIndex != 3 && columnIndex != 4) ||
+                      dataIndex < 0 ||
+                      dataIndex >= transactions.length) {
+                    return const pw.BoxDecoration();
+                  }
+                  final String category = transactionCategory(
+                    transactions[dataIndex],
+                  );
+                  if (columnIndex == 3 && category == 'bill') {
+                    return const pw.BoxDecoration(color: PdfColors.red50);
+                  }
+                  if (columnIndex == 4 && category == 'payment') {
+                    return const pw.BoxDecoration(color: PdfColors.green50);
+                  }
+                  if (columnIndex == 4 && category == 'advance_refund') {
+                    return const pw.BoxDecoration(color: PdfColors.blue50);
+                  }
+                  return const pw.BoxDecoration();
+                },
                 data:
                     transactions.map((t) {
-                      bool isDebit = (t.type.toUpperCase() == 'CREDIT');
+                      final String category = transactionCategory(t);
+                      final bool isDebit = category == 'bill';
                       String method = formatMethodForPdf(
                         t.paymentMethod,
                         t.type,
                       );
 
-                      String desc = isDebit ? "DEBIT" : "CREDIT";
+                      // Description shows the plain-English type label
+                      // plus any note/shipment — Debit/Credit columns
+                      // carry the actual figure.
+                      String desc = transactionTypeLabel(category);
+                      if (t.shipmentName != null &&
+                          t.shipmentName!.trim().isNotEmpty) {
+                        desc += "\n${t.shipmentName}";
+                      }
                       if (t.notes != null && t.notes!.trim().isNotEmpty) {
                         desc += "\nNote: ${t.notes}";
                       }
@@ -827,8 +959,17 @@ class VendorController extends GetxController {
                 child: pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
                   children: [
-                    pdfStat("Total Debit", totalDebit, PdfColors.red900),
-                    pdfStat("Total Credit", totalCredit, PdfColors.green900),
+                    pdfStat("Total Bills", totalBills, PdfColors.red900),
+                    pdfStat(
+                      "Total Payments",
+                      totalPayments,
+                      PdfColors.green900,
+                    ),
+                    pdfStat(
+                      "Advance/Refund",
+                      totalAdvanceRefund,
+                      PdfColors.blue900,
+                    ),
                     pdfStat(balanceLabel, netBalance.abs(), PdfColors.black),
                   ],
                 ),
@@ -838,13 +979,45 @@ class VendorController extends GetxController {
         ),
       );
 
+      final String fileSuffix =
+          (startDate != null && endDate != null)
+              ? '_${DateFormat('ddMMyyyy').format(startDate)}-${DateFormat('ddMMyyyy').format(endDate)}'
+              : '';
+
       await Printing.layoutPdf(
         onLayout: (format) => pdf.save(),
-        name: 'Statement_${vendor.name.replaceAll(' ', '_')}.pdf',
+        name: 'Statement_${vendor.name.replaceAll(' ', '_')}$fileSuffix.pdf',
       );
     } catch (e) {
       if (Get.isDialogOpen ?? false) Get.back(); // Close dialog if error occurs
       Get.snackbar("Error", "PDF Generation Failed: $e");
     }
+  }
+
+  /// Convenience wrapper: opens a date-range picker dialog, then generates
+  /// the statement for the selected range. Call this directly from a button
+  /// (e.g. onPressed: () => controller.pickRangeAndGenerateReport(vendor)).
+  Future<void> pickRangeAndGenerateReport(
+    VendorModel vendor, {
+    BuildContext? context,
+  }) async {
+    final BuildContext ctx = context ?? Get.context!;
+    final DateTimeRange? picked = await showDateRangePicker(
+      context: ctx,
+      firstDate: DateTime(2015),
+      lastDate: DateTime.now(),
+      initialDateRange: DateTimeRange(
+        start: DateTime.now().subtract(const Duration(days: 30)),
+        end: DateTime.now(),
+      ),
+    );
+
+    if (picked == null) return; // User cancelled
+
+    await generateVendorReport(
+      vendor,
+      startDate: picked.start,
+      endDate: picked.end,
+    );
   }
 }

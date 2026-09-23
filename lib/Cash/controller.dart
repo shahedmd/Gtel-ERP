@@ -74,7 +74,7 @@ class CashDrawerController extends GetxController {
   @override
   void onInit() {
     super.onInit();
-    setFilter(DateFilter.monthly);
+    setFilter(DateFilter.daily);
   }
 
   // --- PAGINATION ---

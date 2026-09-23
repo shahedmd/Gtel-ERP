@@ -493,7 +493,9 @@ class GlobalPurchasePage extends StatelessWidget {
     DateTime date =
         (item['date'] is Timestamp)
             ? (item['date'] as Timestamp).toDate()
-            : DateTime.now();
+            : (item['date'] is DateTime
+                ? item['date'] as DateTime
+                : DateTime.now());
     String type = (item['type'] ?? 'unknown').toString().toLowerCase();
     double amount =
         double.tryParse((item['totalAmount'] ?? item['amount']).toString()) ??

@@ -732,13 +732,13 @@ class ShipmentPage extends StatelessWidget {
                                       ),
                                     ),
                                     title: Text(
-                                      item.productName,
+                                      item.productModel,
                                       style: const TextStyle(
                                         fontWeight: FontWeight.bold,
                                       ),
                                     ),
                                     subtitle: Text(
-                                      "${item.productModel} • Ctn: ${item.cartonNo} • ${item.seaQty}s/${item.airQty}a",
+                                      "${item.productName} • Ctn: ${item.cartonNo} • ${item.seaQty}s/${item.airQty}a",
                                     ),
                                     trailing: Row(
                                       mainAxisSize: MainAxisSize.min,

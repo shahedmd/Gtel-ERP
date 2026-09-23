@@ -559,11 +559,48 @@ class VendorDetailPage extends StatelessWidget {
           child: Container(color: AppTheme.border, height: 1),
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.print_outlined),
+          // Print Statement — choose Full history or a specific Date Range
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.print_outlined, color: AppTheme.darkSlate),
             tooltip: "Print Statement",
-            // Pass the whole vendor object so we have the ID to fetch all data
-            onPressed: () => controller.generateVendorReport(vendor),
+            onSelected: (value) {
+              if (value == 'full') {
+                controller.generateVendorReport(vendor);
+              } else if (value == 'range') {
+                controller.pickRangeAndGenerateReport(vendor, context: context);
+              }
+            },
+            itemBuilder:
+                (context) => const [
+                  PopupMenuItem(
+                    value: 'full',
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.receipt_long,
+                          size: 18,
+                          color: AppTheme.textMuted,
+                        ),
+                        SizedBox(width: 10),
+                        Text("Full Statement"),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'range',
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.date_range,
+                          size: 18,
+                          color: AppTheme.textMuted,
+                        ),
+                        SizedBox(width: 10),
+                        Text("Select Date Range"),
+                      ],
+                    ),
+                  ),
+                ],
           ),
         ],
       ),
@@ -656,7 +693,7 @@ class VendorDetailPage extends StatelessWidget {
                   ),
                 ),
                 Expanded(
-                  flex: 4,
+                  flex: 3,
                   child: Text(
                     "DESCRIPTION",
                     style: TextStyle(
@@ -678,9 +715,21 @@ class VendorDetailPage extends StatelessWidget {
                   ),
                 ),
                 Expanded(
-                  flex: 3,
+                  flex: 2,
                   child: Text(
-                    "AMOUNT",
+                    "DEBIT",
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.textMuted,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  flex: 2,
+                  child: Text(
+                    "CREDIT",
                     textAlign: TextAlign.right,
                     style: TextStyle(
                       fontSize: 11,
@@ -814,7 +863,7 @@ class VendorDetailPage extends StatelessWidget {
                   ),
                 ),
                 Expanded(
-                  flex: 4,
+                  flex: 3,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -848,44 +897,67 @@ class VendorDetailPage extends StatelessWidget {
                 ),
                 Expanded(
                   flex: 2,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color:
-                          (isCredit && !isIncoming)
-                              ? AppTheme.danger.withOpacity(0.1)
-                              : AppTheme.success.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      isIncoming ? "ADVANCE" : (isCredit ? "BILL" : "PAYMENT"),
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        color:
-                            (isCredit && !isIncoming)
-                                ? AppTheme.danger
-                                : AppTheme.success,
-                      ),
-                      textAlign: TextAlign.center,
+                  child: Builder(
+                    builder: (context) {
+                      // Three distinct colors so Payment and
+                      // Advance/Refund (which both reduce/offset what's
+                      // owed) never get confused with each other:
+                      // Bill = red, Payment = green, Advance/Refund
+                      // from vendor = blue.
+                      final Color badgeColor =
+                          isIncoming
+                              ? AppTheme.primary
+                              : (isCredit ? AppTheme.danger : AppTheme.success);
+                      final String badgeText =
+                          isIncoming
+                              ? "ADVANCE/REFUND"
+                              : (isCredit ? "BILL" : "PAYMENT");
+                      return Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: badgeColor.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          badgeText,
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: badgeColor,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                // Bill -> Debit column (red). Payment -> Credit column
+                // (green). Advance/Refund from vendor -> Credit column
+                // too, but blue, so it never reads as a regular Payment.
+                Expanded(
+                  flex: 2,
+                  child: Text(
+                    (isCredit && !isIncoming) ? tx.formattedAmount : "",
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.danger,
                     ),
                   ),
                 ),
                 Expanded(
-                  flex: 3,
+                  flex: 2,
                   child: Text(
-                    tx.formattedAmount,
+                    (!isCredit || isIncoming) ? tx.formattedAmount : "",
                     textAlign: TextAlign.right,
                     style: TextStyle(
-                      fontSize: 13,
+                      fontSize: 12,
                       fontWeight: FontWeight.bold,
-                      color:
-                          (isCredit && !isIncoming)
-                              ? AppTheme.danger
-                              : AppTheme.success,
+                      color: isIncoming ? AppTheme.primary : AppTheme.success,
                     ),
                   ),
                 ),

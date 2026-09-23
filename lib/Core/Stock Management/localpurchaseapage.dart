@@ -1,4 +1,5 @@
 // ignore_for_file: avoid_print, deprecated_member_use, must_be_immutable
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
@@ -28,9 +29,8 @@ class SmartPurchaseScreen extends StatefulWidget {
 class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
   // --- Controllers ---
   final DebatorController debtorCtrl = Get.find<DebatorController>();
-  final DebtorPurchaseController purchaseCtrl = Get.put(
-    DebtorPurchaseController(),
-  );
+  final DebtorPurchaseController purchaseCtrl =
+      Get.find<DebtorPurchaseController>();
   final ProductController productCtrl = Get.find<ProductController>();
 
   // --- Reactive States ---
@@ -49,6 +49,17 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
   late TextEditingController noteController;
   TextEditingController? _internalSupplierCtrl;
   TextEditingController? _internalProductCtrl;
+
+  // ------------------------------------------------------------------
+  // SEARCH DEBOUNCE: Autocomplete's optionsBuilder fires on every
+  // keystroke. Without a delay, typing one name fires one Firestore
+  // query (or one backend HTTP call) per character. These generation
+  // counters let us wait until the user pauses typing before actually
+  // querying, and any older in-flight lookup discards its result.
+  // ------------------------------------------------------------------
+  int _supplierSearchGen = 0;
+  int _productSearchGen = 0;
+  static const Duration _searchDebounce = Duration(milliseconds: 400);
 
   @override
   void initState() {
@@ -397,6 +408,16 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
               List<String> searchTerms = qLower.split(RegExp(r'\s+'));
               String primaryTerm = searchTerms.first;
 
+              // Wait for a pause in typing before hitting Firestore.
+              // If the user types again within the window, this call's
+              // generation becomes stale and it bails out without
+              // querying — only the last keystroke's call actually reads.
+              final int myGen = ++_supplierSearchGen;
+              await Future.delayed(_searchDebounce);
+              if (myGen != _supplierSearchGen) {
+                return const Iterable<DebtorModel>.empty();
+              }
+
               Map<String, DebtorModel> combinedResults = {};
 
               if (primaryTerm.isNotEmpty) {
@@ -407,6 +428,12 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
                           .where('searchKeywords', arrayContains: primaryTerm)
                           .limit(20)
                           .get();
+                  // Bail again if a newer keystroke arrived while this
+                  // query was in flight, so a slow old result can't
+                  // flash stale options over the current text.
+                  if (myGen != _supplierSearchGen) {
+                    return const Iterable<DebtorModel>.empty();
+                  }
                   for (var doc in snap.docs) {
                     combinedResults[doc.id] = DebtorModel.fromFirestore(doc);
                   }
@@ -581,6 +608,12 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
               String queryText = textEditingValue.text.trim();
               if (queryText.isEmpty) return const Iterable<Product>.empty();
 
+              final int myGen = ++_productSearchGen;
+              await Future.delayed(_searchDebounce);
+              if (myGen != _productSearchGen) {
+                return const Iterable<Product>.empty();
+              }
+
               try {
                 final uri = Uri.parse(
                   '${ProductController.baseUrl}/products',
@@ -592,6 +625,9 @@ class _SmartPurchaseScreenState extends State<SmartPurchaseScreen> {
                   },
                 );
                 final res = await http.get(uri);
+                if (myGen != _productSearchGen) {
+                  return const Iterable<Product>.empty();
+                }
                 if (res.statusCode == 200) {
                   final data = jsonDecode(res.body);
                   final List productsJson = data['products'] ?? [];

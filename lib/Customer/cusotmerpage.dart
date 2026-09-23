@@ -10,8 +10,7 @@ import 'package:intl/intl.dart';
 class CustomerAnalyticsPage extends StatelessWidget {
   CustomerAnalyticsPage({super.key});
 
-  final controller = Get.put(CustomerAnalyticsController());
-
+  final controller = Get.find<CustomerAnalyticsController>();
   // Professional Color Palette
   static const Color darkBlue = Color(0xFF1E293B);
   static const Color brandBlue = Color(0xFF2563EB);

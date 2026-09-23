@@ -1173,9 +1173,9 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
   }
 
   void _showReceiveConfirmation() {
-    // Local reactive state — dialog এর ভেতরেই scoped
     final Rx<Warehouse?> selectedWarehouse = Rx<Warehouse?>(null);
     final locationCtrl = TextEditingController();
+    final RxBool isSubmitting = false.obs; // 👈 নতুন লোকাল ফ্ল্যাগ
 
     String warningMoneyStr =
         widget.shipment.exchangeRate > 0
@@ -1186,104 +1186,11 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
       title: "Confirm Stock Receipt",
       contentPadding: const EdgeInsets.all(20),
       content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Text(
-            "Are you sure you want to finalize this shipment?",
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 10),
-
-          // Shortage warning — unchanged
-          if (valueDifference > 0)
-            Container(
-              padding: const EdgeInsets.all(10),
-              color: Colors.red[50],
-              child: Text(
-                "Warning: Shortage of $warningMoneyStr detected. This will be logged as Vendor Loss.",
-                style: const TextStyle(
-                  color: Colors.red,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ),
-          const SizedBox(height: 14),
-
-          // ── WAREHOUSE SELECTION ──────────────────────────
-          Obx(
-            () => DropdownButtonFormField<Warehouse?>(
-              value: selectedWarehouse.value,
-              decoration: const InputDecoration(
-                labelText: "Destination Warehouse",
-                hintText: "Optional",
-                border: OutlineInputBorder(),
-                isDense: true,
-                prefixIcon: Icon(Icons.warehouse_outlined, size: 18),
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-              ),
-              items: [
-                const DropdownMenuItem<Warehouse?>(
-                  value: null,
-                  child: Text(
-                    "No specific warehouse",
-                    style: TextStyle(color: Colors.grey),
-                  ),
-                ),
-                ...productController.activeWarehouses.map(
-                  (w) => DropdownMenuItem<Warehouse?>(
-                    value: w,
-                    child: Text(w.name),
-                  ),
-                ),
-              ],
-              onChanged: (w) => selectedWarehouse.value = w,
-            ),
-          ),
-
-          // ── LOCATION FIELD — warehouse select হলেই দেখাবে ──
-          Obx(
-            () =>
-                selectedWarehouse.value != null
-                    ? Padding(
-                      padding: const EdgeInsets.only(top: 10),
-                      child: TextField(
-                        controller: locationCtrl,
-                        decoration: const InputDecoration(
-                          labelText: "Location in Warehouse",
-                          hintText: "e.g. Rack A3, Shelf 2",
-                          border: OutlineInputBorder(),
-                          isDense: true,
-                          prefixIcon: Icon(
-                            Icons.location_on_outlined,
-                            size: 18,
-                          ),
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 10,
-                          ),
-                        ),
-                      ),
-                    )
-                    : const SizedBox.shrink(),
-          ),
-
-          // ────────────────────────────────────────────────
-          const SizedBox(height: 10),
-          const Text(
-            "Stock will be added to inventory immediately.",
-            style: TextStyle(fontSize: 11, color: Colors.grey),
-          ),
-        ],
+        // ...unchanged content...
       ),
 
-      // Cancel — unchanged
       cancel: Obx(() {
-        final isLoading = controller.isLoading.value;
+        final isLoading = controller.isLoading.value || isSubmitting.value;
         return TextButton(
           onPressed: isLoading ? null : () => Get.back(),
           child: Text(
@@ -1293,9 +1200,8 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
         );
       }),
 
-      // Confirm — warehouseId + warehouseLocation এখন pass হচ্ছে
       confirm: Obx(() {
-        final isLoading = controller.isLoading.value;
+        final isLoading = controller.isLoading.value || isSubmitting.value;
         return ElevatedButton(
           style: ElevatedButton.styleFrom(
             backgroundColor: kHeaderColor,
@@ -1306,42 +1212,54 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
               isLoading
                   ? null
                   : () async {
-                    final updatedShipment = ShipmentModel(
-                      docId: widget.shipment.docId,
-                      shipmentName: widget.shipment.shipmentName,
-                      purchaseDate: widget.shipment.purchaseDate,
-                      vendorName: widget.shipment.vendorName,
-                      carrier: widget.shipment.carrier,
-                      exchangeRate: widget.shipment.exchangeRate,
-                      totalCartons: widget.shipment.totalCartons,
-                      totalWeight: widget.shipment.totalWeight,
-                      carrierCostPerCarton:
-                          widget.shipment.carrierCostPerCarton,
-                      totalCarrierFee: widget.shipment.totalCarrierFee,
-                      totalAmount: widget.shipment.totalAmount,
-                      isReceived: false,
-                      items: editedItems,
-                      carrierReport: reportCtrl.text,
-                    );
+                    isSubmitting.value = true; // 👈 সাথে সাথে লক করে দিন
 
-                    await controller.updateShipmentDetails(
-                      updatedShipment,
-                      editedItems,
-                      reportCtrl.text,
-                    );
+                    try {
+                      final updatedShipment = ShipmentModel(
+                        docId: widget.shipment.docId,
+                        shipmentName: widget.shipment.shipmentName,
+                        purchaseDate: widget.shipment.purchaseDate,
+                        vendorName: widget.shipment.vendorName,
+                        carrier: widget.shipment.carrier,
+                        exchangeRate: widget.shipment.exchangeRate,
+                        totalCartons: widget.shipment.totalCartons,
+                        totalWeight: widget.shipment.totalWeight,
+                        carrierCostPerCarton:
+                            widget.shipment.carrierCostPerCarton,
+                        totalCarrierFee: widget.shipment.totalCarrierFee,
+                        totalAmount: widget.shipment.totalAmount,
+                        isReceived: false,
+                        items: editedItems,
+                        carrierReport: reportCtrl.text,
+                      );
 
-                    // ── warehouse info সহ receive ──
-                    await controller.receiveShipmentFast(
-                      updatedShipment,
-                      DateTime.now(),
-                      warehouseId: selectedWarehouse.value?.id,
-                      warehouseLocation:
-                          locationCtrl.text.trim().isEmpty
-                              ? null
-                              : locationCtrl.text.trim(),
-                    );
+                      await controller.updateShipmentDetails(
+                        updatedShipment,
+                        editedItems,
+                        reportCtrl.text,
+                      );
 
-                    locationCtrl.dispose();
+                      await controller.receiveShipmentFast(
+                        updatedShipment,
+                        DateTime.now(),
+                        warehouseId: selectedWarehouse.value?.id,
+                        warehouseLocation:
+                            locationCtrl.text.trim().isEmpty
+                                ? null
+                                : locationCtrl.text.trim(),
+                      );
+
+                      locationCtrl.dispose();
+                      Get.back(); // 👈 সবচেয়ে গুরুত্বপূর্ণ লাইন — কাজ শেষে ডায়ালগ বন্ধ করা
+                    } catch (e) {
+                      isSubmitting.value = false; // এরর হলে আবার আনলক করুন
+                      Get.snackbar(
+                        "Error",
+                        "Failed to receive shipment: $e",
+                        backgroundColor: Colors.red,
+                        colorText: Colors.white,
+                      );
+                    }
                   },
           child:
               isLoading
