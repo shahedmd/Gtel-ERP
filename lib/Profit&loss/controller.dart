@@ -247,7 +247,7 @@ class ProfitController extends GetxController {
       // or 'saleId'), rename it in the two spots marked [BUGFIX] below.
       final Set<String> periodInvoiceIds =
           coreResults[0].docs.map((d) {
-            final data = d.data() as Map<String, dynamic>;
+            final data = d.data();
             return (data['invoiceId']?.toString() ?? d.id);
           }).toSet();
 

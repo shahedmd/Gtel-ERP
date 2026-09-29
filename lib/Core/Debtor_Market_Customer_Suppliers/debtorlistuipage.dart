@@ -712,19 +712,12 @@ class Debatorpage extends StatelessWidget {
     if (debtor.isAgent) {
       Get.to(() => Debatordetails(id: debtor.id, name: debtor.name));
     } else {
-      Get.dialog(
-        GetBuilder<_CustomerLedgerController>(
-          init: _CustomerLedgerController(debtor, controller),
-          tag: debtor.id,
-          builder:
-              (ledgerCtrl) => _CustomerLedgerDialog(
-                debtor: debtor,
-                categoryColor: _categoryColor(debtor),
-                ledgerCtrl: ledgerCtrl,
-              ),
+      Get.to(
+        () => _RegularCustomerDetailsPage(
+          debtor: debtor,
+          categoryColor: _categoryColor(debtor),
         ),
-        barrierDismissible: false,
-      ).then((_) => Get.delete<_CustomerLedgerController>(tag: debtor.id));
+      );
     }
   }
 
@@ -1392,6 +1385,7 @@ class _CustomerLedgerController extends GetxController {
 
   final RxBool isLoadingInvoices = true.obs;
   final RxList<Map<String, dynamic>> invoices = <Map<String, dynamic>>[].obs;
+  final RxInt selectedTab = 0.obs;
 
   // Collect-due form state
   final amountC = TextEditingController();
@@ -1402,6 +1396,49 @@ class _CustomerLedgerController extends GetxController {
   final RxString payMethodType = 'cash'.obs;
   final RxBool showCollectForm = false.obs;
   final RxBool isSubmitting = false.obs;
+
+  // Discount form state
+  final discountC = TextEditingController();
+  final discountNoteC = TextEditingController();
+  final RxBool showDiscountForm = false.obs;
+  final RxBool isDiscountSubmitting = false.obs;
+
+  List<Map<String, dynamic>> get activityEntries {
+    final entries = <Map<String, dynamic>>[];
+    for (final inv in invoices) {
+      final List<dynamic> paymentHistory =
+          (inv['paymentHistory'] as List<dynamic>? ?? []);
+
+      if (paymentHistory.isNotEmpty) {
+        for (final item in paymentHistory) {
+          if (item is! Map) continue;
+          final data = Map<String, dynamic>.from(item);
+          final timestamp = data['timestamp'] is Timestamp
+              ? (data['timestamp'] as Timestamp).toDate()
+              : DateTime.now();
+          entries.add({
+            'title': (data['note'] ?? 'Payment').toString(),
+            'amount': (data['amount'] as num?)?.toDouble() ?? 0.0,
+            'type': (data['type'] ?? 'payment').toString(),
+            'date': timestamp,
+          });
+        }
+      } else {
+        final timestamp = inv['timestamp'] is Timestamp
+            ? (inv['timestamp'] as Timestamp).toDate()
+            : DateTime.now();
+        entries.add({
+          'title': 'Invoice ${inv['invoiceId'] ?? inv['transactionId'] ?? 'created'}',
+          'amount': (inv['pending'] as num?)?.toDouble() ?? 0.0,
+          'type': 'invoice',
+          'date': timestamp,
+        });
+      }
+    }
+
+    entries.sort((a, b) => (b['date'] as DateTime).compareTo(a['date'] as DateTime));
+    return entries;
+  }
 
   @override
   void onInit() {
@@ -1416,6 +1453,8 @@ class _CustomerLedgerController extends GetxController {
     bankNameC.dispose();
     accountNoC.dispose();
     mobileNoC.dispose();
+    discountC.dispose();
+    discountNoteC.dispose();
     super.onClose();
   }
 
@@ -1433,6 +1472,33 @@ class _CustomerLedgerController extends GetxController {
   @override
   Future<void> refresh() async {
     await _loadInvoices();
+  }
+
+  Future<void> submitDiscount() async {
+    double amount = double.tryParse(discountC.text.trim()) ?? 0;
+    if (amount <= 0) {
+      Get.snackbar("Error", "Enter a valid discount amount.");
+      return;
+    }
+
+    isDiscountSubmitting.value = true;
+    try {
+      await mainCtrl.applyRegularCustomerDiscount(
+        customerId: debtor.id,
+        customerName: debtor.name,
+        customerCategory: debtor.customerCategory,
+        amount: amount,
+        note: discountNoteC.text.trim(),
+        date: DateTime.now(),
+      );
+
+      discountC.clear();
+      discountNoteC.clear();
+      showDiscountForm.value = false;
+      await _loadInvoices();
+    } finally {
+      isDiscountSubmitting.value = false;
+    }
   }
 
   Future<void> submitCollection() async {
@@ -1489,6 +1555,865 @@ class _CustomerLedgerController extends GetxController {
   }
 }
 
+class _RegularCustomerDetailsController extends GetxController {
+  final DebtorModel debtor;
+  final DebatorController mainCtrl;
+
+  _RegularCustomerDetailsController(this.debtor, this.mainCtrl);
+
+  final RxBool isLoading = true.obs;
+  final RxList<Map<String, dynamic>> invoices = <Map<String, dynamic>>[].obs;
+  final RxString searchText = ''.obs;
+  final Rx<String> filter = 'All'.obs;
+
+  List<Map<String, dynamic>> get transactionRows {
+    final rows = <Map<String, dynamic>>[];
+
+    for (final inv in invoices) {
+      final String invoiceId =
+          (inv['invoiceId'] ?? inv['transactionId'] ?? '').toString();
+      final String invoiceLabel = invoiceId.isEmpty ? 'Invoice' : invoiceId;
+      final DateTime date = inv['timestamp'] is Timestamp
+          ? (inv['timestamp'] as Timestamp).toDate()
+          : DateTime.now();
+      final double amount = (inv['amount'] as num?)?.toDouble() ?? 0.0;
+
+      final List<dynamic> paymentHistory =
+          (inv['paymentHistory'] as List<dynamic>? ?? []);
+      final sameDayPayments = <Map<String, dynamic>>[];
+      final laterPayments = <Map<String, dynamic>>[];
+      for (final item in paymentHistory) {
+        if (item is! Map) continue;
+        final data = Map<String, dynamic>.from(item);
+        final paymentDate = data['timestamp'] is Timestamp
+            ? (data['timestamp'] as Timestamp).toDate()
+            : date;
+        // Initial payment entries created with the invoice do not have a
+        // collectionMode. Every later collection must remain its own row,
+        // including collections made on the invoice date.
+        final isInitialPayment = !data.containsKey('collectionMode');
+        final target = isInitialPayment ? sameDayPayments : laterPayments;
+        target.add({
+          ...data,
+          '_date': paymentDate,
+          '_amount': (data['amount'] as num?)?.toDouble() ?? 0.0,
+        });
+      }
+
+      final sameDayCredit = sameDayPayments.fold<double>(
+        0.0,
+        (total, payment) => total + (payment['_amount'] as double),
+      );
+      rows.add({
+        'id':
+            'invoice-${invoiceId.isEmpty ? date.millisecondsSinceEpoch : invoiceId}',
+        'date': date,
+        'label': 'INVOICE / DUE',
+        'note': invoiceLabel,
+        'debit': amount,
+        'credit': sameDayCredit.clamp(0.0, amount),
+        'due': (amount - sameDayCredit).clamp(0.0, amount),
+        'paymentMethod': <String, dynamic>{
+          'type': sameDayPayments.isEmpty
+              ? 'invoice'
+              : sameDayPayments
+                  .map((payment) => (payment['type'] ?? 'cash').toString())
+                  .toSet()
+                  .join(', '),
+        },
+      });
+
+      laterPayments.sort(
+        (a, b) => (a['_date'] as DateTime).compareTo(b['_date'] as DateTime),
+      );
+      var runningDue = (amount - sameDayCredit).clamp(0.0, amount);
+      for (int index = 0; index < laterPayments.length; index++) {
+        final payment = laterPayments[index];
+        final paymentAmount = payment['_amount'] as double;
+        runningDue = (runningDue - paymentAmount).clamp(0.0, amount);
+        rows.add({
+          'id':
+              'payment-${invoiceId.isEmpty ? date.millisecondsSinceEpoch : invoiceId}-$index',
+          'date': payment['_date'],
+          'label': 'PAYMENT',
+          'note': (payment['note'] ?? 'Due Collection').toString(),
+          'debit': 0.0,
+          'credit': paymentAmount,
+          'due': runningDue,
+          'paymentMethod': <String, dynamic>{
+            'type': (payment['type'] ?? 'cash').toString(),
+            if ((payment['bankName'] ?? '').toString().isNotEmpty)
+              'bankName': payment['bankName'],
+          },
+        });
+      }
+    }
+
+    rows.sort((a, b) => (b['date'] as DateTime).compareTo(a['date'] as DateTime));
+
+    final q = searchText.value.trim().toLowerCase();
+    return rows.where((row) {
+      final note = (row['note'] ?? '').toString().toLowerCase();
+      final paymentMethod = (row['paymentMethod'] ?? {}).toString().toLowerCase();
+      final due = (row['due'] as num).toDouble();
+      final bool matchFilter =
+          filter.value == 'All' ||
+          (filter.value == 'Due' && due > 0.5) ||
+          (filter.value == 'Paid' && due <= 0.5);
+      final bool matchText =
+          q.isEmpty || note.contains(q) || paymentMethod.contains(q);
+      return matchFilter && matchText;
+    }).toList();
+  }
+
+  Future<void> loadInvoices() async {
+    isLoading.value = true;
+    try {
+      final list = await mainCtrl.getRegularCustomerInvoices(
+        customerName: debtor.name,
+        customerCategory: debtor.customerCategory,
+        customerPhone: debtor.phone,
+      );
+      invoices.assignAll(list);
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+  List<Map<String, dynamic>> get filteredInvoices {
+    final q = searchText.value.trim().toLowerCase();
+    final rows = <Map<String, dynamic>>[];
+    for (final inv in invoices) {
+      final String invoiceId =
+          (inv['invoiceId'] ?? inv['transactionId'] ?? '').toString();
+      final double pending = (inv['pending'] as num?)?.toDouble() ?? 0.0;
+      final String status = pending > 0.5 ? 'Due' : 'Paid';
+      final bool matchFilter =
+          filter.value == 'All' || status == filter.value;
+      final bool matchText =
+          q.isEmpty ||
+          invoiceId.toLowerCase().contains(q) ||
+          (inv['name'] ?? '').toString().toLowerCase().contains(q);
+      if (matchFilter && matchText) rows.add(inv);
+    }
+    rows.sort((a, b) {
+      final t1 = a['timestamp'] is Timestamp ? (a['timestamp'] as Timestamp).toDate() : DateTime.now();
+      final t2 = b['timestamp'] is Timestamp ? (b['timestamp'] as Timestamp).toDate() : DateTime.now();
+      return t2.compareTo(t1);
+    });
+    return rows;
+  }
+
+  String paymentLabel(Map<String, dynamic>? paymentMethod) {
+    if (paymentMethod == null || paymentMethod.isEmpty) return 'Invoice';
+    final type = (paymentMethod['type'] ?? 'cash').toString();
+    if (type == 'bank') {
+      final bankName = (paymentMethod['bankName'] ?? '').toString();
+      return bankName.isNotEmpty ? '$bankName Bank' : 'Bank';
+    }
+    if (type == 'cash') return 'Cash';
+    if (type == 'bkash') return 'Bkash';
+    if (type == 'nagad') return 'Nagad';
+    if (type == 'rocket') return 'Rocket';
+    if (type.contains(',')) {
+      return type
+          .split(',')
+          .map((value) => paymentLabel({'type': value.trim()}))
+          .join(' + ');
+    }
+    return type.toUpperCase();
+  }
+
+  Future<void> printInvoice(String invoiceId) async {
+    try {
+      if (!Get.isRegistered<DailySalesController>()) {
+        Get.put(DailySalesController());
+      }
+      await Get.find<DailySalesController>().reprintInvoice(invoiceId);
+    } catch (e) {
+      Get.snackbar('Error', 'Could not load invoice: $e');
+    }
+  }
+
+  Future<void> collectDue({
+    required double amount,
+    required String note,
+    required Map<String, dynamic> paymentMethod,
+  }) async {
+    await mainCtrl.collectRegularCustomerDue(
+      customerId: debtor.id,
+      customerName: debtor.name,
+      customerCategory: debtor.customerCategory,
+      amount: amount,
+      note: note,
+      date: DateTime.now(),
+      paymentMethodData: paymentMethod,
+    );
+    await loadInvoices();
+  }
+
+  Future<void> applyDiscount({
+    required double amount,
+    required String note,
+  }) async {
+    await mainCtrl.applyRegularCustomerDiscount(
+      customerId: debtor.id,
+      customerName: debtor.name,
+      customerCategory: debtor.customerCategory,
+      amount: amount,
+      note: note,
+      date: DateTime.now(),
+    );
+    await loadInvoices();
+  }
+
+  Future<void> exportStatement() async {
+    await mainCtrl.downloadRegularCustomerStatement(
+      debtor.id,
+      debtor.name,
+      customerCategory: debtor.customerCategory,
+    );
+  }
+}
+
+class _RegularCustomerDetailsPage extends StatelessWidget {
+  final DebtorModel debtor;
+  final Color categoryColor;
+
+  const _RegularCustomerDetailsPage({
+    required this.debtor,
+    required this.categoryColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final pageCtrl = Get.put(
+      _RegularCustomerDetailsController(debtor, Get.find<DebatorController>()),
+      tag: debtor.id,
+    );
+    final bool isMobile = MediaQuery.of(context).size.width < 850;
+
+    pageCtrl.loadInvoices();
+
+    return Scaffold(
+      backgroundColor: scaffoldBg,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: textDark),
+          onPressed: () => Get.back(),
+        ),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              debtor.name,
+              style: const TextStyle(
+                color: textDark,
+                fontWeight: FontWeight.w800,
+                fontSize: 18,
+              ),
+            ),
+            const Text(
+              'Financial Ledger',
+              style: TextStyle(
+                color: textLight,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: pageCtrl.exportStatement,
+            icon: const FaIcon(FontAwesomeIcons.filePdf, size: 14, color: dangerRed),
+            label: const Text('Statement', style: TextStyle(color: dangerRed, fontWeight: FontWeight.w600)),
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        backgroundColor: categoryColor,
+        onPressed: () => _showRegularCustomerActionSheet(context, pageCtrl),
+        icon: const Icon(Icons.add_card, color: Colors.white),
+        label: const Text('New Entry', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+      ),
+      body: Obx(() {
+        final balance = pageCtrl.mainCtrl.regularCustomerDues
+            .firstWhereOrNull((d) => d.id == debtor.id)
+            ?.balance ?? debtor.balance;
+        final lastUpdate = pageCtrl.invoices.isNotEmpty
+            ? pageCtrl.invoices
+                .map((inv) => inv['timestamp'])
+                .whereType<Timestamp>()
+                .map((ts) => ts.toDate())
+                .toList()
+                .fold<DateTime?>(null, (prev, date) {
+                  if (prev == null || date.isAfter(prev)) return date;
+                  return prev;
+                })
+            : null;
+
+        return SingleChildScrollView(
+          padding: EdgeInsets.all(isMobile ? 12 : 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: _SummaryCard(
+                      title: 'TOTAL OUTSTANDING',
+                      value: '৳ ${balance.toStringAsFixed(0)}',
+                      accent: dangerRed,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _SummaryCard(
+                      title: 'INVOICES',
+                      value: pageCtrl.invoices.length.toString(),
+                      accent: primaryColor,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _SummaryCard(
+                      title: 'LAST UPDATE',
+                      value: lastUpdate == null ? '-' : DateFormat('dd MMM').format(lastUpdate),
+                      accent: successGreen,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: borderCol),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        onChanged: (v) => pageCtrl.searchText.value = v,
+                        decoration: InputDecoration(
+                          hintText: 'Search invoice or note',
+                          prefixIcon: const Icon(Icons.search, size: 18, color: textLight),
+                          filled: true,
+                          fillColor: scaffoldBg,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: BorderSide.none,
+                          ),
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    DropdownButton<String>(
+                      value: pageCtrl.filter.value,
+                      items: const [
+                        DropdownMenuItem(value: 'All', child: Text('All')),
+                        DropdownMenuItem(value: 'Due', child: Text('Due')),
+                        DropdownMenuItem(value: 'Paid', child: Text('Paid')),
+                      ],
+                      onChanged: (v) {
+                        if (v != null) pageCtrl.filter.value = v;
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 18),
+              if (pageCtrl.isLoading.value)
+                const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(40),
+                    child: CircularProgressIndicator(color: primaryColor),
+                  ),
+                )
+              else if (pageCtrl.transactionRows.isEmpty)
+                const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(40),
+                    child: Text('No invoice records found for this customer.', style: TextStyle(color: textLight)),
+                  ),
+                )
+              else
+                isMobile
+                    ? _buildRegularMobileTransactions(pageCtrl)
+                    : _buildRegularDesktopTransactions(pageCtrl),
+            ],
+          ),
+        );
+      }),
+    );
+  }
+
+  Widget _buildRegularDesktopTransactions(
+    _RegularCustomerDetailsController pageCtrl,
+  ) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: borderCol),
+      ),
+      child: Column(
+        children: [
+          Container(
+            color: const Color(0xFFF1F5F9),
+            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
+            child: const Row(
+              children: [
+                Expanded(flex: 2, child: Text('DATE', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 11, color: textLight, letterSpacing: 0.5))),
+                Expanded(flex: 4, child: Text('DETAILS / INVOICE', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 11, color: textLight, letterSpacing: 0.5))),
+                Expanded(flex: 2, child: Align(alignment: Alignment.centerRight, child: Text('DEBIT', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 11, color: dangerRed, letterSpacing: 0.5)))),
+                Expanded(flex: 2, child: Align(alignment: Alignment.centerRight, child: Text('CREDIT', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 11, color: successGreen, letterSpacing: 0.5)))),
+                Expanded(flex: 2, child: Align(alignment: Alignment.centerRight, child: Text('DUE', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 11, color: textLight, letterSpacing: 0.5)))),
+              ],
+            ),
+          ),
+          ListView.separated(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: pageCtrl.transactionRows.length,
+            separatorBuilder: (_, _) => const Divider(height: 1, color: Color(0xFFF1F5F9)),
+            itemBuilder: (_, index) => _buildRegularDesktopRow(
+              pageCtrl.transactionRows[index],
+              pageCtrl,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRegularDesktopRow(
+    Map<String, dynamic> tx,
+    _RegularCustomerDetailsController pageCtrl,
+  ) {
+    final date = tx['date'] as DateTime;
+    final note = (tx['note'] ?? '-').toString();
+    final debit = (tx['debit'] as num).toDouble();
+    final credit = (tx['credit'] as num).toDouble();
+    final due = (tx['due'] as num).toDouble();
+    final method = pageCtrl.paymentLabel(
+      tx['paymentMethod'] as Map<String, dynamic>?,
+    );
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            flex: 2,
+            child: Text(
+              DateFormat('dd MMM yyyy').format(date),
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: textLight),
+            ),
+          ),
+          Expanded(
+            flex: 4,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'INVOICE / DUE',
+                  style: TextStyle(color: dangerRed, fontWeight: FontWeight.w800, fontSize: 9, letterSpacing: 0.5),
+                ),
+                const SizedBox(height: 4),
+                InkWell(
+                  onTap: note == '-' ? null : () => pageCtrl.printInvoice(note),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          note,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 12, color: primaryColor, fontWeight: FontWeight.bold, decoration: TextDecoration.underline),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      const Icon(Icons.print, size: 12, color: primaryColor),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(method, style: const TextStyle(fontSize: 11, color: textLight, fontWeight: FontWeight.w600)),
+              ],
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: Text('৳${debit.toStringAsFixed(0)}', style: const TextStyle(fontSize: 13, color: dangerRed, fontWeight: FontWeight.bold)),
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: Text(credit > 0 ? '৳${credit.toStringAsFixed(0)}' : '-', style: const TextStyle(fontSize: 13, color: successGreen, fontWeight: FontWeight.bold)),
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: Text('৳${due.toStringAsFixed(0)}', style: TextStyle(fontSize: 13, color: due > 0.5 ? dangerRed : successGreen, fontWeight: FontWeight.bold)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRegularMobileTransactions(
+    _RegularCustomerDetailsController pageCtrl,
+  ) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: borderCol),
+      ),
+      child: ListView.separated(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: pageCtrl.transactionRows.length,
+        separatorBuilder: (_, _) => const Divider(height: 1, color: Color(0xFFF1F5F9)),
+        itemBuilder: (_, index) {
+          final tx = pageCtrl.transactionRows[index];
+          final date = tx['date'] as DateTime;
+          final note = (tx['note'] ?? '-').toString();
+          final debit = (tx['debit'] as num).toDouble();
+          final credit = (tx['credit'] as num).toDouble();
+          final due = (tx['due'] as num).toDouble();
+          final method = pageCtrl.paymentLabel(tx['paymentMethod'] as Map<String, dynamic>?);
+
+          return Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(DateFormat('dd MMM yyyy').format(date), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: textLight)),
+                    const Text('INVOICE / DUE', style: TextStyle(color: dangerRed, fontWeight: FontWeight.w800, fontSize: 9, letterSpacing: 0.5)),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                InkWell(
+                  onTap: note == '-' ? null : () => pageCtrl.printInvoice(note),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: Text(note, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14, color: primaryColor, fontWeight: FontWeight.bold, decoration: TextDecoration.underline)),
+                      ),
+                      const SizedBox(width: 6),
+                      const Icon(Icons.print, size: 14, color: primaryColor),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(method, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: textLight)),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    _regularAmountBadge('DR', debit, dangerRed),
+                    const SizedBox(width: 8),
+                    _regularAmountBadge('CR', credit, successGreen),
+                    const SizedBox(width: 8),
+                    _regularAmountBadge('DUE', due, due > 0.5 ? dangerRed : successGreen),
+                  ],
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _regularAmountBadge(String label, double value, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        '$label: ৳${value.toStringAsFixed(0)}',
+        style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 12),
+      ),
+    );
+  }
+
+  void _showRegularCustomerActionSheet(BuildContext context, _RegularCustomerDetailsController pageCtrl) {
+    Get.bottomSheet(
+      Container(
+        padding: const EdgeInsets.all(18),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Customer Action', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: textDark)),
+              const SizedBox(height: 12),
+              ListTile(
+                leading: const Icon(Icons.payments, color: successGreen),
+                title: const Text('Collect Due'),
+                onTap: () {
+                  Get.back();
+                  _showCollectForm(context, pageCtrl);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.discount_outlined, color: Colors.orange),
+                title: const Text('Add Discount'),
+                onTap: () {
+                  Get.back();
+                  _showDiscountForm(context, pageCtrl);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+      isScrollControlled: true,
+    );
+  }
+
+  void _showCollectForm(BuildContext context, _RegularCustomerDetailsController pageCtrl) {
+    final amountC = TextEditingController();
+    final noteC = TextEditingController();
+    final bankNameC = TextEditingController();
+    final accountNoC = TextEditingController();
+    final mobileNoC = TextEditingController();
+    final payMethod = 'cash'.obs;
+    final isSubmitting = false.obs;
+
+    Get.dialog(
+      AlertDialog(
+        title: const Text('Collect Due'),
+        content: SizedBox(
+          width: 420,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: amountC,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Amount Collected (Tk)'),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: noteC,
+                  decoration: const InputDecoration(labelText: 'Note (optional)'),
+                ),
+                const SizedBox(height: 10),
+                Obx(
+                  () => DropdownButtonFormField<String>(
+                    value: payMethod.value,
+                    items: const [
+                      DropdownMenuItem(value: 'cash', child: Text('Cash')),
+                      DropdownMenuItem(value: 'bank', child: Text('Bank Transfer')),
+                      DropdownMenuItem(value: 'bkash', child: Text('Bkash')),
+                      DropdownMenuItem(value: 'nagad', child: Text('Nagad')),
+                      DropdownMenuItem(value: 'rocket', child: Text('Rocket')),
+                    ],
+                    onChanged: (v) => payMethod.value = v ?? 'cash',
+                    decoration: const InputDecoration(labelText: 'Payment Method'),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Obx(() {
+                  if (payMethod.value == 'bank') {
+                    return Column(
+                      children: [
+                        TextField(controller: bankNameC, decoration: const InputDecoration(labelText: 'Bank Name')),
+                        TextField(controller: accountNoC, decoration: const InputDecoration(labelText: 'Account Number')),
+                      ],
+                    );
+                  }
+                  if (['bkash', 'nagad', 'rocket'].contains(payMethod.value)) {
+                    return TextField(
+                      controller: mobileNoC,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(labelText: '${payMethod.value.capitalizeFirst} Number'),
+                    );
+                  }
+                  return const SizedBox.shrink();
+                }),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          Obx(
+            () => TextButton(
+              onPressed: isSubmitting.value ? null : () => Get.back(),
+              child: const Text('Cancel'),
+            ),
+          ),
+          Obx(
+            () => ElevatedButton(
+              onPressed: isSubmitting.value
+                  ? null
+                  : () async {
+                      final amount =
+                          double.tryParse(amountC.text.trim()) ?? 0.0;
+                      if (amount <= 0) {
+                        Get.snackbar('Error', 'Enter a valid amount to collect.');
+                        return;
+                      }
+                      final pm = {
+                        'type': payMethod.value,
+                        if (payMethod.value == 'bank') ...{
+                          'bankName': bankNameC.text.trim(),
+                          'accountNo': accountNoC.text.trim(),
+                        },
+                        if (['bkash', 'nagad', 'rocket']
+                            .contains(payMethod.value))
+                          'number': mobileNoC.text.trim(),
+                      };
+
+                      isSubmitting.value = true;
+                      try {
+                        await pageCtrl.collectDue(
+                          amount: amount,
+                          note: noteC.text.trim(),
+                          paymentMethod: pm,
+                        );
+                        if (Get.isDialogOpen ?? false) Get.back();
+                      } finally {
+                        isSubmitting.value = false;
+                      }
+                    },
+              child: isSubmitting.value
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Text('Confirm'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showDiscountForm(BuildContext context, _RegularCustomerDetailsController pageCtrl) {
+    final amountC = TextEditingController();
+    final noteC = TextEditingController();
+
+    Get.dialog(
+      AlertDialog(
+        title: const Text('Discount'),
+        content: SizedBox(
+          width: 360,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: amountC,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Discount Amount (Tk)'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: noteC,
+                decoration: const InputDecoration(labelText: 'Note (optional)'),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Get.back(), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () async {
+              final amount = double.tryParse(amountC.text.trim()) ?? 0.0;
+              Get.back();
+              if (amount > 0) {
+                await pageCtrl.applyDiscount(amount: amount, note: noteC.text.trim());
+              }
+            },
+            child: const Text('Apply Discount'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryCard extends StatelessWidget {
+  final String title;
+  final String value;
+  final Color accent;
+
+  const _SummaryCard({
+    required this.title,
+    required this.value,
+    required this.accent,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: borderCol),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: textLight, letterSpacing: 0.4),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+              color: accent,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ignore: unused_element
 class _CustomerLedgerDialog extends StatelessWidget {
   final DebtorModel debtor;
   final Color categoryColor;
@@ -1511,12 +2436,11 @@ class _CustomerLedgerDialog extends StatelessWidget {
         vertical: 24,
       ),
       child: Container(
-        width: 620,
-        constraints: const BoxConstraints(maxHeight: 700),
+        width: 700,
+        constraints: const BoxConstraints(maxHeight: 760),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // --- HEADER ---
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 22),
@@ -1565,123 +2489,135 @@ class _CustomerLedgerDialog extends StatelessWidget {
               ),
             ),
 
-            // --- OUTSTANDING DUE + COLLECT BUTTON ---
             Padding(
               padding: const EdgeInsets.all(18),
               child: Obx(() {
                 final freshDebtor = ledgerCtrl.mainCtrl.regularCustomerDues
                     .firstWhereOrNull((d) => d.id == debtor.id);
-                final double liveBalance =
-                    freshDebtor?.balance ?? debtor.balance;
+                final double liveBalance = freshDebtor?.balance ?? debtor.balance;
+                final lastTx = ledgerCtrl.activityEntries.isNotEmpty
+                    ? ledgerCtrl.activityEntries.first['date'] as DateTime?
+                    : null;
 
-                return Row(
+                return Column(
                   children: [
-                    Expanded(
-                      child: Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: dangerRed.withValues(alpha: 0.06),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: dangerRed.withValues(alpha: 0.2),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _ledgerStatCard(
+                            title: 'OUTSTANDING DUE',
+                            value: '৳ ${liveBalance.toStringAsFixed(0)}',
+                            color: dangerRed,
+                            bgColor: dangerRed.withValues(alpha: 0.06),
                           ),
                         ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              "OUTSTANDING DUE",
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w800,
-                                color: textLight,
-                                letterSpacing: 0.5,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              "৳ ${liveBalance.toStringAsFixed(0)}",
-                              style: const TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.w900,
-                                color: dangerRed,
-                              ),
-                            ),
-                          ],
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: _ledgerStatCard(
+                            title: 'INVOICES',
+                            value: ledgerCtrl.invoices.length.toString(),
+                            color: primaryColor,
+                            bgColor: primaryColor.withValues(alpha: 0.06),
+                          ),
                         ),
-                      ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: _ledgerStatCard(
+                            title: 'LAST UPDATE',
+                            value: lastTx == null ? '-' : DateFormat('dd MMM').format(lastTx),
+                            color: successGreen,
+                            bgColor: successGreen.withValues(alpha: 0.06),
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 12),
-                    ElevatedButton.icon(
-                      onPressed:
-                          liveBalance <= 0
-                              ? null
-                              : () => ledgerCtrl.showCollectForm.toggle(),
-                      icon: const Icon(Icons.payments, size: 18),
-                      label: const Text("Collect Due"),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: successGreen,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 18,
-                          vertical: 18,
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed:
+                                liveBalance <= 0
+                                    ? null
+                                    : () => ledgerCtrl.showCollectForm.toggle(),
+                            icon: const Icon(Icons.payments, size: 18),
+                            label: const Text('Collect Due'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: successGreen,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                          ),
                         ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed:
+                                liveBalance <= 0
+                                    ? null
+                                    : () => ledgerCtrl.showDiscountForm.toggle(),
+                            icon: const Icon(Icons.discount_outlined, size: 18),
+                            label: const Text('Discount'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.orange.shade800,
+                              side: BorderSide(color: Colors.orange.shade300),
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                          ),
                         ),
-                      ),
+                      ],
                     ),
                   ],
                 );
               }),
             ),
 
-            // --- COLLECT DUE FORM (collapsible) ---
             Obx(
-              () =>
-                  ledgerCtrl.showCollectForm.value
-                      ? Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 18),
-                        child: _CollectDueForm(ledgerCtrl: ledgerCtrl),
-                      )
-                      : const SizedBox.shrink(),
+              () => ledgerCtrl.showCollectForm.value
+                  ? Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 18),
+                      child: _CollectDueForm(ledgerCtrl: ledgerCtrl),
+                    )
+                  : const SizedBox.shrink(),
             ),
 
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 18),
-              child: Divider(height: 24, color: borderCol),
+            Obx(
+              () => ledgerCtrl.showDiscountForm.value
+                  ? Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 18),
+                      child: _DiscountForm(ledgerCtrl: ledgerCtrl),
+                    )
+                  : const SizedBox.shrink(),
             ),
 
-            // --- INVOICE LIST ---
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 18),
               child: Row(
                 children: [
-                  const Text(
-                    "INVOICES",
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      color: textLight,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
+                  _tabButton('Invoices', 0),
+                  const SizedBox(width: 8),
+                  _tabButton('Activity', 1),
                   const Spacer(),
                   Obx(
                     () => IconButton(
-                      icon: const Icon(
-                        Icons.refresh,
-                        size: 18,
-                        color: textLight,
-                      ),
-                      onPressed:
-                          ledgerCtrl.isLoadingInvoices.value
-                              ? null
-                              : ledgerCtrl.refresh,
+                      icon: const Icon(Icons.refresh, size: 18, color: textLight),
+                      onPressed: ledgerCtrl.isLoadingInvoices.value
+                          ? null
+                          : () async => ledgerCtrl.refresh(),
                     ),
                   ),
                 ],
               ),
+            ),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 18),
+              child: Divider(height: 24, color: borderCol),
             ),
             Expanded(
               child: Obx(() {
@@ -1693,12 +2629,32 @@ class _CustomerLedgerDialog extends StatelessWidget {
                     ),
                   );
                 }
+                if (ledgerCtrl.selectedTab.value == 1) {
+                  final history = ledgerCtrl.activityEntries;
+                  if (history.isEmpty) {
+                    return const Padding(
+                      padding: EdgeInsets.all(30),
+                      child: Center(
+                        child: Text(
+                          'No transaction activity for this customer yet.',
+                          style: TextStyle(color: textLight),
+                        ),
+                      ),
+                    );
+                  }
+                  return ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(18, 6, 18, 18),
+                    itemCount: history.length,
+                    separatorBuilder: (_, _) => const Divider(height: 1, color: borderCol),
+                    itemBuilder: (context, index) => _historyRow(history[index]),
+                  );
+                }
                 if (ledgerCtrl.invoices.isEmpty) {
                   return const Padding(
                     padding: EdgeInsets.all(30),
                     child: Center(
                       child: Text(
-                        "No invoices found for this customer.",
+                        'No invoices found for this customer.',
                         style: TextStyle(color: textLight),
                       ),
                     ),
@@ -1707,8 +2663,7 @@ class _CustomerLedgerDialog extends StatelessWidget {
                 return ListView.separated(
                   padding: const EdgeInsets.fromLTRB(18, 6, 18, 18),
                   itemCount: ledgerCtrl.invoices.length,
-                  separatorBuilder:
-                      (_, _) => const Divider(height: 1, color: borderCol),
+                  separatorBuilder: (_, _) => const Divider(height: 1, color: borderCol),
                   itemBuilder: (context, index) {
                     final inv = ledgerCtrl.invoices[index];
                     return _invoiceRow(inv);
@@ -1718,6 +2673,135 @@ class _CustomerLedgerDialog extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _tabButton(String label, int index) {
+    return Obx(
+      () => InkWell(
+        onTap: () => ledgerCtrl.selectedTab.value = index,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: ledgerCtrl.selectedTab.value == index
+                ? primaryColor.withValues(alpha: 0.08)
+                : scaffoldBg,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: ledgerCtrl.selectedTab.value == index
+                  ? primaryColor.withValues(alpha: 0.3)
+                  : borderCol,
+            ),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: ledgerCtrl.selectedTab.value == index ? primaryColor : textLight,
+              fontWeight: FontWeight.w700,
+              fontSize: 12,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _ledgerStatCard({
+    required String title,
+    required String value,
+    required Color color,
+    required Color bgColor,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withValues(alpha: 0.15)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 9,
+              fontWeight: FontWeight.w800,
+              color: textLight,
+              letterSpacing: 0.4,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w900,
+              color: color,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _historyRow(Map<String, dynamic> entry) {
+    final double amount = (entry['amount'] as num?)?.toDouble() ?? 0.0;
+    final DateTime date = entry['date'] as DateTime? ?? DateTime.now();
+    final String type = (entry['type'] ?? '').toString();
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: type.toLowerCase() == 'discount'
+                  ? Colors.orange.withValues(alpha: 0.1)
+                  : successGreen.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(
+              type.toLowerCase() == 'discount' ? Icons.discount_outlined : Icons.receipt_long,
+              color: type.toLowerCase() == 'discount' ? Colors.orange.shade800 : successGreen,
+              size: 16,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  (entry['title'] ?? 'Transaction').toString(),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: textDark,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  DateFormat('dd MMM yyyy • hh:mm a').format(date),
+                  style: const TextStyle(fontSize: 11, color: textLight),
+                ),
+              ],
+            ),
+          ),
+          Text(
+            '৳ ${amount.toStringAsFixed(0)}',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w800,
+              color: type.toLowerCase() == 'discount' ? Colors.orange.shade800 : primaryColor,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1816,6 +2900,100 @@ class _CustomerLedgerDialog extends StatelessWidget {
                 color: isPaid ? successGreen : Colors.orange.shade800,
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DiscountForm extends StatelessWidget {
+  final _CustomerLedgerController ledgerCtrl;
+  const _DiscountForm({required this.ledgerCtrl});
+
+  Widget _field(
+    TextEditingController c,
+    String hint,
+    IconData icon, {
+    bool isNum = false,
+  }) {
+    return TextField(
+      style: const TextStyle(fontSize: 13),
+      controller: c,
+      keyboardType: isNum ? TextInputType.number : TextInputType.text,
+      decoration: InputDecoration(
+        prefixIcon: Icon(icon, size: 16, color: textLight),
+        hintText: hint,
+        hintStyle: const TextStyle(fontSize: 13),
+        filled: true,
+        fillColor: scaffoldBg,
+        isDense: true,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide.none,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.orange.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.orange.withValues(alpha: 0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _field(
+            ledgerCtrl.discountC,
+            'Discount Amount (Tk)',
+            Icons.discount_outlined,
+            isNum: true,
+          ),
+          const SizedBox(height: 10),
+          _field(ledgerCtrl.discountNoteC, 'Discount Note (optional)', Icons.note),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: () => ledgerCtrl.showDiscountForm.value = false,
+                child: const Text('Cancel'),
+              ),
+              const SizedBox(width: 8),
+              Obx(
+                () => ElevatedButton(
+                  onPressed: ledgerCtrl.isDiscountSubmitting.value
+                      ? null
+                      : ledgerCtrl.submitDiscount,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.orange.shade800,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  child: ledgerCtrl.isDiscountSubmitting.value
+                      ? const SizedBox(
+                          height: 16,
+                          width: 16,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : const Text(
+                          'Apply Discount',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                ),
+              ),
+            ],
           ),
         ],
       ),

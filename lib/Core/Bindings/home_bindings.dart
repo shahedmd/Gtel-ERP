@@ -23,7 +23,7 @@ class HomeBinding extends Bindings {
 
     Get.put(DailySalesController(), permanent: true);
     Get.put(OverviewController(), permanent: true);
-    Get.put(CashDrawerController(), permanent: true);
+    Get.lazyPut(() => CashDrawerController(), fenix: true);
 
     Get.lazyPut(() => DebatorController(), fenix: true);
     Get.lazyPut(() => ProductController(), fenix: true);

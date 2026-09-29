@@ -165,6 +165,340 @@ class DebatorController extends GetxController {
     await calculateTotalOutstanding();
   }
 
+  Future<void> downloadRegularCustomerStatement(
+    String customerId,
+    String customerName, {
+    String? customerCategory,
+  }) async {
+    gbIsLoading.value = true;
+    try {
+      final invoices = await getRegularCustomerInvoices(
+        customerName: customerName,
+        customerCategory: customerCategory,
+        customerPhone: customerId,
+      );
+
+      if (invoices.isEmpty) {
+        Get.snackbar('Info', 'No invoice data found for this customer statement.');
+        return;
+      }
+
+      final pdf = pw.Document();
+      final fontReg = await PdfGoogleFonts.nunitoRegular();
+      final fontBold = await PdfGoogleFonts.nunitoBold();
+
+      double totalDebit = 0.0;
+      double totalCredit = 0.0;
+      final rows = <List<String>>[];
+      for (final inv in invoices) {
+        final String invoiceId =
+            (inv['invoiceId'] ?? inv['transactionId'] ?? '').toString();
+        final double amount = (inv['amount'] as num?)?.toDouble() ?? 0.0;
+        final DateTime timestamp = inv['timestamp'] is Timestamp
+            ? (inv['timestamp'] as Timestamp).toDate()
+            : DateTime.now();
+        final history = (inv['paymentHistory'] as List<dynamic>? ?? []);
+        final sameDayPayments = <Map<String, dynamic>>[];
+        final laterPayments = <Map<String, dynamic>>[];
+        for (final item in history) {
+          if (item is! Map) continue;
+          final paymentDate = item['timestamp'] is Timestamp
+              ? (item['timestamp'] as Timestamp).toDate()
+              : timestamp;
+          final payment = {
+            ...Map<String, dynamic>.from(item),
+            '_date': paymentDate,
+            '_amount': (item['amount'] as num?)?.toDouble() ?? 0.0,
+          };
+          // Invoice-time payment entries have no collectionMode. Later
+          // collections remain separate PDF rows, even on the same day.
+          final sameDay = !item.containsKey('collectionMode');
+          (sameDay ? sameDayPayments : laterPayments).add(payment);
+        }
+
+        final sameDayCredit = sameDayPayments.fold<double>(
+          0.0,
+          (total, payment) => total + (payment['_amount'] as double),
+        );
+        totalDebit += amount;
+        totalCredit += sameDayCredit;
+        rows.add([
+          DateFormat('dd/MM/yyyy').format(timestamp),
+          'DEBIT / CREDIT SALE\nInvoice: ${invoiceId.isEmpty ? 'Invoice' : invoiceId}'
+              '\nDue: ৳${(amount - sameDayCredit).clamp(0.0, amount).toStringAsFixed(0)}',
+          sameDayPayments.isEmpty
+              ? '-'
+              : sameDayPayments
+                  .map((payment) => (payment['type'] ?? 'cash').toString())
+                  .toSet()
+                  .join(', ')
+                  .toUpperCase(),
+          bdCurrency.format(amount),
+          sameDayCredit > 0 ? bdCurrency.format(sameDayCredit) : '-',
+        ]);
+
+        laterPayments.sort(
+          (a, b) => (a['_date'] as DateTime).compareTo(b['_date'] as DateTime),
+        );
+        var runningDue = (amount - sameDayCredit).clamp(0.0, amount);
+        for (final payment in laterPayments) {
+          final paymentAmount = payment['_amount'] as double;
+          runningDue = (runningDue - paymentAmount).clamp(0.0, amount);
+          totalCredit += paymentAmount;
+          rows.add([
+            DateFormat('dd/MM/yyyy').format(payment['_date'] as DateTime),
+            'PAYMENT\nInvoice: ${invoiceId.isEmpty ? 'Invoice' : invoiceId}'
+                '\n${(payment['note'] ?? 'Due Collection').toString()}'
+                '\nDue: ৳${runningDue.toStringAsFixed(0)}',
+            (payment['type'] ?? 'cash').toString().toUpperCase(),
+            '-',
+            bdCurrency.format(paymentAmount),
+          ]);
+        }
+      }
+      final netDue = totalDebit - totalCredit;
+
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(32),
+          header: (context) => pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(
+                    'STATEMENT OF ACCOUNT',
+                    style: pw.TextStyle(
+                      font: fontBold,
+                      fontSize: 18,
+                      color: PdfColors.blue900,
+                    ),
+                  ),
+                  pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.end,
+                    children: [
+                      pw.Text(
+                        'Date: ${DateFormat('dd MMM yyyy').format(DateTime.now())}',
+                        style: pw.TextStyle(font: fontReg, fontSize: 10),
+                      ),
+                      pw.Text(
+                        'Page ${context.pageNumber} of ${context.pagesCount}',
+                        style: pw.TextStyle(font: fontReg, fontSize: 10),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              pw.SizedBox(height: 8),
+              pw.Text(
+                'Account Name: $customerName',
+                style: pw.TextStyle(font: fontBold, fontSize: 12),
+              ),
+              pw.Text(
+                'Category: ${customerCategory ?? 'WHOLESALE'}',
+                style: pw.TextStyle(font: fontReg, fontSize: 10),
+              ),
+              pw.SizedBox(height: 14),
+              pw.Divider(color: PdfColors.grey400),
+            ],
+          ),
+          build: (context) => [
+            pw.TableHelper.fromTextArray(
+              headers: [
+                'Date',
+                'Description',
+                'Payment Method',
+                'Debit',
+                'Credit',
+              ],
+              data: rows,
+              border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.5),
+              headerStyle: pw.TextStyle(font: fontBold, fontSize: 9, color: PdfColors.white),
+              headerDecoration: const pw.BoxDecoration(color: PdfColors.blue800),
+              cellStyle: pw.TextStyle(font: fontReg, fontSize: 9),
+              cellPadding: const pw.EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+              columnWidths: {
+                0: const pw.FlexColumnWidth(1.5),
+                1: const pw.FlexColumnWidth(3.5),
+                2: const pw.FlexColumnWidth(2),
+                3: const pw.FlexColumnWidth(1.5),
+                4: const pw.FlexColumnWidth(1.5),
+              },
+              cellAlignments: {
+                0: pw.Alignment.centerLeft,
+                1: pw.Alignment.centerLeft,
+                2: pw.Alignment.centerLeft,
+                3: pw.Alignment.centerRight,
+                4: pw.Alignment.centerRight,
+              },
+            ),
+            pw.SizedBox(height: 16),
+            pw.Container(
+              padding: const pw.EdgeInsets.all(12),
+              decoration: pw.BoxDecoration(
+                border: pw.Border.all(color: PdfColors.blue400),
+                color: PdfColors.blue50,
+              ),
+              child: pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  _pdfStat(
+                    'Total Debit',
+                    totalDebit,
+                    PdfColors.red900,
+                    fontReg,
+                    fontBold,
+                  ),
+                  _pdfStat(
+                    'Total Credit',
+                    totalCredit,
+                    PdfColors.green900,
+                    fontReg,
+                    fontBold,
+                  ),
+                  _pdfStat(
+                    'Due Balance',
+                    netDue,
+                    PdfColors.blue900,
+                    fontReg,
+                    fontBold,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+
+      await Printing.layoutPdf(
+        onLayout: (format) => pdf.save(),
+        name: '${customerName.replaceAll(' ', '_')}_Statement.pdf',
+      );
+    } catch (e) {
+      Get.snackbar('Error', 'Could not generate customer statement: $e');
+    } finally {
+      gbIsLoading.value = false;
+    }
+  }
+
+  Future<void> applyRegularCustomerDiscount({
+    required String customerId,
+    required String customerName,
+    required String? customerCategory,
+    required double amount,
+    required String note,
+    required DateTime date,
+  }) async {
+    if (amount <= 0) {
+      Get.snackbar("Error", "Enter a valid discount amount.");
+      return;
+    }
+
+    try {
+      final normalizedType = (customerCategory ?? '').trim().toLowerCase();
+      final safePhone = customerId.trim();
+      final safeName = customerName.trim();
+
+      final Map<String, QueryDocumentSnapshot> docs = {};
+
+      if (safePhone.isNotEmpty) {
+        final phoneSnap =
+            await db
+                .collection('daily_sales')
+                .where('customerPhone', isEqualTo: safePhone)
+                .get();
+        for (var doc in phoneSnap.docs) {
+          docs[doc.id] = doc;
+        }
+      }
+
+      if (safeName.isNotEmpty) {
+        final nameSnap =
+            await db.collection('daily_sales').where('name', isEqualTo: safeName).get();
+        for (var doc in nameSnap.docs) {
+          docs[doc.id] = doc;
+        }
+      }
+
+      final pendingDocs =
+          docs.values.where((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            final pending = (data['pending'] as num?)?.toDouble() ?? 0.0;
+            final type = (data['customerType'] ?? '').toString().toLowerCase();
+            return (normalizedType.isEmpty || type == normalizedType) &&
+                pending > 0.5;
+          }).toList();
+
+      if (pendingDocs.isEmpty) {
+        Get.snackbar("No Due", "No pending invoice found for this customer.");
+        return;
+      }
+
+      pendingDocs.sort((a, b) {
+        final da = a.data() as Map<String, dynamic>;
+        final dbb = b.data() as Map<String, dynamic>;
+        final t1 = da['timestamp'] is Timestamp ? da['timestamp'] as Timestamp : Timestamp.now();
+        final t2 = dbb['timestamp'] is Timestamp ? dbb['timestamp'] as Timestamp : Timestamp.now();
+        return t1.compareTo(t2);
+      });
+
+      double remaining = amount;
+      final batch = db.batch();
+      final discountEntry = {
+        'amount': amount,
+        'note': note.trim().isNotEmpty ? note.trim() : 'Customer Discount',
+        'timestamp': Timestamp.fromDate(date),
+        'paidAt': Timestamp.now(),
+        'type': 'discount',
+        'number': '',
+        'bankName': '',
+        'accountNumber': '',
+        'sourceTxId': 'DISCOUNT-${DateTime.now().millisecondsSinceEpoch}',
+        'discount': true,
+      };
+
+      for (var doc in pendingDocs) {
+        if (remaining <= 0.01) break;
+
+        final data = doc.data() as Map<String, dynamic>;
+        final currentPending = (data['pending'] as num?)?.toDouble() ?? 0.0;
+        final currentDiscount = (data['discount'] as num?)?.toDouble() ?? 0.0;
+        final take = remaining >= currentPending ? currentPending : remaining;
+        final newPending = currentPending - take;
+
+        batch.update(doc.reference, {
+          'pending': newPending < 0 ? 0.0 : newPending,
+          'discount': currentDiscount + take,
+          'status': newPending <= 0.5 ? 'paid' : 'partial',
+          'paymentHistory': FieldValue.arrayUnion([
+            {
+              ...discountEntry,
+              'amount': take,
+              'appliedTo': doc.id,
+              'invoiceId': (data['invoiceId'] ?? data['transactionId'] ?? '').toString(),
+              'collectionMode': 'discount',
+            }
+          ]),
+        });
+
+        remaining -= take;
+      }
+
+      if (remaining > 0.01) {
+        Get.snackbar("Info", "Discount applied partially. Remaining due remains.");
+      }
+
+      await batch.commit();
+      await refreshRegularCustomerDues();
+
+      Get.snackbar("Success", "Discount recorded for $customerName");
+    } catch (e) {
+      Get.snackbar("Error", e.toString());
+    }
+  }
+
   Future<List<Map<String, dynamic>>> getRegularCustomerInvoices({
     required String customerName,
     String? customerCategory,
@@ -209,13 +543,13 @@ class DebatorController extends GetxController {
                 return data;
               })
               .where((data) {
-                final pending = (data['pending'] as num?)?.toDouble() ?? 0.0;
                 final type =
                     (data['customerType'] ?? '').toString().toLowerCase();
 
                 final typeMatched =
                     normalizedType.isEmpty || type == normalizedType;
 
+                final pending = (data['pending'] as num?)?.toDouble() ?? 0.0;
                 return typeMatched && pending > 0.5;
               })
               .toList();

@@ -1177,10 +1177,9 @@ class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
     final locationCtrl = TextEditingController();
     final RxBool isSubmitting = false.obs; // 👈 নতুন লোকাল ফ্ল্যাগ
 
-    String warningMoneyStr =
-        widget.shipment.exchangeRate > 0
-            ? "${controller.formatMoney(valueDifference)} / ${controller.formatRMB(valueDifference / widget.shipment.exchangeRate)}"
-            : controller.formatMoney(valueDifference);
+    widget.shipment.exchangeRate > 0
+        ? "${controller.formatMoney(valueDifference)} / ${controller.formatRMB(valueDifference / widget.shipment.exchangeRate)}"
+        : controller.formatMoney(valueDifference);
 
     Get.defaultDialog(
       title: "Confirm Stock Receipt",

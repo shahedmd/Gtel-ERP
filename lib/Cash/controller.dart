@@ -174,22 +174,38 @@ class CashDrawerController extends GetxController {
       // 2. Absolute Start (for cumulative balances)
       DateTime absoluteStart = DateTime(2020, 1, 1);
 
+      final previousDay = filterStart.subtract(const Duration(days: 1));
+      final openingBalanceSnapshot =
+          await _db
+              .collection('cash_drawer_daily_balances')
+              .doc(DateFormat('yyyy-MM-dd').format(previousDay))
+              .get();
+      final hasOpeningBalance = openingBalanceSnapshot.exists;
+      final queryStart = hasOpeningBalance ? filterStart : absoluteStart;
+      final openingBalance = openingBalanceSnapshot.data() ?? {};
+
       // 3. Fetch Data
       var salesFuture =
           _db
               .collection('daily_sales')
-              .where('timestamp', isGreaterThanOrEqualTo: absoluteStart)
+              .where(
+                'timestamp',
+                isGreaterThanOrEqualTo: Timestamp.fromDate(queryStart),
+              )
               .where('timestamp', isLessThanOrEqualTo: filterEnd)
               .get();
 
       var ledgerFuture =
           _db
               .collection('cash_ledger')
-              .where('timestamp', isGreaterThanOrEqualTo: absoluteStart)
+              .where(
+                'timestamp',
+                isGreaterThanOrEqualTo: Timestamp.fromDate(queryStart),
+              )
               .where('timestamp', isLessThanOrEqualTo: filterEnd)
               .get();
 
-      var expensesFuture = _fetchExpensesList(absoluteStart, filterEnd);
+      var expensesFuture = _fetchExpensesList(queryStart, filterEnd);
 
       var results = await Future.wait([
         salesFuture,
@@ -225,7 +241,22 @@ class CashDrawerController extends GetxController {
       allRawItems.sort((a, b) => a['time'].compareTo(b['time']));
 
       // 5. Accumulators
-      double tCash = 0, tBank = 0, tBkash = 0, tNagad = 0;
+      double tCash =
+          hasOpeningBalance
+              ? (openingBalance['cash'] as num?)?.toDouble() ?? 0
+              : 0;
+      double tBank =
+          hasOpeningBalance
+              ? (openingBalance['bank'] as num?)?.toDouble() ?? 0
+              : 0;
+      double tBkash =
+          hasOpeningBalance
+              ? (openingBalance['bkash'] as num?)?.toDouble() ?? 0
+              : 0;
+      double tNagad =
+          hasOpeningBalance
+              ? (openingBalance['nagad'] as num?)?.toDouble() ?? 0
+              : 0;
       double periodSales = 0, periodCollections = 0, periodExpenses = 0;
       List<DrawerTransaction> periodTxList = [];
 
