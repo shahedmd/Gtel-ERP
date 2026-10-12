@@ -836,6 +836,10 @@ class VendorDetailPage extends StatelessWidget {
           bool isCredit = tx.type == 'CREDIT';
           bool isIncoming = tx.isIncomingCash;
 
+          // Debit column  -> Bill + Advance/Refund
+          // Credit column -> Payment only
+          final bool showInDebit = isCredit || isIncoming;
+
           return Container(
             padding: const EdgeInsets.symmetric(vertical: 12),
             child: Row(
@@ -899,11 +903,7 @@ class VendorDetailPage extends StatelessWidget {
                   flex: 2,
                   child: Builder(
                     builder: (context) {
-                      // Three distinct colors so Payment and
-                      // Advance/Refund (which both reduce/offset what's
-                      // owed) never get confused with each other:
-                      // Bill = red, Payment = green, Advance/Refund
-                      // from vendor = blue.
+                      // Bill = red, Payment = green, Advance/Refund = blue
                       final Color badgeColor =
                           isIncoming
                               ? AppTheme.primary
@@ -934,30 +934,29 @@ class VendorDetailPage extends StatelessWidget {
                     },
                   ),
                 ),
-                // Bill -> Debit column (red). Payment -> Credit column
-                // (green). Advance/Refund from vendor -> Credit column
-                // too, but blue, so it never reads as a regular Payment.
+                // DEBIT column: Bill (red) + Advance/Refund (blue)
                 Expanded(
                   flex: 2,
                   child: Text(
-                    (isCredit && !isIncoming) ? tx.formattedAmount : "",
-                    textAlign: TextAlign.right,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: AppTheme.danger,
-                    ),
-                  ),
-                ),
-                Expanded(
-                  flex: 2,
-                  child: Text(
-                    (!isCredit || isIncoming) ? tx.formattedAmount : "",
+                    showInDebit ? tx.formattedAmount : "",
                     textAlign: TextAlign.right,
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
-                      color: isIncoming ? AppTheme.primary : AppTheme.success,
+                      color: isIncoming ? AppTheme.primary : AppTheme.danger,
+                    ),
+                  ),
+                ),
+                // CREDIT column: Payment only (green)
+                Expanded(
+                  flex: 2,
+                  child: Text(
+                    !showInDebit ? tx.formattedAmount : "",
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.success,
                     ),
                   ),
                 ),

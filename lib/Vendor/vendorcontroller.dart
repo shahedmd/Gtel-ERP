@@ -644,7 +644,7 @@ class VendorController extends GetxController {
           .collection('vendors')
           .doc(vendor.docId)
           .collection('history')
-          .orderBy('date', descending: false); // Fetch chronologically
+          .orderBy('date', descending: false);
 
       if (startDate != null) {
         final DateTime dayStart = DateTime(
@@ -659,8 +659,6 @@ class VendorController extends GetxController {
       }
 
       if (endDate != null) {
-        // Push to the very end of the selected end day so that day's
-        // transactions are included too.
         final DateTime dayEnd = DateTime(
           endDate.year,
           endDate.month,
@@ -703,10 +701,7 @@ class VendorController extends GetxController {
       double totalPayments = 0.0;
       double totalAdvanceRefund = 0.0;
 
-      // 4. Calculate Totals — three distinct categories:
-      //    Bill (goods purchased / manually added), Payment (paid to
-      //    vendor, with or without a prior bill — i.e. incl. advance
-      //    payments), and Advance/Refund received FROM the vendor.
+      // 4. Calculate Totals
       for (var t in transactions) {
         if (t.isIncomingCash) {
           totalAdvanceRefund += t.amount;
@@ -717,9 +712,6 @@ class VendorController extends GetxController {
         }
       }
 
-      // Mirrors the same running-balance logic used when the transaction
-      // is recorded (see addTransaction): Bills and incoming Advance/Refund
-      // both add to what's due, Payments reduce it.
       double netBalance = (totalBills + totalAdvanceRefund) - totalPayments;
       String balanceLabel = "Net Balance";
       if (netBalance > 0) {
@@ -728,7 +720,6 @@ class VendorController extends GetxController {
         balanceLabel = "Advance Balance";
       }
 
-      // Optional date-range label shown under the vendor name in the header
       String? rangeLabel;
       if (startDate != null && endDate != null) {
         rangeLabel =
@@ -739,7 +730,6 @@ class VendorController extends GetxController {
         rangeLabel = "Up to: ${DateFormat('dd MMM yyyy').format(endDate)}";
       }
 
-      // Helper widget
       pw.Widget pdfStat(String label, double amount, PdfColor color) {
         return pw.Column(
           children: [
@@ -765,11 +755,9 @@ class VendorController extends GetxController {
         return method;
       }
 
-      // 'bill'            -> goods purchased / manually added bill (Debit)
-      // 'payment'         -> paid to vendor, incl. advance payments made
-      //                      when there's no bill yet (Credit)
+      // 'bill'            -> goods purchased / manually added bill
+      // 'payment'         -> paid to vendor
       // 'advance_refund'  -> advance or refund received FROM the vendor
-      //                      (Credit, but color-coded separately)
       String transactionCategory(VendorTransaction t) {
         if (t.isIncomingCash) return 'advance_refund';
         return (t.type.toUpperCase() == 'CREDIT') ? 'bill' : 'payment';
@@ -786,13 +774,12 @@ class VendorController extends GetxController {
         }
       }
 
-      // 5. MultiPage builder ensures NO rows are ever missed.
+      // 5. MultiPage builder
       pdf.addPage(
         pw.MultiPage(
           pageFormat: PdfPageFormat.a4,
           margin: const pw.EdgeInsets.all(32),
           header: (context) {
-            // Repeats perfectly on every page
             return pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
@@ -851,7 +838,6 @@ class VendorController extends GetxController {
           },
           build: (context) {
             return [
-              // This table will auto-break onto new pages and repeat the header!
               pw.Table.fromTextArray(
                 border: pw.TableBorder.all(
                   color: PdfColors.grey400,
@@ -862,9 +848,6 @@ class VendorController extends GetxController {
                 ),
                 headerHeight: 28,
                 cellHeight: 25,
-                // Fixed proportional widths so the Description column
-                // (which can contain long notes) never squeezes out the
-                // other columns.
                 columnWidths: {
                   0: const pw.FlexColumnWidth(1.3), // Date
                   1: const pw.FlexColumnWidth(2.8), // Description
@@ -891,11 +874,8 @@ class VendorController extends GetxController {
                   "Debit",
                   "Credit",
                 ],
-                // Color-codes the amount cell so the three transaction
-                // kinds stay visually distinct even though Payment and
-                // Advance/Refund share the Credit column: red for Bill
-                // (Debit), green for Payment, blue for Advance/Refund
-                // received from the vendor.
+                // Debit column  : Bill (red) + Advance/Refund (blue)
+                // Credit column : Payment (green)
                 cellDecoration: (int columnIndex, dynamic data, int rowNum) {
                   final int dataIndex = rowNum - 1; // headerCount == 1
                   if ((columnIndex != 3 && columnIndex != 4) ||
@@ -909,26 +889,25 @@ class VendorController extends GetxController {
                   if (columnIndex == 3 && category == 'bill') {
                     return const pw.BoxDecoration(color: PdfColors.red50);
                   }
+                  if (columnIndex == 3 && category == 'advance_refund') {
+                    return const pw.BoxDecoration(color: PdfColors.blue50);
+                  }
                   if (columnIndex == 4 && category == 'payment') {
                     return const pw.BoxDecoration(color: PdfColors.green50);
-                  }
-                  if (columnIndex == 4 && category == 'advance_refund') {
-                    return const pw.BoxDecoration(color: PdfColors.blue50);
                   }
                   return const pw.BoxDecoration();
                 },
                 data:
                     transactions.map((t) {
                       final String category = transactionCategory(t);
-                      final bool isDebit = category == 'bill';
+                      // Bill AND Advance/Refund both go in the Debit column
+                      final bool isDebit =
+                          category == 'bill' || category == 'advance_refund';
                       String method = formatMethodForPdf(
                         t.paymentMethod,
                         t.type,
                       );
 
-                      // Description shows the plain-English type label
-                      // plus any note/shipment — Debit/Credit columns
-                      // carry the actual figure.
                       String desc = transactionTypeLabel(category);
                       if (t.shipmentName != null &&
                           t.shipmentName!.trim().isNotEmpty) {
@@ -948,7 +927,6 @@ class VendorController extends GetxController {
                     }).toList(),
               ),
 
-              // Summary block stays intact at the very end of the document
               pw.SizedBox(height: 20),
               pw.Container(
                 padding: const pw.EdgeInsets.all(12),
@@ -989,7 +967,7 @@ class VendorController extends GetxController {
         name: 'Statement_${vendor.name.replaceAll(' ', '_')}$fileSuffix.pdf',
       );
     } catch (e) {
-      if (Get.isDialogOpen ?? false) Get.back(); // Close dialog if error occurs
+      if (Get.isDialogOpen ?? false) Get.back();
       Get.snackbar("Error", "PDF Generation Failed: $e");
     }
   }
