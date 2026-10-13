@@ -3,14 +3,31 @@ import 'package:get/get.dart';
 import 'package:gtel_erp/Live%20order/salemodel.dart';
 import '../Permission/permission_button.dart';
 
-class LiveOrderSalesPage extends StatelessWidget {
-  const LiveOrderSalesPage({super.key});
+class LiveOrderSalesPage extends StatefulWidget {
+  final Map<String, dynamic>? quotationDraft;
+
+  const LiveOrderSalesPage({super.key, this.quotationDraft});
+
+  @override
+  State<LiveOrderSalesPage> createState() => _LiveOrderSalesPageState();
+}
+
+class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
+  late final LiveSalesController controller;
+  final RxString cartSearchQuery = ''.obs;
+
+  @override
+  void initState() {
+    super.initState();
+    controller = Get.put(LiveSalesController());
+    final quotationDraft = widget.quotationDraft;
+    if (quotationDraft != null) {
+      controller.applyQuotationDraft(quotationDraft);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final controller = Get.put(LiveSalesController());
-
-    final RxString cartSearchQuery = ''.obs;
     final double screenWidth = MediaQuery.sizeOf(context).width;
     final double screenHeight = MediaQuery.sizeOf(context).height;
     final bool isDesktop = screenWidth >= 900;

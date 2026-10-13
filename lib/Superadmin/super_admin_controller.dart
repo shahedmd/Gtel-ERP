@@ -15,6 +15,7 @@ class SuperAdminController extends GetxController {
 
   static const Map<String, String> moduleLabels = {
     'new_order': 'New Order (Live Order)',
+    'quotations': 'Quotations',
     'daily_sales': 'Daily Sales',
     'monthly_sales': 'Monthly Sales',
     'condition_sale': 'Condition Sale',
@@ -46,7 +47,7 @@ class SuperAdminController extends GetxController {
     'delete',
     'export',
     'sync',
-    'report'
+    'report',
   ];
 
   Future<void> createUser({

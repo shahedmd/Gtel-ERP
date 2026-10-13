@@ -24,10 +24,10 @@ class MenuItem {
 class NavigationController extends GetxController {
   var activeId = Routes.dailysales.obs;
 
-  void changePage(String routeName) {
+  void changePage(String routeName, {Object? arguments}) {
     if (activeId.value == routeName) return;
     activeId.value = routeName;
-    Get.toNamed(routeName, id: NavKey.nestedHome);
+    Get.toNamed(routeName, id: NavKey.nestedHome, arguments: arguments);
   }
 }
 
@@ -227,6 +227,12 @@ class SidebarMenu extends StatelessWidget {
                   _NavTile(
                     id: Routes.conditionpage,
                     title: "Condition Sale",
+                    isSubItem: true,
+                  ),
+                if (canView('quotations'))
+                  _NavTile(
+                    id: Routes.quotations,
+                    title: "Quotations",
                     isSubItem: true,
                   ),
                 if (canView('sale_return'))

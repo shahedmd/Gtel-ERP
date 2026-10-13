@@ -127,6 +127,7 @@ class LiveSalesController extends GetxController {
   final RxDouble totalPaidInput = 0.0.obs;
   final RxDouble changeReturn = 0.0.obs;
   final RxDouble calculatedCourierDue = 0.0.obs;
+  bool _requiresAgentLookupFromQuotation = false;
 
   int get currentPage => productCtrl.currentPage.value;
   int get totalPages =>
@@ -608,6 +609,62 @@ class LiveSalesController extends GetxController {
     );
   }
 
+  void applyQuotationDraft(Map<String, dynamic> draft) {
+    _resetAll();
+    isConditionSale.value = false;
+    isNonConditionSale.value = false;
+
+    customerType.value = draft['customerType']?.toString() ?? 'WHOLESALE';
+    _requiresAgentLookupFromQuotation = customerType.value == 'AGENT';
+    final customerName = draft['customerName']?.toString() ?? '';
+    final customerPhone = draft['customerPhone']?.toString() ?? '';
+    nameC.text = customerName;
+    phoneC.text = customerPhone;
+    shopC.text = draft['shopName']?.toString() ?? '';
+    addressC.text = draft['address']?.toString() ?? '';
+    debtorPhoneSearch.text = customerPhone;
+    discountVal.value = (draft['discount'] as num?)?.toDouble() ?? 0;
+    discountC.text = discountVal.value.toStringAsFixed(2);
+    discountNoteC.text = draft['discountNote']?.toString() ?? '';
+
+    if (customerType.value == 'AGENT') {
+      selectedDebtor.value = debtorCtrl.bodies.firstWhereOrNull(
+        (debtor) => debtor.phone == customerPhone,
+      );
+    }
+
+    final draftItems = draft['items'] as List<dynamic>? ?? const [];
+    for (final rawItem in draftItems) {
+      if (rawItem is! Map) continue;
+      final item = Map<String, dynamic>.from(rawItem);
+      final productId = (item['productId'] as num?)?.toInt();
+      if (productId == null) continue;
+
+      final currentProduct = productCtrl.allProducts.firstWhereOrNull(
+        (product) => product.id == productId,
+      );
+      final snapshot = item['productSnapshot'];
+      final product =
+          currentProduct ??
+          (snapshot is Map
+              ? Product.fromJson(Map<String, dynamic>.from(snapshot))
+              : null);
+      if (product == null) continue;
+
+      final quantity = (item['quantity'] as num?)?.toInt() ?? 1;
+      final price = (item['unitPrice'] as num?)?.toDouble() ?? 0;
+      cart.add(
+        SalesCartItem(
+          product: product,
+          initialQty: quantity > 0 ? quantity : 1,
+          priceAtSale: price,
+        ),
+      );
+    }
+    cart.refresh();
+    updatePaymentCalculations();
+  }
+
   void _handleTypeChange() {
     selectedDebtor.value = null;
     selectedRegularCustomer.value = null;
@@ -786,6 +843,28 @@ class LiveSalesController extends GetxController {
     String fName = nameC.text.trim();
     String fPhone = phoneC.text.trim();
     String? finalDebtorId;
+
+    if (customerType.value == "AGENT" &&
+        selectedDebtor.value == null &&
+        _requiresAgentLookupFromQuotation) {
+      try {
+        final existingAgent =
+            await _db
+                .collection('debatorbody')
+                .where('phone', isEqualTo: fPhone)
+                .limit(1)
+                .get();
+        if (existingAgent.docs.isNotEmpty) {
+          selectedDebtor.value = DebtorModel.fromFirestore(
+            existingAgent.docs.first,
+          );
+        }
+        _requiresAgentLookupFromQuotation = false;
+      } catch (e) {
+        Get.snackbar("Error", "Could not verify the quoted agent: $e");
+        return;
+      }
+    }
 
     if (customerType.value == "AGENT") {
       if (selectedDebtor.value != null) {
@@ -1881,6 +1960,7 @@ class LiveSalesController extends GetxController {
   }
 
   void _resetAll() {
+    _requiresAgentLookupFromQuotation = false;
     cart.clear();
     nameC.clear();
     phoneC.clear();

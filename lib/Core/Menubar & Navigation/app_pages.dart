@@ -4,6 +4,8 @@ import 'package:gtel_erp/Cash/page.dart';
 import 'package:gtel_erp/Core/Auth/login.dart';
 import 'package:gtel_erp/Customer/cusotmerpage.dart';
 import 'package:gtel_erp/Live%20order/liveorder.dart';
+import 'package:gtel_erp/Quotation/quotation_page.dart';
+import 'package:gtel_erp/Quotation/quotation_model.dart';
 import 'package:gtel_erp/Profit&loss/page.dart';
 import 'package:gtel_erp/Sale%20Return/salereturnpage.dart';
 import 'package:gtel_erp/Shipment/shipmentpage.dart';
@@ -41,6 +43,8 @@ abstract class Routes {
   static const String profitloss = '/profit';
   static const String staff = '/staff';
   static const String liveorder = '/liveorder';
+  static const String quotations = '/quotations';
+  static const String quotationForm = '/quotations/form';
   static const String cash = '/cash';
   static const String service = '/service';
   static const String salereturn = '/salereturn';
@@ -129,11 +133,36 @@ abstract class AppPages {
     ),
     GetPage(
       name: Routes.liveorder,
+      page: () {
+        final arguments = Get.arguments;
+        final draft =
+            arguments is Map ? Map<String, dynamic>.from(arguments) : null;
+        return PermissionGuard(
+          moduleKey: 'new_order',
+          child: LiveOrderSalesPage(quotationDraft: draft),
+        );
+      },
+    ),
+    GetPage(
+      name: Routes.quotations,
       page:
           () => PermissionGuard(
-            moduleKey: 'new_order',
-            child: LiveOrderSalesPage(),
+            moduleKey: 'quotations',
+            child: const QuotationListPage(),
           ),
+    ),
+    GetPage(
+      name: Routes.quotationForm,
+      page: () {
+        final quotation = Get.arguments;
+        return PermissionGuard(
+          moduleKey: 'quotations',
+          child:
+              quotation is Quotation
+                  ? QuotationFormPage(quotation: quotation)
+                  : const QuotationFormPage(),
+        );
+      },
     ),
     GetPage(
       name: Routes.profitloss,
