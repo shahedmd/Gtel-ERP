@@ -852,8 +852,15 @@ class LiveSalesController extends GetxController {
             await _db
                 .collection('debatorbody')
                 .where('phone', isEqualTo: fPhone)
-                .limit(1)
+                .limit(2)
                 .get();
+        if (existingAgent.docs.length > 1) {
+          Get.snackbar(
+            "Duplicate Agent",
+            "More than one agent account uses this phone number. Please resolve the duplicate accounts first.",
+          );
+          return;
+        }
         if (existingAgent.docs.isNotEmpty) {
           selectedDebtor.value = DebtorModel.fromFirestore(
             existingAgent.docs.first,
@@ -874,23 +881,47 @@ class LiveSalesController extends GetxController {
       } else {
         try {
           isProcessing.value = true;
-          DocumentReference newDebtorRef = _db.collection('debatorbody').doc();
-          finalDebtorId = newDebtorRef.id;
-          await newDebtorRef.set({
-            'id': finalDebtorId,
-            'name': fName,
-            'phone': fPhone,
-            'address': addressC.text,
-            'des': shopC.text,
-            'nid': '',
-            'balance': 0.0,
-            'purchaseDue': 0.0,
-            'createdAt': FieldValue.serverTimestamp(),
-            'lastTransactionDate': FieldValue.serverTimestamp(),
-            'searchKeywords': _generateSearchKeywords(fName, fPhone),
-          });
-          await debtorCtrl.loadBodies();
-          Get.snackbar("New Agent", "Created account for $fName");
+          final existingAgents =
+              await _db
+                  .collection('debatorbody')
+                  .where('phone', isEqualTo: fPhone.trim())
+                  .limit(2)
+                  .get();
+          if (existingAgents.docs.length > 1) {
+            isProcessing.value = false;
+            Get.snackbar(
+              "Duplicate Agent",
+              "More than one agent account uses this phone number. Please resolve the duplicate accounts first.",
+            );
+            return;
+          }
+          if (existingAgents.docs.length == 1) {
+            selectedDebtor.value = DebtorModel.fromFirestore(
+              existingAgents.docs.first,
+            );
+            finalDebtorId = selectedDebtor.value!.id;
+            fName = selectedDebtor.value!.name;
+            fPhone = selectedDebtor.value!.phone;
+          } else {
+            DocumentReference newDebtorRef =
+                _db.collection('debatorbody').doc();
+            finalDebtorId = newDebtorRef.id;
+            await newDebtorRef.set({
+              'id': finalDebtorId,
+              'name': fName,
+              'phone': fPhone,
+              'address': addressC.text,
+              'des': shopC.text,
+              'nid': '',
+              'balance': 0.0,
+              'purchaseDue': 0.0,
+              'createdAt': FieldValue.serverTimestamp(),
+              'lastTransactionDate': FieldValue.serverTimestamp(),
+              'searchKeywords': _generateSearchKeywords(fName, fPhone),
+            });
+            await debtorCtrl.loadBodies();
+            Get.snackbar("New Agent", "Created account for $fName");
+          }
         } catch (e) {
           isProcessing.value = false;
           Get.snackbar("Error", "Failed to create new Agent: $e");
@@ -1359,6 +1390,85 @@ class LiveSalesController extends GetxController {
       allRegularCustomersCache[existingIndex] = updatedCust;
     } else {
       allRegularCustomersCache.add(updatedCust);
+    }
+  }
+
+  void updateAgentProfileCache({
+    required String debtorId,
+    required String name,
+    required String phone,
+    required String nid,
+    required String address,
+    required String shop,
+  }) {
+    final selected = selectedDebtor.value;
+    final cachedDebtor =
+        selected?.id == debtorId
+            ? selected
+            : filteredDebtors.firstWhereOrNull(
+                  (debtor) => debtor.id == debtorId,
+                ) ??
+                debtorCtrl.bodies.firstWhereOrNull(
+                  (debtor) => debtor.id == debtorId,
+                );
+    if (cachedDebtor == null) return;
+
+    final updatedDebtor = cachedDebtor.copyWith(
+      name: name,
+      phone: phone,
+      nid: nid,
+      address: address,
+      des: shop,
+    );
+    if (selected?.id == debtorId) {
+      selectedDebtor.value = updatedDebtor;
+    }
+    for (var index = 0; index < filteredDebtors.length; index++) {
+      if (filteredDebtors[index].id == debtorId) {
+        filteredDebtors[index] = updatedDebtor;
+      }
+    }
+  }
+
+  void updateRegularCustomerProfileCache({
+    required String oldPhone,
+    required String phone,
+    required String name,
+    required String shop,
+    required String address,
+    required String type,
+  }) {
+    final updatedCustomer = <String, dynamic>{
+      'id': phone,
+      'phone': phone,
+      'name': name,
+      'shop': shop,
+      'address': address,
+      'type': type,
+    };
+
+    bool matchesPhone(Map<String, dynamic> customer, String value) =>
+        value.isNotEmpty &&
+        ((customer['phone'] ?? '').toString() == value ||
+            (customer['id'] ?? '').toString() == value);
+
+    allRegularCustomersCache.removeWhere(
+      (customer) =>
+          matchesPhone(customer, oldPhone) || matchesPhone(customer, phone),
+    );
+    allRegularCustomersCache.add(updatedCustomer);
+
+    final selected = selectedRegularCustomer.value;
+    if (selected != null &&
+        (matchesPhone(selected, oldPhone) || matchesPhone(selected, phone))) {
+      selectedRegularCustomer.value = updatedCustomer;
+    }
+
+    for (var index = filteredRegularCustomers.length - 1; index >= 0; index--) {
+      final customer = filteredRegularCustomers[index];
+      if (matchesPhone(customer, oldPhone) || matchesPhone(customer, phone)) {
+        filteredRegularCustomers[index] = updatedCustomer;
+      }
     }
   }
 
@@ -2144,31 +2254,36 @@ class LiveSalesController extends GetxController {
     pdf.addPage(
       pw.MultiPage(
         pageTheme: pageTheme,
-        footer: (ctx) => _buildNewFooter(ctx, regularFont),
+        header:
+            (_) => pw.Column(
+              children: [
+                _buildNewHeader(
+                  boldFont,
+                  regularFont,
+                  invId,
+                  "Sales Invoice",
+                  packagerName,
+                  authorizedName,
+                  invDue,
+                  false,
+                  null,
+                  "",
+                  paymentMethodsStr,
+                ),
+                _buildNewCustomerBox(
+                  name,
+                  address,
+                  phone,
+                  shopName,
+                  regularFont,
+                  boldFont,
+                ),
+                pw.SizedBox(height: 5),
+              ],
+            ),
+        footer: (ctx) => _buildNewFooter(ctx, regularFont, boldFont),
         build:
             (ctx) => [
-              _buildNewHeader(
-                boldFont,
-                regularFont,
-                invId,
-                "Sales Invoice",
-                packagerName,
-                authorizedName,
-                invDue,
-                false,
-                null,
-                "",
-                paymentMethodsStr,
-              ),
-              _buildNewCustomerBox(
-                name,
-                address,
-                phone,
-                shopName,
-                regularFont,
-                boldFont,
-              ),
-              pw.SizedBox(height: 5),
               _buildNewTable(items, boldFont, regularFont),
               _buildNewSummary(
                 subTotal,
@@ -2185,6 +2300,7 @@ class LiveSalesController extends GetxController {
               _buildNewDues(totalPreviousBalance, netTotalDue, regularFont),
               if (invDue <= 0 && !isCondition)
                 _buildPaidStamp(boldFont, regularFont),
+              if (invDue > 0) _buildDueStamp(boldFont, invDue),
               if (invDue > 0 || isCondition) pw.SizedBox(height: 15),
               _buildWordsBox(currentInvTotal, boldFont),
               pw.SizedBox(height: 40),
@@ -2197,7 +2313,7 @@ class LiveSalesController extends GetxController {
       pdf.addPage(
         pw.MultiPage(
           pageTheme: pageTheme,
-          footer: (ctx) => _buildNewFooter(ctx, regularFont),
+          footer: (ctx) => _buildNewFooter(ctx, regularFont, boldFont),
           build:
               (ctx) => [
                 _buildNewHeader(
@@ -2635,6 +2751,60 @@ class LiveSalesController extends GetxController {
     );
   }
 
+  pw.Widget _buildDueStamp(pw.Font bold, double due) {
+    return pw.Container(
+      margin: const pw.EdgeInsets.symmetric(vertical: 20),
+      alignment: pw.Alignment.center,
+      child: pw.Container(
+        padding: const pw.EdgeInsets.symmetric(horizontal: 40, vertical: 10),
+        decoration: pw.BoxDecoration(
+          border: pw.Border.all(color: PdfColors.red800, width: 2),
+          borderRadius: const pw.BorderRadius.all(pw.Radius.circular(5)),
+        ),
+        child: pw.Column(
+          children: [
+            pw.Text(
+              "D U E",
+              style: pw.TextStyle(
+                color: PdfColors.red800,
+                font: bold,
+                fontSize: 24,
+                letterSpacing: 2,
+              ),
+            ),
+            pw.SizedBox(height: 5),
+            pw.Text(
+              "৳${due.toStringAsFixed(2)}",
+              style: pw.TextStyle(
+                color: PdfColors.red800,
+                font: bold,
+                fontSize: 12,
+              ),
+            ),
+            pw.SizedBox(height: 5),
+            pw.Text(
+              DateFormat('dd MMM yyyy').format(DateTime.now()),
+              style: pw.TextStyle(
+                color: PdfColors.red800,
+                font: bold,
+                fontSize: 12,
+              ),
+            ),
+            pw.SizedBox(height: 5),
+            pw.Text(
+              "G TEL",
+              style: pw.TextStyle(
+                color: PdfColors.red800,
+                font: bold,
+                fontSize: 14,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   pw.Widget _buildWordsBox(double currentInvTotal, pw.Font bold) {
     return pw.Container(
       width: double.infinity,
@@ -2685,7 +2855,11 @@ class LiveSalesController extends GetxController {
     );
   }
 
-  pw.Widget _buildNewFooter(pw.Context context, pw.Font reg) {
+  pw.Widget _buildNewFooter(
+    pw.Context context,
+    pw.Font reg,
+    pw.Font bold,
+  ) {
     return pw.Column(
       mainAxisSize: pw.MainAxisSize.min,
       children: [
@@ -2712,7 +2886,7 @@ class LiveSalesController extends GetxController {
             ),
             pw.Text(
               "Page ${context.pageNumber} of ${context.pagesCount}",
-              style: pw.TextStyle(font: reg, fontSize: 7),
+              style: pw.TextStyle(font: bold, fontSize: 7),
             ),
           ],
         ),

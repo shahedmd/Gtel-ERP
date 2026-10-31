@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import 'gteldebtorcontroller.dart';
 import '../../Web Screen/Sales/controller.dart';
 import 'debtordartmodel.dart';
+import '../../Live order/salemodel.dart';
 
 // --- THEME COLORS ---
 const Color darkSlate = Color(0xFF0F172A);
@@ -2649,11 +2650,21 @@ class _EditProfileFormController extends GetxController {
         address: addressC.text,
         payments: debtor.payments,
       );
+      if (Get.isRegistered<LiveSalesController>()) {
+        Get.find<LiveSalesController>().updateAgentProfileCache(
+          debtorId: debtor.id,
+          name: nameC.text.trim(),
+          phone: phoneC.text.trim(),
+          nid: nidC.text.trim(),
+          address: addressC.text.trim(),
+          shop: desC.text.trim(),
+        );
+      }
       if (context.mounted) {
         Navigator.of(context).pop();
       }
     } catch (e) {
-      Get.snackbar("Error", "Failed to update profile");
+      Get.snackbar("Error", "Failed to update profile: $e");
     } finally {
       isSubmitting.value = false;
     }

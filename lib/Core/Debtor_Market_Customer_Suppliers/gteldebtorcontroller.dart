@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Core/Utils/app_logger.dart';
+import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -56,6 +57,74 @@ class DebatorController extends GetxController {
     decimalDigits: 2,
   );
 
+  Future<Set<String>> _getConditionCourierInvoiceIds(
+    Iterable<Map<String, dynamic>> sales,
+  ) async {
+    final invoiceIds = <String>{};
+    for (final sale in sales) {
+      final id = (sale['_docId'] ?? '').toString().trim();
+      if (id.isNotEmpty) invoiceIds.add(id);
+      for (final key in ['transactionId', 'invoiceId']) {
+        final value = (sale[key] ?? '').toString().trim();
+        if (value.isNotEmpty) invoiceIds.add(value);
+      }
+    }
+
+    final conditionInvoiceIds = <String>{};
+    final ids = invoiceIds.toList();
+    for (var start = 0; start < ids.length; start += 30) {
+      final end = start + 30 < ids.length ? start + 30 : ids.length;
+      final chunk = ids.sublist(start, end);
+      final ordersByDocumentId =
+          await db
+              .collection('sales_orders')
+              .where(FieldPath.documentId, whereIn: chunk)
+              .get();
+      final ordersByInvoiceId =
+          await db
+              .collection('sales_orders')
+              .where('invoiceId', whereIn: chunk)
+              .get();
+      final orders = {
+        for (final order in ordersByDocumentId.docs) order.id: order,
+        for (final order in ordersByInvoiceId.docs) order.id: order,
+      };
+
+      for (final order in orders.values) {
+        final data = order.data();
+        final saleMode = (data['saleMode'] ?? '').toString().toLowerCase();
+        final isLegacyCondition =
+            saleMode.isEmpty && data['isCondition'] == true;
+        if (saleMode == 'condition' || isLegacyCondition) {
+          conditionInvoiceIds.add(order.id);
+          final invoiceId = (data['invoiceId'] ?? '').toString().trim();
+          if (invoiceId.isNotEmpty) conditionInvoiceIds.add(invoiceId);
+        }
+      }
+    }
+    return conditionInvoiceIds;
+  }
+
+  bool _isConditionCourierInvoice(
+    Map<String, dynamic> sale,
+    Set<String> conditionInvoiceIds,
+  ) {
+    final saleMode = (sale['saleMode'] ?? '').toString().toLowerCase();
+    final source = (sale['source'] ?? '').toString().toLowerCase();
+    if (source == 'pos_condition_sale' ||
+        saleMode == 'condition' ||
+        (sale['isCondition'] == true && saleMode != 'non_condition')) {
+      return true;
+    }
+    if (conditionInvoiceIds.contains((sale['_docId'] ?? '').toString())) {
+      return true;
+    }
+    return conditionInvoiceIds.contains(
+          (sale['transactionId'] ?? '').toString(),
+        ) ||
+        conditionInvoiceIds.contains((sale['invoiceId'] ?? '').toString());
+  }
+
   @override
   @override
   void onInit() {
@@ -94,13 +163,26 @@ class DebatorController extends GetxController {
     );
   }
 
-  Future<void> _fetchRegularCustomerDues() async {
+  Future<bool> _fetchRegularCustomerDues() async {
     try {
       final snap =
           await db
               .collection('daily_sales')
               .where('pending', isGreaterThan: 0.5)
               .get();
+      final candidateSales =
+          snap.docs
+              .where((doc) {
+                final type =
+                    (doc.data()['customerType'] ?? '')
+                        .toString()
+                        .toUpperCase();
+                return type == 'WHOLESALE' || type == 'VIP';
+              })
+              .map((doc) => {'_docId': doc.id, ...doc.data()})
+              .toList();
+      final conditionInvoiceIds =
+          await _getConditionCourierInvoiceIds(candidateSales);
 
       final Map<String, DebtorModel> grouped = {};
 
@@ -109,6 +191,12 @@ class DebatorController extends GetxController {
         final type = (data['customerType'] ?? '').toString().toUpperCase();
 
         if (type != 'WHOLESALE' && type != 'VIP') continue;
+        if (_isConditionCourierInvoice(
+          {'_docId': doc.id, ...data},
+          conditionInvoiceIds,
+        )) {
+          continue;
+        }
 
         final name = (data['name'] ?? '').toString().trim();
         final phone = (data['customerPhone'] ?? '').toString().trim();
@@ -122,10 +210,14 @@ class DebatorController extends GetxController {
         grouped[key] = DebtorModel(
           id: phone.isNotEmpty ? phone : key,
           name: name,
-          des: existing?.des ?? '',
+          des: existing?.des ?? (data['shop'] ?? '').toString().trim(),
           nid: '',
           phone: phone,
-          address: existing?.address ?? '',
+          address:
+              existing?.address ??
+              (data['address'] ?? data['deliveryAddress'] ?? '')
+                  .toString()
+                  .trim(),
           payments: const [],
           balance: (existing?.balance ?? 0.0) + pending,
           purchaseDue: 0.0,
@@ -138,13 +230,58 @@ class DebatorController extends GetxController {
         );
       }
 
+      final regularDues = await Future.wait(
+        grouped.values.map((due) async {
+          var phone = due.phone;
+          var shop = due.des;
+          var address = due.address;
+
+          if (address.isEmpty || phone.isEmpty) {
+            Query<Map<String, dynamic>> orderQuery = db.collection(
+              'sales_orders',
+            );
+            orderQuery =
+                phone.isNotEmpty
+                    ? orderQuery.where('customerPhone', isEqualTo: phone)
+                    : orderQuery.where('customerName', isEqualTo: due.name);
+            final orderSnap =
+                await orderQuery
+                    .orderBy('timestamp', descending: true)
+                    .limit(1)
+                    .get();
+            if (orderSnap.docs.isNotEmpty) {
+              final order = orderSnap.docs.first.data();
+              address = (order['deliveryAddress'] ?? order['address'] ?? '')
+                  .toString()
+                  .trim();
+              phone = (order['customerPhone'] ?? phone).toString().trim();
+              shop = (order['shopName'] ?? shop).toString().trim();
+            }
+          }
+
+          if (phone.isNotEmpty) {
+            final customerDoc =
+                await db.collection('customers').doc(phone).get();
+            final customerData = customerDoc.data() ?? <String, dynamic>{};
+            phone = (customerData['phone'] ?? phone).toString().trim();
+            shop = (customerData['shop'] ?? shop).toString().trim();
+            final profileAddress =
+                (customerData['address'] ?? '').toString().trim();
+            if (profileAddress.isNotEmpty) address = profileAddress;
+          }
+
+          return due.copyWith(phone: phone, des: shop, address: address);
+        }),
+      );
+
       regularCustomerDues.value =
-          grouped.values.toList()
-            ..sort((a, b) => b.balance.compareTo(a.balance));
+          regularDues..sort((a, b) => b.balance.compareTo(a.balance));
 
       _applyMergedList();
+      return true;
     } catch (e) {
       AppLogger.i("Error fetching pending regular customer dues: $e");
+      return false;
     }
   }
 
@@ -422,12 +559,20 @@ class DebatorController extends GetxController {
         }
       }
 
+      final conditionInvoiceIds = await _getConditionCourierInvoiceIds(
+        docs.values
+            .map((doc) => {'_docId': doc.id, ...doc.data() as Map<String, dynamic>}),
+      );
       final pendingDocs =
           docs.values.where((doc) {
             final data = doc.data() as Map<String, dynamic>;
             final pending = (data['pending'] as num?)?.toDouble() ?? 0.0;
             final type = (data['customerType'] ?? '').toString().toLowerCase();
             return (normalizedType.isEmpty || type == normalizedType) &&
+                !_isConditionCourierInvoice(
+                  {'_docId': doc.id, ...data},
+                  conditionInvoiceIds,
+                ) &&
                 pending > 0.5;
           }).toList();
 
@@ -535,11 +680,16 @@ class DebatorController extends GetxController {
         }
       }
 
+      final conditionInvoiceIds = await _getConditionCourierInvoiceIds(
+        docs.values
+            .map((doc) => {'_docId': doc.id, ...doc.data() as Map<String, dynamic>}),
+      );
       final list =
           docs.values
               .map((d) {
                 final data = Map<String, dynamic>.from(d.data() as Map);
                 data['docId'] = d.id;
+                data['_docId'] = d.id;
                 return data;
               })
               .where((data) {
@@ -550,7 +700,9 @@ class DebatorController extends GetxController {
                     normalizedType.isEmpty || type == normalizedType;
 
                 final pending = (data['pending'] as num?)?.toDouble() ?? 0.0;
-                return typeMatched && pending > 0.5;
+                return typeMatched &&
+                    !_isConditionCourierInvoice(data, conditionInvoiceIds) &&
+                    pending > 0.5;
               })
               .toList();
 
@@ -633,6 +785,10 @@ class DebatorController extends GetxController {
         }
       }
 
+      final conditionInvoiceIds = await _getConditionCourierInvoiceIds(
+        docs.values
+            .map((doc) => {'_docId': doc.id, ...doc.data() as Map<String, dynamic>}),
+      );
       final pendingDocs =
           docs.values.where((doc) {
             final data = doc.data() as Map<String, dynamic>;
@@ -642,7 +798,12 @@ class DebatorController extends GetxController {
             final typeMatched =
                 normalizedType.isEmpty || type == normalizedType;
 
-            return typeMatched && pending > 0.5;
+            return typeMatched &&
+                !_isConditionCourierInvoice(
+                  {'_docId': doc.id, ...data},
+                  conditionInvoiceIds,
+                ) &&
+                pending > 0.5;
           }).toList();
 
       pendingDocs.sort((a, b) {
@@ -839,12 +1000,31 @@ class DebatorController extends GetxController {
               .collection('daily_sales')
               .where('pending', isGreaterThan: 0.5)
               .get();
+      final regularDueSales =
+          dueSalesSnap.docs
+              .where((doc) {
+                final type =
+                    (doc.data()['customerType'] ?? '')
+                        .toString()
+                        .toUpperCase();
+                return type == 'WHOLESALE' || type == 'VIP';
+              })
+              .map((doc) => {'_docId': doc.id, ...doc.data()})
+              .toList();
+      final conditionInvoiceIds =
+          await _getConditionCourierInvoiceIds(regularDueSales);
 
       for (var doc in dueSalesSnap.docs) {
         final data = doc.data();
         final type = (data['customerType'] ?? '').toString().toUpperCase();
 
         if (type == 'WHOLESALE' || type == 'VIP') {
+          if (_isConditionCourierInvoice(
+            {'_docId': doc.id, ...data},
+            conditionInvoiceIds,
+          )) {
+            continue;
+          }
           final due = (data['pending'] as num?)?.toDouble() ?? 0.0;
           if (due > 0) totalRec += due;
         }
@@ -994,9 +1174,22 @@ class DebatorController extends GetxController {
     isBodiesLoading.value = true;
 
     try {
+      if (!await _fetchRegularCustomerDues()) {
+        Get.snackbar(
+          "Error",
+          "Could not refresh customer dues. Please try searching again.",
+        );
+        return;
+      }
+
       String qLower = queryText.trim().toLowerCase();
       Map<String, DebtorModel> agentResults = {};
       Map<String, DebtorModel> regularResults = {};
+      final regularDuesByIdentity = <String, DebtorModel>{};
+      for (final due in regularCustomerDues) {
+        regularDuesByIdentity[due.id] = due;
+        if (due.phone.isNotEmpty) regularDuesByIdentity[due.phone] = due;
+      }
       List<String> searchTerms = qLower.split(RegExp(r'\s+'));
       String primaryTerm = searchTerms.first;
 
@@ -1011,7 +1204,9 @@ class DebatorController extends GetxController {
           agentResults[doc.id] = DebtorModel.fromFirestore(doc);
         }
 
-        // NEW: search Regular customers too (kept only if they still owe)
+        // Customer documents provide searchable profile fields, but currentDue
+        // can lag behind invoice payments. Only include them when an invoice-
+        // based outstanding balance exists in regularCustomerDues.
         var custKwSnap =
             await db
                 .collection('customers')
@@ -1019,8 +1214,19 @@ class DebatorController extends GetxController {
                 .limit(50)
                 .get();
         for (var doc in custKwSnap.docs) {
-          final model = DebtorModel.fromRegularCustomer(doc);
-          if (model.balance > 0) regularResults[doc.id] = model;
+          final customer = DebtorModel.fromRegularCustomer(doc);
+          final due =
+              regularDuesByIdentity[doc.id] ??
+              (customer.phone.isNotEmpty
+                  ? regularDuesByIdentity[customer.phone]
+                  : null);
+          if (due != null) {
+            regularResults[due.id] = due.copyWith(
+              name: customer.name,
+              des: customer.des,
+              address: customer.address,
+            );
+          }
         }
       }
 
@@ -1028,7 +1234,7 @@ class DebatorController extends GetxController {
         agentResults[m.id] = m;
       }
       for (var m in regularCustomerDues) {
-        regularResults[m.id] = m;
+        regularResults.putIfAbsent(m.id, () => m);
       }
 
       bool matchesTerms(DebtorModel d) {
@@ -1124,11 +1330,28 @@ class DebatorController extends GetxController {
   }) async {
     isAddingBody.value = true;
     try {
+      final safePhone = phone.trim();
+      if (safePhone.isNotEmpty) {
+        final existing =
+            await db
+                .collection('debatorbody')
+                .where('phone', isEqualTo: safePhone)
+                .limit(1)
+                .get();
+        if (existing.docs.isNotEmpty) {
+          Get.snackbar(
+            "Already Exists",
+            "A debtor account already uses this phone number.",
+          );
+          return;
+        }
+      }
+
       await db.collection('debatorbody').add({
         "name": name.trim(),
         "des": des.trim(),
         "nid": nid,
-        "phone": phone.trim(),
+        "phone": safePhone,
         "address": address,
         "payments": payments,
         "balance": 0.0,
@@ -1163,11 +1386,25 @@ class DebatorController extends GetxController {
   }) async {
     gbIsLoading.value = true;
     try {
+      final safePhone = phone.trim();
+      if (safePhone.isNotEmpty) {
+        final matchingDebtors =
+            await db
+                .collection('debatorbody')
+                .where('phone', isEqualTo: safePhone)
+                .get();
+        if (matchingDebtors.docs.any((doc) => doc.id != id)) {
+          throw StateError(
+            "Another debtor account already uses this phone number.",
+          );
+        }
+      }
+
       Map<String, dynamic> updateData = {
         "name": newName.trim(),
         "des": des.trim(),
         "nid": nid,
-        "phone": phone.trim(),
+        "phone": safePhone,
         "address": address,
         "searchKeywords": _generateSearchKeywords(
           newName.trim(),
@@ -1227,8 +1464,198 @@ class DebatorController extends GetxController {
       Get.snackbar("Success", "Debtor profile updated");
     } catch (e) {
       Get.snackbar("Error", "Update failed: $e");
+      rethrow;
     } finally {
       gbIsLoading.value = false;
+    }
+  }
+
+  Future<void> updateRegularCustomerProfile({
+    required String oldPhone,
+    required String oldName,
+    required String newName,
+    required String newPhone,
+    required String shop,
+    required String address,
+    required String category,
+  }) async {
+    final safeOldPhone = oldPhone.trim();
+    final safeOldName = oldName.trim();
+    final safeName = newName.trim();
+    final safePhone = newPhone.trim();
+    final safeShop = shop.trim();
+    final safeAddress = address.trim();
+    final normalizedCategory = category.trim().toLowerCase();
+
+    if (safeName.isEmpty || safePhone.isEmpty) {
+      throw ArgumentError('Customer name and phone number are required.');
+    }
+
+    final oldCustomerRef =
+        safeOldPhone.isEmpty
+            ? null
+            : db.collection('customers').doc(safeOldPhone);
+    final newCustomerRef = db.collection('customers').doc(safePhone);
+    final oldCustomerData =
+        oldCustomerRef == null
+            ? <String, dynamic>{}
+            : (await oldCustomerRef.get()).data() ?? <String, dynamic>{};
+    if (safePhone != safeOldPhone) {
+      final newCustomerSnapshot = await newCustomerRef.get();
+      if (newCustomerSnapshot.exists) {
+        throw StateError('A customer account already uses this phone number.');
+      }
+    }
+
+    final Map<String, QueryDocumentSnapshot<Map<String, dynamic>>> dailyDocs =
+        {};
+    if (safeOldPhone.isNotEmpty) {
+      final byPhone =
+          await db
+              .collection('daily_sales')
+              .where('customerPhone', isEqualTo: safeOldPhone)
+              .get();
+      for (final doc in byPhone.docs) {
+        final type = (doc.data()['customerType'] ?? '').toString().toLowerCase();
+        if (type == normalizedCategory) dailyDocs[doc.id] = doc;
+      }
+    }
+    if (safeOldName.isNotEmpty) {
+      final byName =
+          await db
+              .collection('daily_sales')
+              .where('name', isEqualTo: safeOldName)
+              .get();
+      for (final doc in byName.docs) {
+        final data = doc.data();
+        final invoicePhone = (data['customerPhone'] ?? '').toString().trim();
+        final type = (data['customerType'] ?? '').toString().toLowerCase();
+        if (invoicePhone.isEmpty && type == normalizedCategory) {
+          dailyDocs[doc.id] = doc;
+        }
+      }
+    }
+
+    final Map<String, QueryDocumentSnapshot<Map<String, dynamic>>> salesOrders =
+        {};
+    if (safeOldPhone.isNotEmpty) {
+      final byPhone =
+          await db
+              .collection('sales_orders')
+              .where('customerPhone', isEqualTo: safeOldPhone)
+              .get();
+      for (final doc in byPhone.docs) {
+        final type = (doc.data()['customerType'] ?? '').toString().toLowerCase();
+        if (type == normalizedCategory) salesOrders[doc.id] = doc;
+      }
+    }
+    if (safeOldName.isNotEmpty) {
+      final byName =
+          await db
+              .collection('sales_orders')
+              .where('customerName', isEqualTo: safeOldName)
+              .get();
+      for (final doc in byName.docs) {
+        final data = doc.data();
+        final orderPhone = (data['customerPhone'] ?? '').toString().trim();
+        final type = (data['customerType'] ?? '').toString().toLowerCase();
+        if (orderPhone.isEmpty && type == normalizedCategory) {
+          salesOrders[doc.id] = doc;
+        }
+      }
+    }
+
+    final oldOrderDocs =
+        oldCustomerRef == null
+            ? <QueryDocumentSnapshot<Map<String, dynamic>>>[]
+            : (await oldCustomerRef.collection('orders').get()).docs;
+    if (safePhone != safeOldPhone) {
+      final destinationOrdersRef = newCustomerRef.collection('orders');
+      for (final order in oldOrderDocs) {
+        final destinationOrder =
+            await destinationOrdersRef.doc(order.id).get();
+        if (destinationOrder.exists) {
+          throw StateError(
+            'An invoice history entry already exists in the new customer account.',
+          );
+        }
+      }
+    }
+
+    final currentDue = dailyDocs.values.fold<double>(0, (total, doc) {
+      final pending = doc.data()['pending'];
+      return total + (pending is num ? pending.toDouble() : 0.0);
+    });
+
+    final writes = <void Function(WriteBatch)>[];
+    for (final doc in dailyDocs.values) {
+      writes.add(
+        (batch) => batch.update(doc.reference, {
+          'name': safeName,
+          'customerPhone': safePhone,
+        }),
+      );
+    }
+    for (final doc in salesOrders.values) {
+      writes.add(
+        (batch) => batch.update(doc.reference, {
+          'customerName': safeName,
+          'customerPhone': safePhone,
+          'shopName': safeShop,
+          'deliveryAddress': safeAddress,
+        }),
+      );
+    }
+    await _commitRegularCustomerProfileWrites(writes);
+
+    final updatedCustomerData = <String, dynamic>{
+      ...oldCustomerData,
+      'name': safeName,
+      'phone': safePhone,
+      'shop': safeShop,
+      'address': safeAddress,
+      'type': category.trim().toUpperCase(),
+      'currentDue': currentDue,
+      'searchKeywords': _generateSearchKeywords(
+        safeName,
+        safePhone,
+        safeShop,
+        safeAddress,
+      ),
+      'lastShopDate': FieldValue.serverTimestamp(),
+    };
+
+    if (safePhone == safeOldPhone) {
+      await newCustomerRef.set(updatedCustomerData, SetOptions(merge: true));
+    } else {
+      await newCustomerRef.set(updatedCustomerData);
+      final orderWrites = <void Function(WriteBatch)>[];
+      for (final order in oldOrderDocs) {
+        final destinationRef = newCustomerRef.collection('orders').doc(order.id);
+        orderWrites.add((batch) => batch.set(destinationRef, order.data()));
+        orderWrites.add((batch) => batch.delete(order.reference));
+      }
+      await _commitRegularCustomerProfileWrites(orderWrites);
+      await oldCustomerRef?.delete();
+    }
+
+    isSearching.value = false;
+    await _fetchRegularCustomerDues();
+    await calculateTotalOutstanding();
+    await loadPage(1);
+  }
+
+  Future<void> _commitRegularCustomerProfileWrites(
+    List<void Function(WriteBatch)> writes,
+  ) async {
+    for (var start = 0; start < writes.length; start += 400) {
+      final batch = db.batch();
+      final end =
+          start + 400 < writes.length ? start + 400 : writes.length;
+      for (final write in writes.sublist(start, end)) {
+        write(batch);
+      }
+      await batch.commit();
     }
   }
 
@@ -1905,7 +2332,91 @@ class DebatorController extends GetxController {
         gbIsLoading.value = false;
         return;
       }
-      String type = txSnap['type'];
+      final txData = txSnap.data() as Map<String, dynamic>;
+      final type = (txData['type'] ?? '').toString();
+      final isInvoiceSale =
+          (txData['note'] ?? '').toString().trim().toLowerCase().startsWith(
+            'invoice',
+          );
+      DocumentSnapshot<Map<String, dynamic>>? saleOrderSnap;
+
+      if (type == 'credit') {
+        final invoiceId =
+            (txData['transactionId'] ?? transactionId).toString().trim();
+        if (invoiceId.isNotEmpty) {
+          final directOrderSnap =
+              await db.collection('sales_orders').doc(invoiceId).get();
+          saleOrderSnap = directOrderSnap;
+
+          if (!saleOrderSnap.exists) {
+            final matchingOrders =
+                await db
+                    .collection('sales_orders')
+                    .where('invoiceId', isEqualTo: invoiceId)
+                    .limit(1)
+                    .get();
+            if (matchingOrders.docs.isNotEmpty) {
+              saleOrderSnap = matchingOrders.docs.first;
+            }
+          }
+
+          if (saleOrderSnap.exists) {
+            final saleOrder = saleOrderSnap.data()!;
+            final orderDebtorId = (saleOrder['debtorId'] ?? '').toString();
+            if (orderDebtorId.isNotEmpty && orderDebtorId != debtorId) {
+              throw StateError(
+                'Invoice $invoiceId is not linked to this debtor account.',
+              );
+            }
+
+            if (saleOrder['status'] != 'deleted') {
+              final items = saleOrder['items'] as List<dynamic>? ?? [];
+              final stockReturns = <Map<String, dynamic>>[];
+              for (final item in items) {
+                if (item is! Map) continue;
+                final productId =
+                    int.tryParse(
+                      (item['productId'] ?? item['id'] ?? '').toString(),
+                    ) ??
+                    0;
+                final quantity = (item['qty'] as num?)?.toInt() ?? 0;
+                final costRate =
+                    (item['costRate'] as num?)?.toDouble() ?? 0.0;
+                if (productId > 0 && quantity > 0) {
+                  stockReturns.add({
+                    'id': productId,
+                    'sea_qty': quantity,
+                    'air_qty': 0,
+                    'local_qty': 0,
+                    'local_price': costRate,
+                  });
+                }
+              }
+
+              if (stockReturns.isNotEmpty) {
+                if (!Get.isRegistered<ProductController>()) {
+                  throw StateError(
+                    'Stock controller is unavailable; sale was not deleted.',
+                  );
+                }
+                final stockRestored = await Get.find<ProductController>()
+                    .bulkAddStockMixed(stockReturns);
+                if (!stockRestored) {
+                  throw StateError(
+                    'Failed to restore sale stock; sale was not deleted.',
+                  );
+                }
+              }
+            }
+          }
+        }
+        if (isInvoiceSale &&
+            (saleOrderSnap == null || !saleOrderSnap.exists)) {
+          throw StateError(
+            'Master invoice was not found; sale was not deleted.',
+          );
+        }
+      }
 
       await db
           .collection('debatorbody')
@@ -2033,6 +2544,17 @@ class DebatorController extends GetxController {
         }
         await batch.commit();
         await daily.loadDailySales();
+      }
+
+      if (saleOrderSnap != null && saleOrderSnap.exists) {
+        final invoiceId =
+            (saleOrderSnap.data()?['invoiceId'] ?? saleOrderSnap.id).toString();
+        final batch = db.batch();
+        batch.delete(saleOrderSnap.reference);
+        batch.delete(
+          db.collection('debtor_transaction_history').doc(invoiceId),
+        );
+        await batch.commit();
       }
 
       await _recalculateSingleDebtorBalance(debtorId);
@@ -2222,6 +2744,19 @@ class DebatorController extends GetxController {
                   .collection('daily_sales')
                   .where('pending', isGreaterThan: 0.5)
                   .get();
+          final regularDueSales =
+              dueSalesSnap.docs
+                  .where((doc) {
+                    final type =
+                        (doc.data()['customerType'] ?? '')
+                            .toString()
+                            .toUpperCase();
+                    return type == 'WHOLESALE' || type == 'VIP';
+                  })
+                  .map((doc) => {'_docId': doc.id, ...doc.data()})
+                  .toList();
+          final conditionInvoiceIds =
+              await _getConditionCourierInvoiceIds(regularDueSales);
 
           final Map<String, DebtorModel> grouped = {};
 
@@ -2230,6 +2765,12 @@ class DebatorController extends GetxController {
             final type = (data['customerType'] ?? '').toString().toUpperCase();
 
             if (type != 'WHOLESALE' && type != 'VIP') continue;
+            if (_isConditionCourierInvoice(
+              {'_docId': doc.id, ...data},
+              conditionInvoiceIds,
+            )) {
+              continue;
+            }
 
             final name = (data['name'] ?? '').toString().trim();
             final phone = (data['customerPhone'] ?? '').toString().trim();

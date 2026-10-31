@@ -13,6 +13,7 @@ import '../../Permission/permission_button.dart';
 import '../../Permission/permission_controller.dart';
 import '../../controller.dart';
 import '../../Web Screen/Sales/controller.dart';
+import '../../Live order/salemodel.dart';
 
 // --- ERP COLOR PALETTE ---
 const Color primaryColor = Color(0xFF2563EB);
@@ -616,10 +617,10 @@ class Debatorpage extends StatelessWidget {
       ),
       child: Row(
         children: [
-          _colHeader("CLIENT DETAILS", flex: 3),
-          _colHeader("CONTACT INFO", flex: 2),
-          _colHeader("BALANCE STATUS", flex: 2, align: TextAlign.right),
-          _colHeader("LOCATION", flex: 2),
+          _colHeader("NAME", flex: 3),
+          _colHeader("PHONE", flex: 2),
+          _colHeader("ADDRESS", flex: 3),
+          _colHeader("OUTSTANDING BALANCE", flex: 2, align: TextAlign.right),
           const SizedBox(
             width: 70,
             child: Text(
@@ -797,7 +798,7 @@ class Debatorpage extends StatelessWidget {
                       const Icon(Icons.phone, size: 12, color: textLight),
                       const SizedBox(width: 6),
                       Text(
-                        debtor.phone,
+                        debtor.phone.isNotEmpty ? debtor.phone : "N/A",
                         style: const TextStyle(
                           color: textDark,
                           fontSize: 13,
@@ -815,6 +816,18 @@ class Debatorpage extends StatelessWidget {
                       ),
                     ),
                 ],
+              ),
+            ),
+            Expanded(
+              flex: 3,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 10),
+                child: Text(
+                  debtor.address.isNotEmpty ? debtor.address : "N/A",
+                  style: const TextStyle(color: textLight, fontSize: 13),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ),
             Expanded(
@@ -844,18 +857,6 @@ class Debatorpage extends StatelessWidget {
                     ),
                   ),
                 ],
-              ),
-            ),
-            Expanded(
-              flex: 2,
-              child: Padding(
-                padding: const EdgeInsets.only(left: 10),
-                child: Text(
-                  debtor.address.isNotEmpty ? debtor.address : "N/A",
-                  style: const TextStyle(color: textLight, fontSize: 13),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
               ),
             ),
             SizedBox(
@@ -1089,65 +1090,32 @@ class Debatorpage extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              const Icon(
-                                Icons.phone,
-                                size: 12,
-                                color: textLight,
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                debtor.phone,
-                                style: const TextStyle(
-                                  color: textDark,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                          if (debtor.nid.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 4),
-                              child: Text(
-                                "NID: ${debtor.nid}",
-                                style: const TextStyle(
-                                  color: textLight,
-                                  fontSize: 11,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color:
-                              isDue
-                                  ? dangerRed.withValues(alpha: 0.1)
-                                  : successGreen.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
+                      const Icon(Icons.phone, size: 12, color: textLight),
+                      const SizedBox(width: 6),
+                      Expanded(
                         child: Text(
-                          bdCurrency.format(bal),
-                          style: TextStyle(
-                            color: isDue ? dangerRed : successGreen,
-                            fontWeight: FontWeight.bold,
+                          debtor.phone.isNotEmpty ? debtor.phone : "N/A",
+                          style: const TextStyle(
+                            color: textDark,
                             fontSize: 13,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),
                     ],
                   ),
+                  if (debtor.nid.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        "NID: ${debtor.nid}",
+                        style: const TextStyle(
+                          color: textLight,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
                   if (debtor.address.isNotEmpty) ...[
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 10),
@@ -1174,6 +1142,39 @@ class Debatorpage extends StatelessWidget {
                       ],
                     ),
                   ],
+                  if (debtor.address.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: Text(
+                        "Address: N/A",
+                        style: TextStyle(color: textLight, fontSize: 12),
+                      ),
+                    ),
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color:
+                            isDue
+                                ? dangerRed.withValues(alpha: 0.1)
+                                : successGreen.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        bdCurrency.format(bal),
+                        style: TextStyle(
+                          color: isDue ? dangerRed : successGreen,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -1826,6 +1827,18 @@ class _RegularCustomerDetailsPage extends StatelessWidget {
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: 'Edit customer profile',
+            onPressed: () {
+              Get.dialog(
+                _RegularCustomerProfileDialog(
+                  debtor: debtor,
+                  controller: pageCtrl.mainCtrl,
+                ),
+              );
+            },
+            icon: const Icon(Icons.edit_outlined, color: primaryColor),
+          ),
           TextButton.icon(
             onPressed: pageCtrl.exportStatement,
             icon: const FaIcon(FontAwesomeIcons.filePdf, size: 14, color: dangerRed),
@@ -2365,6 +2378,141 @@ class _RegularCustomerDetailsPage extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _RegularCustomerProfileDialog extends StatefulWidget {
+  final DebtorModel debtor;
+  final DebatorController controller;
+
+  const _RegularCustomerProfileDialog({
+    required this.debtor,
+    required this.controller,
+  });
+
+  @override
+  State<_RegularCustomerProfileDialog> createState() =>
+      _RegularCustomerProfileDialogState();
+}
+
+class _RegularCustomerProfileDialogState
+    extends State<_RegularCustomerProfileDialog> {
+  late final TextEditingController _nameController;
+  late final TextEditingController _phoneController;
+  late final TextEditingController _shopController;
+  late final TextEditingController _addressController;
+  bool _isSaving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.debtor.name);
+    _phoneController = TextEditingController(text: widget.debtor.phone);
+    _shopController = TextEditingController(text: widget.debtor.des);
+    _addressController = TextEditingController(text: widget.debtor.address);
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _phoneController.dispose();
+    _shopController.dispose();
+    _addressController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _saveProfile() async {
+    setState(() => _isSaving = true);
+    try {
+      await widget.controller.updateRegularCustomerProfile(
+        oldPhone: widget.debtor.phone,
+        oldName: widget.debtor.name,
+        newName: _nameController.text,
+        newPhone: _phoneController.text,
+        shop: _shopController.text,
+        address: _addressController.text,
+        category: widget.debtor.customerCategory ?? 'WHOLESALE',
+      );
+      if (Get.isRegistered<LiveSalesController>()) {
+        Get.find<LiveSalesController>().updateRegularCustomerProfileCache(
+          oldPhone: widget.debtor.phone,
+          phone: _phoneController.text.trim(),
+          name: _nameController.text.trim(),
+          shop: _shopController.text.trim(),
+          address: _addressController.text.trim(),
+          type: widget.debtor.customerCategory ?? 'WHOLESALE',
+        );
+      }
+      if (!mounted) return;
+      Get.back();
+      Get.back();
+      Get.snackbar('Success', 'Customer profile updated.');
+    } catch (e) {
+      Get.snackbar('Error', 'Could not update customer profile: $e');
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Edit Customer Profile'),
+      content: SizedBox(
+        width: 440,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: _nameController,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(labelText: 'Customer name'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _phoneController,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(labelText: 'Phone number'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _shopController,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(labelText: 'Shop name'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _addressController,
+                textCapitalization: TextCapitalization.sentences,
+                maxLines: 3,
+                decoration: const InputDecoration(labelText: 'Address'),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _isSaving ? null : () => Get.back(),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: _isSaving ? null : _saveProfile,
+          child:
+              _isSaving
+                  ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                  : const Text('Save Changes'),
+        ),
+      ],
     );
   }
 }

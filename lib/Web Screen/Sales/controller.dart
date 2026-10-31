@@ -689,14 +689,42 @@ class DailySalesController extends GetxController {
   Future<void> reprintInvoice(String invoiceId) async {
     isLoading.value = true;
     try {
-      DocumentSnapshot doc =
+      DocumentSnapshot<Map<String, dynamic>> invoiceDoc =
           await _db.collection('sales_orders').doc(invoiceId).get();
-      if (!doc.exists) {
+
+      if (!invoiceDoc.exists) {
+        final byInvoiceId =
+            await _db
+                .collection('sales_orders')
+                .where('invoiceId', isEqualTo: invoiceId)
+                .limit(1)
+                .get();
+        if (byInvoiceId.docs.isNotEmpty) {
+          invoiceDoc = byInvoiceId.docs.first;
+        }
+      }
+
+      if (!invoiceDoc.exists) {
+        final byTransactionId =
+            await _db
+                .collection('sales_orders')
+                .where('transactionId', isEqualTo: invoiceId)
+                .limit(1)
+                .get();
+        if (byTransactionId.docs.isNotEmpty) {
+          invoiceDoc = byTransactionId.docs.first;
+        }
+      }
+
+      if (!invoiceDoc.exists) {
         Get.snackbar("Error", "Invoice not found in master records.");
         return;
       }
 
-      Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+      Map<String, dynamic> data = invoiceDoc.data() ?? <String, dynamic>{};
+      final resolvedInvoiceId =
+          (data['invoiceId'] ?? data['transactionId'] ?? invoiceDoc.id)
+              .toString();
       bool isCond = data['isCondition'] ?? false;
 
       // 🌟 FIX: "isCondition" শুধু বোঝায় চালান/ডেলিভারি পেজ প্রিন্ট হবে কিনা।
@@ -723,9 +751,18 @@ class DailySalesController extends GetxController {
         QuerySnapshot dailySnap =
             await _db
                 .collection('daily_sales')
-                .where('transactionId', isEqualTo: invoiceId)
+                .where('transactionId', isEqualTo: resolvedInvoiceId)
                 .limit(1)
                 .get();
+
+        if (dailySnap.docs.isEmpty && resolvedInvoiceId != invoiceId) {
+          dailySnap =
+              await _db
+                  .collection('daily_sales')
+                  .where('transactionId', isEqualTo: invoiceId)
+                  .limit(1)
+                  .get();
+        }
 
         if (dailySnap.docs.isNotEmpty) {
           var dailyData = dailySnap.docs.first.data() as Map<String, dynamic>;
@@ -856,7 +893,7 @@ class DailySalesController extends GetxController {
       }
 
       await _generatePdf(
-        invoiceId,
+        resolvedInvoiceId,
         name,
         phone,
         payMap,
@@ -871,6 +908,7 @@ class DailySalesController extends GetxController {
         runningDueSnap: snapRun,
         authorizedName: sellerName,
         authorizedPhone: sellerPhone,
+        isConditionPayment: isRealConditionFlow,
         discountNote: savedDiscountNote,
         packagerName: packagerName,
         invoiceDate: invoiceDate,
@@ -900,6 +938,7 @@ class DailySalesController extends GetxController {
     double runningDueSnap = 0.0,
     required String authorizedName,
     required String authorizedPhone,
+    bool isConditionPayment = false,
     double discount = 0.0,
     String discountNote = "", // <-- ADDED PARAMETER
     String? packagerName,
@@ -963,32 +1002,39 @@ class DailySalesController extends GetxController {
     pdf.addPage(
       pw.MultiPage(
         pageTheme: pageTheme,
-        footer: (pw.Context context) => _buildNewFooter(context, regularFont),
+        header:
+            (_) => pw.Column(
+              children: [
+                _buildNewHeader(
+                  boldFont,
+                  regularFont,
+                  invId,
+                  "Sales Invoice",
+                  packagerName,
+                  authorizedName,
+                  invDue,
+                  false,
+                  null,
+                  "",
+                  paymentMethodsStr,
+                  invoiceDate,
+                ),
+                _buildNewCustomerBox(
+                  name,
+                  address,
+                  phone,
+                  shopName,
+                  regularFont,
+                  boldFont,
+                ),
+                pw.SizedBox(height: 5),
+              ],
+            ),
+        footer:
+            (pw.Context context) =>
+                _buildNewFooter(context, regularFont, boldFont),
         build: (pw.Context context) {
           return [
-            _buildNewHeader(
-              boldFont,
-              regularFont,
-              invId,
-              "Sales Invoice",
-              packagerName,
-              authorizedName,
-              invDue,
-              false,
-              null,
-              "",
-              paymentMethodsStr,
-              invoiceDate,
-            ),
-            _buildNewCustomerBox(
-              name,
-              address,
-              phone,
-              shopName,
-              regularFont,
-              boldFont,
-            ),
-            pw.SizedBox(height: 5),
             _buildNewTable(items, boldFont, regularFont),
             _buildNewSummary(
               subTotal,
@@ -1005,6 +1051,7 @@ class DailySalesController extends GetxController {
             _buildNewDues(totalPreviousBalance, netTotalDue, regularFont),
             if (invDue <= 0 && !isCondition)
               _buildPaidStamp(boldFont, regularFont, invoiceDate),
+            if (invDue > 0) _buildDueStamp(boldFont, invDue, invoiceDate),
             if (invDue > 0 || isCondition) pw.SizedBox(height: 15),
             _buildWordsBox(currentInvTotal, boldFont),
             pw.SizedBox(height: 40),
@@ -1018,7 +1065,9 @@ class DailySalesController extends GetxController {
       pdf.addPage(
         pw.MultiPage(
           pageTheme: pageTheme,
-          footer: (pw.Context context) => _buildNewFooter(context, regularFont),
+          footer:
+              (pw.Context context) =>
+                  _buildNewFooter(context, regularFont, boldFont),
           build: (context) {
             return [
               _buildNewHeader(
@@ -1052,7 +1101,12 @@ class DailySalesController extends GetxController {
                 boldFont,
               ),
               pw.SizedBox(height: 60),
-              _buildChallanCenterBox(boldFont, regularFont, invDue),
+              _buildChallanCenterBox(
+                boldFont,
+                regularFont,
+                invDue,
+                isConditionPayment,
+              ),
               pw.SizedBox(height: 100),
               _buildNewSignatures(regularFont),
             ];
@@ -1209,6 +1263,60 @@ class DailySalesController extends GetxController {
               "G TEL",
               style: pw.TextStyle(
                 color: PdfColors.blue800,
+                font: bold,
+                fontSize: 14,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  pw.Widget _buildDueStamp(pw.Font bold, double due, DateTime invoiceDate) {
+    return pw.Container(
+      margin: const pw.EdgeInsets.symmetric(vertical: 20),
+      alignment: pw.Alignment.center,
+      child: pw.Container(
+        padding: const pw.EdgeInsets.symmetric(horizontal: 40, vertical: 10),
+        decoration: pw.BoxDecoration(
+          border: pw.Border.all(color: PdfColors.red800, width: 2),
+          borderRadius: const pw.BorderRadius.all(pw.Radius.circular(5)),
+        ),
+        child: pw.Column(
+          children: [
+            pw.Text(
+              "D U E",
+              style: pw.TextStyle(
+                color: PdfColors.red800,
+                font: bold,
+                fontSize: 24,
+                letterSpacing: 2,
+              ),
+            ),
+            pw.SizedBox(height: 5),
+            pw.Text(
+              "৳${due.toStringAsFixed(2)}",
+              style: pw.TextStyle(
+                color: PdfColors.red800,
+                font: bold,
+                fontSize: 12,
+              ),
+            ),
+            pw.SizedBox(height: 5),
+            pw.Text(
+              DateFormat('dd MMM yyyy').format(invoiceDate),
+              style: pw.TextStyle(
+                color: PdfColors.red800,
+                font: bold,
+                fontSize: 12,
+              ),
+            ),
+            pw.SizedBox(height: 5),
+            pw.Text(
+              "G TEL",
+              style: pw.TextStyle(
+                color: PdfColors.red800,
                 font: bold,
                 fontSize: 14,
               ),
@@ -1614,7 +1722,11 @@ class DailySalesController extends GetxController {
     );
   }
 
-  pw.Widget _buildNewFooter(pw.Context context, pw.Font reg) {
+  pw.Widget _buildNewFooter(
+    pw.Context context,
+    pw.Font reg,
+    pw.Font bold,
+  ) {
     return pw.Column(
       mainAxisSize: pw.MainAxisSize.min,
       children: [
@@ -1641,7 +1753,7 @@ class DailySalesController extends GetxController {
             ),
             pw.Text(
               "Page ${context.pageNumber} of ${context.pagesCount}",
-              style: pw.TextStyle(font: reg, fontSize: 7),
+              style: pw.TextStyle(font: bold, fontSize: 7),
             ),
           ],
         ),
@@ -1649,23 +1761,34 @@ class DailySalesController extends GetxController {
     );
   }
 
-  pw.Widget _buildChallanCenterBox(pw.Font bold, pw.Font reg, double due) {
-    bool isPaid = due <= 0;
+  pw.Widget _buildChallanCenterBox(
+    pw.Font bold,
+    pw.Font reg,
+    double due,
+    bool isConditionPayment,
+  ) {
+    bool showConditionCollection = isConditionPayment && due > 0;
 
     return pw.Container(
       width: double.infinity,
       padding: const pw.EdgeInsets.all(20),
       decoration: pw.BoxDecoration(
         border: pw.Border.all(
-          color: isPaid ? PdfColors.green700 : PdfColors.deepOrange700,
+          color:
+              showConditionCollection
+                  ? PdfColors.deepOrange700
+                  : PdfColors.green700,
           width: 2,
         ),
         borderRadius: const pw.BorderRadius.all(pw.Radius.circular(5)),
-        color: isPaid ? PdfColors.green50 : PdfColors.deepOrange50,
+        color:
+            showConditionCollection
+                ? PdfColors.deepOrange50
+                : PdfColors.green50,
       ),
       child: pw.Column(
         children: [
-          if (isPaid) ...[
+          if (!showConditionCollection) ...[
             pw.Text(
               "NON CONDITION",
               style: pw.TextStyle(

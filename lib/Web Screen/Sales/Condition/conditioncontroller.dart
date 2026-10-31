@@ -22,6 +22,7 @@ class ConditionSalesController extends GetxController {
   final RxList<ConditionOrderModel> filteredOrders =
       <ConditionOrderModel>[].obs;
   final RxBool isLoading = false.obs;
+  final RxSet<String> deletingInvoiceIds = <String>{}.obs;
 
   final int _limit = 20;
   DocumentSnapshot? _lastDocument;
@@ -376,7 +377,7 @@ class ConditionSalesController extends GetxController {
     String c = challanNo.trim();
     if (c.isEmpty) return false;
     if (c.length <= 1) {
-      return false; // single char like "0" or "x" = not set yet
+      return false;
     }
     return true;
   }
@@ -394,7 +395,6 @@ class ConditionSalesController extends GetxController {
       List<ConditionOrderModel> pending = [];
       for (var doc in snap.docs) {
         final model = ConditionOrderModel.fromFirestore(doc);
-        // Only: still due AND a real challan number has been entered
         if (model.courierDue > 0.5 && _isValidChallan(model.challanNo)) {
           pending.add(model);
         }
@@ -1795,16 +1795,16 @@ class ConditionSalesController extends GetxController {
   }
 
   Future<void> deleteConditionSale(ConditionOrderModel order) async {
+    final invoiceId = order.invoiceId;
+    if (!deletingInvoiceIds.add(invoiceId)) return;
+
     isLoading.value = true;
     try {
-      String invoiceId = order.invoiceId;
-
       DocumentSnapshot masterSnap =
           await _db.collection('sales_orders').doc(invoiceId).get();
 
       if (!masterSnap.exists) {
         Get.snackbar("Error", "Order not found in database.");
-        isLoading.value = false;
         return;
       }
 
@@ -1843,7 +1843,6 @@ class ConditionSalesController extends GetxController {
             "Error",
             "Failed to restore stock to SEA. Deletion aborted.",
           );
-          isLoading.value = false;
           return;
         }
       }
@@ -1909,6 +1908,7 @@ class ConditionSalesController extends GetxController {
       );
     } finally {
       isLoading.value = false;
+      deletingInvoiceIds.remove(invoiceId);
     }
   }
 }
