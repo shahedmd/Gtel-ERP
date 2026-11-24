@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Live%20order/salemodel.dart';
 import '../Permission/permission_button.dart';
+import 'agent_sale_payment_plan.dart';
 
 class LiveOrderSalesPage extends StatefulWidget {
   final Map<String, dynamic>? quotationDraft;
@@ -673,14 +674,17 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
                         mainAxisAlignment: MainAxisAlignment.center,
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
-                          const Text(
-                            "Previous Due",
+                          Text(
+                            "Previous Due / Credit",
                             style: TextStyle(fontSize: 9, color: Colors.grey),
                           ),
                           Text(
                             "৳${controller.totalPreviousDue.toStringAsFixed(0)}",
-                            style: const TextStyle(
-                              color: Colors.red,
+                            style: TextStyle(
+                              color:
+                                  controller.totalPreviousDue < -0.5
+                                      ? Colors.green
+                                      : Colors.red,
                               fontWeight: FontWeight.bold,
                               fontSize: 13,
                             ),
@@ -1586,35 +1590,56 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
               children: [
                 Obx(() {
                   final double paid = controller.totalPaidInput.value;
-                  final double currentDue = controller.grandTotal - paid;
-                  final double safeCurrentDue =
-                      currentDue > 0 ? currentDue : 0.0;
-
-                  final bool showRegularPreviousDue =
-                      controller.customerType.value != "AGENT" &&
-                      !controller.isConditionSale.value &&
-                      controller.regularCustomerPreviousDue.value > 0;
-
+                  final bool isAgent = controller.customerType.value == "AGENT";
+                  final bool usesCustomerAccount =
+                      !controller.isConditionSale.value ||
+                      controller.isNonConditionSale.value;
+                  final bool hasSelectedCustomer =
+                      usesCustomerAccount &&
+                      (isAgent
+                          ? controller.selectedDebtor.value != null
+                          : controller.selectedRegularCustomer.value != null);
                   final double previousDue =
-                      showRegularPreviousDue
-                          ? controller.regularCustomerPreviousDue.value
+                      !usesCustomerAccount
+                          ? 0
+                          : isAgent
+                          ? controller.totalPreviousDue
+                          : controller.regularCustomerPreviousDue.value;
+                  final double cashApplied =
+                      paid.clamp(0.0, controller.grandTotal).toDouble();
+                  final double availableAdvance =
+                      isAgent
+                          ? (-previousDue)
+                              .clamp(0.0, double.infinity)
+                              .toDouble()
+                          : controller.regularCustomerAdvanceBalance.value;
+                  final double advanceApplied =
+                      usesCustomerAccount
+                          ? availableAdvance
+                              .clamp(0.0, controller.grandTotal - cashApplied)
+                              .toDouble()
                           : 0.0;
+                  final double currentDue =
+                      (controller.grandTotal - cashApplied - advanceApplied)
+                          .clamp(0.0, double.infinity)
+                          .toDouble();
 
-                  final double totalReceivable = previousDue + safeCurrentDue;
+                  final bool showAccountBalance =
+                      hasSelectedCustomer &&
+                      (previousDue.abs() > 0.5 ||
+                          paid > controller.grandTotal ||
+                          advanceApplied > 0.5);
+                  final double accountBalanceAfterSale =
+                      calculatePostSaleAccountBalance(
+                        previousBalance: previousDue,
+                        invoiceTotal: controller.grandTotal,
+                        cashReceived: paid,
+                      );
 
-                  String lbl =
-                      currentDue > 0
-                          ? "CURRENT DUE"
-                          : (paid > controller.grandTotal
-                              ? "CHANGE RETURN"
-                              : "PAID");
+                  String lbl = currentDue > 0 ? "CURRENT DUE" : "PAID";
 
                   Color clr = currentDue > 0 ? Colors.red : Colors.green;
-                  double val =
-                      currentDue > 0
-                          ? currentDue
-                          : (paid - controller.grandTotal);
-                  if (paid == controller.grandTotal) val = 0;
+                  double val = currentDue;
 
                   return Column(
                     children: [
@@ -1622,7 +1647,7 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text(
-                            "Paid: ৳${paid.toStringAsFixed(0)}",
+                            "Paid: ৳${(paid + advanceApplied).toStringAsFixed(0)}",
                             style: const TextStyle(
                               fontWeight: FontWeight.bold,
                               fontSize: 13,
@@ -1649,7 +1674,7 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
                           ),
                         ],
                       ),
-                      if (showRegularPreviousDue) ...[
+                      if (showAccountBalance) ...[
                         const SizedBox(height: 8),
                         Container(
                           width: double.infinity,
@@ -1658,9 +1683,17 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
                             vertical: 8,
                           ),
                           decoration: BoxDecoration(
-                            color: Colors.red.shade50,
+                            color:
+                                previousDue < -0.5
+                                    ? Colors.green.shade50
+                                    : Colors.red.shade50,
                             borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: Colors.red.shade100),
+                            border: Border.all(
+                              color:
+                                  previousDue < -0.5
+                                      ? Colors.green.shade100
+                                      : Colors.red.shade100,
+                            ),
                           ),
                           child: Column(
                             children: [
@@ -1668,20 +1701,26 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
                                 mainAxisAlignment:
                                     MainAxisAlignment.spaceBetween,
                                 children: [
-                                  const Text(
-                                    "Previous Due",
+                                  Text(
+                                    "Previous Due / Credit",
                                     style: TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.bold,
-                                      color: Colors.red,
+                                      color:
+                                          previousDue < -0.5
+                                              ? Colors.green
+                                              : Colors.red,
                                     ),
                                   ),
                                   Text(
                                     "৳${previousDue.toStringAsFixed(0)}",
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       fontSize: 13,
                                       fontWeight: FontWeight.w900,
-                                      color: Colors.red,
+                                      color:
+                                          previousDue < -0.5
+                                              ? Colors.green
+                                              : Colors.red,
                                     ),
                                   ),
                                 ],
@@ -1691,20 +1730,26 @@ class _LiveOrderSalesPageState extends State<LiveOrderSalesPage> {
                                 mainAxisAlignment:
                                     MainAxisAlignment.spaceBetween,
                                 children: [
-                                  const Text(
-                                    "Total Receivable After Invoice",
+                                  Text(
+                                    "Account Balance After Sale",
                                     style: TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.bold,
-                                      color: Color(0xFF991B1B),
+                                      color:
+                                          accountBalanceAfterSale < -0.5
+                                              ? Colors.green
+                                              : Color(0xFF991B1B),
                                     ),
                                   ),
                                   Text(
-                                    "৳${totalReceivable.toStringAsFixed(0)}",
-                                    style: const TextStyle(
+                                    "৳${accountBalanceAfterSale.toStringAsFixed(0)}",
+                                    style: TextStyle(
                                       fontSize: 15,
                                       fontWeight: FontWeight.w900,
-                                      color: Color(0xFF991B1B),
+                                      color:
+                                          accountBalanceAfterSale < -0.5
+                                              ? Colors.green
+                                              : Color(0xFF991B1B),
                                     ),
                                   ),
                                 ],

@@ -13,6 +13,9 @@ import '../Core/Stock Management/stockcontroller.dart';
 import '../Core/Stock Management/stockproductmodel.dart';
 import '../Core/Debtor_Market_Customer_Suppliers/gteldebtorcontroller.dart';
 import '../Core/Debtor_Market_Customer_Suppliers/debtordartmodel.dart';
+import '../Core/Debtor_Market_Customer_Suppliers/paid_invoice_running_due.dart';
+import '../Core/Debtor_Market_Customer_Suppliers/regular_customer_collection_plan.dart';
+import 'agent_sale_payment_plan.dart';
 import '../Web Screen/Sales/controller.dart';
 
 class SalesCartItem {
@@ -28,6 +31,16 @@ class SalesCartItem {
 
   double get subtotal => priceAtSale * quantity.value;
   bool get isLoss => priceAtSale < product.avgPurchasePrice;
+}
+
+class _RegularCustomerSaleCollection {
+  const _RegularCustomerSaleCollection({
+    required this.plan,
+    required this.dailySales,
+  });
+
+  final RegularCustomerCollectionPlan plan;
+  final Map<String, QueryDocumentSnapshot<Map<String, dynamic>>> dailySales;
 }
 
 class LiveSalesController extends GetxController {
@@ -103,6 +116,7 @@ class LiveSalesController extends GetxController {
   final RxDouble debtorOldDue = 0.0.obs;
   final RxDouble debtorRunningDue = 0.0.obs;
   final RxDouble regularCustomerPreviousDue = 0.0.obs;
+  final RxDouble regularCustomerAdvanceBalance = 0.0.obs;
   double get totalPreviousDue => debtorOldDue.value + debtorRunningDue.value;
   final debtorPhoneSearch = TextEditingController();
   final nameC = TextEditingController();
@@ -285,17 +299,191 @@ class LiveSalesController extends GetxController {
         final data = doc.data() as Map<String, dynamic>;
 
         final docType = (data['customerType'] ?? '').toString().toLowerCase();
-        final pending = (data['pending'] as num?)?.toDouble() ?? 0.0;
+        final pending = DebatorController.effectiveRegularCustomerPending(data);
 
         if (docType == normalizedType && pending > 0.5) {
           totalDue += pending;
         }
       }
 
+      if (safePhone.isNotEmpty) {
+        final customerDoc =
+            await _db.collection('customers').doc(safePhone).get();
+        final customerData = customerDoc.data();
+        final advanceBalance =
+            (customerData?['advanceBalance'] as num?)?.toDouble() ?? 0.0;
+        totalDue -= advanceBalance;
+      }
+
       return _round(totalDue);
     } catch (e) {
       AppLogger.i("Regular customer previous due fetch error: $e");
       return 0.0;
+    }
+  }
+
+  Future<_RegularCustomerSaleCollection?> _planRegularCustomerSaleCollection({
+    required String phone,
+    required String name,
+    required String type,
+    required double amount,
+    required DateTime collectionDate,
+  }) async {
+    if (amount <= 0.01) return null;
+
+    final docs = <String, QueryDocumentSnapshot<Map<String, dynamic>>>{};
+    final safePhone = phone.trim();
+    final safeName = name.trim();
+    if (safePhone.isNotEmpty) {
+      final byPhone =
+          await _db
+              .collection('daily_sales')
+              .where('customerPhone', isEqualTo: safePhone)
+              .get();
+      for (final doc in byPhone.docs) {
+        docs[doc.id] = doc;
+      }
+    }
+    if (safeName.isNotEmpty) {
+      final byName =
+          await _db
+              .collection('daily_sales')
+              .where('name', isEqualTo: safeName)
+              .get();
+      for (final doc in byName.docs) {
+        docs[doc.id] = doc;
+      }
+    }
+
+    final eligibleDocs =
+        <String, QueryDocumentSnapshot<Map<String, dynamic>>>{};
+    final invoices = <RegularCustomerCollectionInvoice>[];
+    for (final doc in docs.values) {
+      final data = doc.data();
+      final docType = (data['customerType'] ?? '').toString().toLowerCase();
+      final docPhone = (data['customerPhone'] ?? '').toString().trim();
+      final saleMode = (data['saleMode'] ?? '').toString().toLowerCase();
+      final source = (data['source'] ?? '').toString().toLowerCase();
+      final isConditionInvoice =
+          saleMode == 'condition' ||
+          (saleMode.isEmpty && data['isCondition'] == true) ||
+          source == 'pos_condition_sale';
+      final pending = DebatorController.effectiveRegularCustomerPending(data);
+      if (docType != type.toLowerCase() ||
+          (safePhone.isNotEmpty &&
+              docPhone.isNotEmpty &&
+              docPhone != safePhone) ||
+          isConditionInvoice ||
+          pending <= 0.5) {
+        continue;
+      }
+
+      final invoiceDate =
+          data['timestamp'] is Timestamp
+              ? (data['timestamp'] as Timestamp).toDate()
+              : collectionDate;
+      eligibleDocs[doc.id] = doc;
+      invoices.add(
+        RegularCustomerCollectionInvoice(
+          documentId: doc.id,
+          pending: pending,
+          paid: (data['paid'] as num?)?.toDouble() ?? 0.0,
+          ledgerPaid: (data['ledgerPaid'] as num?)?.toDouble() ?? 0.0,
+          invoiceDate: invoiceDate,
+        ),
+      );
+    }
+
+    final plan = RegularCustomerCollectionPlan.build(
+      invoices: invoices,
+      amount: amount,
+      collectionDate: collectionDate,
+    );
+    return _RegularCustomerSaleCollection(plan: plan, dailySales: eligibleDocs);
+  }
+
+  Future<void> _applyRegularCustomerSaleCollection({
+    required WriteBatch batch,
+    required _RegularCustomerSaleCollection collection,
+    required String saleInvoiceId,
+    required DateTime date,
+    required String note,
+  }) async {
+    for (final allocation in collection.plan.allocations) {
+      final dailyDoc = collection.dailySales[allocation.invoice.documentId]!;
+      final data = dailyDoc.data();
+      final amount = allocation.amount;
+      final invoiceId =
+          (data['invoiceId'] ?? data['transactionId'] ?? '').toString();
+      final paymentMap = _extractPaymentFor(amount);
+      final history = <String, dynamic>{
+        'amount': amount,
+        'note': note,
+        'timestamp': Timestamp.fromDate(date),
+        'paidAt': Timestamp.now(),
+        'type': paymentMap['method'] ?? 'cash',
+        'number':
+            (paymentMap['bkashNumber'] ?? paymentMap['nagadNumber'] ?? '')
+                .toString(),
+        'bankName': paymentMap['bankName'] ?? '',
+        'accountNumber': paymentMap['accountNumber'] ?? '',
+        'sourceTxId': saleInvoiceId,
+        'appliedTo': dailyDoc.id,
+        'invoiceId': invoiceId,
+        'collectionMode':
+            allocation.isPreviousDateInvoice ? 'old_due_ledger' : 'same_day',
+      };
+      final dailyUpdate = <String, dynamic>{
+        'paid': allocation.newPaid,
+        if (allocation.isPreviousDateInvoice)
+          'ledgerPaid': allocation.newLedgerPaid,
+        'pending': max(0.0, allocation.newPending),
+        'status': allocation.isFullyPaid ? 'paid' : 'partial',
+        'lastPaymentAt': FieldValue.serverTimestamp(),
+        'paymentHistory': FieldValue.arrayUnion([history]),
+      };
+      for (final method in ['cash', 'bkash', 'nagad', 'bank']) {
+        final methodAmount = (paymentMap[method] as num?)?.toDouble() ?? 0.0;
+        if (methodAmount > 0.01) {
+          dailyUpdate['paymentMethod.$method'] = FieldValue.increment(
+            methodAmount,
+          );
+        }
+      }
+      batch.update(dailyDoc.reference, dailyUpdate);
+
+      if (invoiceId.isEmpty) continue;
+      final orderRef = _db.collection('sales_orders').doc(invoiceId);
+      final orderSnapshot = await orderRef.get();
+      if (!orderSnapshot.exists) continue;
+
+      final orderUpdate = <String, dynamic>{
+        'paid': FieldValue.increment(amount),
+        'paymentDetails.due': FieldValue.increment(-amount),
+        'paymentDetails.paidForInvoice': FieldValue.increment(amount),
+        'isFullyPaid': allocation.isFullyPaid,
+        'status': allocation.isFullyPaid ? 'completed' : 'partial',
+      };
+      for (final method in ['cash', 'bkash', 'nagad', 'bank']) {
+        final methodAmount = (paymentMap[method] as num?)?.toDouble() ?? 0.0;
+        if (methodAmount > 0.01) {
+          orderUpdate['paymentDetails.$method'] = FieldValue.increment(
+            methodAmount,
+          );
+        }
+      }
+      if ((paymentMap['bkashNumber'] ?? '').toString().isNotEmpty) {
+        orderUpdate['paymentDetails.bkashNumber'] = paymentMap['bkashNumber'];
+      }
+      if ((paymentMap['nagadNumber'] ?? '').toString().isNotEmpty) {
+        orderUpdate['paymentDetails.nagadNumber'] = paymentMap['nagadNumber'];
+      }
+      if ((paymentMap['bankName'] ?? '').toString().isNotEmpty) {
+        orderUpdate['paymentDetails.bankName'] = paymentMap['bankName'];
+        orderUpdate['paymentDetails.accountNumber'] =
+            paymentMap['accountNumber'] ?? '';
+      }
+      batch.update(orderRef, orderUpdate);
     }
   }
 
@@ -587,6 +775,8 @@ class LiveSalesController extends GetxController {
     addressC.text = customer['address'] ?? '';
     shopC.text = customer['shop'] ?? '';
     filteredRegularCustomers.clear();
+    regularCustomerAdvanceBalance.value =
+        (customer['advanceBalance'] as num?)?.toDouble() ?? 0.0;
 
     regularCustomerPreviousDue
         .value = await getRegularCustomerPreviousDueForInvoice(
@@ -674,6 +864,7 @@ class LiveSalesController extends GetxController {
     debtorOldDue.value = 0.0;
     debtorRunningDue.value = 0.0;
     regularCustomerPreviousDue.value = 0.0;
+    regularCustomerAdvanceBalance.value = 0.0;
 
     for (var item in cart) {
       item.priceAtSale =
@@ -777,15 +968,7 @@ class LiveSalesController extends GetxController {
 
     totalPaidInput.value = _round(cash + bkash + nagad + bank);
 
-    if (!isConditionSale.value) {
-      if (totalPaidInput.value > grandTotal && customerType.value != "AGENT") {
-        changeReturn.value = _round(totalPaidInput.value - grandTotal);
-      } else {
-        changeReturn.value = 0.0;
-      }
-    } else {
-      changeReturn.value = 0.0;
-    }
+    changeReturn.value = 0.0;
   }
 
   double get subtotalAmount =>
@@ -939,7 +1122,14 @@ class LiveSalesController extends GetxController {
             ? currentUser!.displayName!.split('|')[1].trim()
             : "01720677206";
 
-    if (totalPaidInput.value <= 0) {
+    final hasSelectedCustomerAdvance =
+        (!isConditionSale.value || isNonConditionSale.value) &&
+        ((customerType.value != "AGENT" &&
+                regularCustomerAdvanceBalance.value > 0.01) ||
+            (customerType.value == "AGENT" &&
+                selectedDebtor.value != null &&
+                totalPreviousDue < -0.01));
+    if (totalPaidInput.value <= 0 && !hasSelectedCustomerAdvance) {
       Get.defaultDialog(
         title: "No Payment Details",
         middleText: "No payment entered. Proceed as Due/Credit sale?",
@@ -1064,7 +1254,11 @@ class LiveSalesController extends GetxController {
 
     double allocatedToOldDue = 0.0,
         allocatedToInvoice = 0.0,
-        allocatedToPrevRunningDue = 0.0;
+        allocatedToPrevRunningDue = 0.0,
+        cashAllocatedToInvoice = 0.0,
+        advanceApplied = 0.0,
+        advanceReceived = 0.0;
+    _RegularCustomerSaleCollection? regularCustomerSaleCollection;
 
     double oldDueSnap = debtorOldDue.value,
         runningDueSnap = debtorRunningDue.value;
@@ -1077,43 +1271,77 @@ class LiveSalesController extends GetxController {
       );
     }
 
-    double remaining = totalPaidInputVal;
-
-    if (remaining > 0) {
-      if (remaining >= grandTotal) {
-        allocatedToInvoice = grandTotal;
-        remaining = _round(remaining - grandTotal);
-      } else {
-        allocatedToInvoice = remaining;
-        remaining = 0.0;
-      }
-    }
-
     if (customerType.value == "AGENT" &&
         !useConditionFlow &&
         debtorId != null) {
-      if (oldDueSnap > 0 && remaining > 0) {
-        if (remaining >= oldDueSnap) {
-          allocatedToOldDue = oldDueSnap;
-          remaining = _round(remaining - oldDueSnap);
-        } else {
-          allocatedToOldDue = remaining;
-          remaining = 0.0;
-        }
-      }
-
-      if (runningDueSnap > 0 && remaining > 0) {
-        if (remaining >= runningDueSnap) {
-          allocatedToPrevRunningDue = runningDueSnap;
-          remaining = _round(remaining - runningDueSnap);
-        } else {
-          allocatedToPrevRunningDue = remaining;
-          remaining = 0.0;
-        }
-      }
+      final plan = AgentSalePaymentPlan.build(
+        invoiceTotal: grandTotal,
+        cashReceived: totalPaidInputVal,
+        oldDue: oldDueSnap,
+        runningDue: runningDueSnap,
+      );
+      allocatedToOldDue = plan.oldDueCash;
+      allocatedToPrevRunningDue = plan.runningDueCash;
+      allocatedToInvoice = plan.invoicePaid;
+      cashAllocatedToInvoice = plan.invoiceCash;
+      advanceApplied = plan.advanceApplied;
+      advanceReceived = plan.advanceReceived;
     } else {
       allocatedToInvoice =
           totalPaidInputVal > grandTotal ? grandTotal : totalPaidInputVal;
+      cashAllocatedToInvoice = allocatedToInvoice;
+    }
+
+    if (customerType.value != "AGENT" && !useConditionFlow) {
+      double availableAdvance;
+      try {
+        final customerDoc = await _db.collection('customers').doc(fPhone).get();
+        final customerData = customerDoc.data();
+        availableAdvance =
+            (customerData?['advanceBalance'] as num?)?.toDouble() ?? 0.0;
+      } catch (e) {
+        isProcessing.value = false;
+        Get.snackbar("Error", "Could not load customer advance balance: $e");
+        return;
+      }
+      try {
+        regularCustomerSaleCollection =
+            await _planRegularCustomerSaleCollection(
+              phone: fPhone,
+              name: fName,
+              type: customerType.value,
+              amount: totalPaidInputVal,
+              collectionDate: saleDate,
+            );
+      } catch (e) {
+        isProcessing.value = false;
+        Get.snackbar("Error", "Could not load previous customer invoices: $e");
+        return;
+      }
+      if (regularCustomerSaleCollection != null) {
+        allocatedToPrevRunningDue =
+            regularCustomerSaleCollection.plan.appliedAmount;
+        cashAllocatedToInvoice = _round(
+          min(
+            grandTotal,
+            max(0.0, totalPaidInputVal - allocatedToPrevRunningDue),
+          ),
+        );
+        advanceReceived = _round(
+          max(
+            0.0,
+            regularCustomerSaleCollection.plan.advanceAmount -
+                cashAllocatedToInvoice,
+          ),
+        );
+      } else {
+        cashAllocatedToInvoice = _round(min(totalPaidInputVal, grandTotal));
+      }
+      allocatedToInvoice = cashAllocatedToInvoice;
+      advanceApplied = _round(
+        min(availableAdvance, max(0.0, grandTotal - allocatedToInvoice)),
+      );
+      allocatedToInvoice = _round(allocatedToInvoice + advanceApplied);
     }
 
     double invoiceDueAmount = _round(grandTotal - allocatedToInvoice);
@@ -1155,6 +1383,9 @@ class LiveSalesController extends GetxController {
         allocatedToPrevRunningDue,
         invoiceDueAmount,
         totalPaidInputVal,
+        advanceApplied: advanceApplied,
+        advanceReceived: advanceReceived,
+        previousAccountBalance: oldDueSnap + runningDueSnap,
       );
 
       batch.set(orderRef, {
@@ -1195,6 +1426,12 @@ class LiveSalesController extends GetxController {
         "isFullyPaid": invoiceDueAmount <= 0,
         "snapshotOldDue": oldDueSnap,
         "snapshotRunningDue": runningDueSnap,
+        if (customerType.value == "AGENT" &&
+            !useConditionFlow &&
+            invoiceDueAmount <= 0.5)
+          ...PaidInvoiceRunningDueSnapshot.markPaid({
+            'snapshotRunningDue': runningDueSnap,
+          }),
         "status":
             useConditionFlow
                 ? (invoiceDueAmount <= 0 ? "completed" : "on_delivery")
@@ -1229,12 +1466,27 @@ class LiveSalesController extends GetxController {
           sellerPhone,
           allocatedToOldDue,
           allocatedToInvoice,
+          cashAllocatedToInvoice,
           allocatedToPrevRunningDue,
+          advanceApplied,
+          advanceReceived,
           masterPaymentMap,
           sellerUid,
         );
       } else {
         double invoiceDue = _round(grandTotal - allocatedToInvoice);
+        final regularCollection = regularCustomerSaleCollection?.plan;
+        if (regularCustomerSaleCollection != null) {
+          await _applyRegularCustomerSaleCollection(
+            batch: batch,
+            collection: regularCustomerSaleCollection,
+            saleInvoiceId: invNo,
+            date: saleDate,
+            note: 'Payment via Inv $invNo',
+          );
+        }
+        final regularPreviousDuePaid = regularCollection?.appliedAmount ?? 0.0;
+        final customerAdvanceChange = advanceReceived - advanceApplied;
 
         DocumentReference custRef = _db.collection('customers').doc(fPhone);
         batch.set(custRef, {
@@ -1245,7 +1497,48 @@ class LiveSalesController extends GetxController {
           "type": customerType.value,
           "lastInv": invNo,
           "lastShopDate": FieldValue.serverTimestamp(),
-          if (invoiceDue > 0.5) "currentDue": FieldValue.increment(invoiceDue),
+          if ((invoiceDue - regularPreviousDuePaid).abs() > 0.01)
+            "currentDue": FieldValue.increment(
+              invoiceDue - regularPreviousDuePaid,
+            ),
+          if (customerAdvanceChange.abs() > 0.01)
+            "advanceBalance": FieldValue.increment(customerAdvanceChange),
+          if (advanceApplied > 0.01)
+            "advanceUsageHistory": FieldValue.arrayUnion([
+              {
+                "amount": advanceApplied,
+                "invoiceId": invNo,
+                "note": "Applied to invoice $invNo",
+                "timestamp": Timestamp.fromDate(saleDate),
+              },
+            ]),
+          if (advanceReceived > 0.01)
+            "advanceHistory": FieldValue.arrayUnion([
+              {
+                "amount": advanceReceived,
+                "note": "Excess payment from invoice $invNo",
+                "timestamp": Timestamp.fromDate(saleDate),
+                "paidAt": Timestamp.now(),
+                "type": _extractPaymentFor(advanceReceived)['method'],
+                "number":
+                    _extractPaymentFor(advanceReceived)['bkashNumber'] ??
+                    _extractPaymentFor(advanceReceived)['nagadNumber'] ??
+                    '',
+                "bankName": bankNameC.text.trim(),
+                "accountNumber": bankAccC.text.trim(),
+                "sourceTxId": invNo,
+                "invoiceAllocations":
+                    regularCollection?.allocations
+                        .map(
+                          (allocation) => {
+                            "invoiceId": allocation.invoice.documentId,
+                            "amount": allocation.amount,
+                          },
+                        )
+                        .toList() ??
+                    const <Map<String, dynamic>>[],
+              },
+            ]),
           "searchKeywords": _generateSearchKeywords(fName, fPhone),
         }, SetOptions(merge: true));
 
@@ -1255,7 +1548,28 @@ class LiveSalesController extends GetxController {
           shopC.text,
           addressC.text,
           customerType.value,
+          advanceApplied: advanceApplied,
+          advanceReceived: advanceReceived,
         );
+
+        final regularCashLedgerAmount = max(
+          0.0,
+          (regularCollection?.cashLedgerAmount ?? 0.0) - cashAllocatedToInvoice,
+        );
+        if (regularCashLedgerAmount > 0.01) {
+          final ledgerPayment = _extractPaymentFor(regularCashLedgerAmount);
+          batch.set(_db.collection('cash_ledger').doc(), {
+            "type": "deposit",
+            "amount": regularCashLedgerAmount,
+            "method": ledgerPayment['method'],
+            "details": ledgerPayment,
+            "description": "Collection from $fName (${customerType.value})",
+            "timestamp": Timestamp.fromDate(saleDate),
+            "linkedCustomerId": fPhone,
+            "linkedTxId": invNo,
+            "source": "customer_due_collection",
+          });
+        }
 
         DocumentReference custOrdRef = custRef.collection('orders').doc(invNo);
         batch.set(custOrdRef, {
@@ -1267,34 +1581,46 @@ class LiveSalesController extends GetxController {
         });
 
         DocumentReference dailyRef = _db.collection('daily_sales').doc();
-        Map<String, dynamic> methodMap = _extractPaymentFor(allocatedToInvoice);
+        Map<String, dynamic> methodMap = _extractPaymentFor(
+          cashAllocatedToInvoice,
+        );
         methodMap['pending'] = invoiceDue;
+
+        final paymentHistory = <Map<String, dynamic>>[];
+        if (cashAllocatedToInvoice > 0.01) {
+          paymentHistory.add({
+            "amount": cashAllocatedToInvoice,
+            "note": "Initial Payment",
+            "timestamp": Timestamp.fromDate(saleDate),
+            "type": methodMap['method'],
+            "bkashNumber": methodMap['bkashNumber'] ?? "",
+            "nagadNumber": methodMap['nagadNumber'] ?? "",
+            "bankName": methodMap['bankName'] ?? "",
+            "accountNumber": methodMap['accountNumber'] ?? "",
+          });
+        }
+        if (advanceApplied > 0.01) {
+          paymentHistory.add({
+            "amount": advanceApplied,
+            "note": "Applied Customer Advance",
+            "timestamp": Timestamp.fromDate(saleDate),
+            "type": "advance",
+            "collectionMode": "advance_credit",
+            "invoiceId": invNo,
+          });
+        }
 
         batch.set(dailyRef, {
           "name": fName,
           "customerPhone": fPhone,
           "amount": grandTotal,
           "paid": allocatedToInvoice,
-          "ledgerPaid": 0.0,
+          "ledgerPaid": advanceApplied,
           "pending": invoiceDue,
           "customerType": customerType.value.toLowerCase(),
           "timestamp": Timestamp.fromDate(saleDate),
           "paymentMethod": methodMap,
-          "paymentHistory":
-              allocatedToInvoice > 0
-                  ? [
-                    {
-                      "amount": allocatedToInvoice,
-                      "note": "Initial Payment",
-                      "timestamp": Timestamp.fromDate(saleDate),
-                      "type": methodMap['method'],
-                      "bkashNumber": methodMap['bkashNumber'] ?? "",
-                      "nagadNumber": methodMap['nagadNumber'] ?? "",
-                      "bankName": methodMap['bankName'] ?? "",
-                      "accountNumber": methodMap['accountNumber'] ?? "",
-                    },
-                  ]
-                  : [],
+          "paymentHistory": paymentHistory,
           "createdAt": FieldValue.serverTimestamp(),
           "source": "pos_sale",
           "transactionId": invNo,
@@ -1337,6 +1663,7 @@ class LiveSalesController extends GetxController {
         discount: discountVal.value,
         discountNote: discountNoteC.text.trim(),
         packagerName: selectedPackager.value,
+        isAgentInvoice: customerType.value == "AGENT" && !useConditionFlow,
       );
 
       _resetAll();
@@ -1372,24 +1699,49 @@ class LiveSalesController extends GetxController {
     String name,
     String shop,
     String address,
-    String type,
-  ) {
+    String type, {
+    double advanceApplied = 0.0,
+    double advanceReceived = 0.0,
+  }) {
     if (type == 'AGENT') return;
     var existingIndex = allRegularCustomersCache.indexWhere(
       (c) => c['phone'] == phone || c['id'] == phone,
     );
+    final existingAdvanceBalance =
+        existingIndex >= 0
+            ? (allRegularCustomersCache[existingIndex]['advanceBalance']
+                        as num?)
+                    ?.toDouble() ??
+                0.0
+            : (selectedRegularCustomer.value?['advanceBalance'] as num?)
+                    ?.toDouble() ??
+                0.0;
     Map<String, dynamic> updatedCust = {
+      if (existingIndex >= 0) ...allRegularCustomersCache[existingIndex],
       'id': phone,
       'phone': phone,
       'name': name,
       'shop': shop,
       'address': address,
       'type': type,
+      if (advanceApplied > 0.01 || advanceReceived > 0.01)
+        'advanceBalance': max(
+          0.0,
+          existingAdvanceBalance - advanceApplied + advanceReceived,
+        ),
     };
     if (existingIndex >= 0) {
       allRegularCustomersCache[existingIndex] = updatedCust;
     } else {
       allRegularCustomersCache.add(updatedCust);
+    }
+    final selected = selectedRegularCustomer.value;
+    if (selected != null &&
+        ((selected['phone'] ?? '').toString() == phone ||
+            (selected['id'] ?? '').toString() == phone)) {
+      selectedRegularCustomer.value = updatedCust;
+      regularCustomerAdvanceBalance.value =
+          (updatedCust['advanceBalance'] as num?)?.toDouble() ?? 0.0;
     }
   }
 
@@ -1438,7 +1790,17 @@ class LiveSalesController extends GetxController {
     required String address,
     required String type,
   }) {
+    bool matchesPhone(Map<String, dynamic> customer, String value) =>
+        value.isNotEmpty &&
+        ((customer['phone'] ?? '').toString() == value ||
+            (customer['id'] ?? '').toString() == value);
+
+    final existingCustomer = allRegularCustomersCache.firstWhereOrNull(
+      (customer) =>
+          matchesPhone(customer, oldPhone) || matchesPhone(customer, phone),
+    );
     final updatedCustomer = <String, dynamic>{
+      if (existingCustomer != null) ...existingCustomer,
       'id': phone,
       'phone': phone,
       'name': name,
@@ -1446,11 +1808,6 @@ class LiveSalesController extends GetxController {
       'address': address,
       'type': type,
     };
-
-    bool matchesPhone(Map<String, dynamic> customer, String value) =>
-        value.isNotEmpty &&
-        ((customer['phone'] ?? '').toString() == value ||
-            (customer['id'] ?? '').toString() == value);
 
     allRegularCustomersCache.removeWhere(
       (customer) =>
@@ -1580,7 +1937,10 @@ class LiveSalesController extends GetxController {
     String sellerPhone,
     double allocatedToOldDue,
     double allocatedToInvoice,
+    double cashAllocatedToInvoice,
     double allocatedToPrevRunningDue,
+    double advanceApplied,
+    double advanceReceived,
     Map masterPaymentMap,
     String sellerUid,
   ) async {
@@ -1646,20 +2006,20 @@ class LiveSalesController extends GetxController {
       "soldByPhone": sellerPhone,
     });
 
-    if (allocatedToInvoice > 0) {
+    if (cashAllocatedToInvoice > 0) {
       DocumentReference debitRef = _db
           .collection('debatorbody')
           .doc(debtorId)
           .collection('transactions')
           .doc("${invNo}_pay");
       batch.set(debitRef, {
-        "amount": allocatedToInvoice,
+        "amount": cashAllocatedToInvoice,
         "transactionId": "${invNo}_pay",
         "type": "debit",
         "date": Timestamp.fromDate(saleDate),
         "createdAt": FieldValue.serverTimestamp(),
         "note": "Payment for Inv $invNo",
-        "paymentMethod": _extractPaymentFor(allocatedToInvoice),
+        "paymentMethod": _extractPaymentFor(cashAllocatedToInvoice),
         "collectedBy": sellerName,
         "collectedByPhone": sellerPhone,
       });
@@ -1784,6 +2144,7 @@ class LiveSalesController extends GetxController {
                 "paymentDetails.due": 0.0,
                 "isFullyPaid": true,
                 "status": "completed",
+                ...PaidInvoiceRunningDueSnapshot.markPaid(oData),
               });
             }
             continue;
@@ -1838,6 +2199,7 @@ class LiveSalesController extends GetxController {
           if (isNowFullyPaid) {
             orderUpdate["isFullyPaid"] = true;
             orderUpdate["status"] = "completed";
+            orderUpdate.addAll(PaidInvoiceRunningDueSnapshot.markPaid(oData));
           }
           batch.update(orderDoc.reference, orderUpdate);
 
@@ -1907,39 +2269,82 @@ class LiveSalesController extends GetxController {
         });
       } catch (e) {
         AppLogger.i("Error allocating surplus to old bills: $e");
+        throw StateError(
+          "Could not allocate payment to earlier Agent invoices: $e",
+        );
       }
+    }
+
+    if (advanceReceived > 0.01) {
+      final advanceTxId = "${invNo}_advance";
+      final advancePayment = _extractPaymentFor(advanceReceived);
+      final advanceRef = _db
+          .collection('debatorbody')
+          .doc(debtorId)
+          .collection('transactions')
+          .doc(advanceTxId);
+      batch.set(advanceRef, {
+        "amount": advanceReceived,
+        "transactionId": advanceTxId,
+        "type": "advance_received",
+        "date": Timestamp.fromDate(saleDate),
+        "createdAt": FieldValue.serverTimestamp(),
+        "note": "Advance received from Inv $invNo",
+        "paymentMethod": advancePayment,
+        "collectedBy": sellerName,
+        "collectedByPhone": sellerPhone,
+      });
+      _insertCashLedgerRecords(
+        batch: batch,
+        payMap: advancePayment,
+        description: "Advance received from $fName",
+        debtorId: debtorId,
+        txId: advanceTxId,
+        sellerUid: sellerUid,
+      );
     }
 
     DocumentReference dailyRef = _db.collection('daily_sales').doc();
     double due = grandTotal - allocatedToInvoice;
     Map<String, dynamic> agentMethodMap = _extractPaymentFor(
-      allocatedToInvoice,
+      cashAllocatedToInvoice,
     );
     agentMethodMap['pending'] = due;
+
+    final paymentHistory = <Map<String, dynamic>>[];
+    if (cashAllocatedToInvoice > 0.01) {
+      paymentHistory.add({
+        "amount": cashAllocatedToInvoice,
+        "note": "Initial Payment",
+        "timestamp": Timestamp.fromDate(saleDate),
+        "type": agentMethodMap['method'],
+        "bkashNumber": agentMethodMap['bkashNumber'] ?? "",
+        "nagadNumber": agentMethodMap['nagadNumber'] ?? "",
+        "bankName": agentMethodMap['bankName'] ?? "",
+        "accountNumber": agentMethodMap['accountNumber'] ?? "",
+      });
+    }
+    if (advanceApplied > 0.01) {
+      paymentHistory.add({
+        "amount": advanceApplied,
+        "note": "Applied Agent Advance",
+        "timestamp": Timestamp.fromDate(saleDate),
+        "type": "advance",
+        "collectionMode": "advance_credit",
+        "invoiceId": invNo,
+      });
+    }
 
     batch.set(dailyRef, {
       "name": fName,
       "amount": grandTotal,
       "paid": allocatedToInvoice,
+      "ledgerPaid": advanceApplied,
       "pending": due,
       "customerType": "agent",
       "timestamp": Timestamp.fromDate(saleDate),
       "paymentMethod": agentMethodMap,
-      "paymentHistory":
-          allocatedToInvoice > 0
-              ? [
-                {
-                  "amount": allocatedToInvoice,
-                  "note": "Initial Payment",
-                  "timestamp": Timestamp.fromDate(saleDate),
-                  "type": agentMethodMap['method'],
-                  "bkashNumber": agentMethodMap['bkashNumber'] ?? "",
-                  "nagadNumber": agentMethodMap['nagadNumber'] ?? "",
-                  "bankName": agentMethodMap['bankName'] ?? "",
-                  "accountNumber": agentMethodMap['accountNumber'] ?? "",
-                },
-              ]
-              : [],
+      "paymentHistory": paymentHistory,
       "createdAt": FieldValue.serverTimestamp(),
       "source": "pos_sale",
       "transactionId": invNo,
@@ -2026,8 +2431,11 @@ class LiveSalesController extends GetxController {
     double inv,
     double prevRun,
     double due,
-    double totalInput,
-  ) {
+    double totalInput, {
+    double advanceApplied = 0.0,
+    double advanceReceived = 0.0,
+    double previousAccountBalance = 0.0,
+  }) {
     return {
       "type": isConditionSale.value ? "condition_partial" : "multi",
       "cash": double.tryParse(cashC.text) ?? 0,
@@ -2042,6 +2450,10 @@ class LiveSalesController extends GetxController {
       "paidForOldDue": oldDue,
       "paidForInvoice": inv,
       "paidForPrevRunning": prevRun,
+      "advanceApplied": advanceApplied,
+      "advanceReceived": advanceReceived,
+      if (customerType.value != "AGENT")
+        "previousAccountBalance": previousAccountBalance,
       "due": due,
       "currency": "BDT",
     };
@@ -2098,6 +2510,8 @@ class LiveSalesController extends GetxController {
     filteredDebtors.clear();
     selectedRegularCustomer.value = null;
     filteredRegularCustomers.clear();
+    regularCustomerPreviousDue.value = 0.0;
+    regularCustomerAdvanceBalance.value = 0.0;
     debtorPhoneSearch.clear();
     debtorOldDue.value = 0.0;
     debtorRunningDue.value = 0.0;
@@ -2195,21 +2609,23 @@ class LiveSalesController extends GetxController {
     double discount = 0.0,
     String discountNote = "",
     String? packagerName,
+    bool isAgentInvoice = false,
   }) async {
     final pdf = pw.Document();
     final boldFont = await PdfGoogleFonts.robotoBold();
     final regularFont = await PdfGoogleFonts.robotoRegular();
     final italicFont = await PdfGoogleFonts.robotoItalic();
 
-    double paidOld = double.tryParse(payMap['paidForOldDue'].toString()) ?? 0.0;
+    double paidOld =
+        double.tryParse(payMap['paidForOldDue']?.toString() ?? '0') ?? 0.0;
     double paidPrevRun =
-        double.tryParse(payMap['paidForPrevRunning'].toString()) ?? 0.0;
+        double.tryParse(payMap['paidForPrevRunning']?.toString() ?? '0') ?? 0.0;
     double invDue = double.tryParse(payMap['due'].toString()) ?? 0.0;
-    double totalPaidForInvoice =
-        double.tryParse(payMap['paidForInvoice']?.toString() ?? '0') ?? 0.0;
     double totalPaidInput =
         double.tryParse(payMap['totalPaidInput']?.toString() ?? '0') ??
-        totalPaidForInvoice;
+        (double.tryParse(payMap['paidForInvoice']?.toString() ?? '0') ?? 0.0);
+    double advanceApplied =
+        double.tryParse(payMap['advanceApplied']?.toString() ?? '0') ?? 0.0;
 
     List<String> methodsUsed = [];
     if ((double.tryParse(payMap['cash']?.toString() ?? '0') ?? 0) > 0) {
@@ -2224,6 +2640,7 @@ class LiveSalesController extends GetxController {
     if ((double.tryParse(payMap['bank']?.toString() ?? '0') ?? 0) > 0) {
       methodsUsed.add('Bank');
     }
+    if (advanceApplied > 0.01) methodsUsed.add('Advance Credit');
     String paymentMethodsStr =
         methodsUsed.isNotEmpty ? methodsUsed.join(', ') : "None/Credit";
 
@@ -2232,14 +2649,40 @@ class LiveSalesController extends GetxController {
       (sumv, item) =>
           sumv + (double.tryParse(item['subtotal'].toString()) ?? 0),
     );
-    double remainingOldDue = (oldDueSnap - paidOld).clamp(0, double.infinity);
-    double remainingPrevRunning = (runningDueSnap - paidPrevRun).clamp(
-      0,
-      double.infinity,
-    );
-    double netTotalDue = remainingOldDue + remainingPrevRunning + invDue;
-    double totalPreviousBalance = oldDueSnap + runningDueSnap;
     double currentInvTotal = subTotal - discount;
+    final advanceReceived =
+        double.tryParse(payMap['advanceReceived']?.toString() ?? '0') ?? 0.0;
+    final totalPreviousBalance =
+        isAgentInvoice
+            ? calculateAgentInvoicePreviousBalance(
+              snapshotOldDue: oldDueSnap,
+              snapshotRunningDue: runningDueSnap,
+              paidForOldDue: paidOld,
+              paidForRunningDue: paidPrevRun,
+            )
+            : double.tryParse(
+                  payMap['previousAccountBalance']?.toString() ?? '',
+                ) ??
+                oldDueSnap + runningDueSnap;
+    final netTotalDue =
+        isAgentInvoice
+            ? calculateAgentInvoicePresentDue(
+              snapshotOldDue: oldDueSnap,
+              snapshotRunningDue: runningDueSnap,
+              paidForOldDue: paidOld,
+              paidForRunningDue: paidPrevRun,
+              invoiceDue: invDue,
+              advanceApplied: advanceApplied,
+              advanceReceived: advanceReceived,
+            )
+            : calculateInvoicePresentDue(
+              previousBalance: totalPreviousBalance,
+              paidForOldDue: paidOld,
+              paidForRunningDue: paidPrevRun,
+              invoiceDue: invDue,
+              advanceApplied: advanceApplied,
+              advanceReceived: advanceReceived,
+            );
 
     final pageTheme = pw.PageTheme(
       pageFormat: PdfPageFormat.a4,
@@ -2289,7 +2732,7 @@ class LiveSalesController extends GetxController {
                 subTotal,
                 discount,
                 currentInvTotal,
-                totalPaidInput,
+                totalPaidInput + advanceApplied,
                 paymentMethodsStr,
                 items,
                 boldFont,
@@ -2855,11 +3298,7 @@ class LiveSalesController extends GetxController {
     );
   }
 
-  pw.Widget _buildNewFooter(
-    pw.Context context,
-    pw.Font reg,
-    pw.Font bold,
-  ) {
+  pw.Widget _buildNewFooter(pw.Context context, pw.Font reg, pw.Font bold) {
     return pw.Column(
       mainAxisSize: pw.MainAxisSize.min,
       children: [

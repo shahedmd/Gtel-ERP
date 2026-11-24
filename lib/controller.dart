@@ -2,8 +2,6 @@ import 'package:get/get.dart';
 import 'package:gtel_erp/Core/Services/session_controller.dart';
 
 class RoleController extends GetxController {
-  // SessionController থেকে data নাও
-  // Sidebar এর কোনো কিছু বদলাতে হবে না
   SessionController get _session => Get.find<SessionController>();
 
   bool get isSuperAdmin => _session.isSuperAdmin;

@@ -8,6 +8,7 @@ import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
 import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/gteldebtorcontroller.dart';
 import 'package:gtel_erp/Core/Gtel%20Expense/Daily%20Expense/dailyexpensecontroller.dart';
 import 'package:intl/intl.dart';
+import 'package:gtel_erp/Web%20Screen/Debator%20Finance/purchaseallocation.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -378,7 +379,16 @@ class GlobalPurchaseHistoryController extends GetxController {
     if (amount <= 0) return;
     isLoading.value = true;
     try {
+      final allocationPlan = await PurchaseAllocation.planForSettlement(
+        db: _db,
+        debtorId: debtorId,
+        amount: amount,
+      );
       WriteBatch batch = _db.batch();
+      final purchasesRef = _db
+          .collection('debatorbody')
+          .doc(debtorId)
+          .collection('purchases');
       DocumentReference histRef =
           _db
               .collection('debatorbody')
@@ -398,9 +408,17 @@ class GlobalPurchaseHistoryController extends GetxController {
         'method': method,
         'note': note,
         'isAdjustment': false,
+        'allocations': allocationPlan.allocations,
+        'unallocatedAmount': allocationPlan.unallocatedAmount,
+        'allocationVersion': 1,
       };
 
       batch.set(histRef, newPaymentData);
+      for (final allocation in allocationPlan.allocations) {
+        batch.update(purchasesRef.doc(allocation['invoiceId'] as String), {
+          'settledAmount': FieldValue.increment(allocation['amount'] as num),
+        });
+      }
 
       DocumentReference debtorRef = _db.collection('debatorbody').doc(debtorId);
       batch.update(debtorRef, {
@@ -453,7 +471,12 @@ class GlobalPurchaseHistoryController extends GetxController {
       }
 
       if (Get.isDialogOpen ?? false) Get.back();
-      Get.snackbar("Success", "Payment Recorded.");
+      Get.snackbar(
+        "Success",
+        allocationPlan.unallocatedAmount > 0.01
+            ? "Payment recorded. ৳${allocationPlan.unallocatedAmount.toStringAsFixed(2)} remains as unallocated supplier credit."
+            : "Payment Recorded.",
+      );
     } catch (e) {
       Get.snackbar(
         "Error",
@@ -481,15 +504,29 @@ class GlobalPurchaseHistoryController extends GetxController {
   }) async {
     isLoading.value = true;
     try {
-      WriteBatch batch = _db.batch();
-
-      // 1. Update the Invoice Document
-      DocumentReference purchaseRef = _db
+      await PurchaseAllocation.ensureMigrated(db: _db, debtorId: debtorId);
+      final purchaseRef = _db
           .collection('debatorbody')
           .doc(debtorId)
           .collection('purchases')
           .doc(purchaseId);
+      final existingPurchase = await purchaseRef.get();
+      if (!existingPurchase.exists) {
+        throw StateError('Purchase invoice was not found.');
+      }
+      final settledAmount = PurchaseAllocation.settledAmountFor(
+        existingPurchase.data() ?? <String, dynamic>{},
+      );
+      if (newTotal + 0.01 < settledAmount) {
+        throw StateError(
+          'Invoice total cannot be less than the amount already paid or adjusted '
+          '(${settledAmount.toStringAsFixed(2)}).',
+        );
+      }
 
+      WriteBatch batch = _db.batch();
+
+      // 1. Update the Invoice Document
       batch.update(purchaseRef, {
         'items': newItems,
         'totalAmount': newTotal,

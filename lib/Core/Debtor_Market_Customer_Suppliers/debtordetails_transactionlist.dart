@@ -1,9 +1,13 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:get/get.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:gtel_erp/ActivityLogger/activity_logger.dart';
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/Debtor%20Purchase/purchasepage.dart';
+import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/invoice_payment_reconciliation.dart';
+import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/invoice_snapshot_repair.dart';
+import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/paid_invoice_running_due_repair.dart';
 import 'package:intl/intl.dart';
 import 'gteldebtorcontroller.dart';
 import '../../Web Screen/Sales/controller.dart';
@@ -347,12 +351,43 @@ class Debatordetails extends StatelessWidget {
               if (val == 'pdf') {
                 _openPdfDownloadDialog(id, name, pageCtrl.mainController);
               }
+              if (val == 'repair_invoice_snapshots') {
+                _confirmInvoiceSnapshotRepair(context, repair: true);
+              }
+              if (val == 'undo_invoice_snapshots') {
+                _confirmInvoiceSnapshotRepair(context, repair: false);
+              }
+              if (val == 'undo_paid_invoice_running_due') {
+                if (debtor.isAgent) {
+                  _confirmPaidInvoiceRunningDueRepair(context, repair: false);
+                }
+              }
+              if (val == 'clear_paid_invoice_running_due') {
+                if (debtor.isAgent) {
+                  _confirmPaidInvoiceRunningDueRepair(context, repair: true);
+                }
+              }
+              if (val == 'undo_paid_invoice_previous_due') {
+                if (debtor.isAgent) {
+                  _confirmPaidInvoiceRunningDueRepair(
+                    context,
+                    repair: false,
+                    undoPreviousDue: true,
+                  );
+                }
+              }
+              if (val == 'reconcile_invoice_payments') {
+                _previewInvoicePaymentReconciliation(context);
+              }
+              if (val == 'undo_invoice_payment_reconciliation') {
+                _undoInvoicePaymentReconciliation(context);
+              }
             },
             itemBuilder:
-                (context) => const [
+                (context) => [
                   PopupMenuItem(
                     value: 'purchases',
-                    child: Row(
+                    child: const Row(
                       children: [
                         FaIcon(
                           FontAwesomeIcons.bagShopping,
@@ -366,7 +401,7 @@ class Debatordetails extends StatelessWidget {
                   ),
                   PopupMenuItem(
                     value: 'profile',
-                    child: Row(
+                    child: const Row(
                       children: [
                         Icon(Icons.edit, size: 16, color: activeAccent),
                         SizedBox(width: 10),
@@ -376,7 +411,7 @@ class Debatordetails extends StatelessWidget {
                   ),
                   PopupMenuItem(
                     value: 'pdf',
-                    child: Row(
+                    child: const Row(
                       children: [
                         FaIcon(
                           FontAwesomeIcons.filePdf,
@@ -385,6 +420,106 @@ class Debatordetails extends StatelessWidget {
                         ),
                         SizedBox(width: 10),
                         Text("Statement", style: TextStyle(fontSize: 13)),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuDivider(),
+                  const PopupMenuItem(
+                    value: 'repair_invoice_snapshots',
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.build_circle_outlined,
+                          size: 16,
+                          color: activeAccent,
+                        ),
+                        SizedBox(width: 10),
+                        Text(
+                          "Fix invoice dues",
+                          style: TextStyle(fontSize: 13),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'undo_invoice_snapshots',
+                    child: Row(
+                      children: [
+                        Icon(Icons.undo, size: 16, color: debitColor),
+                        SizedBox(width: 10),
+                        Text("Undo last fix", style: TextStyle(fontSize: 13)),
+                      ],
+                    ),
+                  ),
+                  if (debtor.isAgent) ...[
+                    const PopupMenuItem(
+                      value: 'clear_paid_invoice_running_due',
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.payments_outlined,
+                            size: 16,
+                            color: activeAccent,
+                          ),
+                          SizedBox(width: 10),
+                          Text(
+                            "Clear Running Due on paid invoices",
+                            style: TextStyle(fontSize: 13),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: 'undo_paid_invoice_running_due',
+                      child: Row(
+                        children: [
+                          Icon(Icons.undo, size: 16, color: debitColor),
+                          SizedBox(width: 10),
+                          Text(
+                            "Undo paid-invoice Running Due fix",
+                            style: TextStyle(fontSize: 13),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: 'undo_paid_invoice_previous_due',
+                      child: Row(
+                        children: [
+                          Icon(Icons.undo, size: 16, color: activeAccent),
+                          SizedBox(width: 10),
+                          Text(
+                            "Undo earlier Previous Due fix",
+                            style: TextStyle(fontSize: 13),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  const PopupMenuDivider(),
+                  const PopupMenuItem(
+                    value: 'reconcile_invoice_payments',
+                    child: Row(
+                      children: [
+                        Icon(Icons.sync_alt, size: 16, color: activeAccent),
+                        SizedBox(width: 10),
+                        Text(
+                          "Reconcile payment records",
+                          style: TextStyle(fontSize: 13),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'undo_invoice_payment_reconciliation',
+                    child: Row(
+                      children: [
+                        Icon(Icons.undo, size: 16, color: debitColor),
+                        SizedBox(width: 10),
+                        Text(
+                          "Undo payment reconciliation",
+                          style: TextStyle(fontSize: 13),
+                        ),
                       ],
                     ),
                   ),
@@ -428,10 +563,358 @@ class Debatordetails extends StatelessWidget {
               style: TextStyle(color: debitColor, fontWeight: FontWeight.w600),
             ),
           ),
+          PopupMenuButton<String>(
+            tooltip: 'Invoice due tools',
+            icon: const Icon(Icons.build_circle_outlined, color: darkSlate),
+            onSelected: (value) {
+              if (value == 'repair_invoice_snapshots' ||
+                  value == 'undo_invoice_snapshots') {
+                _confirmInvoiceSnapshotRepair(
+                  context,
+                  repair: value == 'repair_invoice_snapshots',
+                );
+              } else if (value == 'reconcile_invoice_payments') {
+                _previewInvoicePaymentReconciliation(context);
+              } else if (value == 'undo_invoice_payment_reconciliation') {
+                _undoInvoicePaymentReconciliation(context);
+              } else if (value == 'clear_paid_invoice_running_due' ||
+                  value == 'undo_paid_invoice_running_due' ||
+                  value == 'undo_paid_invoice_previous_due') {
+                if (debtor.isAgent) {
+                  _confirmPaidInvoiceRunningDueRepair(
+                    context,
+                    repair: value == 'clear_paid_invoice_running_due',
+                    undoPreviousDue: value == 'undo_paid_invoice_previous_due',
+                  );
+                }
+              }
+            },
+            itemBuilder:
+                (context) => [
+                  const PopupMenuItem(
+                    value: 'repair_invoice_snapshots',
+                    child: Text("Fix invoice dues"),
+                  ),
+                  const PopupMenuItem(
+                    value: 'undo_invoice_snapshots',
+                    child: Text("Undo last fix"),
+                  ),
+                  if (debtor.isAgent) ...[
+                    const PopupMenuItem(
+                      value: 'clear_paid_invoice_running_due',
+                      child: Text("Clear Running Due on paid invoices"),
+                    ),
+                    const PopupMenuItem(
+                      value: 'undo_paid_invoice_running_due',
+                      child: Text("Undo paid-invoice Running Due fix"),
+                    ),
+                    const PopupMenuItem(
+                      value: 'undo_paid_invoice_previous_due',
+                      child: Text("Undo earlier Previous Due fix"),
+                    ),
+                  ],
+                  const PopupMenuDivider(),
+                  const PopupMenuItem(
+                    value: 'reconcile_invoice_payments',
+                    child: Text("Reconcile payment records"),
+                  ),
+                  const PopupMenuItem(
+                    value: 'undo_invoice_payment_reconciliation',
+                    child: Text("Undo payment reconciliation"),
+                  ),
+                ],
+          ),
           const SizedBox(width: 16),
         ],
       ],
     );
+  }
+
+  Future<void> _confirmInvoiceSnapshotRepair(
+    BuildContext context, {
+    required bool repair,
+  }) async {
+    final firestore = FirebaseFirestore.instance;
+    final projectId = firestore.app.options.projectId;
+    final confirmed = await Get.dialog<bool>(
+      AlertDialog(
+        title: Text(repair ? 'Fix invoice dues?' : 'Undo last invoice fix?'),
+        content: Text(
+          repair
+              ? 'This will recalculate Previous Due and Present Due snapshots '
+                  'for invoices belonging to $name. A backup will be saved so '
+                  'you can undo this fix.\n\nFirebase project: '
+                  '$projectId\n\n'
+                  'This will write to this Firebase project, including when '
+                  'running locally. Undo restores the saved snapshot fields, '
+                  'but it can stop if invoice data changes after the fix.'
+              : 'This will restore the invoice snapshot values saved before '
+                  'the latest fix for $name.\n\nFirebase project: '
+                  '$projectId',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Get.back(result: false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Get.back(result: true),
+            child: Text(repair ? 'Fix invoices' : 'Undo fix'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    Get.dialog(
+      const Center(child: CircularProgressIndicator()),
+      barrierDismissible: false,
+    );
+    try {
+      if (repair) {
+        final result = await InvoiceSnapshotRepair.repairDebtor(
+          db: firestore,
+          debtorId: id,
+        );
+        Get.back();
+        Get.snackbar(
+          'Invoice dues fixed',
+          '${result.invoiceCount} invoices updated. Undo is available if needed.',
+        );
+      } else {
+        final count = await InvoiceSnapshotRepair.undoLastRepair(
+          db: firestore,
+          debtorId: id,
+        );
+        Get.back();
+        Get.snackbar('Fix undone', '$count invoices restored.');
+      }
+    } catch (e) {
+      if (Get.isDialogOpen ?? false) Get.back();
+      Get.snackbar('Error', e.toString());
+    }
+  }
+
+  Future<void> _confirmPaidInvoiceRunningDueRepair(
+    BuildContext context, {
+    required bool repair,
+    bool undoPreviousDue = false,
+  }) async {
+    final firestore = FirebaseFirestore.instance;
+    final projectId = firestore.app.options.projectId;
+    final confirmed = await Get.dialog<bool>(
+      AlertDialog(
+        title: Text(
+          repair
+              ? 'Clear Running Due on paid invoices?'
+              : undoPreviousDue
+              ? 'Undo earlier Previous Due fix?'
+              : 'Undo paid-invoice Running Due fix?',
+        ),
+        content: Text(
+          repair
+              ? 'This sets snapshotRunningDue to 0 for Agent invoices marked '
+                  'isFullyPaid. It can remove legitimate previous due shown on '
+                  'those invoices. A backup will be saved and this action can '
+                  'be undone.\n\nFirebase project: $projectId'
+              : undoPreviousDue
+              ? 'Restore snapshotOldDue from the earlier repair backup. This '
+                  'will stop if invoice or daily sales payment data has changed.'
+                  '\n\nFirebase project: $projectId'
+              : 'Restore snapshotRunningDue from the latest paid-invoice repair '
+                  'backup for $name. Undo will stop if an invoice field changed '
+                  'after the repair.\n\nFirebase project: $projectId',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Get.back(result: false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Get.back(result: true),
+            child: Text(
+              repair
+                  ? 'Clear Running Due'
+                  : undoPreviousDue
+                  ? 'Undo earlier fix'
+                  : 'Undo fix',
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    Get.dialog(
+      const Center(child: CircularProgressIndicator()),
+      barrierDismissible: false,
+    );
+    try {
+      if (repair) {
+        final result = await PaidInvoiceRunningDueRepair.repairDebtor(
+          db: firestore,
+          debtorId: id,
+        );
+        if (Get.isDialogOpen ?? false) Get.back();
+        if (result.clearedInvoiceCount == 0) {
+          Get.snackbar(
+            'No paid invoice Running Due found',
+            '${result.skippedInvoiceCount} Agent invoices with Running Due '
+                'were not changed because isFullyPaid was not true.',
+          );
+        } else {
+          Get.snackbar(
+            'Paid-invoice Running Due cleared',
+            '${result.clearedInvoiceCount} invoices updated; '
+                '${result.skippedInvoiceCount} unpaid invoices with Running Due '
+                'left unchanged. Undo is available.',
+          );
+        }
+      } else if (undoPreviousDue) {
+        final count =
+            await PaidInvoiceRunningDueRepair.undoLastPreviousDueRepair(
+              db: firestore,
+              debtorId: id,
+            );
+        if (Get.isDialogOpen ?? false) Get.back();
+        Get.snackbar('Earlier fix undone', '$count invoices restored.');
+      } else {
+        final count = await PaidInvoiceRunningDueRepair.undoLastRepair(
+          db: firestore,
+          debtorId: id,
+        );
+        if (Get.isDialogOpen ?? false) Get.back();
+        Get.snackbar('Fix undone', '$count invoices restored.');
+      }
+    } catch (e) {
+      if (Get.isDialogOpen ?? false) Get.back();
+      Get.snackbar('Running Due repair failed', e.toString());
+    }
+  }
+
+  Future<void> _previewInvoicePaymentReconciliation(
+    BuildContext context,
+  ) async {
+    final firestore = FirebaseFirestore.instance;
+    Get.dialog(
+      const Center(child: CircularProgressIndicator()),
+      barrierDismissible: false,
+    );
+    try {
+      final preview = await InvoicePaymentReconciliation.previewDebtor(
+        db: firestore,
+        debtorId: id,
+      );
+      if (Get.isDialogOpen ?? false) Get.back();
+
+      final skippedDetails = preview.skipped
+          .take(5)
+          .map((item) => '${item.invoiceId}: ${item.reason}')
+          .join('\n');
+      final confirmed = await Get.dialog<bool>(
+        AlertDialog(
+          title: const Text('Review payment reconciliation'),
+          content: SizedBox(
+            width: 520,
+            child: SingleChildScrollView(
+              child: Text(
+                'Firebase project: ${firestore.app.options.projectId}\n\n'
+                'Invoices safe to update: ${preview.eligibleInvoiceCount}\n'
+                'Invoices skipped for review: ${preview.skippedInvoiceCount}\n'
+                'ledgerPaid increase from verified history: ৳'
+                '${preview.ledgerPaidToAdd.toStringAsFixed(2)}\n\n'
+                'The update uses payment history linked to debtor ledger '
+                'transactions. It will update paid, ledgerPaid, pending and '
+                'status in daily_sales, plus paid/due fields in sales_orders. '
+                'It will not change debtor balances, cash fields, transaction '
+                'history or invoice due snapshots. A backup is saved for undo.'
+                '${skippedDetails.isEmpty ? '' : '\n\nExamples skipped:\n$skippedDetails'}',
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Get.back(result: false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed:
+                  preview.eligibleInvoiceCount == 0
+                      ? null
+                      : () => Get.back(result: true),
+              child: const Text('Reconcile safe invoices'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !context.mounted) return;
+
+      Get.dialog(
+        const Center(child: CircularProgressIndicator()),
+        barrierDismissible: false,
+      );
+      final result = await InvoicePaymentReconciliation.repairDebtor(
+        db: firestore,
+        debtorId: id,
+      );
+      if (Get.isDialogOpen ?? false) Get.back();
+      if (Get.isRegistered<DailySalesController>()) {
+        await Get.find<DailySalesController>().loadDailySales();
+      }
+      Get.snackbar(
+        'Payment records reconciled',
+        '${result.updatedInvoiceCount} invoices updated; '
+            '${result.skippedInvoiceCount} skipped. '
+            'Ledger-paid amount added: ৳${result.ledgerPaidAdded.toStringAsFixed(2)}. '
+            'Undo is available.',
+      );
+    } catch (e) {
+      if (Get.isDialogOpen ?? false) Get.back();
+      Get.snackbar('Reconciliation error', e.toString());
+    }
+  }
+
+  Future<void> _undoInvoicePaymentReconciliation(BuildContext context) async {
+    final confirmed = await Get.dialog<bool>(
+      AlertDialog(
+        title: const Text('Undo payment reconciliation?'),
+        content: Text(
+          'Restore the saved daily_sales and sales_orders fields for $name? '
+          'Undo stops if those payment fields changed after reconciliation.\n\n'
+          'Firebase project: ${FirebaseFirestore.instance.app.options.projectId}',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Get.back(result: false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Get.back(result: true),
+            child: const Text('Undo reconciliation'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    Get.dialog(
+      const Center(child: CircularProgressIndicator()),
+      barrierDismissible: false,
+    );
+    try {
+      final count = await InvoicePaymentReconciliation.undoLastRepair(
+        db: FirebaseFirestore.instance,
+        debtorId: id,
+      );
+      if (Get.isDialogOpen ?? false) Get.back();
+      if (Get.isRegistered<DailySalesController>()) {
+        await Get.find<DailySalesController>().loadDailySales();
+      }
+      Get.snackbar('Reconciliation undone', '$count invoices restored.');
+    } catch (e) {
+      if (Get.isDialogOpen ?? false) Get.back();
+      Get.snackbar('Undo failed', e.toString());
+    }
   }
 
   // --- LIVE BALANCE HEADER ---

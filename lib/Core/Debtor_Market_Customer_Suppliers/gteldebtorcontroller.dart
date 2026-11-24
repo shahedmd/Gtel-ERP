@@ -13,6 +13,9 @@ import 'package:gtel_erp/Web%20Screen/overviewcontroller.dart';
 import 'package:gtel_erp/Cash/controller.dart';
 import '../../Web Screen/Sales/controller.dart';
 import 'debtordartmodel.dart';
+import 'paid_invoice_running_due.dart';
+import 'regular_customer_collection_plan.dart';
+import 'regular_customer_discount_plan.dart';
 
 class DebatorController extends GetxController {
   final FirebaseFirestore db = FirebaseFirestore.instance;
@@ -174,15 +177,19 @@ class DebatorController extends GetxController {
           snap.docs
               .where((doc) {
                 final type =
-                    (doc.data()['customerType'] ?? '')
-                        .toString()
-                        .toUpperCase();
+                    (doc.data()['customerType'] ?? '').toString().toUpperCase();
                 return type == 'WHOLESALE' || type == 'VIP';
               })
               .map((doc) => {'_docId': doc.id, ...doc.data()})
               .toList();
-      final conditionInvoiceIds =
-          await _getConditionCourierInvoiceIds(candidateSales);
+      final conditionInvoiceIds = await _getConditionCourierInvoiceIds(
+        candidateSales,
+      );
+      final advanceSnapshot =
+          await db
+              .collection('customers')
+              .where('advanceBalance', isGreaterThan: 0.5)
+              .get();
 
       final Map<String, DebtorModel> grouped = {};
 
@@ -191,16 +198,16 @@ class DebatorController extends GetxController {
         final type = (data['customerType'] ?? '').toString().toUpperCase();
 
         if (type != 'WHOLESALE' && type != 'VIP') continue;
-        if (_isConditionCourierInvoice(
-          {'_docId': doc.id, ...data},
-          conditionInvoiceIds,
-        )) {
+        if (_isConditionCourierInvoice({
+          '_docId': doc.id,
+          ...data,
+        }, conditionInvoiceIds)) {
           continue;
         }
 
         final name = (data['name'] ?? '').toString().trim();
         final phone = (data['customerPhone'] ?? '').toString().trim();
-        final pending = (data['pending'] as num?)?.toDouble() ?? 0.0;
+        final pending = effectiveRegularCustomerPending(data);
 
         if (name.isEmpty || pending <= 0.5) continue;
 
@@ -235,6 +242,7 @@ class DebatorController extends GetxController {
           var phone = due.phone;
           var shop = due.des;
           var address = due.address;
+          var balance = due.balance;
 
           if (address.isEmpty || phone.isEmpty) {
             Query<Map<String, dynamic>> orderQuery = db.collection(
@@ -251,9 +259,10 @@ class DebatorController extends GetxController {
                     .get();
             if (orderSnap.docs.isNotEmpty) {
               final order = orderSnap.docs.first.data();
-              address = (order['deliveryAddress'] ?? order['address'] ?? '')
-                  .toString()
-                  .trim();
+              address =
+                  (order['deliveryAddress'] ?? order['address'] ?? '')
+                      .toString()
+                      .trim();
               phone = (order['customerPhone'] ?? phone).toString().trim();
               shop = (order['shopName'] ?? shop).toString().trim();
             }
@@ -268,11 +277,57 @@ class DebatorController extends GetxController {
             final profileAddress =
                 (customerData['address'] ?? '').toString().trim();
             if (profileAddress.isNotEmpty) address = profileAddress;
+            final advanceBalance =
+                (customerData['advanceBalance'] as num?)?.toDouble() ?? 0.0;
+            balance -= advanceBalance;
           }
 
-          return due.copyWith(phone: phone, des: shop, address: address);
+          return due.copyWith(
+            phone: phone,
+            des: shop,
+            address: address,
+            balance: balance,
+          );
         }),
       );
+
+      final regularCustomerPhones =
+          regularDues
+              .map((due) => due.phone)
+              .where((phone) => phone.isNotEmpty)
+              .toSet();
+      for (final doc in advanceSnapshot.docs) {
+        final data = doc.data();
+        final type = (data['type'] ?? '').toString().toUpperCase();
+        if (type != 'WHOLESALE' && type != 'VIP') continue;
+
+        final phone = (data['phone'] ?? doc.id).toString().trim();
+        if (phone.isEmpty || regularCustomerPhones.contains(phone)) continue;
+
+        final advanceBalance =
+            (data['advanceBalance'] as num?)?.toDouble() ?? 0.0;
+        if (advanceBalance <= 0.5) continue;
+
+        regularDues.add(
+          DebtorModel(
+            id: doc.id,
+            name: (data['name'] ?? phone).toString().trim(),
+            des: (data['shop'] ?? '').toString().trim(),
+            nid: '',
+            phone: phone,
+            address: (data['address'] ?? '').toString().trim(),
+            payments: const [],
+            balance: -advanceBalance,
+            purchaseDue: 0.0,
+            lastTransactionDate:
+                data['lastShopDate'] is Timestamp
+                    ? (data['lastShopDate'] as Timestamp).toDate()
+                    : null,
+            sourceType: DebtorSourceType.regular,
+            customerCategory: type,
+          ),
+        );
+      }
 
       regularCustomerDues.value =
           regularDues..sort((a, b) => b.balance.compareTo(a.balance));
@@ -302,6 +357,307 @@ class DebatorController extends GetxController {
     await calculateTotalOutstanding();
   }
 
+  static List<Map<String, dynamic>> buildRegularCustomerLedgerRows({
+    required List<Map<String, dynamic>> invoices,
+    required List<Map<String, dynamic>> advanceHistory,
+  }) {
+    final events = <Map<String, dynamic>>[];
+    final receiptEvents = <String, Map<String, dynamic>>{};
+    var sequence = 0;
+
+    DateTime dateFrom(dynamic value, DateTime fallback) =>
+        value is Timestamp ? value.toDate() : fallback;
+
+    for (final invoice in invoices) {
+      final invoiceId =
+          (invoice['invoiceId'] ?? invoice['transactionId'] ?? '').toString();
+      final invoiceDate = dateFrom(invoice['timestamp'], DateTime.now());
+      final invoiceAmount = (invoice['amount'] as num?)?.toDouble() ?? 0.0;
+      final paymentHistory =
+          (invoice['paymentHistory'] as List<dynamic>? ?? []);
+      final initialPayments = <Map<String, dynamic>>[];
+      var advanceApplied = 0.0;
+
+      for (var index = 0; index < paymentHistory.length; index++) {
+        final item = paymentHistory[index];
+        if (item is! Map) continue;
+        final payment = Map<String, dynamic>.from(item);
+        final mode = (payment['collectionMode'] ?? '').toString();
+        final paymentAmount = (payment['amount'] as num?)?.toDouble() ?? 0.0;
+        if (paymentAmount <= 0.01) continue;
+        if (mode == 'advance_credit') {
+          advanceApplied += paymentAmount;
+          continue;
+        }
+
+        final paymentDate = dateFrom(payment['timestamp'], invoiceDate);
+        if (mode.isEmpty) {
+          initialPayments.add(payment);
+          continue;
+        }
+
+        final sourceTxId = (payment['sourceTxId'] ?? '').toString();
+        if (mode == 'sale_return_refund') {
+          events.add({
+            'id':
+                'refund-${sourceTxId.isEmpty ? invoiceId : sourceTxId}-$index',
+            'date': paymentDate,
+            'label': 'REFUND',
+            'note': (payment['note'] ?? 'Invoice return refund').toString(),
+            'debit': paymentAmount,
+            'credit': 0.0,
+            'paymentMethod': {'type': 'refund'},
+            '_priority': 1,
+            '_sequence': sequence++,
+          });
+          continue;
+        }
+
+        if (mode == 'discount') {
+          events.add({
+            'id':
+                'discount-${sourceTxId.isEmpty ? invoiceId : sourceTxId}-$index',
+            'date': paymentDate,
+            'label': 'DISCOUNT',
+            'note':
+                invoiceId.isEmpty ? 'Invoice discount' : 'Invoice $invoiceId',
+            'debit': 0.0,
+            'credit': paymentAmount,
+            'paymentMethod': {'type': 'discount'},
+            '_priority': 1,
+            '_sequence': sequence++,
+          });
+          continue;
+        }
+
+        final groupKey =
+            sourceTxId.isEmpty
+                ? 'legacy-${invoice['docId'] ?? invoiceId}-$index'
+                : sourceTxId;
+        final event = receiptEvents.putIfAbsent(groupKey, () {
+          final created = <String, dynamic>{
+            'id': 'receipt-$groupKey',
+            'date': paymentDate,
+            'label': 'PAYMENT',
+            'note': '',
+            'debit': 0.0,
+            'credit': 0.0,
+            'paymentMethod': <String, dynamic>{'type': ''},
+            '_sourceTxId': sourceTxId,
+            '_advanceAmount': 0.0,
+            '_allocations': <String, double>{},
+            '_methods': <String>{},
+            '_priority': 1,
+            '_sequence': sequence++,
+          };
+          events.add(created);
+          return created;
+        });
+        event['credit'] = (event['credit'] as double) + paymentAmount;
+        final allocations = event['_allocations'] as Map<String, double>;
+        final allocatedInvoiceId =
+            (payment['invoiceId'] ?? invoiceId).toString();
+        if (allocatedInvoiceId.isNotEmpty) {
+          allocations[allocatedInvoiceId] =
+              (allocations[allocatedInvoiceId] ?? 0.0) + paymentAmount;
+        }
+        final methods = event['_methods'] as Set<String>;
+        methods.add((payment['type'] ?? 'cash').toString());
+        if (paymentDate.isBefore(event['date'] as DateTime)) {
+          event['date'] = paymentDate;
+        }
+      }
+
+      final initialCredit = initialPayments.fold<double>(
+        0.0,
+        (total, payment) =>
+            total + ((payment['amount'] as num?)?.toDouble() ?? 0.0),
+      );
+      final initialMethods =
+          initialPayments
+              .map((payment) => (payment['type'] ?? 'cash').toString())
+              .toSet();
+      events.add({
+        'id': 'invoice-${invoice['docId'] ?? invoiceId}',
+        'date': invoiceDate,
+        'label': 'INVOICE',
+        'advanceApplied': advanceApplied,
+        'note': [
+          invoiceId.isEmpty ? 'Invoice' : invoiceId,
+          if (advanceApplied > 0.01)
+            'Advance used ৳${advanceApplied.toStringAsFixed(0)}',
+        ].join(' • '),
+        'debit': invoiceAmount,
+        'credit': initialCredit,
+        'paymentMethod': {
+          'type':
+              initialMethods.isEmpty ? 'invoice' : initialMethods.join(', '),
+        },
+        '_priority': 0,
+        '_sequence': sequence++,
+      });
+    }
+
+    for (final advance in advanceHistory) {
+      final amount = (advance['amount'] as num?)?.toDouble() ?? 0.0;
+      if (amount <= 0.01) continue;
+      final sourceTxId = (advance['sourceTxId'] ?? '').toString();
+      final receipt = receiptEvents[sourceTxId];
+      if (sourceTxId.isNotEmpty && receipt != null) {
+        receipt['credit'] = (receipt['credit'] as double) + amount;
+        receipt['_advanceAmount'] =
+            (receipt['_advanceAmount'] as double) + amount;
+        final date = dateFrom(
+          advance['timestamp'],
+          receipt['date'] as DateTime,
+        );
+        if (date.isBefore(receipt['date'] as DateTime)) {
+          receipt['date'] = date;
+        }
+        final methods = receipt['_methods'] as Set<String>;
+        methods.add((advance['type'] ?? 'cash').toString());
+        continue;
+      }
+
+      final advanceDate = dateFrom(advance['timestamp'], DateTime.now());
+      events.add({
+        'id': 'advance-$sourceTxId-${advanceDate.millisecondsSinceEpoch}',
+        'date': advanceDate,
+        'label': 'PAYMENT',
+        'note':
+            sourceTxId.isEmpty
+                ? 'Advance deposit'
+                : 'Advance deposit • Ref: $sourceTxId',
+        'debit': 0.0,
+        'credit': amount,
+        'paymentMethod': {'type': (advance['type'] ?? 'cash').toString()},
+        '_priority': 1,
+        '_sequence': sequence++,
+      });
+    }
+
+    for (final event in receiptEvents.values) {
+      final sourceTxId = (event['_sourceTxId'] ?? '').toString();
+      final allocations = event['_allocations'] as Map<String, double>;
+      final details = <String>[
+        if (allocations.isNotEmpty)
+          allocations.entries
+              .map((entry) => '${entry.key} ৳${entry.value.toStringAsFixed(0)}')
+              .join(', '),
+        if ((event['_advanceAmount'] as double) > 0.01)
+          'Extra advance ৳${(event['_advanceAmount'] as double).toStringAsFixed(0)}',
+      ];
+      event['note'] =
+          details.isEmpty
+              ? (sourceTxId.isEmpty ? 'Payment received' : 'Ref: $sourceTxId')
+              : details.join(' • ');
+      final methods = event['_methods'] as Set<String>;
+      (event['paymentMethod'] as Map<String, dynamic>)['type'] =
+          methods.isEmpty ? 'cash' : methods.join(', ');
+    }
+
+    events.sort((a, b) {
+      final dateCompare = (a['date'] as DateTime).compareTo(
+        b['date'] as DateTime,
+      );
+      if (dateCompare != 0) return dateCompare;
+      final priorityCompare = (a['_priority'] as int).compareTo(
+        b['_priority'] as int,
+      );
+      if (priorityCompare != 0) return priorityCompare;
+      return (a['_sequence'] as int).compareTo(b['_sequence'] as int);
+    });
+
+    var balance = 0.0;
+    for (final event in events) {
+      balance += (event['debit'] as num).toDouble();
+      balance -= (event['credit'] as num).toDouble();
+      event['due'] = balance;
+      event.remove('_priority');
+      event.remove('_sequence');
+      event.remove('_sourceTxId');
+      event.remove('_advanceAmount');
+      event.remove('_allocations');
+      event.remove('_methods');
+    }
+    return events;
+  }
+
+  static double effectiveRegularCustomerPending(Map<String, dynamic> data) {
+    final pending = (data['pending'] as num?)?.toDouble() ?? 0.0;
+    final amount = data['amount'];
+    final paid = data['paid'];
+    if (amount is! num || paid is! num) {
+      return pending > 0 ? pending : 0.0;
+    }
+
+    final calculatedPending = amount.toDouble() - paid.toDouble();
+    if (calculatedPending <= 0.0) return 0.0;
+    return pending < calculatedPending ? pending : calculatedPending;
+  }
+
+  static List<Map<String, dynamic>> buildRegularCustomerDueLedgerRows({
+    required List<Map<String, dynamic>> invoices,
+    required List<Map<String, dynamic>> advanceHistory,
+  }) {
+    final dueInvoices =
+        invoices.where((invoice) {
+          final pending = effectiveRegularCustomerPending(invoice);
+          return pending > 0.5;
+        }).toList();
+    if (dueInvoices.isEmpty) return [];
+
+    final dueInvoiceRowIds = <String>{};
+    DateTime? oldestDueInvoiceDate;
+    for (final invoice in dueInvoices) {
+      final invoiceId =
+          (invoice['invoiceId'] ?? invoice['transactionId'] ?? '').toString();
+      dueInvoiceRowIds.add('invoice-${invoice['docId'] ?? invoiceId}');
+      final timestamp = invoice['timestamp'];
+      if (timestamp is Timestamp) {
+        final date = timestamp.toDate();
+        if (oldestDueInvoiceDate == null ||
+            date.isBefore(oldestDueInvoiceDate)) {
+          oldestDueInvoiceDate = date;
+        }
+      }
+    }
+
+    final allRows = buildRegularCustomerLedgerRows(
+      invoices: invoices,
+      advanceHistory: advanceHistory,
+    );
+    final rows = <Map<String, dynamic>>[];
+    var balance = 0.0;
+
+    for (final row in allRows) {
+      final label = (row['label'] ?? '').toString();
+      final credit = (row['credit'] as num?)?.toDouble() ?? 0.0;
+      final rowDate = row['date'] as DateTime;
+
+      if (label == 'INVOICE') {
+        if (!dueInvoiceRowIds.contains(row['id'])) continue;
+        final advanceApplied =
+            (row['advanceApplied'] as num?)?.toDouble() ?? 0.0;
+        final shownCredit = credit + advanceApplied;
+        balance += (row['debit'] as num).toDouble() - shownCredit;
+        rows.add({...row, 'credit': shownCredit, 'due': balance});
+        continue;
+      }
+
+      if (label != 'PAYMENT' ||
+          (oldestDueInvoiceDate != null &&
+              rowDate.isBefore(oldestDueInvoiceDate))) {
+        continue;
+      }
+
+      balance -= credit;
+      rows.add({...row, 'note': 'Payment received', 'due': balance});
+    }
+
+    return rows;
+  }
+
   Future<void> downloadRegularCustomerStatement(
     String customerId,
     String customerName, {
@@ -315,8 +671,15 @@ class DebatorController extends GetxController {
         customerPhone: customerId,
       );
 
-      if (invoices.isEmpty) {
-        Get.snackbar('Info', 'No invoice data found for this customer statement.');
+      final advanceHistory = await getRegularCustomerAdvanceHistory(
+        customerId,
+        customerName: customerName,
+      );
+      if (invoices.isEmpty && advanceHistory.isEmpty) {
+        Get.snackbar(
+          'Info',
+          'No invoice data found for this customer statement.',
+        );
         return;
       }
 
@@ -324,188 +687,168 @@ class DebatorController extends GetxController {
       final fontReg = await PdfGoogleFonts.nunitoRegular();
       final fontBold = await PdfGoogleFonts.nunitoBold();
 
-      double totalDebit = 0.0;
-      double totalCredit = 0.0;
-      final rows = <List<String>>[];
-      for (final inv in invoices) {
-        final String invoiceId =
-            (inv['invoiceId'] ?? inv['transactionId'] ?? '').toString();
-        final double amount = (inv['amount'] as num?)?.toDouble() ?? 0.0;
-        final DateTime timestamp = inv['timestamp'] is Timestamp
-            ? (inv['timestamp'] as Timestamp).toDate()
-            : DateTime.now();
-        final history = (inv['paymentHistory'] as List<dynamic>? ?? []);
-        final sameDayPayments = <Map<String, dynamic>>[];
-        final laterPayments = <Map<String, dynamic>>[];
-        for (final item in history) {
-          if (item is! Map) continue;
-          final paymentDate = item['timestamp'] is Timestamp
-              ? (item['timestamp'] as Timestamp).toDate()
-              : timestamp;
-          final payment = {
-            ...Map<String, dynamic>.from(item),
-            '_date': paymentDate,
-            '_amount': (item['amount'] as num?)?.toDouble() ?? 0.0,
-          };
-          // Invoice-time payment entries have no collectionMode. Later
-          // collections remain separate PDF rows, even on the same day.
-          final sameDay = !item.containsKey('collectionMode');
-          (sameDay ? sameDayPayments : laterPayments).add(payment);
-        }
-
-        final sameDayCredit = sameDayPayments.fold<double>(
-          0.0,
-          (total, payment) => total + (payment['_amount'] as double),
-        );
-        totalDebit += amount;
-        totalCredit += sameDayCredit;
-        rows.add([
-          DateFormat('dd/MM/yyyy').format(timestamp),
-          'DEBIT / CREDIT SALE\nInvoice: ${invoiceId.isEmpty ? 'Invoice' : invoiceId}'
-              '\nDue: ৳${(amount - sameDayCredit).clamp(0.0, amount).toStringAsFixed(0)}',
-          sameDayPayments.isEmpty
-              ? '-'
-              : sameDayPayments
-                  .map((payment) => (payment['type'] ?? 'cash').toString())
-                  .toSet()
-                  .join(', ')
-                  .toUpperCase(),
-          bdCurrency.format(amount),
-          sameDayCredit > 0 ? bdCurrency.format(sameDayCredit) : '-',
-        ]);
-
-        laterPayments.sort(
-          (a, b) => (a['_date'] as DateTime).compareTo(b['_date'] as DateTime),
-        );
-        var runningDue = (amount - sameDayCredit).clamp(0.0, amount);
-        for (final payment in laterPayments) {
-          final paymentAmount = payment['_amount'] as double;
-          runningDue = (runningDue - paymentAmount).clamp(0.0, amount);
-          totalCredit += paymentAmount;
-          rows.add([
-            DateFormat('dd/MM/yyyy').format(payment['_date'] as DateTime),
-            'PAYMENT\nInvoice: ${invoiceId.isEmpty ? 'Invoice' : invoiceId}'
-                '\n${(payment['note'] ?? 'Due Collection').toString()}'
-                '\nDue: ৳${runningDue.toStringAsFixed(0)}',
-            (payment['type'] ?? 'cash').toString().toUpperCase(),
-            '-',
-            bdCurrency.format(paymentAmount),
-          ]);
-        }
-      }
-      final netDue = totalDebit - totalCredit;
+      final ledgerRows = DebatorController.buildRegularCustomerLedgerRows(
+        invoices: invoices,
+        advanceHistory: advanceHistory,
+      );
+      final totalDebit = ledgerRows.fold<double>(
+        0.0,
+        (total, row) => total + (row['debit'] as num).toDouble(),
+      );
+      final totalCredit = ledgerRows.fold<double>(
+        0.0,
+        (total, row) => total + (row['credit'] as num).toDouble(),
+      );
+      final netDue =
+          ledgerRows.isEmpty ? 0.0 : (ledgerRows.last['due'] as num).toDouble();
+      final rows =
+          ledgerRows.map((row) {
+            final date = row['date'] as DateTime;
+            final paymentMethod =
+                row['paymentMethod'] as Map<String, dynamic>? ?? {};
+            final description = (row['note'] ?? '').toString();
+            return [
+              DateFormat('dd/MM/yyyy').format(date),
+              '${row['label']}\n$description',
+              (paymentMethod['type'] ?? '-').toString().toUpperCase(),
+              (row['debit'] as num).toDouble() > 0.01
+                  ? bdCurrency.format((row['debit'] as num).toDouble())
+                  : '-',
+              (row['credit'] as num).toDouble() > 0.01
+                  ? bdCurrency.format((row['credit'] as num).toDouble())
+                  : '-',
+              bdCurrency.format((row['due'] as num).toDouble()),
+            ];
+          }).toList();
 
       pdf.addPage(
         pw.MultiPage(
           pageFormat: PdfPageFormat.a4,
           margin: const pw.EdgeInsets.all(32),
-          header: (context) => pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          header:
+              (context) => pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
-                  pw.Text(
-                    'STATEMENT OF ACCOUNT',
-                    style: pw.TextStyle(
-                      font: fontBold,
-                      fontSize: 18,
-                      color: PdfColors.blue900,
-                    ),
-                  ),
-                  pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.end,
+                  pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                     children: [
                       pw.Text(
-                        'Date: ${DateFormat('dd MMM yyyy').format(DateTime.now())}',
-                        style: pw.TextStyle(font: fontReg, fontSize: 10),
+                        'STATEMENT OF ACCOUNT',
+                        style: pw.TextStyle(
+                          font: fontBold,
+                          fontSize: 18,
+                          color: PdfColors.blue900,
+                        ),
                       ),
-                      pw.Text(
-                        'Page ${context.pageNumber} of ${context.pagesCount}',
-                        style: pw.TextStyle(font: fontReg, fontSize: 10),
+                      pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.end,
+                        children: [
+                          pw.Text(
+                            'Date: ${DateFormat('dd MMM yyyy').format(DateTime.now())}',
+                            style: pw.TextStyle(font: fontReg, fontSize: 10),
+                          ),
+                          pw.Text(
+                            'Page ${context.pageNumber} of ${context.pagesCount}',
+                            style: pw.TextStyle(font: fontReg, fontSize: 10),
+                          ),
+                        ],
                       ),
                     ],
                   ),
+                  pw.SizedBox(height: 8),
+                  pw.Text(
+                    'Account Name: $customerName',
+                    style: pw.TextStyle(font: fontBold, fontSize: 12),
+                  ),
+                  pw.Text(
+                    'Category: ${customerCategory ?? 'WHOLESALE'}',
+                    style: pw.TextStyle(font: fontReg, fontSize: 10),
+                  ),
+                  pw.SizedBox(height: 14),
+                  pw.Divider(color: PdfColors.grey400),
                 ],
               ),
-              pw.SizedBox(height: 8),
-              pw.Text(
-                'Account Name: $customerName',
-                style: pw.TextStyle(font: fontBold, fontSize: 12),
-              ),
-              pw.Text(
-                'Category: ${customerCategory ?? 'WHOLESALE'}',
-                style: pw.TextStyle(font: fontReg, fontSize: 10),
-              ),
-              pw.SizedBox(height: 14),
-              pw.Divider(color: PdfColors.grey400),
-            ],
-          ),
-          build: (context) => [
-            pw.TableHelper.fromTextArray(
-              headers: [
-                'Date',
-                'Description',
-                'Payment Method',
-                'Debit',
-                'Credit',
+          build:
+              (context) => [
+                pw.TableHelper.fromTextArray(
+                  headers: [
+                    'Date',
+                    'Description',
+                    'Payment Method',
+                    'Debit',
+                    'Credit',
+                    'Balance',
+                  ],
+                  data: rows,
+                  border: pw.TableBorder.all(
+                    color: PdfColors.grey400,
+                    width: 0.5,
+                  ),
+                  headerStyle: pw.TextStyle(
+                    font: fontBold,
+                    fontSize: 9,
+                    color: PdfColors.white,
+                  ),
+                  headerDecoration: const pw.BoxDecoration(
+                    color: PdfColors.blue800,
+                  ),
+                  cellStyle: pw.TextStyle(font: fontReg, fontSize: 9),
+                  cellPadding: const pw.EdgeInsets.symmetric(
+                    vertical: 6,
+                    horizontal: 8,
+                  ),
+                  columnWidths: {
+                    0: const pw.FlexColumnWidth(1.5),
+                    1: const pw.FlexColumnWidth(3.5),
+                    2: const pw.FlexColumnWidth(2),
+                    3: const pw.FlexColumnWidth(1.5),
+                    4: const pw.FlexColumnWidth(1.5),
+                    5: const pw.FlexColumnWidth(1.5),
+                  },
+                  cellAlignments: {
+                    0: pw.Alignment.centerLeft,
+                    1: pw.Alignment.centerLeft,
+                    2: pw.Alignment.centerLeft,
+                    3: pw.Alignment.centerRight,
+                    4: pw.Alignment.centerRight,
+                    5: pw.Alignment.centerRight,
+                  },
+                ),
+                pw.SizedBox(height: 16),
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(12),
+                  decoration: pw.BoxDecoration(
+                    border: pw.Border.all(color: PdfColors.blue400),
+                    color: PdfColors.blue50,
+                  ),
+                  child: pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      _pdfStat(
+                        'Total Debit',
+                        totalDebit,
+                        PdfColors.red900,
+                        fontReg,
+                        fontBold,
+                      ),
+                      _pdfStat(
+                        'Total Credit',
+                        totalCredit,
+                        PdfColors.green900,
+                        fontReg,
+                        fontBold,
+                      ),
+                      _pdfStat(
+                        'Due Balance',
+                        netDue,
+                        PdfColors.blue900,
+                        fontReg,
+                        fontBold,
+                      ),
+                    ],
+                  ),
+                ),
               ],
-              data: rows,
-              border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.5),
-              headerStyle: pw.TextStyle(font: fontBold, fontSize: 9, color: PdfColors.white),
-              headerDecoration: const pw.BoxDecoration(color: PdfColors.blue800),
-              cellStyle: pw.TextStyle(font: fontReg, fontSize: 9),
-              cellPadding: const pw.EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-              columnWidths: {
-                0: const pw.FlexColumnWidth(1.5),
-                1: const pw.FlexColumnWidth(3.5),
-                2: const pw.FlexColumnWidth(2),
-                3: const pw.FlexColumnWidth(1.5),
-                4: const pw.FlexColumnWidth(1.5),
-              },
-              cellAlignments: {
-                0: pw.Alignment.centerLeft,
-                1: pw.Alignment.centerLeft,
-                2: pw.Alignment.centerLeft,
-                3: pw.Alignment.centerRight,
-                4: pw.Alignment.centerRight,
-              },
-            ),
-            pw.SizedBox(height: 16),
-            pw.Container(
-              padding: const pw.EdgeInsets.all(12),
-              decoration: pw.BoxDecoration(
-                border: pw.Border.all(color: PdfColors.blue400),
-                color: PdfColors.blue50,
-              ),
-              child: pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  _pdfStat(
-                    'Total Debit',
-                    totalDebit,
-                    PdfColors.red900,
-                    fontReg,
-                    fontBold,
-                  ),
-                  _pdfStat(
-                    'Total Credit',
-                    totalCredit,
-                    PdfColors.green900,
-                    fontReg,
-                    fontBold,
-                  ),
-                  _pdfStat(
-                    'Due Balance',
-                    netDue,
-                    PdfColors.blue900,
-                    fontReg,
-                    fontBold,
-                  ),
-                ],
-              ),
-            ),
-          ],
         ),
       );
 
@@ -528,15 +871,27 @@ class DebatorController extends GetxController {
     required String note,
     required DateTime date,
   }) async {
-    if (amount <= 0) {
+    final normalizedType = (customerCategory ?? '').trim().toLowerCase();
+    if (normalizedType != 'wholesale' && normalizedType != 'vip') {
+      Get.snackbar(
+        "Not Allowed",
+        "Discount is only available for Wholesale/VIP customers.",
+      );
+      return;
+    }
+    if (!amount.isFinite || amount <= 0) {
       Get.snackbar("Error", "Enter a valid discount amount.");
       return;
     }
 
     try {
-      final normalizedType = (customerCategory ?? '').trim().toLowerCase();
       final safePhone = customerId.trim();
       final safeName = customerName.trim();
+      if (safePhone.isEmpty || safePhone.contains('-')) {
+        throw StateError(
+          'A valid customer phone number is required to apply a discount safely.',
+        );
+      }
 
       final Map<String, QueryDocumentSnapshot> docs = {};
 
@@ -553,26 +908,33 @@ class DebatorController extends GetxController {
 
       if (safeName.isNotEmpty) {
         final nameSnap =
-            await db.collection('daily_sales').where('name', isEqualTo: safeName).get();
+            await db
+                .collection('daily_sales')
+                .where('name', isEqualTo: safeName)
+                .get();
         for (var doc in nameSnap.docs) {
           docs[doc.id] = doc;
         }
       }
 
       final conditionInvoiceIds = await _getConditionCourierInvoiceIds(
-        docs.values
-            .map((doc) => {'_docId': doc.id, ...doc.data() as Map<String, dynamic>}),
+        docs.values.map(
+          (doc) => {'_docId': doc.id, ...doc.data() as Map<String, dynamic>},
+        ),
       );
       final pendingDocs =
           docs.values.where((doc) {
             final data = doc.data() as Map<String, dynamic>;
-            final pending = (data['pending'] as num?)?.toDouble() ?? 0.0;
+            final pending = effectiveRegularCustomerPending(data);
             final type = (data['customerType'] ?? '').toString().toLowerCase();
-            return (normalizedType.isEmpty || type == normalizedType) &&
-                !_isConditionCourierInvoice(
-                  {'_docId': doc.id, ...data},
-                  conditionInvoiceIds,
-                ) &&
+            final invoicePhone =
+                (data['customerPhone'] ?? '').toString().trim();
+            return type == normalizedType &&
+                (invoicePhone.isEmpty || invoicePhone == safePhone) &&
+                !_isConditionCourierInvoice({
+                  '_docId': doc.id,
+                  ...data,
+                }, conditionInvoiceIds) &&
                 pending > 0.5;
           }).toList();
 
@@ -581,64 +943,238 @@ class DebatorController extends GetxController {
         return;
       }
 
+      DateTime invoiceDate(Map<String, dynamic> data) {
+        final timestamp = data['timestamp'];
+        if (timestamp is Timestamp) return timestamp.toDate();
+        final createdAt = data['createdAt'];
+        if (createdAt is Timestamp) return createdAt.toDate();
+        return DateTime.fromMillisecondsSinceEpoch(0);
+      }
+
       pendingDocs.sort((a, b) {
         final da = a.data() as Map<String, dynamic>;
         final dbb = b.data() as Map<String, dynamic>;
-        final t1 = da['timestamp'] is Timestamp ? da['timestamp'] as Timestamp : Timestamp.now();
-        final t2 = dbb['timestamp'] is Timestamp ? dbb['timestamp'] as Timestamp : Timestamp.now();
-        return t1.compareTo(t2);
+        final dateCompare = invoiceDate(da).compareTo(invoiceDate(dbb));
+        return dateCompare != 0 ? dateCompare : a.id.compareTo(b.id);
       });
 
-      double remaining = amount;
-      final batch = db.batch();
-      final discountEntry = {
-        'amount': amount,
-        'note': note.trim().isNotEmpty ? note.trim() : 'Customer Discount',
-        'timestamp': Timestamp.fromDate(date),
-        'paidAt': Timestamp.now(),
-        'type': 'discount',
-        'number': '',
-        'bankName': '',
-        'accountNumber': '',
-        'sourceTxId': 'DISCOUNT-${DateTime.now().millisecondsSinceEpoch}',
-        'discount': true,
-      };
+      if (pendingDocs.length > 200) {
+        throw StateError(
+          'This customer has too many due invoices to discount safely in one operation.',
+        );
+      }
 
-      for (var doc in pendingDocs) {
-        if (remaining <= 0.01) break;
+      final customerRef = db.collection('customers').doc(safePhone);
+      final sourceTxId = 'DISCOUNT-${db.collection('daily_sales').doc().id}';
+      final appliedAmount = await db.runTransaction<double>((
+        transaction,
+      ) async {
+        final customerSnapshot = await transaction.get(customerRef);
+        if (!customerSnapshot.exists) {
+          throw StateError('Customer profile was not found.');
+        }
+        final customerData = customerSnapshot.data() ?? <String, dynamic>{};
+        final profileType =
+            (customerData['type'] ?? '').toString().trim().toLowerCase();
+        if (profileType.isNotEmpty && profileType != normalizedType) {
+          throw StateError(
+            'Customer profile category does not match the selected account.',
+          );
+        }
+        final customerCurrentDue = customerData['currentDue'];
+        if (customerCurrentDue is! num || !customerCurrentDue.isFinite) {
+          throw StateError(
+            'Customer current due is missing or invalid; no discount was applied.',
+          );
+        }
 
-        final data = doc.data() as Map<String, dynamic>;
-        final currentPending = (data['pending'] as num?)?.toDouble() ?? 0.0;
-        final currentDiscount = (data['discount'] as num?)?.toDouble() ?? 0.0;
-        final take = remaining >= currentPending ? currentPending : remaining;
-        final newPending = currentPending - take;
+        final currentInvoices = <RegularCustomerDiscountInvoice>[];
+        final dailySnapshots = <String, DocumentSnapshot>{};
+        for (final doc in pendingDocs) {
+          final snapshot = await transaction.get(doc.reference);
+          if (!snapshot.exists) continue;
+          final data = snapshot.data() as Map<String, dynamic>;
+          final type = (data['customerType'] ?? '').toString().toLowerCase();
+          final invoicePhone = (data['customerPhone'] ?? '').toString().trim();
+          if (type != normalizedType ||
+              (invoicePhone.isNotEmpty && invoicePhone != safePhone) ||
+              conditionInvoiceIds.contains(doc.id)) {
+            continue;
+          }
 
-        batch.update(doc.reference, {
-          'pending': newPending < 0 ? 0.0 : newPending,
-          'discount': currentDiscount + take,
-          'status': newPending <= 0.5 ? 'paid' : 'partial',
-          'paymentHistory': FieldValue.arrayUnion([
-            {
-              ...discountEntry,
-              'amount': take,
-              'appliedTo': doc.id,
-              'invoiceId': (data['invoiceId'] ?? data['transactionId'] ?? '').toString(),
-              'collectionMode': 'discount',
-            }
-          ]),
+          final invoiceId =
+              (data['invoiceId'] ?? data['transactionId'] ?? '').toString();
+          final pending = effectiveRegularCustomerPending(data);
+          if (pending <= 0.5) continue;
+          if (invoiceId.isEmpty) {
+            throw StateError(
+              'A due invoice is missing its invoice ID; no discount was applied.',
+            );
+          }
+          final invoiceAmount = (data['amount'] as num?)?.toDouble() ?? 0;
+          final paid = (data['paid'] as num?)?.toDouble() ?? 0;
+          final ledgerPaid = (data['ledgerPaid'] as num?)?.toDouble() ?? 0;
+          final discount = (data['discount'] as num?)?.toDouble() ?? 0;
+          if (!invoiceAmount.isFinite ||
+              !paid.isFinite ||
+              !ledgerPaid.isFinite ||
+              !discount.isFinite ||
+              invoiceAmount <= 0 ||
+              paid < 0 ||
+              ledgerPaid < 0 ||
+              discount < 0 ||
+              ledgerPaid > paid + 0.01 ||
+              paid + pending > invoiceAmount + 0.01) {
+            throw StateError(
+              'Invoice $invoiceId has inconsistent payment totals; no discount was applied.',
+            );
+          }
+          currentInvoices.add(
+            RegularCustomerDiscountInvoice(
+              dailySalesDocumentId: doc.id,
+              invoiceId: invoiceId,
+              amount: invoiceAmount,
+              pending: pending,
+              paid: paid,
+              ledgerPaid: ledgerPaid,
+              discount: discount,
+            ),
+          );
+          dailySnapshots[doc.id] = snapshot;
+        }
+
+        final plan = RegularCustomerDiscountPlan.build(
+          invoices: currentInvoices,
+          amount: amount,
+        );
+        if (plan.allocations.isEmpty) return 0;
+        if (customerCurrentDue + 0.01 < plan.appliedAmount) {
+          throw StateError(
+            'Customer profile due is lower than the invoice discount; no discount was applied.',
+          );
+        }
+
+        final orderSnapshots = <String, DocumentSnapshot>{};
+        final seenInvoiceIds = <String>{};
+        for (final allocation in plan.allocations) {
+          final invoice = allocation.invoice;
+          if (!seenInvoiceIds.add(invoice.invoiceId)) {
+            throw StateError(
+              'More than one due record points to invoice ${invoice.invoiceId}; no discount was applied.',
+            );
+          }
+          final orderRef = db.collection('sales_orders').doc(invoice.invoiceId);
+          final orderSnapshot = await transaction.get(orderRef);
+          if (!orderSnapshot.exists) {
+            throw StateError(
+              'Sales order ${invoice.invoiceId} was not found; no discount was applied.',
+            );
+          }
+          final orderData = orderSnapshot.data() as Map<String, dynamic>;
+          final orderType =
+              (orderData['customerType'] ?? '').toString().trim().toLowerCase();
+          final saleMode =
+              (orderData['saleMode'] ?? '').toString().toLowerCase();
+          final orderPhone =
+              (orderData['customerPhone'] ?? '').toString().trim();
+          final dailyData =
+              dailySnapshots[invoice.dailySalesDocumentId]!.data()
+                  as Map<String, dynamic>;
+          final dailyPhone =
+              (dailyData['customerPhone'] ?? '').toString().trim();
+          if ((orderType.isNotEmpty && orderType != normalizedType) ||
+              saleMode == 'condition' ||
+              (saleMode != 'non_condition' &&
+                  orderData['isCondition'] == true) ||
+              (dailyPhone.isNotEmpty && dailyPhone != safePhone) ||
+              (dailyPhone.isEmpty && orderPhone != safePhone)) {
+            throw StateError(
+              'Sales order ${invoice.invoiceId} is not an eligible Wholesale/VIP invoice.',
+            );
+          }
+          final orderTotal = (orderData['grandTotal'] as num?)?.toDouble() ?? 0;
+          final orderPaid = (orderData['paid'] as num?)?.toDouble() ?? 0;
+          if (!orderTotal.isFinite ||
+              !orderPaid.isFinite ||
+              orderPaid < 0 ||
+              orderPaid > orderTotal + 0.01 ||
+              invoice.amount <= 0 ||
+              (orderTotal - invoice.amount).abs() > 0.01) {
+            throw StateError(
+              'Sales order ${invoice.invoiceId} total does not match daily sales; no discount was applied.',
+            );
+          }
+          orderSnapshots[invoice.invoiceId] = orderSnapshot;
+        }
+
+        final discountNote =
+            note.trim().isNotEmpty ? note.trim() : 'Customer Discount';
+        final paidAt = Timestamp.now();
+        for (final allocation in plan.allocations) {
+          final invoice = allocation.invoice;
+          final dailySnapshot = dailySnapshots[invoice.dailySalesDocumentId]!;
+          final orderSnapshot = orderSnapshots[invoice.invoiceId]!;
+          final fullyPaid = allocation.isFullyPaid;
+          final historyEntry = {
+            'amount': allocation.amount,
+            'note': discountNote,
+            'timestamp': Timestamp.fromDate(date),
+            'paidAt': paidAt,
+            'type': 'discount',
+            'number': '',
+            'bankName': '',
+            'accountNumber': '',
+            'sourceTxId': sourceTxId,
+            'appliedTo': invoice.dailySalesDocumentId,
+            'invoiceId': invoice.invoiceId,
+            'collectionMode': 'discount',
+            'discount': true,
+          };
+
+          transaction.update(dailySnapshot.reference, {
+            'paid': allocation.newPaid,
+            'ledgerPaid': allocation.newLedgerPaid,
+            'pending': allocation.newPending,
+            'paymentMethod.pending': allocation.newPending,
+            'discount': allocation.newDiscount,
+            'status': fullyPaid ? 'paid' : 'partial',
+            'lastPaymentAt': FieldValue.serverTimestamp(),
+            'paymentHistory': FieldValue.arrayUnion([historyEntry]),
+          });
+          transaction.update(orderSnapshot.reference, {
+            'paid': allocation.newPaid,
+            'paymentDetails.due': allocation.newPending,
+            'paymentDetails.paidForInvoice': allocation.newPaid,
+            'isFullyPaid': fullyPaid,
+            'status': fullyPaid ? 'completed' : 'partial',
+          });
+        }
+
+        transaction.update(customerRef, {
+          'currentDue': FieldValue.increment(-plan.appliedAmount),
+          'lastShopDate': FieldValue.serverTimestamp(),
         });
+        return plan.appliedAmount;
+      });
 
-        remaining -= take;
+      if (appliedAmount <= 0.01) {
+        Get.snackbar("No Due", "No pending invoice found for this customer.");
+        return;
       }
 
-      if (remaining > 0.01) {
-        Get.snackbar("Info", "Discount applied partially. Remaining due remains.");
-      }
-
-      await batch.commit();
       await refreshRegularCustomerDues();
+      if (Get.isRegistered<DailySalesController>()) {
+        await Get.find<DailySalesController>().loadDailySales();
+      }
+      if (Get.isRegistered<OverviewController>()) {
+        Get.find<OverviewController>().refreshData();
+      }
 
-      Get.snackbar("Success", "Discount recorded for $customerName");
+      final message =
+          appliedAmount + 0.01 < amount
+              ? "৳${appliedAmount.toStringAsFixed(2)} discount applied to $customerName. Remaining amount exceeded the available invoice due."
+              : "৳${appliedAmount.toStringAsFixed(2)} discount applied to $customerName.";
+      Get.snackbar("Success", message);
     } catch (e) {
       Get.snackbar("Error", e.toString());
     }
@@ -681,8 +1217,9 @@ class DebatorController extends GetxController {
       }
 
       final conditionInvoiceIds = await _getConditionCourierInvoiceIds(
-        docs.values
-            .map((doc) => {'_docId': doc.id, ...doc.data() as Map<String, dynamic>}),
+        docs.values.map(
+          (doc) => {'_docId': doc.id, ...doc.data() as Map<String, dynamic>},
+        ),
       );
       final list =
           docs.values
@@ -690,19 +1227,25 @@ class DebatorController extends GetxController {
                 final data = Map<String, dynamic>.from(d.data() as Map);
                 data['docId'] = d.id;
                 data['_docId'] = d.id;
+                data['pending'] = effectiveRegularCustomerPending(data);
                 return data;
               })
               .where((data) {
                 final type =
                     (data['customerType'] ?? '').toString().toLowerCase();
+                final invoicePhone =
+                    (data['customerPhone'] ?? '').toString().trim();
 
                 final typeMatched =
                     normalizedType.isEmpty || type == normalizedType;
+                final phoneMatched =
+                    safePhone.isEmpty ||
+                    invoicePhone.isEmpty ||
+                    invoicePhone == safePhone;
 
-                final pending = (data['pending'] as num?)?.toDouble() ?? 0.0;
                 return typeMatched &&
-                    !_isConditionCourierInvoice(data, conditionInvoiceIds) &&
-                    pending > 0.5;
+                    phoneMatched &&
+                    !_isConditionCourierInvoice(data, conditionInvoiceIds);
               })
               .toList();
 
@@ -725,7 +1268,79 @@ class DebatorController extends GetxController {
     }
   }
 
-  Future<void> collectRegularCustomerDue({
+  Future<List<Map<String, dynamic>>> getRegularCustomerAdvanceHistory(
+    String customerId, {
+    String? customerName,
+  }) async {
+    try {
+      final customerDoc =
+          await db.collection('customers').doc(customerId).get();
+      final history =
+          customerDoc.data()?['advanceHistory'] as List<dynamic>? ?? [];
+      final advances =
+          history
+              .whereType<Map>()
+              .map((item) => Map<String, dynamic>.from(item))
+              .toList();
+      final invoiceDocs = <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+      if (customerId.trim().isNotEmpty) {
+        final byPhone =
+            await db
+                .collection('daily_sales')
+                .where('customerPhone', isEqualTo: customerId.trim())
+                .get();
+        invoiceDocs.addAll(byPhone.docs);
+      }
+      if ((customerName ?? '').trim().isNotEmpty) {
+        final byName =
+            await db
+                .collection('daily_sales')
+                .where('name', isEqualTo: customerName!.trim())
+                .get();
+        final knownIds = invoiceDocs.map((doc) => doc.id).toSet();
+        invoiceDocs.addAll(
+          byName.docs.where((doc) => !knownIds.contains(doc.id)),
+        );
+      }
+
+      for (final advance in advances) {
+        final allocations =
+            (advance['invoiceAllocations'] as List<dynamic>? ?? []);
+        if (allocations.isNotEmpty) continue;
+        final sourceTxId = (advance['sourceTxId'] ?? '').toString();
+        if (sourceTxId.isEmpty) continue;
+
+        final recoveredAllocations = <Map<String, dynamic>>[];
+        for (final invoiceDoc in invoiceDocs) {
+          final data = invoiceDoc.data();
+          final invoiceHistory =
+              (data['paymentHistory'] as List<dynamic>? ?? []);
+          for (final item in invoiceHistory) {
+            if (item is! Map || item['sourceTxId'] != sourceTxId) continue;
+            recoveredAllocations.add({
+              'invoiceId':
+                  (item['invoiceId'] ??
+                          data['invoiceId'] ??
+                          data['transactionId'] ??
+                          '')
+                      .toString(),
+              'amount': (item['amount'] as num?)?.toDouble() ?? 0.0,
+            });
+          }
+        }
+        if (recoveredAllocations.isNotEmpty) {
+          advance['invoiceAllocations'] = recoveredAllocations;
+        }
+      }
+
+      return advances;
+    } catch (e) {
+      AppLogger.i("Error fetching regular customer advance history: $e");
+      return [];
+    }
+  }
+
+  Future<bool> collectRegularCustomerDue({
     required String customerId,
     required String customerName,
     required String? customerCategory,
@@ -734,13 +1349,10 @@ class DebatorController extends GetxController {
     required DateTime date,
     required Map<String, dynamic> paymentMethodData,
   }) async {
-    if (amount <= 0) {
+    if (!amount.isFinite || amount <= 0) {
       Get.snackbar("Error", "Enter a valid amount to collect.");
-      return;
+      return false;
     }
-
-    bool isSameDay(DateTime a, DateTime b) =>
-        a.year == b.year && a.month == b.month && a.day == b.day;
 
     gbIsLoading.value = true;
 
@@ -786,93 +1398,78 @@ class DebatorController extends GetxController {
       }
 
       final conditionInvoiceIds = await _getConditionCourierInvoiceIds(
-        docs.values
-            .map((doc) => {'_docId': doc.id, ...doc.data() as Map<String, dynamic>}),
+        docs.values.map(
+          (doc) => {'_docId': doc.id, ...doc.data() as Map<String, dynamic>},
+        ),
       );
       final pendingDocs =
           docs.values.where((doc) {
             final data = doc.data() as Map<String, dynamic>;
-            final pending = (data['pending'] as num?)?.toDouble() ?? 0.0;
+            final pending = effectiveRegularCustomerPending(data);
             final type = (data['customerType'] ?? '').toString().toLowerCase();
 
             final typeMatched =
                 normalizedType.isEmpty || type == normalizedType;
 
             return typeMatched &&
-                !_isConditionCourierInvoice(
-                  {'_docId': doc.id, ...data},
-                  conditionInvoiceIds,
-                ) &&
+                !_isConditionCourierInvoice({
+                  '_docId': doc.id,
+                  ...data,
+                }, conditionInvoiceIds) &&
                 pending > 0.5;
           }).toList();
 
-      pendingDocs.sort((a, b) {
-        final da = a.data() as Map<String, dynamic>;
-        final dbb = b.data() as Map<String, dynamic>;
+      final docsById = {for (final doc in pendingDocs) doc.id: doc};
+      final collectionPlan = RegularCustomerCollectionPlan.build(
+        invoices:
+            pendingDocs.map((doc) {
+              final data = doc.data() as Map<String, dynamic>;
+              return RegularCustomerCollectionInvoice(
+                documentId: doc.id,
+                pending: effectiveRegularCustomerPending(data),
+                paid: (data['paid'] as num?)?.toDouble() ?? 0,
+                ledgerPaid: (data['ledgerPaid'] as num?)?.toDouble() ?? 0,
+                invoiceDate:
+                    data['timestamp'] is Timestamp
+                        ? (data['timestamp'] as Timestamp).toDate()
+                        : date,
+              );
+            }).toList(),
+        amount: amount,
+        collectionDate: date,
+      );
+      final double amountToCollect = collectionPlan.appliedAmount;
+      final double advanceAmount = collectionPlan.advanceAmount;
 
-        final t1 =
-            da['timestamp'] is Timestamp
-                ? da['timestamp'] as Timestamp
-                : Timestamp.now();
-        final t2 =
-            dbb['timestamp'] is Timestamp
-                ? dbb['timestamp'] as Timestamp
-                : Timestamp.now();
-
-        return t1.compareTo(t2);
-      });
-
-      final double totalPending = pendingDocs.fold(0.0, (sumvalue, doc) {
-        final data = doc.data() as Map<String, dynamic>;
-        return sumvalue + ((data['pending'] as num?)?.toDouble() ?? 0.0);
-      });
-
-      if (totalPending <= 0.5) {
-        Get.snackbar("No Due", "No pending invoice found for this customer.");
-        return;
+      if (advanceAmount > 0.01 &&
+          (safePhone.isEmpty || safePhone.contains('-'))) {
+        Get.snackbar(
+          "Cannot Save Advance",
+          "A valid customer phone number is required to keep extra payment as account credit.",
+        );
+        return false;
       }
 
-      final double amountToCollect =
-          amount > totalPending ? totalPending : amount;
-
-      double remaining = amountToCollect;
-      double oldDueLedgerAmount = 0.0;
+      final invoiceAllocations = <Map<String, dynamic>>[];
 
       final String sourceTxId =
           "COLLECT-${DateTime.now().millisecondsSinceEpoch}";
 
       final batch = db.batch();
 
-      for (var doc in pendingDocs) {
-        if (remaining <= 0.01) break;
-
+      for (final allocation in collectionPlan.allocations) {
+        final doc = docsById[allocation.invoice.documentId]!;
         final data = doc.data() as Map<String, dynamic>;
 
-        final double currentPending =
-            (data['pending'] as num?)?.toDouble() ?? 0.0;
-        final double currentPaid = (data['paid'] as num?)?.toDouble() ?? 0.0;
-        final double currentLedgerPaid =
-            (data['ledgerPaid'] as num?)?.toDouble() ?? 0.0;
-
-        final double take =
-            remaining >= currentPending ? currentPending : remaining;
-
-        final double newPending = currentPending - take;
-        final bool fullyPaid = newPending <= 0.5;
-
-        final DateTime invoiceDate =
-            data['timestamp'] is Timestamp
-                ? (data['timestamp'] as Timestamp).toDate()
-                : date;
-
-        final bool sameDayCollection = isSameDay(invoiceDate, date);
-
-        if (!sameDayCollection) {
-          oldDueLedgerAmount += take;
-        }
+        final double take = allocation.amount;
+        final double newPending = allocation.newPending;
+        final bool fullyPaid = allocation.isFullyPaid;
 
         final String invoiceId =
             (data['invoiceId'] ?? data['transactionId'] ?? '').toString();
+        if (invoiceId.isNotEmpty) {
+          invoiceAllocations.add({'invoiceId': invoiceId, 'amount': take});
+        }
 
         final history = {
           'amount': take,
@@ -889,12 +1486,14 @@ class DebatorController extends GetxController {
           'sourceTxId': sourceTxId,
           'appliedTo': doc.id,
           'invoiceId': invoiceId,
-          'collectionMode': sameDayCollection ? 'same_day' : 'old_due_ledger',
+          'collectionMode':
+              allocation.isPreviousDateInvoice ? 'old_due_ledger' : 'same_day',
         };
 
         batch.update(doc.reference, {
-          'paid': currentPaid + take,
-          if (!sameDayCollection) 'ledgerPaid': currentLedgerPaid + take,
+          'paid': allocation.newPaid,
+          if (allocation.isPreviousDateInvoice)
+            'ledgerPaid': allocation.newLedgerPaid,
           'pending': newPending < 0 ? 0.0 : newPending,
           'status': fullyPaid ? 'paid' : 'partial',
           'lastPaymentAt': FieldValue.serverTimestamp(),
@@ -928,33 +1527,57 @@ class DebatorController extends GetxController {
             });
           }
         }
-
-        remaining -= take;
       }
 
       if (safePhone.isNotEmpty && !safePhone.contains('-')) {
         batch.set(db.collection('customers').doc(safePhone), {
+          'name': safeName,
+          'phone': safePhone,
+          'type': (customerCategory ?? '').trim().toUpperCase(),
           'currentDue': FieldValue.increment(-amountToCollect),
+          if (advanceAmount > 0.01)
+            'advanceBalance': FieldValue.increment(advanceAmount),
+          if (advanceAmount > 0.01)
+            'advanceHistory': FieldValue.arrayUnion([
+              {
+                'amount': advanceAmount,
+                'note':
+                    note.trim().isNotEmpty
+                        ? note.trim()
+                        : 'Excess due collection kept as customer credit',
+                'timestamp': Timestamp.fromDate(date),
+                'paidAt': Timestamp.now(),
+                'type': pType,
+                'number': paymentMethodData['number'] ?? '',
+                'bankName': paymentMethodData['bankName'] ?? '',
+                'accountNumber':
+                    paymentMethodData['accountNo'] ??
+                    paymentMethodData['accountNumber'] ??
+                    '',
+                'sourceTxId': sourceTxId,
+                'invoiceAllocations': invoiceAllocations,
+              },
+            ]),
           'lastShopDate': Timestamp.now(),
         }, SetOptions(merge: true));
       }
 
-      await batch.commit();
-
-      if (oldDueLedgerAmount > 0.5) {
-        await db.collection('cash_ledger').add({
+      if (collectionPlan.cashLedgerAmount > 0.01) {
+        batch.set(db.collection('cash_ledger').doc(), {
           'type': 'deposit',
-          'amount': oldDueLedgerAmount,
+          'amount': collectionPlan.cashLedgerAmount,
           'method': parsedMethod,
           'details': paymentMethodData,
           'description':
-              "Old due collection from $customerName (${customerCategory?.toUpperCase() ?? 'CUSTOMER'})",
+              "Collection from $customerName (${customerCategory?.toUpperCase() ?? 'CUSTOMER'})",
           'timestamp': Timestamp.fromDate(date),
           'linkedCustomerId': customerId,
           'linkedTxId': sourceTxId,
-          'source': 'customer_old_due_collection',
+          'source': 'customer_due_collection',
         });
       }
+
+      await batch.commit();
 
       await refreshRegularCustomerDues();
 
@@ -972,9 +1595,16 @@ class DebatorController extends GetxController {
 
       if (Get.isDialogOpen ?? false) Get.back();
 
-      Get.snackbar("Success", "Payment collected from $customerName");
+      Get.snackbar(
+        "Success",
+        advanceAmount > 0.01
+            ? "Payment collected. ৳${advanceAmount.toStringAsFixed(2)} kept as customer credit."
+            : "Payment collected from $customerName",
+      );
+      return true;
     } catch (e) {
       Get.snackbar("Error", e.toString());
+      return false;
     } finally {
       gbIsLoading.value = false;
     }
@@ -1004,25 +1634,24 @@ class DebatorController extends GetxController {
           dueSalesSnap.docs
               .where((doc) {
                 final type =
-                    (doc.data()['customerType'] ?? '')
-                        .toString()
-                        .toUpperCase();
+                    (doc.data()['customerType'] ?? '').toString().toUpperCase();
                 return type == 'WHOLESALE' || type == 'VIP';
               })
               .map((doc) => {'_docId': doc.id, ...doc.data()})
               .toList();
-      final conditionInvoiceIds =
-          await _getConditionCourierInvoiceIds(regularDueSales);
+      final conditionInvoiceIds = await _getConditionCourierInvoiceIds(
+        regularDueSales,
+      );
 
       for (var doc in dueSalesSnap.docs) {
         final data = doc.data();
         final type = (data['customerType'] ?? '').toString().toUpperCase();
 
         if (type == 'WHOLESALE' || type == 'VIP') {
-          if (_isConditionCourierInvoice(
-            {'_docId': doc.id, ...data},
-            conditionInvoiceIds,
-          )) {
+          if (_isConditionCourierInvoice({
+            '_docId': doc.id,
+            ...data,
+          }, conditionInvoiceIds)) {
             continue;
           }
           final due = (data['pending'] as num?)?.toDouble() ?? 0.0;
@@ -1516,7 +2145,8 @@ class DebatorController extends GetxController {
               .where('customerPhone', isEqualTo: safeOldPhone)
               .get();
       for (final doc in byPhone.docs) {
-        final type = (doc.data()['customerType'] ?? '').toString().toLowerCase();
+        final type =
+            (doc.data()['customerType'] ?? '').toString().toLowerCase();
         if (type == normalizedCategory) dailyDocs[doc.id] = doc;
       }
     }
@@ -1545,7 +2175,8 @@ class DebatorController extends GetxController {
               .where('customerPhone', isEqualTo: safeOldPhone)
               .get();
       for (final doc in byPhone.docs) {
-        final type = (doc.data()['customerType'] ?? '').toString().toLowerCase();
+        final type =
+            (doc.data()['customerType'] ?? '').toString().toLowerCase();
         if (type == normalizedCategory) salesOrders[doc.id] = doc;
       }
     }
@@ -1572,8 +2203,7 @@ class DebatorController extends GetxController {
     if (safePhone != safeOldPhone) {
       final destinationOrdersRef = newCustomerRef.collection('orders');
       for (final order in oldOrderDocs) {
-        final destinationOrder =
-            await destinationOrdersRef.doc(order.id).get();
+        final destinationOrder = await destinationOrdersRef.doc(order.id).get();
         if (destinationOrder.exists) {
           throw StateError(
             'An invoice history entry already exists in the new customer account.',
@@ -1631,7 +2261,9 @@ class DebatorController extends GetxController {
       await newCustomerRef.set(updatedCustomerData);
       final orderWrites = <void Function(WriteBatch)>[];
       for (final order in oldOrderDocs) {
-        final destinationRef = newCustomerRef.collection('orders').doc(order.id);
+        final destinationRef = newCustomerRef
+            .collection('orders')
+            .doc(order.id);
         orderWrites.add((batch) => batch.set(destinationRef, order.data()));
         orderWrites.add((batch) => batch.delete(order.reference));
       }
@@ -1650,8 +2282,7 @@ class DebatorController extends GetxController {
   ) async {
     for (var start = 0; start < writes.length; start += 400) {
       final batch = db.batch();
-      final end =
-          start + 400 < writes.length ? start + 400 : writes.length;
+      final end = start + 400 < writes.length ? start + 400 : writes.length;
       for (final write in writes.sublist(start, end)) {
         write(batch);
       }
@@ -2172,6 +2803,7 @@ class DebatorController extends GetxController {
                   "paymentDetails.due": 0.0,
                   "isFullyPaid": true,
                   "status": "completed",
+                  ...PaidInvoiceRunningDueSnapshot.markPaid(oData),
                 });
                 hasUpdates = true;
               }
@@ -2209,6 +2841,7 @@ class DebatorController extends GetxController {
             if (isNowFullyPaid) {
               orderUpdate["isFullyPaid"] = true;
               orderUpdate["status"] = "completed";
+              orderUpdate.addAll(PaidInvoiceRunningDueSnapshot.markPaid(oData));
             }
             batch.update(orderDoc.reference, orderUpdate);
 
@@ -2334,10 +2967,11 @@ class DebatorController extends GetxController {
       }
       final txData = txSnap.data() as Map<String, dynamic>;
       final type = (txData['type'] ?? '').toString();
-      final isInvoiceSale =
-          (txData['note'] ?? '').toString().trim().toLowerCase().startsWith(
-            'invoice',
-          );
+      final isInvoiceSale = (txData['note'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase()
+          .startsWith('invoice');
       DocumentSnapshot<Map<String, dynamic>>? saleOrderSnap;
 
       if (type == 'credit') {
@@ -2380,8 +3014,7 @@ class DebatorController extends GetxController {
                     ) ??
                     0;
                 final quantity = (item['qty'] as num?)?.toInt() ?? 0;
-                final costRate =
-                    (item['costRate'] as num?)?.toDouble() ?? 0.0;
+                final costRate = (item['costRate'] as num?)?.toDouble() ?? 0.0;
                 if (productId > 0 && quantity > 0) {
                   stockReturns.add({
                     'id': productId,
@@ -2410,8 +3043,7 @@ class DebatorController extends GetxController {
             }
           }
         }
-        if (isInvoiceSale &&
-            (saleOrderSnap == null || !saleOrderSnap.exists)) {
+        if (isInvoiceSale && (saleOrderSnap == null || !saleOrderSnap.exists)) {
           throw StateError(
             'Master invoice was not found; sale was not deleted.',
           );
@@ -2529,7 +3161,10 @@ class DebatorController extends GetxController {
                 DocumentReference orderRef = db
                     .collection('sales_orders')
                     .doc(saleTxId);
-                batch.update(orderRef, {
+                final orderSnapshot = await orderRef.get();
+                final orderData =
+                    orderSnapshot.data() as Map<String, dynamic>? ?? {};
+                final orderUpdate = <String, dynamic>{
                   "paid": FieldValue.increment(-amountReversed),
                   "paymentDetails.due": FieldValue.increment(amountReversed),
                   "paymentDetails.$reversedType": FieldValue.increment(
@@ -2537,7 +3172,13 @@ class DebatorController extends GetxController {
                   ),
                   "isFullyPaid": false,
                   "status": "completed",
-                });
+                };
+                if (currentPending + amountReversed > 0.5) {
+                  orderUpdate.addAll(
+                    PaidInvoiceRunningDueSnapshot.restoreIfUnpaid(orderData),
+                  );
+                }
+                batch.update(orderRef, orderUpdate);
               }
             }
           }
@@ -2755,8 +3396,9 @@ class DebatorController extends GetxController {
                   })
                   .map((doc) => {'_docId': doc.id, ...doc.data()})
                   .toList();
-          final conditionInvoiceIds =
-              await _getConditionCourierInvoiceIds(regularDueSales);
+          final conditionInvoiceIds = await _getConditionCourierInvoiceIds(
+            regularDueSales,
+          );
 
           final Map<String, DebtorModel> grouped = {};
 
@@ -2765,10 +3407,10 @@ class DebatorController extends GetxController {
             final type = (data['customerType'] ?? '').toString().toUpperCase();
 
             if (type != 'WHOLESALE' && type != 'VIP') continue;
-            if (_isConditionCourierInvoice(
-              {'_docId': doc.id, ...data},
-              conditionInvoiceIds,
-            )) {
+            if (_isConditionCourierInvoice({
+              '_docId': doc.id,
+              ...data,
+            }, conditionInvoiceIds)) {
               continue;
             }
 

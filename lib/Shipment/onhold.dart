@@ -94,87 +94,88 @@ class OnHoldShipmentPage extends StatelessWidget {
                   );
                 }
                 return SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: DataTable(
-                    columns: const [
-                      DataColumn(label: Text("Purchase Date")),
-                      DataColumn(label: Text("Shipment ID")),
-                      DataColumn(label: Text("Carrier")),
-                      DataColumn(label: Text("Product")),
-                      DataColumn(label: Text("On Hold Qty")),
-                      DataColumn(label: Text("Action")),
-                    ],
-                    rows:
-                        controller.filteredOnHoldItems.map((item) {
-                          return DataRow(
-                            cells: [
-                              DataCell(
-                                Text(
-                                  DateFormat(
-                                    'yyyy-MM-dd',
-                                  ).format(item.purchaseDate),
+                  scrollDirection: Axis.vertical,
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: DataTable(
+                      columns: const [
+                        DataColumn(label: Text("Purchase Date")),
+                        DataColumn(label: Text("Shipment ID")),
+                        DataColumn(label: Text("Carrier")),
+                        DataColumn(label: Text("Product")),
+                        DataColumn(label: Text("On Hold Qty")),
+                        DataColumn(label: Text("Action")),
+                      ],
+                      rows: controller.filteredOnHoldItems.map((item) {
+                        return DataRow(
+                          cells: [
+                            DataCell(
+                              Text(
+                                DateFormat(
+                                  'yyyy-MM-dd',
+                                ).format(item.purchaseDate),
+                              ),
+                            ),
+                            DataCell(
+                              Text(
+                                item.shipmentName,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
                                 ),
                               ),
-                              DataCell(
-                                Text(
-                                  item.shipmentName,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                              DataCell(Text(item.carrier)),
-                              DataCell(
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Text(
-                                      item.productModel,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                      ),
+                            ),
+                            DataCell(Text(item.carrier)),
+                            DataCell(
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    item.productModel,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
                                     ),
-                                    Text(
-                                      item.productName,
-                                      style: const TextStyle(
-                                        fontSize: 10,
-                                        color: Colors.grey,
-                                      ),
+                                  ),
+                                  Text(
+                                    item.productName,
+                                    style: const TextStyle(
+                                      fontSize: 10,
+                                      color: Colors.grey,
                                     ),
-                                  ],
-                                ),
-                              ),
-                              DataCell(
-                                Text(
-                                  "${item.missingQty}",
-                                  style: const TextStyle(
-                                    color: Colors.red,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 16,
                                   ),
+                                ],
+                              ),
+                            ),
+                            DataCell(
+                              Text(
+                                "${item.missingQty}",
+                                style: const TextStyle(
+                                  color: Colors.red,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
                                 ),
                               ),
-                              DataCell(
-                                ElevatedButton.icon(
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.green,
-                                    foregroundColor: Colors.white,
-                                  ),
-                                  icon: const Icon(Icons.undo, size: 16),
-                                  label: const Text("RELEASE"),
-                                  onPressed:
-                                      () => _showReleaseDialog(
-                                        context,
-                                        controller,
-                                        productController,
-                                        item,
-                                      ),
+                            ),
+                            DataCell(
+                              ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.green,
+                                  foregroundColor: Colors.white,
+                                ),
+                                icon: const Icon(Icons.undo, size: 16),
+                                label: const Text("RELEASE"),
+                                onPressed: () => _showReleaseDialog(
+                                  context,
+                                  controller,
+                                  productController,
+                                  item,
                                 ),
                               ),
-                            ],
-                          );
-                        }).toList(),
+                            ),
+                          ],
+                        );
+                      }).toList(),
+                    ),
                   ),
                 );
               }),

@@ -5,6 +5,7 @@ import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
 import 'package:intl/intl.dart';
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/Debtor%20Purchase/dialog.dart';
 import 'package:gtel_erp/Web%20Screen/Debator%20Finance/Debtor%20Purchase/purchasecontroller.dart';
+import 'package:gtel_erp/Web%20Screen/Debator%20Finance/purchaseallocation.dart';
 
 class DebtorPurchasePage extends StatelessWidget {
   final String debtorId;
@@ -152,7 +153,7 @@ class DebtorPurchasePage extends StatelessWidget {
             () => Container(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha:  0.05),
+                color: Colors.white.withValues(alpha: 0.05),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: Colors.white12),
               ),
@@ -177,6 +178,17 @@ class DebtorPurchasePage extends StatelessWidget {
                       fontWeight: FontWeight.bold,
                     ),
                   ),
+                  if (controller.unallocatedCredit.value > 0.01) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      "Unallocated credit: ৳${controller.unallocatedCredit.value.toStringAsFixed(2)}",
+                      style: const TextStyle(
+                        color: debitGreen,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -298,7 +310,7 @@ class DebtorPurchasePage extends StatelessWidget {
           Expanded(flex: 2, child: Text("TYPE", style: _headStyle)),
           Expanded(
             flex: 4,
-            child: Text("DESCRIPTION / NOTE", style: _headStyle),
+            child: Text("DESCRIPTION / PAYMENT STATUS", style: _headStyle),
           ),
           Expanded(
             flex: 2,
@@ -340,15 +352,15 @@ class DebtorPurchasePage extends StatelessWidget {
     String badgeLabel = "UNKNOWN";
 
     if (isInvoice) {
-      badgeBg = activeAccent.withValues( alpha: 0.1);
+      badgeBg = activeAccent.withValues(alpha: 0.1);
       badgeText = activeAccent;
       badgeLabel = "PURCHASE";
     } else if (isPay) {
-      badgeBg = debitGreen.withValues( alpha: 0.1);
+      badgeBg = debitGreen.withValues(alpha: 0.1);
       badgeText = debitGreen;
       badgeLabel = "PAYMENT";
     } else if (isAdj) {
-      badgeBg = warningOrange.withValues( alpha: 0.1);
+      badgeBg = warningOrange.withValues(alpha: 0.1);
       badgeText = warningOrange;
       badgeLabel = "CONTRA";
     }
@@ -363,6 +375,27 @@ class DebtorPurchasePage extends StatelessWidget {
     if (item['date'] is Timestamp) {
       dateObj = (item['date'] as Timestamp).toDate();
     }
+    final invoiceTotal = PurchaseAllocation.amountFor(item);
+    final settledAmount = PurchaseAllocation.settledAmountFor(item);
+    final invoiceDue = PurchaseAllocation.dueFor(item);
+    final unallocatedAmount =
+        item['unallocatedAmount'] is num
+            ? (item['unallocatedAmount'] as num).toDouble()
+            : double.tryParse(item['unallocatedAmount']?.toString() ?? '') ?? 0;
+    final paymentStatus =
+        invoiceDue <= 0.01
+            ? 'PAID'
+            : settledAmount > 0.01
+            ? 'PARTIAL'
+            : 'DUE';
+    final statusColor =
+        paymentStatus == 'PAID'
+            ? debitGreen
+            : paymentStatus == 'PARTIAL'
+            ? warningOrange
+            : creditRed;
+    final displayedPaid =
+        settledAmount > invoiceTotal ? invoiceTotal : settledAmount;
 
     return InkWell(
       onTap: isInvoice ? () => _showPurchaseDetails(context, item) : null,
@@ -447,6 +480,79 @@ class DebtorPurchasePage extends StatelessWidget {
                         style: const TextStyle(fontSize: 10, color: textMuted),
                       ),
                     ),
+                  if (isInvoice)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Wrap(
+                        crossAxisAlignment: WrapCrossAlignment.start,
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 9,
+                              vertical: 7,
+                            ),
+                            decoration: BoxDecoration(
+                              color: statusColor.withValues(alpha: 0.12),
+                              border: Border.all(
+                                color: statusColor.withValues(alpha: 0.45),
+                              ),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  paymentStatus == 'PAID'
+                                      ? Icons.check_circle
+                                      : Icons.pending,
+                                  color: statusColor,
+                                  size: 14,
+                                ),
+                                const SizedBox(width: 5),
+                                Text(
+                                  paymentStatus,
+                                  style: TextStyle(
+                                    color: statusColor,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 0.3,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          _buildInvoiceBalanceChip(
+                            label: 'PAID',
+                            amount: displayedPaid,
+                            color: debitGreen,
+                            icon: Icons.check,
+                          ),
+                          _buildInvoiceBalanceChip(
+                            label: 'DUE',
+                            amount: invoiceDue,
+                            color: invoiceDue > 0.01 ? creditRed : debitGreen,
+                            icon:
+                                invoiceDue > 0.01
+                                    ? Icons.error_outline
+                                    : Icons.check,
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (!isInvoice && unallocatedAmount > 0.01)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        "Unallocated supplier credit: ৳${unallocatedAmount.toStringAsFixed(2)}",
+                        style: const TextStyle(
+                          color: debitGreen,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -480,6 +586,37 @@ class DebtorPurchasePage extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildInvoiceBalanceChip({
+    required String label,
+    required double amount,
+    required Color color,
+    required IconData icon,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: color, size: 13),
+          const SizedBox(width: 4),
+          Text(
+            '$label  ৳${amount.toStringAsFixed(2)}',
+            style: TextStyle(
+              color: color,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -546,7 +683,7 @@ class DebtorPurchasePage extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
-                color: activeAccent.withValues( alpha: .1),
+                color: activeAccent.withValues(alpha: .1),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(

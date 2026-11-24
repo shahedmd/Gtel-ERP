@@ -5,8 +5,10 @@ import 'package:get/get.dart';
 import 'package:gtel_erp/Core/Gtel%20Expense/Monthly%20Expense/montlyexpensecontroller.dart';
 import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
 import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/gteldebtorcontroller.dart';
+import 'package:gtel_erp/Core/Debtor_Market_Customer_Suppliers/paid_invoice_running_due.dart';
 import 'package:gtel_erp/Core/Gtel%20Expense/Daily%20Expense/dailyexpensecontroller.dart';
 import 'package:intl/intl.dart';
+import 'package:gtel_erp/Web%20Screen/Debator%20Finance/purchaseallocation.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -50,6 +52,7 @@ class DebtorPurchaseController extends GetxController {
   // Stats (Observables)
   var totalPurchased = 0.0.obs;
   var totalPaid = 0.0.obs;
+  var unallocatedCredit = 0.0.obs;
   double get currentPayable => totalPurchased.value - totalPaid.value;
 
   // ==========================================
@@ -70,6 +73,12 @@ class DebtorPurchaseController extends GetxController {
 
   Future<void> loadPurchases(String debtorId) async {
     clearPurchaseState();
+    try {
+      await PurchaseAllocation.ensureMigrated(db: _db, debtorId: debtorId);
+    } catch (e) {
+      Get.snackbar("Error", "Could not prepare purchase invoice balances: $e");
+      return;
+    }
     await loadPurchasePage(debtorId, 1);
     await _fetchAccurateStats(debtorId);
   }
@@ -213,6 +222,7 @@ class DebtorPurchaseController extends GetxController {
                 .get();
         double p = 0;
         double paid = 0;
+        double credit = 0;
         for (var doc in allDocs.docs) {
           Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
           double amt =
@@ -223,10 +233,17 @@ class DebtorPurchaseController extends GetxController {
             p += amt;
           } else {
             paid += amt;
+            final unallocated = data['unallocatedAmount'];
+            if (unallocated is num) {
+              credit += unallocated.toDouble();
+            } else {
+              credit += double.tryParse(unallocated?.toString() ?? '') ?? 0;
+            }
           }
         }
         totalPurchased.value = p;
         totalPaid.value = paid;
+        unallocatedCredit.value = credit;
       }
     } catch (e) {
       print("Stats error: $e");
@@ -274,6 +291,7 @@ class DebtorPurchaseController extends GetxController {
     if (cartItems.isEmpty) return;
     isLoading.value = true;
     try {
+      await PurchaseAllocation.ensureMigrated(db: _db, debtorId: debtorId);
       double grandTotal = cartItems.fold(
         0,
         (sumv, item) => sumv + item['subtotal'],
@@ -312,6 +330,7 @@ class DebtorPurchaseController extends GetxController {
         'type': 'invoice',
         'items': finalItems,
         'totalAmount': grandTotal,
+        'settledAmount': 0.0,
         'note': note,
         'createdAt': FieldValue.serverTimestamp(),
       });
@@ -368,7 +387,16 @@ class DebtorPurchaseController extends GetxController {
     if (amount <= 0) return;
     isLoading.value = true;
     try {
+      final allocationPlan = await PurchaseAllocation.planForSettlement(
+        db: _db,
+        debtorId: debtorId,
+        amount: amount,
+      );
       WriteBatch batch = _db.batch();
+      final purchasesRef = _db
+          .collection('debatorbody')
+          .doc(debtorId)
+          .collection('purchases');
       DocumentReference histRef =
           _db
               .collection('debatorbody')
@@ -388,7 +416,15 @@ class DebtorPurchaseController extends GetxController {
         'method': method,
         'note': note,
         'isAdjustment': false,
+        'allocations': allocationPlan.allocations,
+        'unallocatedAmount': allocationPlan.unallocatedAmount,
+        'allocationVersion': 1,
       });
+      for (final allocation in allocationPlan.allocations) {
+        batch.update(purchasesRef.doc(allocation['invoiceId'] as String), {
+          'settledAmount': FieldValue.increment(allocation['amount'] as num),
+        });
+      }
 
       DocumentReference debtorRef = _db.collection('debatorbody').doc(debtorId);
       batch.update(debtorRef, {'purchaseDue': FieldValue.increment(-amount)});
@@ -408,7 +444,12 @@ class DebtorPurchaseController extends GetxController {
 
       await loadPurchases(debtorId);
       Get.back();
-      Get.snackbar("Success", "Payment Recorded.");
+      Get.snackbar(
+        "Success",
+        allocationPlan.unallocatedAmount > 0.01
+            ? "Payment recorded. ৳${allocationPlan.unallocatedAmount.toStringAsFixed(2)} remains as unallocated supplier credit."
+            : "Payment Recorded.",
+      );
     } catch (e) {
       Get.snackbar("Error", e.toString());
     } finally {
@@ -434,6 +475,16 @@ class DebtorPurchaseController extends GetxController {
       Map<String, dynamic> debtorData =
           debtorSnap.data() as Map<String, dynamic>;
       String debtorName = debtorData['name'] ?? 'Unknown';
+
+      final allocationPlan = await PurchaseAllocation.planForSettlement(
+        db: _db,
+        debtorId: debtorId,
+        amount: amount,
+      );
+      final purchasesRef = _db
+          .collection('debatorbody')
+          .doc(debtorId)
+          .collection('purchases');
 
       // =========================================================
       // 1. CALCULATE SPLIT: OLD DUE FIRST, THEN RUNNING DUE
@@ -479,10 +530,18 @@ class DebtorPurchaseController extends GetxController {
         'type': 'adjustment',
         'amount': amount,
         'method': 'Contra Adjustment',
+        'allocations': allocationPlan.allocations,
+        'unallocatedAmount': allocationPlan.unallocatedAmount,
+        'allocationVersion': 1,
         'note':
             'Adjusted Sales Due (Old: $amountToOldDue, Running: $amountToRunningDue)',
         'isAdjustment': true,
       });
+      for (final allocation in allocationPlan.allocations) {
+        batch.update(purchasesRef.doc(allocation['invoiceId'] as String), {
+          'settledAmount': FieldValue.increment(allocation['amount'] as num),
+        });
+      }
 
       // =========================================================
       // 3. CREATE DEBTOR TRANSACTIONS (BASED ON SPLIT)
@@ -550,8 +609,23 @@ class DebtorPurchaseController extends GetxController {
                 .where('debtorId', isEqualTo: debtorId)
                 .get();
 
-        List<DocumentSnapshot> pendingOrders =
-            ordersSnap.docs.where((doc) {
+        final allOrders = ordersSnap.docs.toList();
+        allOrders.sort((a, b) {
+          final dataA = a.data() as Map<String, dynamic>;
+          final dataB = b.data() as Map<String, dynamic>;
+          final timestampA =
+              dataA['timestamp'] is Timestamp
+                  ? dataA['timestamp'] as Timestamp
+                  : Timestamp.now();
+          final timestampB =
+              dataB['timestamp'] is Timestamp
+                  ? dataB['timestamp'] as Timestamp
+                  : Timestamp.now();
+          return timestampA.compareTo(timestampB);
+        });
+
+        final pendingOrders =
+            allOrders.where((doc) {
               final data = doc.data() as Map<String, dynamic>;
               double pending = 0.0;
               if (data['paymentDetails'] != null &&
@@ -567,21 +641,7 @@ class DebtorPurchaseController extends GetxController {
               }
               return pending > 0.5;
             }).toList();
-
-        // Sort by date (পুরনো বিল আগে ক্লিয়ার হবে)
-        pendingOrders.sort((a, b) {
-          final dataA = a.data() as Map<String, dynamic>;
-          final dataB = b.data() as Map<String, dynamic>;
-          Timestamp t1 =
-              dataA['timestamp'] is Timestamp
-                  ? dataA['timestamp']
-                  : Timestamp.now();
-          Timestamp t2 =
-              dataB['timestamp'] is Timestamp
-                  ? dataB['timestamp']
-                  : Timestamp.now();
-          return t1.compareTo(t2);
-        });
+        final middleInvoiceReductions = <String, double>{};
 
         if (pendingOrders.isNotEmpty) {
           for (var orderDoc in pendingOrders) {
@@ -644,6 +704,7 @@ class DebtorPurchaseController extends GetxController {
                   "paymentDetails.due": 0.0,
                   "isFullyPaid": true,
                   "status": "completed",
+                  ...PaidInvoiceRunningDueSnapshot.markPaid(oData),
                 });
               }
               continue; // টাকা কাটবেকারি না, পরের বিলে চলে যাবে!
@@ -668,8 +729,24 @@ class DebtorPurchaseController extends GetxController {
             if (isNowFullyPaid) {
               orderUpdate["isFullyPaid"] = true;
               orderUpdate["status"] = "completed";
+              orderUpdate.addAll(PaidInvoiceRunningDueSnapshot.markPaid(oData));
             }
             batch.update(orderDoc.reference, orderUpdate);
+
+            final currentIndex = allOrders.indexWhere(
+              (doc) => doc.id == orderDoc.id,
+            );
+            if (currentIndex >= 0 && currentIndex < allOrders.length - 1) {
+              for (
+                var index = currentIndex + 1;
+                index < allOrders.length;
+                index++
+              ) {
+                final newerOrderId = allOrders[index].id;
+                middleInvoiceReductions[newerOrderId] =
+                    (middleInvoiceReductions[newerOrderId] ?? 0.0) + take;
+              }
+            }
 
             // B. Update Daily Sales
             if (dailyDoc != null) {
@@ -698,6 +775,12 @@ class DebtorPurchaseController extends GetxController {
             remainingToAllocate -= take;
           }
         }
+
+        for (final entry in middleInvoiceReductions.entries) {
+          batch.update(_db.collection('sales_orders').doc(entry.key), {
+            'snapshotRunningDue': FieldValue.increment(-entry.value),
+          });
+        }
       }
 
       await batch.commit();
@@ -710,7 +793,10 @@ class DebtorPurchaseController extends GetxController {
       Get.back();
       Get.snackbar(
         "Success",
-        "Adjusted! Old Due: $amountToOldDue, Running: $amountToRunningDue",
+        allocationPlan.unallocatedAmount > 0.01
+            ? "Adjusted! Old Due: $amountToOldDue, Running: $amountToRunningDue. "
+                "৳${allocationPlan.unallocatedAmount.toStringAsFixed(2)} remains as unallocated supplier credit."
+            : "Adjusted! Old Due: $amountToOldDue, Running: $amountToRunningDue",
       );
     } catch (e) {
       Get.snackbar("Error", e.toString());

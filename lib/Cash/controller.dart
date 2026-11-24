@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'cash_drawer_sale_receipt.dart';
 
 enum DateFilter { daily, monthly, yearly, custom }
 
@@ -273,51 +274,22 @@ class CashDrawerController extends GetxController {
           double totalPaid = double.tryParse(data['paid'].toString()) ?? 0;
           double ledgerPaid =
               double.tryParse(data['ledgerPaid'].toString()) ?? 0;
-          double actualReceived = totalPaid - ledgerPaid;
+          double actualReceived =
+              (totalPaid - ledgerPaid).clamp(0, double.infinity).toDouble();
 
           if (actualReceived > 0.01) {
-            double c = 0, b = 0, bk = 0, n = 0;
+            final receiptByMethod = CashDrawerSaleReceipt.byMethod(
+              Map<String, dynamic>.from(data),
+            );
+            final c = receiptByMethod['cash'] ?? 0;
+            final b = receiptByMethod['bank'] ?? 0;
+            final bk = receiptByMethod['bkash'] ?? 0;
+            final n = receiptByMethod['nagad'] ?? 0;
             String displayMethod = "Cash";
             String? displayBankDetails;
 
             var pm = data['paymentMethod'];
-
-            if (pm is Map) {
-              c = double.tryParse(pm['cash'].toString()) ?? 0;
-              b = double.tryParse(pm['bank'].toString()) ?? 0;
-              bk = double.tryParse(pm['bkash'].toString()) ?? 0;
-              n = double.tryParse(pm['nagad'].toString()) ?? 0;
-
-              displayBankDetails = pm['bankName'];
-
-              // Legacy Fallback
-              if ((c + b + bk + n) == 0) {
-                String valBank = (pm['bankName'] ?? '').toString();
-                String valBkash = (pm['bkashNumber'] ?? '').toString();
-                String valNagad = (pm['nagadNumber'] ?? '').toString();
-
-                if (valBank.isNotEmpty) {
-                  b = actualReceived;
-                } else if (valBkash.isNotEmpty) {
-                  bk = actualReceived;
-                } else if (valNagad.isNotEmpty) {
-                  n = actualReceived;
-                } else {
-                  c = actualReceived;
-                }
-              }
-            } else {
-              String s = pm.toString().toLowerCase();
-              if (s.contains('bank')) {
-                b = actualReceived;
-              } else if (s.contains('bkash')) {
-                bk = actualReceived;
-              } else if (s.contains('nagad')) {
-                n = actualReceived;
-              } else {
-                c = actualReceived;
-              }
-            }
+            if (pm is Map) displayBankDetails = pm['bankName']?.toString();
 
             List<String> activeMethods = [];
             if (c > 0) activeMethods.add("Cash");

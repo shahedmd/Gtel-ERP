@@ -3,6 +3,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:gtel_erp/Live%20order/agent_sale_payment_plan.dart';
 import 'package:gtel_erp/Core/Stock%20Management/stockcontroller.dart';
 import 'package:gtel_erp/Web%20Screen/Sales/Condition/conditioncontroller.dart';
 import 'package:pdf/pdf.dart';
@@ -225,7 +226,16 @@ class DailySalesController extends GetxController {
           cC += paidAmt;
         }
       } else {
-        if (source.contains('recovery') ||
+        final isWholesaleOrVip = type == 'wholesale' || type == 'vip';
+        if (isWholesaleOrVip) {
+          rNA += invAmt;
+          final settledAmount =
+              paidAmt > ledgerPaidAmt ? paidAmt : ledgerPaidAmt;
+          cNA += settledAmount;
+          dNA +=
+              (data['pending'] as num?)?.toDouble() ??
+              (invAmt - settledAmount).clamp(0, double.infinity).toDouble();
+        } else if (source.contains('recovery') ||
             source.contains('payment') ||
             (invAmt <= 0.01 && paidAmt > 0)) {
           cNA += paidAmt;
@@ -655,14 +665,10 @@ class DailySalesController extends GetxController {
                 pendingDue > 0.5 &&
                 custPhone != null &&
                 custPhone.isNotEmpty) {
-              transaction.set(
-                _db.collection('customers').doc(custPhone),
-                {
-                  'currentDue': FieldValue.increment(-pendingDue),
-                  'lastShopDate': FieldValue.serverTimestamp(),
-                },
-                SetOptions(merge: true),
-              );
+              transaction.set(_db.collection('customers').doc(custPhone), {
+                'currentDue': FieldValue.increment(-pendingDue),
+                'lastShopDate': FieldValue.serverTimestamp(),
+              }, SetOptions(merge: true));
             }
 
             transaction.delete(dailySnap.reference);
@@ -913,6 +919,9 @@ class DailySalesController extends GetxController {
         packagerName: packagerName,
         invoiceDate: invoiceDate,
         discount: discountVal,
+        isAgentInvoice:
+            !isCond &&
+            (data['customerType'] ?? '').toString().toUpperCase() == 'AGENT',
       );
     } catch (e) {
       Get.snackbar("Error", "Could not reprint: $e");
@@ -942,6 +951,7 @@ class DailySalesController extends GetxController {
     double discount = 0.0,
     String discountNote = "", // <-- ADDED PARAMETER
     String? packagerName,
+    bool isAgentInvoice = false,
   }) async {
     final pdf = pw.Document();
 
@@ -949,12 +959,15 @@ class DailySalesController extends GetxController {
     final regularFont = await PdfGoogleFonts.robotoRegular();
     final italicFont = await PdfGoogleFonts.robotoItalic();
 
-    double paidOld = double.tryParse(payMap['paidForOldDue'].toString()) ?? 0.0;
+    double paidOld =
+        double.tryParse(payMap['paidForOldDue']?.toString() ?? '0') ?? 0.0;
     double paidPrevRun =
-        double.tryParse(payMap['paidForPrevRunning'].toString()) ?? 0.0;
+        double.tryParse(payMap['paidForPrevRunning']?.toString() ?? '0') ?? 0.0;
     double invDue = double.tryParse(payMap['due'].toString()) ?? 0.0;
     double totalPaidForInvoice =
         double.tryParse(payMap['paidForInvoice']?.toString() ?? '0') ?? 0.0;
+    double advanceApplied =
+        double.tryParse(payMap['advanceApplied']?.toString() ?? '0') ?? 0.0;
 
     List<String> methodsUsed = [];
     if ((double.tryParse(payMap['cash']?.toString() ?? '0') ?? 0) > 0) {
@@ -969,6 +982,10 @@ class DailySalesController extends GetxController {
     if ((double.tryParse(payMap['bank']?.toString() ?? '0') ?? 0) > 0) {
       methodsUsed.add('Bank');
     }
+    if ((double.tryParse(payMap['discount']?.toString() ?? '0') ?? 0) > 0) {
+      methodsUsed.add('Discount');
+    }
+    if (advanceApplied > 0.01) methodsUsed.add('Advance Credit');
 
     String paymentMethodsStr =
         methodsUsed.isNotEmpty ? methodsUsed.join(', ') : "None/Credit";
@@ -978,16 +995,40 @@ class DailySalesController extends GetxController {
       (sumv, item) =>
           sumv + (double.tryParse(item['subtotal'].toString()) ?? 0),
     );
-
-    double remainingOldDue = oldDueSnap - paidOld;
-    if (remainingOldDue < 0) remainingOldDue = 0;
-
-    double remainingPrevRunning = runningDueSnap - paidPrevRun;
-    if (remainingPrevRunning < 0) remainingPrevRunning = 0;
-
-    double netTotalDue = remainingOldDue + remainingPrevRunning + invDue;
-    double totalPreviousBalance = oldDueSnap + runningDueSnap;
     double currentInvTotal = subTotal - discount;
+    final advanceReceived =
+        double.tryParse(payMap['advanceReceived']?.toString() ?? '0') ?? 0.0;
+    final totalPreviousBalance =
+        isAgentInvoice
+            ? calculateAgentInvoicePreviousBalance(
+              snapshotOldDue: oldDueSnap,
+              snapshotRunningDue: runningDueSnap,
+              paidForOldDue: paidOld,
+              paidForRunningDue: paidPrevRun,
+            )
+            : double.tryParse(
+                  payMap['previousAccountBalance']?.toString() ?? '',
+                ) ??
+                oldDueSnap + runningDueSnap;
+    final netTotalDue =
+        isAgentInvoice
+            ? calculateAgentInvoicePresentDue(
+              snapshotOldDue: oldDueSnap,
+              snapshotRunningDue: runningDueSnap,
+              paidForOldDue: paidOld,
+              paidForRunningDue: paidPrevRun,
+              invoiceDue: invDue,
+              advanceApplied: advanceApplied,
+              advanceReceived: advanceReceived,
+            )
+            : calculateInvoicePresentDue(
+              previousBalance: totalPreviousBalance,
+              paidForOldDue: paidOld,
+              paidForRunningDue: paidPrevRun,
+              invoiceDue: invDue,
+              advanceApplied: advanceApplied,
+              advanceReceived: advanceReceived,
+            );
 
     final pageTheme = pw.PageTheme(
       pageFormat: PdfPageFormat.a4,
@@ -1722,11 +1763,7 @@ class DailySalesController extends GetxController {
     );
   }
 
-  pw.Widget _buildNewFooter(
-    pw.Context context,
-    pw.Font reg,
-    pw.Font bold,
-  ) {
+  pw.Widget _buildNewFooter(pw.Context context, pw.Font reg, pw.Font bold) {
     return pw.Column(
       mainAxisSize: pw.MainAxisSize.min,
       children: [

@@ -3,6 +3,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:get/get.dart';
 import 'package:gtel_erp/Customer/model.dart';
+import 'package:gtel_erp/Live%20order/agent_sale_payment_plan.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -687,6 +688,9 @@ class CustomerAnalyticsController extends GetxController {
         packagerName: packagerName,
         invoiceDate: invoiceDate,
         discount: discountVal,
+        isAgentInvoice:
+            !isCond &&
+            (data['customerType'] ?? '').toString().toUpperCase() == 'AGENT',
       );
     } catch (e) {
       Get.snackbar("Error", "Could not reprint: $e");
@@ -718,18 +722,22 @@ class CustomerAnalyticsController extends GetxController {
     double discount = 0.0,
     String discountNote = "",
     String? packagerName,
+    bool isAgentInvoice = false,
   }) async {
     final pdf = pw.Document();
     final boldFont = await PdfGoogleFonts.robotoBold();
     final regularFont = await PdfGoogleFonts.robotoRegular();
     final italicFont = await PdfGoogleFonts.robotoItalic();
 
-    double paidOld = double.tryParse(payMap['paidForOldDue'].toString()) ?? 0.0;
+    double paidOld =
+        double.tryParse(payMap['paidForOldDue']?.toString() ?? '0') ?? 0.0;
     double paidPrevRun =
-        double.tryParse(payMap['paidForPrevRunning'].toString()) ?? 0.0;
+        double.tryParse(payMap['paidForPrevRunning']?.toString() ?? '0') ?? 0.0;
     double invDue = double.tryParse(payMap['due'].toString()) ?? 0.0;
     double totalPaidForInvoice =
         double.tryParse(payMap['paidForInvoice']?.toString() ?? '0') ?? 0.0;
+    double advanceApplied =
+        double.tryParse(payMap['advanceApplied']?.toString() ?? '0') ?? 0.0;
 
     List<String> methodsUsed = [];
     if ((double.tryParse(payMap['cash']?.toString() ?? '0') ?? 0) > 0) {
@@ -744,6 +752,7 @@ class CustomerAnalyticsController extends GetxController {
     if ((double.tryParse(payMap['bank']?.toString() ?? '0') ?? 0) > 0) {
       methodsUsed.add('Bank');
     }
+    if (advanceApplied > 0.01) methodsUsed.add('Advance Credit');
 
     String paymentMethodsStr =
         methodsUsed.isNotEmpty ? methodsUsed.join(', ') : "None/Credit";
@@ -753,14 +762,40 @@ class CustomerAnalyticsController extends GetxController {
       (sumv, item) =>
           sumv + (double.tryParse(item['subtotal'].toString()) ?? 0),
     );
-    double remainingOldDue = oldDueSnap - paidOld;
-    if (remainingOldDue < 0) remainingOldDue = 0;
-    double remainingPrevRunning = runningDueSnap - paidPrevRun;
-    if (remainingPrevRunning < 0) remainingPrevRunning = 0;
-
-    double netTotalDue = remainingOldDue + remainingPrevRunning + invDue;
-    double totalPreviousBalance = oldDueSnap + runningDueSnap;
     double currentInvTotal = subTotal - discount;
+    final advanceReceived =
+        double.tryParse(payMap['advanceReceived']?.toString() ?? '0') ?? 0.0;
+    final totalPreviousBalance =
+        isAgentInvoice
+            ? calculateAgentInvoicePreviousBalance(
+              snapshotOldDue: oldDueSnap,
+              snapshotRunningDue: runningDueSnap,
+              paidForOldDue: paidOld,
+              paidForRunningDue: paidPrevRun,
+            )
+            : double.tryParse(
+                  payMap['previousAccountBalance']?.toString() ?? '',
+                ) ??
+                oldDueSnap + runningDueSnap;
+    final netTotalDue =
+        isAgentInvoice
+            ? calculateAgentInvoicePresentDue(
+              snapshotOldDue: oldDueSnap,
+              snapshotRunningDue: runningDueSnap,
+              paidForOldDue: paidOld,
+              paidForRunningDue: paidPrevRun,
+              invoiceDue: invDue,
+              advanceApplied: advanceApplied,
+              advanceReceived: advanceReceived,
+            )
+            : calculateInvoicePresentDue(
+              previousBalance: totalPreviousBalance,
+              paidForOldDue: paidOld,
+              paidForRunningDue: paidPrevRun,
+              invoiceDue: invDue,
+              advanceApplied: advanceApplied,
+              advanceReceived: advanceReceived,
+            );
 
     final pageTheme = pw.PageTheme(
       pageFormat: PdfPageFormat.a4,

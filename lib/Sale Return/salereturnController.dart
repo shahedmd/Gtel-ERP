@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import '../Core/Stock Management/stockcontroller.dart'; // Ensure correct path to ProductController
+import 'invoice_snapshot_running_due_adjustment.dart';
 
 class SaleReturnController extends GetxController {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -28,6 +29,24 @@ class SaleReturnController extends GetxController {
       double.tryParse(val?.toString() ?? '0') ?? 0.0;
   int toInt(dynamic val) => int.tryParse(val?.toString() ?? '0') ?? 0;
   String toStr(dynamic val) => val?.toString() ?? "";
+
+  DateTime _invoiceDate(Map<String, dynamic> data) {
+    final dateValue = data['date'];
+    if (dateValue is String) {
+      final parsed = DateTime.tryParse(dateValue);
+      if (parsed != null) return parsed;
+    }
+    return _timestampDate(data['timestamp']) ??
+        _timestampDate(data['createdAt']) ??
+        DateTime.fromMillisecondsSinceEpoch(0);
+  }
+
+  DateTime? _timestampDate(dynamic value) {
+    if (value is Timestamp) return value.toDate();
+    if (value is DateTime) return value;
+    if (value is String) return DateTime.tryParse(value);
+    return null;
+  }
 
   // ========================================================================
   // 1. SEARCH INVOICE LOGIC
@@ -314,6 +333,8 @@ class SaleReturnController extends GetxController {
     String customerPhone = toStr(orderData.value!['customerPhone']);
 
     WriteBatch batch = _db.batch();
+    int laterSnapshotUpdateCount = 0;
+    int laterSnapshotSkipCount = 0;
 
     try {
       // A. Fetch Latest DB Documents
@@ -375,6 +396,8 @@ class SaleReturnController extends GetxController {
       if (dailyData != null && toDouble(dailyData['paid']) > realPaidAmount) {
         realPaidAmount = toDouble(dailyData['paid']);
       }
+      final oldInvoiceDue =
+          (oldGT - realPaidAmount).clamp(0, double.infinity).toDouble();
 
       double pCash = toDouble(oldPayDetails['cash']);
       double pBkash = toDouble(oldPayDetails['bkash']);
@@ -404,6 +427,7 @@ class SaleReturnController extends GetxController {
         realPaidAmount = newGT;
         newDue = 0.0;
       }
+      newDue = newDue.clamp(0, double.infinity).toDouble();
 
       // If returning items (Delta < 0), slash payments down
       double amountToSlash = refundToCustomer;
@@ -512,16 +536,29 @@ class SaleReturnController extends GetxController {
           'paymentMethod.bank': pBank,
         };
 
-        // Push the extra payment into today's accounting
+        final historyEntries = <Map<String, dynamic>>[];
         if (deltaGT > 0 && extraCollectedAmount > 0) {
-          dailyUpdate['paymentHistory'] = FieldValue.arrayUnion([
-            {
-              'type': extraCollectedMethod.toLowerCase(),
-              'amount': extraCollectedAmount,
-              'timestamp': Timestamp.now(),
-              'note': 'Invoice Edit: Extra Payment Added',
-            },
-          ]);
+          historyEntries.add({
+            'type': extraCollectedMethod.toLowerCase(),
+            'amount': extraCollectedAmount,
+            'timestamp': Timestamp.now(),
+            'note': 'Invoice Edit: Extra Payment Added',
+          });
+        }
+        if (refundToCustomer > 0.01) {
+          historyEntries.add({
+            'type': 'refund',
+            'amount': refundToCustomer,
+            'timestamp': Timestamp.now(),
+            'note': 'Refund for returned items in invoice $invoiceId',
+            'sourceTxId':
+                'RETURN-$invoiceId-${DateTime.now().millisecondsSinceEpoch}',
+            'invoiceId': invoiceId,
+            'collectionMode': 'sale_return_refund',
+          });
+        }
+        if (historyEntries.isNotEmpty) {
+          dailyUpdate['paymentHistory'] = FieldValue.arrayUnion(historyEntries);
         }
         batch.update(dailyRef, dailyUpdate);
       }
@@ -541,11 +578,11 @@ class SaleReturnController extends GetxController {
                 "Inv $invoiceId (Edited: Delta ${deltaGT > 0 ? '+' : ''}${deltaGT.toStringAsFixed(0)})",
           });
         }
-        batch.set(
-          _db.collection('debtor_transaction_history').doc(invoiceId),
-          {"saleAmount": newGT, "costAmount": newCost, "profit": newProfit},
-          SetOptions(merge: true),
-        );
+        batch.set(_db.collection('debtor_transaction_history').doc(invoiceId), {
+          "saleAmount": newGT,
+          "costAmount": newCost,
+          "profit": newProfit,
+        }, SetOptions(merge: true));
       }
 
       // 4. Update Courier & Condition Ledger
@@ -568,6 +605,61 @@ class SaleReturnController extends GetxController {
           "courierDue": newCourierDue,
           "status": newCourierDue <= 1 ? 'completed' : 'on_delivery',
         }, SetOptions(merge: true));
+      }
+
+      final saleMode =
+          (currentOrder['saleMode'] ?? (isCondition ? 'condition' : 'normal'))
+              .toString();
+      if (debtorId.isNotEmpty && saleMode != 'condition') {
+        final debtorOrders =
+            await _db
+                .collection('sales_orders')
+                .where('debtorId', isEqualTo: debtorId)
+                .get();
+        final candidates =
+            debtorOrders.docs
+                .where((doc) {
+                  final data = doc.data();
+                  final mode =
+                      (data['saleMode'] ??
+                              (data['isCondition'] == true
+                                  ? 'condition'
+                                  : 'normal'))
+                          .toString();
+                  return mode != 'condition';
+                })
+                .map((doc) {
+                  final data = doc.data();
+                  return InvoiceSnapshotOrder(
+                    id: doc.id,
+                    invoiceDate: _invoiceDate(data),
+                    creationTime:
+                        _timestampDate(data['timestamp']) ??
+                        _timestampDate(data['createdAt']) ??
+                        _invoiceDate(data),
+                    snapshotRunningDue:
+                        (data['snapshotRunningDue'] as num?)?.toDouble(),
+                  );
+                })
+                .toList();
+        final snapshotPlan = InvoiceSnapshotRunningDueAdjustment.plan(
+          editedInvoiceId: orderSnap.id,
+          debtorInvoices: candidates,
+          dueDelta: newDue - oldInvoiceDue,
+        );
+        if (snapshotPlan.changes.length > 490) {
+          throw StateError(
+            'This edit affects too many later invoices to update safely in '
+            'one Firestore batch. No invoice edit was committed.',
+          );
+        }
+        for (final change in snapshotPlan.changes) {
+          batch.update(_db.collection('sales_orders').doc(change.invoiceId), {
+            'snapshotRunningDue': change.newSnapshotRunningDue,
+          });
+        }
+        laterSnapshotUpdateCount = snapshotPlan.changes.length;
+        laterSnapshotSkipCount = snapshotPlan.skippedInvoiceIds.length;
       }
 
       // G. BUG FIX: SEPARATE DEDUCTIONS (SALES) AND ADDITIONS (RETURNS TO BUCKETS)
@@ -644,7 +736,9 @@ class SaleReturnController extends GetxController {
       Get.back();
       Get.snackbar(
         "Invoice Updated Successfully",
-        "New Total: ৳${newGT.toStringAsFixed(0)} | Paid: ৳${realPaidAmount.toStringAsFixed(0)}",
+        "New Total: ৳${newGT.toStringAsFixed(0)} | Paid: ৳${realPaidAmount.toStringAsFixed(0)}"
+            "${laterSnapshotUpdateCount > 0 ? ' | Later invoice dues synced: $laterSnapshotUpdateCount' : ''}"
+            "${laterSnapshotSkipCount > 0 ? ' | Snapshots missing: $laterSnapshotSkipCount' : ''}",
         backgroundColor: Colors.green,
         colorText: Colors.white,
         duration: const Duration(seconds: 4),
